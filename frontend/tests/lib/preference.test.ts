@@ -32,6 +32,9 @@ import {
 import { libraryColumnsPreference } from "../../src/lib/libraryColumns";
 import { libraryViewPreference } from "../../src/lib/libraryView";
 import { lastLocationPreference } from "../../src/lib/lastLocation";
+// Imported for its declarations: the key arm below reads every declared key,
+// and a module nothing in this worker loaded has declared none.
+import "../../src/lib/carryOver";
 import { savedSearchesPreference } from "../../src/lib/savedSearches";
 import { sectionChoicesPreference } from "../../src/lib/sectionState";
 
@@ -59,6 +62,14 @@ const THE_KEYS_IN_READERS_BROWSERS = {
   libraryColumnsCataloguer: "libraryColumns.cataloguer",
   savedSearches: "savedSearches",
   lastLocation: "lastLocation",
+  carriedPrivacy: "carryOver.private",
+  carriedCollection: "carryOver.collection",
+  carriedFormat: "carryOver.format",
+  carriedCondition: "carryOver.condition",
+  carriedTags: "carryOver.tags",
+  carriedOwnership: "carryOver.ownership",
+  carriedPurchaseSource: "carryOver.purchaseSource",
+  carriedPurchasedAt: "carryOver.purchasedAt",
   bookDetailSections: "bookDetailSections",
   settingsSections: "settingsSections",
 };

@@ -16,7 +16,8 @@
 
 import { describe, expect, it } from "vitest";
 
-import { formatMinor, parseMinor } from "../../src/lib/money";
+import { Locale } from "../../src/api/generated/model";
+import { formatMinor, formatTotal, parseMinor } from "../../src/lib/money";
 
 describe("formatMinor", () => {
   it("shows cents as a decimal", () => {
@@ -65,5 +66,20 @@ describe("parseMinor", () => {
     for (const raw of ["twelve", "12.999", "1 2", "-5", "12.9.9", "€12"]) {
       expect(parseMinor(raw)).toBeUndefined();
     }
+  });
+});
+
+describe("formatTotal", () => {
+  // Intl separates the code from the amount with a no break space.
+  it("applies the currency's own exponent, so yen show no decimals", () => {
+    expect(formatTotal(150000, "JPY", Locale.en)).toBe("JPY\u00a01,500");
+  });
+
+  it("spells the amount in the reader's locale", () => {
+    expect(formatTotal(124050, "EUR", Locale.de)).toBe("1.240,50\u00a0EUR");
+  });
+
+  it("falls back to the code as written when Intl refuses it", () => {
+    expect(formatTotal(1299, "=A1", Locale.en)).toBe("12.99 =A1");
   });
 });

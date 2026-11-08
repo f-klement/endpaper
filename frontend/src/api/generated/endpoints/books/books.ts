@@ -28,6 +28,8 @@ import type {
 import type {
   AccessDecision,
   AccessRequestOut,
+  AlreadyHeldOut,
+  AlreadyHeldParams,
   ApplyEnrichmentParams,
   AuthorAuthorityParams,
   AuthorBatchMergeOut,
@@ -593,6 +595,167 @@ export const useAddBook = <
 > => {
   return useMutation(getAddBookMutationOptions(options), queryClient);
 };
+export const getAlreadyHeldUrl = (params: AlreadyHeldParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/already-held?${stringifiedParams}`
+    : `/api/books/already-held`;
+};
+
+/**
+ * Whether the member already has the record they are about to save.
+ *
+ * Asked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:
+ * a Book held where they cannot see it answers as nothing here, though the
+ * save itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a
+ * title is compared as it would be stored.
+ * @summary Already Held
+ */
+export const alreadyHeld = async (
+  params: AlreadyHeldParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AlreadyHeldOut> => {
+  return customFetch<AlreadyHeldOut>(getAlreadyHeldUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAlreadyHeldQueryKey = (params?: AlreadyHeldParams) => {
+  return [`/api/books/already-held`, ...(params ? [params] : [])] as const;
+};
+
+export const getAlreadyHeldQueryOptions = <
+  TData = Awaited<ReturnType<typeof alreadyHeld>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: AlreadyHeldParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof alreadyHeld>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAlreadyHeldQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof alreadyHeld>>> = ({
+    signal,
+  }) => alreadyHeld(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof alreadyHeld>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type AlreadyHeldQueryResult = NonNullable<
+  Awaited<ReturnType<typeof alreadyHeld>>
+>;
+export type AlreadyHeldQueryError = Refusal | HTTPValidationError;
+
+export function useAlreadyHeld<
+  TData = Awaited<ReturnType<typeof alreadyHeld>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: AlreadyHeldParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof alreadyHeld>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof alreadyHeld>>,
+          TError,
+          Awaited<ReturnType<typeof alreadyHeld>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useAlreadyHeld<
+  TData = Awaited<ReturnType<typeof alreadyHeld>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: AlreadyHeldParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof alreadyHeld>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof alreadyHeld>>,
+          TError,
+          Awaited<ReturnType<typeof alreadyHeld>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useAlreadyHeld<
+  TData = Awaited<ReturnType<typeof alreadyHeld>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: AlreadyHeldParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof alreadyHeld>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Already Held
+ */
+
+export function useAlreadyHeld<
+  TData = Awaited<ReturnType<typeof alreadyHeld>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  params: AlreadyHeldParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof alreadyHeld>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getAlreadyHeldQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getListAuthorsUrl = () => {
   return `/api/books/authors`;
 };
@@ -3797,9 +3960,9 @@ export const getExportBooksUrl = (params?: ExportBooksParams) => {
 /**
  * The shelf this member can see, as a file.
  *
- * **CSV is `text/csv`, plain text is `text/plain` and MARCXML is
- * `application/marcxml+xml`.** All three are declared for the 200 because the
- * document has no way to say which of them `?format=` selects.
+ * **CSV is `text/csv`, plain text is `text/plain`, HTML is `text/html` and
+ * MARCXML is `application/marcxml+xml`.** All are declared for the 200
+ * because the document has no way to say which of them `?format=` selects.
  *
  * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
  * `Retry-After`. It is not declared here because this document declares a
@@ -3816,7 +3979,7 @@ export const getExportBooksUrl = (params?: ExportBooksParams) => {
  * declaring it honest is declaring it at all of them. The counter is not:
  * this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
  *
- * **MARCXML needs library mode and the other two do not.** A CSV export is a
+ * **MARCXML needs library mode and the other three do not.** A CSV export is a
  * household reading its own shelf in a spreadsheet. A MARC record is a
  * catalogue record handed to another institution, which is what library mode
  * is for, and offering it everywhere would put a format nobody in a household
@@ -8278,7 +8441,7 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
  * without that middle step it is matched by its title, which is the weakest
  * instrument here. **Which
  * catalogues either of those asks is the library's own provider list**, set
- * in Settings: the roster holds nine lookup sources that answer an ISBN and
+ * in Settings: the roster holds ten lookup sources that answer an ISBN and
  * eight search sources that answer a title, the leading pair is asked together
  * and the rest one at a time, and a source switched off is not asked on either
  * path. Google Books answers only when its own section is on and a key is in

@@ -1691,8 +1691,8 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
     working, and nothing on any screen says which account it is working as.
     """
 
-    def test_exactly_one_row_ships_a_login_today(self):
-        assert SHIPPING == [CatalogueSource.BNA]
+    def test_exactly_two_rows_ship_a_login_today(self):
+        assert SHIPPING == [CatalogueSource.BNA, CatalogueSource.BNU]
 
     def test_a_row_that_ships_one_is_a_row_that_needs_one(self):
         for source in SHIPPING:

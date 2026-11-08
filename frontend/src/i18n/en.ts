@@ -24,6 +24,12 @@ export const en = {
   "nav.menuFor": "Menu for {name}",
   "nav.switchAccount": "Switch Account",
   "nav.exportLibrary": "Export Library",
+  // What each export button writes, shown on hover. The button itself reads
+  // the format's name, which is what a person saving the file looks for.
+  "nav.exportFormat.csv": "A spreadsheet with every column",
+  "nav.exportFormat.txt": "Plain text, one book after another",
+  "nav.exportFormat.html": "A web page that opens without a connection",
+  "nav.exportFormat.marcxml": "MARC records for another library's system",
   "nav.logout": "Logout",
   // Not "Logout". Under proxy auth nothing here signs anybody out: it drops
   // the test account session, and the upstream names the admin again.
@@ -318,6 +324,11 @@ export const en = {
   // being the caller's own. Said on the single scan and on a rapid queue row.
   "scan.inTrash":
     "In the trash and not added by you, so it was not added. Put it back, or ask the member who added it, or an admin if nobody did, to delete it for good, and add it again.",
+  // The warning the confirm card shows before the save. The two strengths are
+  // worded apart on purpose: only the ISBN match is the same edition.
+  "scan.alreadyHeldIsbn": "This book is already in the library: same ISBN.",
+  "scan.alreadyHeldTitleAuthor":
+    "Possibly the same book: one in the library has this title and author.",
   "scan.addCover": "Add cover photo (optional)",
   "scan.replaceCover": "Replace cover photo (optional)",
   "scan.privateBook": "Private (only visible to me)",
@@ -479,6 +490,15 @@ export const en = {
   "stats.overTime": "Books Added Over Time",
   "stats.couldNotLoad": "Could not load your stats.",
   "stats.loading": "Loading stats",
+
+  // Both counts ride in parentheses, the pattern `fallback.keepAllForNow`
+  // names: inside the sentence they read "the 1 of 1 books". The first says
+  // "in a currency" because its count is the copies the totals sum, and the
+  // copies priced with no currency are the second line's, not the first's.
+  "stats.purchaseTotal":
+    "spent on the books priced in a currency ({count} of {total})",
+  "stats.pricedWithoutCurrency":
+    "Not counted: priced with no currency ({count})",
 
   // ── Tags ────────────────────────────────────────────────────────────────
   "tags.type": "Type",
@@ -1173,6 +1193,15 @@ export const en = {
   "location.carriedOver":
     "Kept for the next book, so a whole shelf is typed once.",
   "location.batchLabel": "Shelf for everything in this run",
+
+  // ── Carried from the last book ─────────────────────────────────────────
+  "carry.heading": "Carried over from the last book",
+  "carry.hint":
+    "Each starts as the last book you added. Change or clear any of them for this one.",
+  "carry.privateNotice":
+    "This book starts private because the last one you added was. Nobody else will see it.",
+  "carry.makePublic": "Make it visible to everyone",
+  "carry.clearDate": "Clear",
 
   // ── Collections ─────────────────────────────────────────────────────────
   "collections.title": "Collections",
@@ -2089,6 +2118,7 @@ export const en = {
   "providers.name.nkp": "Czech National Library",
   "providers.name.bne": "Spanish National Library",
   "providers.name.bna": "Argentine National Library",
+  "providers.name.bnu": "Uruguayan National Library",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

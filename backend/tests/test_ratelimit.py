@@ -11,6 +11,7 @@ import pytest
 import respx
 from fastapi import HTTPException
 
+from enums import ExportFormat
 from ratelimit import (
     BACKUP_LIMIT,
     EXPORT_LIMIT,
@@ -248,7 +249,7 @@ class TestLimitsAreSane:
 
 class TestTheMetadataLimit:
     """Unlike the others, what this protects is somebody else's server: every
-    lookup fans out to as many as nine public catalogues.
+    lookup fans out to as many as ten public catalogues.
 
     Every source is silenced, so the burst these tests fire never leaves the
     machine. Without that they would be sixty real requests to the DNB.
@@ -299,6 +300,12 @@ class TestTheExportDoorIsRationed:
     @staticmethod
     def _export(client, account):
         return client.get("/api/books/export", headers=account["headers"])
+
+    def test_a_member_can_try_every_format_and_still_retry_one(self):
+        """The reason `EXPORT_LIMIT` gives for five, as arithmetic over the
+        enum the menu offers, so a format added past it fails here rather than
+        quietly spending the retry."""
+        assert EXPORT_LIMIT.max_attempts >= len(ExportFormat) + 1
 
     def test_a_burst_of_exports_is_cut_off(self, client, admin):
         codes = [self._export(client, admin).status_code for _ in range(EXPORT_LIMIT.max_attempts + 1)]

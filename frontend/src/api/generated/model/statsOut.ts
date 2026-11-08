@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { CollectionStat } from "./collectionStat.ts";
+import type { CurrencyTotal } from "./currencyTotal.ts";
 import type { MonthStat } from "./monthStat.ts";
 import type { PerUserStat } from "./perUserStat.ts";
 import type { TagStat } from "./tagStat.ts";
@@ -26,6 +27,9 @@ export interface StatsOut {
   finished_by_month?: MonthStat[];
   pages_by_month?: MonthStat[];
   per_user: PerUserStat[];
+  /** @minimum 0 */
+  priced_without_currency?: number;
+  purchase_totals?: CurrencyTotal[];
   /** @minimum 0 */
   rated_count?: number;
   /** @minimum 0 */

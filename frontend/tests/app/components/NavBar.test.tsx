@@ -358,6 +358,19 @@ describe("export", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers the offline page to a household, and says what it is", async () => {
+    stubFlags(false);
+    renderNav();
+
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+
+    expect(screen.getByRole("button", { name: "html" })).toHaveAttribute(
+      "title",
+      "A web page that opens without a connection",
+    );
+  });
+
   it("offers MARCXML in library mode", async () => {
     stubFlags(true);
     renderNav();

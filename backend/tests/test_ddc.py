@@ -10,6 +10,7 @@ silently matches nothing.
 """
 
 import ddc
+import fetch
 from main import PREDEFINED_TAGS
 
 
@@ -86,6 +87,15 @@ class TestParsingAHeading:
             "005.133",
             "Programmierung",
         )
+
+    def test_a_run_of_spaces_as_long_as_a_response_is_read_in_one_pass(self):
+        """A catalogue value is outside input, bounded only by the response.
+        With a separator that gives whitespace back, this shape backtracks
+        quadratically in the run, which at this length runs far past the per
+        test timeout. That timeout is the refusal; no clock is read here."""
+        run = " " * (fetch.MAX_RESPONSE_BYTES - 400)
+
+        assert ddc.parse_heading("004" + run + "x\ny") is None
 
 
 class TestTheDivision:

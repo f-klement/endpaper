@@ -283,9 +283,9 @@ def titles(response: httpx.Response) -> list[str]:
 
 # ── Metadata catalogues ───────────────────────────────────────────────────────
 #
-# Eleven sources answer a lookup or a search, and respx fails a test that makes
+# Twelve sources answer a lookup or a search, and respx fails a test that makes
 # an unmocked request rather than letting it reach the real service. So a test
-# touching either path has to silence all eleven, and stating them one by one in
+# touching either path has to silence all twelve, and stating them one by one in
 # every test was both noise and a trap: adding a source broke thirty tests in
 # an unrelated file. It did so again when the Spanish National Library joined,
 # because `silence_catalogues` still held a **list** of the sources rather than

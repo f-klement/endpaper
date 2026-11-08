@@ -227,6 +227,95 @@ describe("the count column", () => {
   });
 });
 
+describe("what the collection cost", () => {
+  it("shows one total per currency, never converted", async () => {
+    api.on("/api/stats", {
+      body: makeStats({
+        total: 3,
+        purchase_totals: [
+          { currency: "EUR", total_minor: 124050, copies: 2 },
+          { currency: "GBP", total_minor: 8500, copies: 1 },
+        ],
+      }),
+    });
+    renderWithProviders(<StatsPage />);
+
+    // The matcher folds Intl's no break spaces into plain ones.
+    expect(
+      await screen.findByText("EUR 1,240.50 · GBP 85.00"),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      copies: 1,
+      total: 1,
+      words: "spent on the books priced in a currency (1 of 1)",
+    },
+    {
+      copies: 2,
+      total: 5,
+      words: "spent on the books priced in a currency (2 of 5)",
+    },
+  ])(
+    "says how many of the books the totals cover, at $copies of $total",
+    async ({ copies, total, words }) => {
+      api.on("/api/stats", {
+        body: makeStats({
+          total,
+          purchase_totals: [{ currency: "EUR", total_minor: 500, copies }],
+        }),
+      });
+      renderWithProviders(<StatsPage />);
+
+      expect(await screen.findByText(words)).toBeInTheDocument();
+    },
+  );
+
+  it.each([
+    { count: 1, words: "Not counted: priced with no currency (1)" },
+    { count: 2, words: "Not counted: priced with no currency (2)" },
+  ])(
+    "counts $count with a price and no currency apart from every total",
+    async ({ count, words }) => {
+      api.on("/api/stats", {
+        body: makeStats({ total: count, priced_without_currency: count }),
+      });
+      renderWithProviders(<StatsPage />);
+
+      expect(await screen.findByText(words)).toBeInTheDocument();
+    },
+  );
+
+  it("counts only the copies the totals sum, not those priced with no currency", async () => {
+    api.on("/api/stats", {
+      body: makeStats({
+        total: 5,
+        purchase_totals: [{ currency: "EUR", total_minor: 500, copies: 2 }],
+        priced_without_currency: 1,
+      }),
+    });
+    renderWithProviders(<StatsPage />);
+
+    expect(
+      await screen.findByText(
+        "spent on the books priced in a currency (2 of 5)",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Not counted: priced with no currency (1)"),
+    ).toBeInTheDocument();
+  });
+
+  it("draws no card when nothing is priced", async () => {
+    api.on("/api/stats", { body: makeStats({ total: 1 }) });
+    renderWithProviders(<StatsPage />);
+
+    expect(await screen.findByText("1")).toBeInTheDocument();
+    expect(screen.queryByText(/priced in a currency/)).not.toBeInTheDocument();
+  });
+});
+
 /** The token the property's examples are signed in with. */
 const SESSION = "a-session-the-property-signed-in-with";
 

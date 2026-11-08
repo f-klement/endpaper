@@ -34,6 +34,7 @@ from schemas.book import (
     MERGE_BOOKS_MAX,
     POPPED_BEFORE_THE_ASSIGNMENT,
     POPPED_BEFORE_THE_CONSTRUCTOR,
+    AlreadyHeldOut,
     BookColumns,
     BookCreate,
     BookDetailsUpdate,
@@ -158,7 +159,7 @@ from schemas.settings import (
     SettingsUpdate,
     SourceCredentialIn,
 )
-from schemas.stats import CollectionStat, MonthStat, PerUserStat, StatsOut, TagStat
+from schemas.stats import CollectionStat, CurrencyTotal, MonthStat, PerUserStat, StatsOut, TagStat
 from schemas.tag import KnownTagKey, TagCreate, TagOut, known_key
 from schemas.user import (
     AppearanceOut,
@@ -211,6 +212,7 @@ __all__ = [
     "POPPED_BEFORE_THE_CONSTRUCTOR",
     "AccessDecision",
     "AccessRequestOut",
+    "AlreadyHeldOut",
     "AppearanceOut",
     "AppearanceUpdate",
     "AskedFileIn",
@@ -256,6 +258,7 @@ __all__ = [
     "CopyCreate",
     "CoverBackfillOut",
     "CredentialKeyOut",
+    "CurrencyTotal",
     "CustomFieldCreate",
     "CustomFieldOut",
     "CustomFieldRename",

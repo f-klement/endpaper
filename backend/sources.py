@@ -89,14 +89,15 @@ class Measured:
 #: What each lookup source that needs no credential does, measured 2026-08-30,
 #: except the BNE's row.
 #:
-#: **The set is the seven that need nothing, which is one short of what a stock
+#: **The set is the seven that need nothing, which is two short of what a stock
 #: install asks**, and the gap is the whole of what this heading has to be
-#: careful about. The Biblioteca Nacional Argentina needs a login and ships one,
-#: so a household that has typed nothing does ask it; it is absent here because
-#: these figures come from one pass and it was not in that pass, and adding a row
-#: without re-running the pass would put a number here that `Measured` promises is
-#: comparable with its neighbours and is not. What it answers over the same
-#: committed sample is measured in `metadata`'s block for it.
+#: careful about. The Argentine and Uruguayan national libraries each need a
+#: login and ship one, so a household that has typed nothing does ask them; they
+#: are absent here because these figures come from one pass and neither was in
+#: that pass, and adding a row without re-running the pass would put a number
+#: here that `Measured` promises is comparable with its neighbours and is not.
+#: What each answers over the same committed sample is measured in `metadata`'s
+#: block for it.
 #: `tests/test_sources.py` binds this set to `LOOKUP_SOURCES - NEEDS_A_KEY` so a
 #: source cannot quietly go unmeasured.
 #:
@@ -244,9 +245,9 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: seven candidate orders against the 500 ISBN sample, **395 of 500 under every
 #: one of them**. A reorder is never the fix for a book the chain misses.
 #:
-#: **That modelling ran over the sources that need no credential**, which is one
-#: short of what a stock install asks since the Argentine row began shipping the
-#: login its library publishes. It is left as measured rather than bumped: the
+#: **That modelling ran over the sources that need no credential**, which is two
+#: short of what a stock install asks since the Argentine and Uruguayan rows began
+#: shipping the logins their libraries publish. It is left as measured rather than bumped: the
 #: conclusion is that permutation does not move coverage, and adding a source
 #: the modelling never permuted would not support it.
 #:
@@ -275,8 +276,11 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
     # not name it and `test_the_tail_is_ordered_by_how_often_it_answers_what_the_tier_missed`
     # steps over it. What it does answer is measured in `metadata`'s block for
     # it, against the same committed sample: it is a credentialled source and so
-    # outside the pass those figures come from.
+    # outside the pass those figures come from. The BNU is placed by the same
+    # rule, and behind the BNA because it arrived second rather than because it
+    # was measured against it.
     CatalogueSource.BNA,
+    CatalogueSource.BNU,
     CatalogueSource.GOOGLE_BOOKS,
     CatalogueSource.BNF,
     CatalogueSource.LOC,
@@ -363,38 +367,41 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: sealed `catalogue_credentials` row for anything else.
 #:
 #: **Free and credentialled is a real combination now, and this set no longer
-#: equals `METERED`.** The Biblioteca Nacional Argentina publishes its own login
-#: on its page for librarians, so its credential costs nothing and still has to
-#: be entered before the source answers anything. The two properties were one
+#: equals `METERED`.** The Argentine and Uruguayan national libraries each
+#: publish their own login on a page for librarians, so the credential costs
+#: nothing and still has to be presented before the source answers anything. The two properties were one
 #: set until it joined, and `Plan.lookup_together` bars a **metered** source from
 #: the gathered tier rather than a credentialled one, which is the reading that
 #: had to be checked rather than assumed when they came apart.
 #:
 #: **This is much of the chain's coverage, and most installs do not have it.**
-#: The eight sources a stock install asks answer 399 of the 500 ISBNs behind `MEASURED` and miss
-#: 101, and outside German language publishing they miss 97 of 400. #91
+#: The nine sources a stock install asks answer 407 of the 500 ISBNs behind `MEASURED` and miss
+#: 93, and outside German language publishing they miss 89 of 400. #91
 #: measured the same books with a key: Italy 36% missed keyless against 0% with
 #: one, Greece 86% against 54%. So "the chain covers this country" is a claim
 #: about a keyed install, and it is worth saying wherever the chain's coverage
 #: is described rather than being left for a household to discover.
 #:
-#: **399 and not 395, and which four books moved is measured rather than
-#: assumed.** The eighth source is the Biblioteca Nacional Argentina, which ships
-#: the login its own library publishes, and `metadata`'s block for it measures
-#: **4** books it answers that the rest miss, over the same committed sample. All
-#: four are Argentine, so the figure outside German language publishing moves by
-#: the same four.
+#: **407 and not 395, and which twelve books moved is measured rather than
+#: assumed.** The two credentialled sources ship the logins their own libraries
+#: publish, and `metadata`'s block for each measures what it answers that the rest
+#: miss, over the same committed sample: **4** for the Argentine catalogue and
+#: **8** for the Uruguayan one, which the Argentine catalogue was asked about and
+#: does not hold. All twelve are in their own country's frame, so the figure
+#: outside German language publishing moves by the same twelve. The 8
+#: recomputes from the sample's `bnu` column in `tests/test_sources.py`; the 4
+#: does not, because the Argentine pass committed no column.
 #:
 #: The 395 stays stated because it is what was measured and because it is the
-#: figure for an install that pins `CATALOGUE_CREDENTIAL_BNA` to something it
-#: cannot use: the seven sources that need no credential at all answer 395 of the
-#: 500 and miss 105.
+#: figure for an install that pins both `CATALOGUE_CREDENTIAL_BNA` and
+#: `CATALOGUE_CREDENTIAL_BNU` to something it cannot use: the seven sources that
+#: need no credential at all answer 395 of the 500 and miss 105.
 #:
 #: **"Most of the chain's coverage" was true when it was written and is not
 #: now**, which is why this paragraph says "much". Four things moved the free
-#: figure from 300 to 399 on the same 500 books: three national catalogues, the
+#: figure from 300 to 407 on the same 500 books: three national catalogues, the
 #: `020 $q` rule in `marc_fields.Fields.isbn`, which was refusing 51 records
-#: the sources already held, and a fourth catalogue arriving with its login. The
+#: the sources already held, and two more catalogues arriving with their logins. The
 #: Greek figure above is the sharpest case, and it moved in
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
@@ -436,8 +443,8 @@ STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (NEEDS_
 #:
 #: A cost bound rather than a taste: an ordinary lookup makes this many outbound
 #: requests whatever the household puts in the list, so reordering cannot turn
-#: every lookup into a nine way fan out. **Nine, not eleven**, and the number is
-#: `LOOKUP_SOURCES` rather than the roster: two of the eleven answer a title
+#: every lookup into a ten way fan out. **Ten, not twelve**, and the number is
+#: `LOOKUP_SOURCES` rather than the roster: two of the twelve answer a title
 #: search only and are never asked about an ISBN at all. What a household changes is
 #: **which** sources fill the slots, which is the whole point of the control.
 #:
@@ -486,10 +493,11 @@ ALWAYS_ASKED: Final = 2
 #: books, with **673** tail requests instead of **872**. Per frame it runs from
 #: 0.000s, where the leading pair answers before the tail is reached, to 0.231s.
 #:
-#: **Those figures are the chain of sources that need no credential**, and this
-#: table is one row short of the chain a stock install now runs: the Argentine
-#: catalogue is asked on every miss and has no entry here, so the tail request
-#: count is an understatement by construction.
+#: **Those figures are the chain of sources that need no credential**, and the
+#: model is two rows short of the chain a stock install now runs: the Argentine
+#: catalogue is asked on every miss and has no entry here, and the Uruguayan one
+#: has an entry the model never ran, so the tail request count is an
+#: understatement by construction.
 #:
 #: **Which way the saving itself moves is not stated, because nobody measured
 #: it and the mechanism does not settle it.** An unfiltered source is reached
@@ -513,7 +521,9 @@ ALWAYS_ASKED: Final = 2
 #: **A source the committed sample does not measure cannot clear that bar**, and
 #: not clearing it is not the same as failing it. That distinction is load
 #: bearing at exactly one row, the Argentine one, and `metadata`'s block for it
-#: carries the pass and the numbers.
+#: carries the pass and the numbers. The Uruguayan row is the other way round:
+#: the 500 were put to it and committed as a column, so it clears the bar on the
+#: same evidence as the NLG.
 #:
 #: **Derived from the rows rather than written out here.** The literal lived in
 #: this module until the owner's decision of 2026-09-07, and the reason for

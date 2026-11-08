@@ -16,11 +16,11 @@
  * names no book at all. Same rule as `catalogue._CUT_ON_UPLOAD` and
  * `_KEPT_WHOLE_ON_UPLOAD`, and **the same six names on the cut side**.
  *
- * The kept-whole sides differ by one name each way, because the two tables
- * answer for different fields: `google_books_id` is not something `BookCreate`
- * takes, and `location` is not a catalogue scalar at all. `location` is kept
- * whole for the reason the others are, that a cut value is a different value:
- * a shelf name cut to 120 characters names a shelf nobody has.
+ * The kept-whole sides differ, because the two tables answer for different
+ * fields: `google_books_id` is not something `BookCreate` takes, and
+ * `location` and `purchase_source` are not catalogue scalars at all. Both are
+ * kept whole for the reason the others are, that a cut value is a different
+ * value: a shelf or a shop name cut short names one nobody has.
  *
  * **The numbers are not column widths.** They are the bounds the request bodies
  * already carry, and a value outside them is a row a member cannot afterwards
@@ -40,6 +40,7 @@ export const TEXT_CEILINGS = {
   language: 10,
   location: 120,
   publisher: 255,
+  purchase_source: 120,
   series_name: 255,
   subtitle: 500,
   title: 500,
@@ -78,6 +79,7 @@ export const KEPT_WHOLE: ReadonlySet<BoundedText> = new Set<BoundedText>([
   "isbn",
   "language",
   "location",
+  "purchase_source",
 ]);
 
 /**

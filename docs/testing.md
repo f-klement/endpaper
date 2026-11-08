@@ -1,7 +1,9 @@
 # Testing
 
 Two suites, one rule: **tests never sit beside the code they test.** Each mirrors its
-source tree in a separate directory.
+source tree in a separate directory. The one exception is outside both suites: the CI
+pipeline's CRAP scorer is a Go module, and Go compiles a package's tests from inside its
+directory, so they sit beside each package.
 
 ```
 backend/                          backend/tests/

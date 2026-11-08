@@ -117,7 +117,28 @@ function sourcesAsImported(): [string, string][] {
   return entries().map(([path, source]) => [`../src/${path}`, source]);
 }
 
+/**
+ * Whether a module may call the generated client: a file named exactly
+ * `hooks.ts`, in any folder. A name merely ending in it, such as `myhooks.ts`,
+ * is not one, and an honest author could reach for that name.
+ *
+ * **Known evasions, both admitted:** a `hooks.ts` under `components/` or
+ * `lib/`, which rule 4 and the layout forbid but this does not; and a new
+ * module under `src/api/` re-exporting from `endpoints`, since every `api/`
+ * path is skipped, which would make every importer of it a client caller.
+ */
+function mayCallTheClient(path: string): boolean {
+  return path.split("/").at(-1) === "hooks.ts";
+}
+
 describe("the generated client stays behind hooks.ts", () => {
+  it("refuses a name that only ends in hooks.ts", () => {
+    // The arm below holds the other half: every `hooks.ts` in the tree that
+    // calls the client is still admitted.
+    expect(mayCallTheClient("pages/Home/myhooks.ts")).toBe(false);
+    expect(mayCallTheClient("pages/Home/hooks.ts")).toBe(true);
+  });
+
   it("is imported by nothing else", () => {
     // The single indirection is what stops a regeneration rippling through
     // every component. Types are a different matter and are imported freely:
@@ -126,7 +147,7 @@ describe("the generated client stays behind hooks.ts", () => {
       .filter(([path]) => !path.startsWith("api/"))
       .filter(([, source]) => source.includes("api/generated/endpoints"))
       .map(([path]) => path)
-      .filter((path) => !path.endsWith("hooks.ts"));
+      .filter((path) => !mayCallTheClient(path));
 
     expect(offenders).toEqual([]);
   });

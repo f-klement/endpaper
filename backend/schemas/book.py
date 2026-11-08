@@ -2,7 +2,7 @@ import collections.abc as abc
 from collections.abc import Iterable, Mapping
 from datetime import date
 from types import UnionType
-from typing import TYPE_CHECKING, Annotated, Final, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Final, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -253,6 +253,23 @@ def _a_cover_url_the_column_can_hold(url: str | None) -> str | None:
     return url
 
 
+class AlreadyHeldOut(BaseModel):
+    """What the member already holds of a looked up record, asked before it is
+    saved so a duplicate is caught before the press rather than by the 409.
+
+    `match` says how strong the claim is: `isbn` is a Book on the member's
+    shelf carrying the same ISBN, which the save will refuse; `title_author`
+    is one sharing only the title and author, which may be another edition.
+    This answer does not say whether the save refuses that one: the save asks
+    about its ISBN past the member's shelf, and this answer never does. Neither
+    ever names a Book the member cannot see.
+    """
+
+    match: Literal["isbn", "title_author"] | None
+    #: The Books answering, lowest id first. Empty when `match` is null.
+    book_ids: list[int]
+
+
 class BookLookup(BaseModel):
     """Metadata fetched for an ISBN. Nothing is persisted at this point: the
     client edits it and posts it back to /api/books/scan."""
@@ -349,9 +366,15 @@ class BookCreate(BaseModel):
     #: has no language field.
     language: str | None = Field(default=None, max_length=LANGUAGE_MAX)
     page_count: int | None = Field(default=None, ge=1, le=MAX_PAGE_NUMBER_IN_A_BOOK)
-    # The one collector field offered at add time. Somebody scanning a book is
-    # holding it, so this is the one moment they can answer without checking.
+    # Collector fields offered at add time. Somebody scanning a book is holding
+    # it, so this is the one moment they can answer without checking, and the
+    # scan form carries each over from the last book added: a shelf of
+    # paperbacks from one shop is catalogued in one sitting. Spelled as
+    # `CopyCreate` spells them, so one add and its copy accept the same values.
     format: BookFormat | None = None
+    condition: BookCondition | None = None
+    purchased_at: date | None = None
+    purchase_source: str | None = Field(default=None, max_length=PURCHASE_SOURCE_MAX)
     #: The headings the lookup returned, posted back so the scan flow stores
     #: them. Bounded: every entry becomes a row. Duplicates within one payload
     #: are dropped by `classifications.add_headings` rather than refused, because the

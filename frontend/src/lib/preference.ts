@@ -18,7 +18,10 @@
  * * Not a cache of something the account owns. `theme/appearance.ts` keeps one
  *   key holding a record over accounts and a pointer to the last one, and the
  *   server is the owner. Nothing here models a key that does not vary with its
- *   scope, two values in one key, or a remote owner.
+ *   scope or a remote owner, and the door sees one value per key. That value
+ *   may itself be a record over accounts when no server owns it, as each
+ *   carried field in `lib/carryOver.ts` is: the codec reads the accounts inside
+ *   it, and the door decodes and encodes it whole.
  * * Not a token and not an identity. `api/mutator.ts` owns those.
  * * Not a per tab marker, whose whole point is a lifetime this does not model.
  * * The locale would fit and is deliberately outside. Its one reader and its
@@ -26,7 +29,7 @@
  *
  * **There is deliberately no "forget every preference" call.** What survives a
  * sign out on a shared browser profile is recorded and accepted in
- * `docs/decisions.md`, and the fix it prescribes is a named pair of keys
+ * `docs/decisions.md`, and the fix it prescribes is a named set of keys
  * cleared at one site rather than a sweep offered from here. A door that
  * offered the sweep would make reversing that acceptance a one line change
  * somebody makes without reading it.

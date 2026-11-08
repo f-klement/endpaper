@@ -13152,13 +13152,15 @@ could express (`from_env` without `has_credential`, and the reverse) were unreac
 ## A stock install and a set that needs no credential are two different names
 
 They were one expression, `LOOKUP_SOURCES - NEEDS_A_KEY`, and a source that needs a login and
-ships one separates them: an install that has typed nothing asks eight, and seven need nothing.
+ships one separates them: an install that has typed nothing asks every lookup source
+but the one whose key it lacks, and seven need nothing.
 That name has now been wrong twice in the other direction as well, having read
 `LOOKUP_SOURCES - METERED` while the only credential was also the only bill.
 
 **A measurement keeps the name it was taken over.** The 395 of 500 pass ran against the seven,
-so it stays bound to them; `sources.STOCK_INSTALL_ASKS` is eight and answers 399, the four
-between them being the Argentine row's own measured contribution to the same committed sample.
+so it stays bound to them; `sources.STOCK_INSTALL_ASKS` answers more, the difference being each
+shipped login row's own measured contribution to the same committed sample, which `sources`'
+stock install paragraph states.
 Adding a row to `sources.MEASURED` without re-running the pass was refused: `Measured` promises
 its columns are comparable, and a figure from a later pass is not.
 
@@ -24421,3 +24423,552 @@ whole selection, because the fallback would need its own control and the red nam
 finding a seat acts on. Cost: one run per distinct set, shared by every arm running it; a plain
 baseline is already the control for the whole selection. A red that depends on how
 `--dist loadfile` shares files among workers can still pass its control and read as a catch.
+
+## The add form carries every per copy field from the last book, per account, and privacy carries visibly
+
+Owner's decision, 2026-11-07. Beside the shelf, the scan form now starts each book with the
+collection, format, condition, tags, ownership, purchase source, purchase date and privacy the
+last book added was filed with. Each is drawn on the form prefilled and is clearable there; a
+carried private flag is also said in a sentence with a button to make the book public, because
+a private book hides from every other member and a ticked box nobody looked at tells nobody.
+
+`lib/carryOver.ts` owns which fields carry and how each is normalised, one preference key each.
+A value is remembered only after the server accepted the book. A copy remembers only what it
+was filed with, since it inherits tags and privacy from the book it copies. A cancel restarts
+the form from what the last book added left, except the shelf, which keeps what was typed as it
+always has. The rapid queue carries the shelf alone: it shows no control for the rest.
+
+Only the tags the member chose carry. A lookup's suggestions join the form but are not
+remembered, unless the same tag was carried in: joined into the carry, each book's catalogue
+subjects would land on every later book until somebody removed them one at a time. Picking a
+second match replaces the first match's suggestions for the same reason. **A tag the member
+keeps or picks by hand that the lookup also suggested does not carry**, because the form cannot
+tell the two apart. That is accepted, the lead's call: recording which tags were picked costs more than the
+edge, which shows on the next form and ends once the member adds the tag there, since a tag
+carried in is kept from then on.
+
+A carried tag or collection that no longer exists is dropped once the lists arrive; a value
+picked on the form is not judged. `BookCreate` gained `condition`, `purchased_at` and
+`purchase_source`, spelled as `CopyCreate` spells them.
+
+**Every carried field but the shelf is kept per account**, owner's decision of 2026-11-07. Each
+of those keys holds one value per account id, so a member who signs out and back in on their
+own browser keeps their carry, and a different member on the same browser starts from nothing
+but the shelf and is never told that "the last one you added was" private about another
+member's book. A value stored under one of these keys that is not a record over accounts reads
+as nothing carried.
+
+**Keeping a value per account means it survives a sign out, and that widens what
+`clearSession()` leaves behind.** The entry on what it leaves behind accepted the saved
+searches and the shelf; the carry keys now survive with them, by the owner's ruling that a
+member returning to their own browser keeps their batch. So on a shared browser profile every
+earlier member's carried fields but the shelf (format, condition, ownership, last shop,
+purchase date, private flag, tag ids and collection id) stay in
+storage under their account id, readable by anyone with that profile, though the app never
+applies them to another account. Reversing it follows that entry's rule: clear the keys in
+`clearSession()`.
+
+**Accepted residue.** `carriedByACopy` derives what a copy remembers as every carried field less
+those a copy inherits from the book it copies, so it fails open: a field added later to the carried
+set is remembered by a copy unless somebody also lists it as inherited, though a copy would never
+file it. Nothing is wrong today, because the inherited list is exactly the carried fields that
+have no counterpart on a copy's request; the failure needs a new carried field and a missed second
+edit. Deriving the set from what a copy sends would need a list of copy fields keyed to the
+carried ones, which is a design step of its own.
+
+## The duplicate warning before a save is a recognition ladder that reads only the Shelf
+
+The scan card asks `GET /api/books/already-held` before the save. It is
+answered by `recognition.Source.LOOKUP`, not by a matcher of its own: the ISBN
+on the member's shelf first, then `identity.work_key` on title and author.
+
+A title hit answers `Resembles`, a new answer, rather than `Seen`. A title and
+author match may be another edition, so the UI has to say it is weaker; a
+separate answer type lets a caller tell the two apart without a flag it could
+forget to read. Whether the save then refuses that edition is not this answer's
+to say: the save asks about its ISBN past the member's shelf, and the check
+never does. Only `LOOKUP` sets `title_is_a_guess`, so the import ladders' title
+rungs still answer `Seen`. `_Ladder` refuses the flag on a ladder that reads past
+the Shelf or asks no title, and refuses `asks_off_the_shelf=False` on a scheme
+ladder, where nothing reads it.
+
+`LOOKUP` sets `asks_off_the_shelf=False`, so it never reads past the viewer and
+never answers `Hidden` or `InTrash`. A warning shown before any write that said
+"a Book you cannot see holds this ISBN" would disclose it (ADR 0003) and refuse
+nothing, and the member's own trashed holder needs no warning, because the save
+purges it. The add door still refuses on its ISBN with a 409 naming no Book, as
+it did before; the pre save check adds no disclosure beyond that. Accepted with
+it: re-scanning another member's trashed public Book gets no warning, then the
+409.
+
+The warning is shown on the single scan confirm card only. Rapid mode's queue
+gets none and still meets a duplicate at its 409, as before.
+
+It builds the full Shelf index per request, one read of id, ISBN, title, author
+and copy group over every visible Book, with `work_key` computed in Python for
+each. Accepted for a household library. Measured on 2026-11-07 in a suite pod on
+the slowest worker (two cores), over the test database (SQLite), build plus one question, median of
+five: 22 ms at 1,000 visible Books, 111 ms at 5,000, 455 ms at 20,000 and
+1,248 ms at 50,000, so linear at about 25 ms per thousand. The hook asks once
+per card and once per settled edit. Narrowing it is not a small change. The ISBN rung narrows today, as the add door's index does, but
+saves nothing for a new book, whose title is then asked of every visible row. The title rung has no
+exact narrowing over the stored columns: the title fold case folds with expansions SQL does not
+share, so it needs a stored work key column, which is a migration. The per request index is
+accepted for this wave at about 25 ms per 1,000 books.
+
+**Accepted residue.**
+
+* The add door's existing 409 discloses at save time that a Book the member cannot see holds the
+  ISBN. It is forced by `books.isbn` being unique across the whole table, since a check filtered to
+  the member's view would turn that 409 into a 500. It is older than this wave and the pre save
+  check adds nothing to it; rank 2.
+* On a title and author match the link reads as the copy already in the library, which asserts
+  the sameness the sentence above it doubts; rank 1. Rapid mode has no pre save warning, as said
+  above.
+* The rule that only a file named for hooks may import the generated endpoints is held by a guard
+  whose older evasions are listed in its own docstring, and this wave did not widen them.
+
+## What the collection cost counts, and for whom
+
+**The cost statistic is scoped exactly as `total` is: every copy on the shelf the requesting member may see, whoever added it and whatever its ownership status.**
+
+The shape is the owner's ruling of 2026-11-07: one total per currency, and no conversion. A rate would need an outside source and a date, and either one chosen silently would make the figure wrong.
+
+`routers/stats.py` roots every aggregation at `Shelf.seen_by(db, current_user.id)`. Its figures are of two kinds: `total`, `per_user`, `by_tag`, `by_collection` and `by_month` are facts about the shelf, and `finished_by_month`, `pages_by_month` and the rating average are facts about a reader. The schema labels the two monthly reading series as personal; it does not label `average_rating` either way. What the copies cost is a fact about the shelf, so it takes the first kind. A member therefore sees the cost of every public copy plus their own private ones, and never another member's private copy, exactly as `total` behaves; the route needs an account, so the public catalogue sees no figure at all.
+
+Restricting it to the copies a member added (`added_by_user_id`) was refused: no other shelf statistic does that, and the per member split already exists as `per_user` for anyone who wants it. Filtering by `ownership` was refused too: `total` counts owned, not owned and unknown alike, and a recorded purchase price is the record of a purchase whatever the copy's status now. Either narrowing would make the cost cover a different set of copies than the "of M books" beside it.
+
+Rules settled in code, each with a test in `backend/tests/routers/test_stats.py::TestPurchaseTotals`:
+
+| Copy | Counted as |
+|---|---|
+| price and currency | summed into that currency's total |
+| price, no currency | counted in `priced_without_currency`, never summed: assigning it a currency is a guess, and summing those together could add yen to pounds |
+| currency, no price | unpriced; counts nowhere |
+| price of 0 | priced (a test pins that a truthiness check would drop it) |
+| trashed | excluded by the shelf predicate, as every stat |
+| currency in lower case, from a restored archive | grouped with its upper cased code, since a restore bypasses the write that upper cases it |
+| negative price, from a restored archive | summed as stored; `total_minor` has no lower bound, so `/api/stats` returns the figure instead of a 500, and no clamp hides the row |
+
+The amount is stored as hundredths for every currency (`parseMinor` multiplies by 100 whatever the code), so the client divides by 100 and lets `Intl.NumberFormat` apply the currency's own exponent: a yen total shows no decimals. A code `Intl` refuses (the column takes any three characters) falls back to the plain amount and the code as written.
+
+**Accepted residue.** The unit of `total_minor` (hundredths for every currency, the client
+dividing by 100) is stated in a comment that does not reach the OpenAPI schema, so a third party
+client reading the schema is not told that the exponent is its job; rank 1. Moving the sentence
+into the class docstring would publish it as the schema description.
+
+## The Uruguayan catalogue ships its published login, and carries a remit the Argentine one could not
+
+Owner's decision of 2026-09-05 on ticket 117 ("yes, sequenced behind encrypted credentials"),
+built on the mechanism the Argentine row shipped with: the pair sits on the target row as a
+`ShippedCredential`, bound to the row's origin, and loses to a stored login and to a pinned
+`CATALOGUE_CREDENTIAL_BNU`. No second way to store a secret.
+
+**It differs from the Argentine row in one column, and the difference is a measurement.** All 500
+ISBNs of the committed sample were put to it on 2026-11-07 and committed as a `bnu` column in
+`catalogue_survey_2026_08_31.json`: it hits 27, every one in `978-9974`, and nothing outside; 26 survive the identity check.
+So `serves_groups` is `{"978-9974"}` on the zero book bar in `sources.SERVES_GROUPS`, the same
+evidence the NLG's remit rests on. The Argentine row stays empty because its pass covered fifty
+rows, not five hundred.
+
+**The case against, kept.** A dated fixture now carries a column measured two months after its
+name's date; `test_a_remit_may_only_be_declared_for_a_source_the_sample_measures` names this as
+the remedy, and the date of the column is in `metadata`'s block for the row.
+
+## The HTML export is not asked for by the download's Accept header
+
+`frontend/src/api/mutator.ts` `DOWNLOAD_ACCEPT` lists every media type a download is declared
+as, pinned by `tests/api/mutator.test.ts`, and a neighbouring arm forbids `text/html` because
+Authelia redirects a request that accepts it instead of answering 401. The HTML export is
+declared `text/html`, so the two arms collided. Resolved by leaving `text/html` out and
+exempting it by name in the first arm: the server negotiates nothing on these routes, so the
+page still arrives. The alternative, serving the page under another type, would make the
+declaration less honest to satisfy a header nobody reads.
+
+## The HTML export carries six columns, not the CSV's
+
+Lead's decision in wave breadth1. The page carries title, author, year, ISBN, location and
+the viewer's status. It is a page a person reads or hands to somebody, so it carries what
+finds a book on a shelf and leaves out prices, descriptions, tags and the bookkeeping a
+spreadsheet wants. The rows are the other formats' rows, from the same `_export_pages` walk,
+so the privacy scope cannot differ. The columns are named in `routers/books._html_chunks`.
+
+**The case against, kept.** Location is a household's own data and the plain text export
+leaves it out; the page carries it because finding the book is the page's purpose, and the
+CSV already carries it to the same member.
+
+## Five exports a minute is held to the formats the menu offers
+
+`ratelimit.EXPORT_LIMIT` is five because a member comparing every format spends one start on
+each and should keep at least one retry. That reason named a count of formats, which the HTML
+export made stale, so the prose now names no count and
+`tests/test_ratelimit.py::TestTheExportDoorIsRationed` fails when a format added to
+`ExportFormat` leaves no retry. Raising the limit or splitting the count is the decision that
+test forces, and it is left to whoever adds the next format.
+
+## CRAP under 10 on every pipeline, as a ratchet, with a scorer of our own in Go
+
+**What.** No function may score CRAP 10 or over, where CRAP = CC^2 x (1-coverage)^3 + CC,
+coverage being a function's branch coverage where it has branches and its line coverage
+otherwise. The scorer enforces it in `test:backend` and `test:frontend`, after each suite's
+coverage run, and in the CRAP leg of the local gate script. The owner asked for it on
+2026-11-07.
+
+**What is not scored, and why.** `backend/tests` and `frontend/tests`, which no coverage run
+measures; whatever `[tool.coverage.run] omit` in `backend/pyproject.toml` lists, which the run
+cannot see and would score at 0%; `frontend/src/api/generated`, which nobody writes; and the
+CI tooling, `frontend/scripts`, `frontend/vite.config.ts` and the other config files, which
+run on the host or in the build under no suite that writes an LCOV. The scorer pins the omit
+list as well and refuses a run whose `pyproject.toml` omits anything else. Without the pin, a
+file added to the list left the score with no failure: its recorded entries failed as gone,
+and deleting them as the message said passed the push check. An omit written anywhere other
+than that table does not leave the score; its files read 0% and fail loudly.
+
+**A known blind spot: function values outside every scored function.** The TypeScript reader
+scores declared functions and generators, top level `const` arrows and functions, and class
+methods. A function value anywhere else at module level is scored by nobody: an arrow in an
+object literal passed to a module level call, held by a `const` or nested in another, or one
+passed to a call that a `const` holds or that another call chains off. Object literal methods,
+class field arrows, class expressions and anonymous default exports occur nowhere in the scored
+tree today. A count taken on 2026-11-07 against the frontend coverage run of that day found none
+that would score 10 or over, so the blind spot hid no offender then; the count was not repeated on
+the merged tree, so re-derive it before relying on it. Naming one of them needs a rule for a
+value with no declarator (a call's callee, an index into an array), which is a design of its own
+rather than a fix, so it was left.
+
+**Why 10.** A CRAP score is never below the function's complexity, so 10 caps cyclomatic
+complexity at 9 for a fully covered function. Coverage buys less as complexity grows: an
+untested function of complexity 3 already scores 12, so the gate asks for tests exactly where
+the branching is. The owner set the threshold.
+
+**Why a ratchet.** On the day it arrived 200 functions scored 10 or over: 76 backend functions
+in 31 modules and 124 frontend functions in 87 modules. A gate failing on them would block every
+pipeline until all were rewritten. So the baseline records each, by module then function, with
+its complexity, its score and its coverage. A function not recorded must score under 10. A
+recorded one may not grow more complex or score more than 1.5 times its recorded score, nor,
+where its recorded coverage still binds, fall more than 15 coverage points under it; one made
+simpler fails until its figures are lowered; and one fixed or gone fails as stale until its
+entry is deleted. So the list and every figure in it only shrink. That is the oxlint and ruff
+ratchets' rule here: a list that may hold slack is room for the next regression to arrive
+unseen. The baseline held 200 entries on arrival and holds 199 at the merge, 75 backend and 124
+frontend, one backend function having been brought under the threshold since; the measurements
+below were taken over the 200.
+
+**Why worse means more complex, and the score counts only past a band.** Coverage moves between
+two runs of one tree, because the frontend's property tests draw fresh inputs each run.
+Measured 2026-11-07, two runs of one commit gave `fb2.ts`'s `declaredEncoding` 82.4% and 76.5%
+branch coverage, scores 11.7 and 12.6, and a ratchet comparing scores failed the second run.
+Complexity is a fact about the source. But complexity alone let a recorded function lose every
+test it had: `useRapidIntake` at CC 80 would score 6,480 and pass. So a recorded function also
+fails past 1.5 times its recorded score. The widest swing measured was 1.084, over all 200
+recorded functions in four frontend and four backend coverage runs, and a function losing its
+tests scores several times its figure. Seeding the property tests under coverage would remove
+the wobble instead, but it reverses the fresh seed per run that `frontend/tests/property.ts`
+documents, so it was not taken.
+
+**Why a coverage floor beside the band.** The score is cubic in the uncovered fraction, so near
+full coverage it barely moves: under the band alone a recorded complexity 10 function at 100%
+(`auth_backends.py`'s `user_from_proxy_headers`) passed down to 63.2%, and 162 of the 200
+entries could lose 20 coverage points or more. So each entry also records its coverage, and a
+recorded function held to its floor fails when its coverage falls more than 15 points under
+that figure. The widest coverage swing measured was 8.3 points (`metadata.py`'s `_bnf_record`,
+100% and 91.7%, one branch arm of twelve), over the same runs, read from the tables' coverage
+column; six of the 200 moved at all, two of them on the backend, where Hypothesis draws fresh
+inputs too. A recorded coverage is the highest a shrink has seen, so the room must hold the
+whole swing, and 15 points holds one arm of a function with seven or more. The first choice,
+10, was set from three runs a side, whose widest swing was 6.2 points; the fourth backend run
+moved `_bnf_record` and left 10 with 1.7 points to spare, so it was widened. The band stays, so
+nothing it refused passes now; with both, the median room an entry has fell from 30.8 points to
+15, and the floor is the tighter of the two for 182 of the 200. The recorded figures were taken
+as the highest each function read over those runs, which is what a shrink after each would have
+written.
+
+What the floor refuses that the band let through is a partial loss of tests on a recorded
+function: a deleted test file that reached it, or an uncovered branch swapped in at the same
+complexity. Neither is work the ratchet should pass. Its false refusal would be a wobble wider
+than 15 points, which a function with six arms or fewer reached by a property test could make in
+one arm; none was seen.
+
+**Which simplifications the floor still holds.** A function made simpler with no higher score
+is not held to the old floor, because cutting a covered branch lowers the covered fraction
+honestly, and a shrink records its coverage afresh. One made simpler whose score rose is held to
+the old floor, on the same run: a shrink keeps that floor, so a branch cut beside deleted tests
+cannot carry the loss through one shrink, and checking it only at the recorded complexity told
+the author to record figures that the next run of the same code refused as lost tests. The
+message names both causes, tests lost or covered branches cut beside uncovered ones, and asks
+for the function to be covered. A simplification whose score stayed under the recorded one and
+whose tests were deleted beside it still passes, and a shrink then records the lower coverage;
+that takes two deliberate acts together.
+
+**Why fixed means under 9, not under 10.** One near 10 would otherwise cross on a lucky run and
+fail as stale, and a shrink on that run would drop it, to fail as new on the next. So a
+recorded function counts as fixed only when it is gone, simpler and under 10, or under 9. The
+cost: a recorded function scoring from 9 to 10 at its recorded complexity stays listed, passing,
+until it falls under 9 or loses a branch, and one of complexity 9 leaves only by losing a branch.
+The other direction stays open: a function under 10 that the change did not touch can cross on a
+lucky run and fail as new. The wave workflow gives such a NEW, when under 11, one rerun of its
+side's suite job, which scores its own report, and treats a second as real.
+
+**The baseline only shrinks between commits too.** No single run can see an entry added by
+hand, so the push check compares the pushed baseline with the remote's and refuses a raised
+complexity or score, a lowered coverage beside an unchanged complexity, and a key added without
+a removed key it can carry. A carried pair shares its module (a rename) or its function name (a
+move), and the added key's figures are no worse than the removed one's, so a function deleted in
+one file cannot lend its entry to an unrelated one written in another, nor can a hand written
+figure put the new key beyond the band or the floor. The pairing is a maximum matching, so a
+module split in one push that moves one entry by name and renames another in place pairs both;
+a first take for each added key could spend the removed key a later one needed, and did in a
+probe. The cost: a function renamed and moved in one push shares nothing with its old key and
+is refused, so the two go in separate pushes. The pairing keeps a debt that the removal alone
+would have cleared, which is the price of passing a rename or a move. No pipeline job compares
+two commits' baselines, so the push is where the two copies meet; a push that bypasses the
+script is not checked. The check runs the same scorer, built once in a pod for each state of its
+source and then run on the host, since it reads two JSON files and parses no source.
+
+A scorer change that raises counted complexity, such as a new decision kind in the TypeScript
+reader, a grammar release, or one of the unscored function values above becoming visible over
+10, grows the baseline exactly as new code does, and the push check refuses it. Pushing one is
+the owner's decision.
+
+**How the debt goes down.** The owner's direction: new work may not exceed the threshold, every
+current offender sits in a ticket, one per file, under the complexity epic, and every wave
+carries one extra duo, the hotspot duo, which clears one whole file per wave, worst first. A
+feature duo need not bring a function under 10, but it may not add a branch to a baselined one.
+The shape of a fix is a function decomposed into private helpers in its own module beside their
+caller, underscore prefixed in Python and unexported in TypeScript, never a shared `utils`
+module: the score drops without the logic moving away from the code that reads it (owner,
+2026-11-07). The cap becomes five duos and eight agents (the agent cap ticket, Q73).
+
+**Why a scorer of our own.** The rules come from `unclebob/crapper` (0BSD, commit 6fd92c4c),
+which runs pytest or vitest itself as a bare process, installs coverage tooling into the
+project, and downloads tree-sitter grammars on first use. Here a suite never runs as a bare
+process, and nothing enters the build that no lock recorded. So the scorer keeps only the Python
+and TypeScript extraction, the formula and an LCOV reader matched by exact path rather than by
+suffix, reads a report already on disk, and compiles its grammars in at exact pins. It was
+vendored first as Python and ported to Go in the same wave, before the gate reached `main`.
+
+The TypeScript rules are upstream's, its own test cases ported, with four deviations. An
+inline Express route callback is not an entry, since the frontend has no Express. No
+JavaScript file is scored, since the frontend has none. A generator is an entry, and counts as
+a function when deciding whether a declaration sits inside one. Entries are ordered by start
+line then end line rather than by start byte, and two functions sharing a name in one file
+are keyed `name` and `name#2` in that order, which is how the baseline's keys were recorded.
+Which files are read differs too: each side names its roots and skips, where upstream skips
+fixed test and build directory names and test file suffixes; none of those occurs under
+`frontend/src`.
+
+**Why Go replaced the Python scorer (owner, the scorer language ticket, Q76).** Two
+implementations of one ratchet drift, and nothing failed when they did. The Python scorer needed the backend's environment, because
+its grammars were pinned in the dev group, so the frontend was scored in a job of its own,
+which started the uv image and synced that environment after `test:frontend`.
+The Go scorer is one static binary with the grammars compiled in, so `crap:build` builds it once
+and each suite job runs it after its own coverage step, in whatever image it has. That job is
+gone, and so is the one place a suite's files reached another job: every edge to a suite job is
+now a wait.
+
+What the switch does not change is the cost that matters, the coverage instrumentation, which
+both scorers need. Measured on builder, one run each: the whole backend suite took 516.9 s with
+branch coverage against 471.4 s without, and the frontend suite 133.0 s against 120.3 s.
+Scoring a side is a second or less of that either way. In a suite pod with a 4 CPU limit on
+builder, three runs each over one LCOV, the Python scorer took 920 to 1,370 ms on the backend
+and 900 to 910 ms on the frontend, the Go binary 260 to 270 ms and 220 to 240 ms; held to one
+CPU the Go binary took 770 and 570 ms, so most of that gain is parsing files in parallel. What
+the binary costs instead is its build: a Go toolchain and a C compiler, a module download, and
+the grammars' C, which compiles cold in about 45 s and then comes from the build cache that
+`crap:build` keeps. The two suite jobs now start when `crap:build` ends; what that adds to a
+pipeline was not measured before this entry was written.
+
+**A failed build leaves the suites running.** With the suites waiting on `crap:build`, a
+failed build or a failed pull of the golang image would have skipped both, leaving a pipeline
+with no test result at all, where a fault in the Python scorer's tooling had left them
+running. So `crap:build` may fail. GitLab starts a job whose need failed when that need was
+allowed to fail, as it does for the suites' wait on `suites:proof`, so each suite runs whole
+and goes red at its CRAP step, where the missing binary exits 127, and no publisher passes
+over it. A tree `suites:proof` proved skips that step, and its CRAP verdict is the earlier
+pipeline's over the same tree. That red is the only thing between a failed build and a
+publisher, so the pipeline's self test holds it by running the jobs rather than reading them:
+each suite's script, with the tools stubbed and no scorer, must exit non zero after its
+last check, and `crap:build`'s script, with its build failing, must exit non zero and leave no
+binary, while its artefact carries no `when:`, so nothing is uploaded from a failed build.
+
+**Why tree-sitter through cgo, and not a pure Go parser.** Equal complexity for every function
+needs the same syntax tree the Python scorer walked, node type for node type. So the candidates
+were the grammars it used, run by the C runtime through cgo, or the same grammars run by a pure
+Go runtime, `github.com/odvcencio/gotreesitter` v0.56.0. A scratch prototype parsed all 456
+scored files with each.
+
+| | cgo, tree-sitter-python 0.25.0, tree-sitter-typescript 0.23.2 | gotreesitter v0.56.0 |
+|---|---|---|
+| Files with an error node | 0 | 0 |
+| Nodes | 693,321 | 684,079 |
+| Binary | 6.1 MB static | 35.6 MB with every grammar |
+
+Neither failed a file, but the pure Go runtime's trees differ. In `frontend/src/api/mutator.ts`
+it read `async <T>(` as two comparisons, with no error node, so `customFetch` would have dropped
+out of the report without a word. A pure Go build that is wrong in silence is worse than a cgo
+build. The grammars and the runtime are pinned once, in the module's `go.mod`, and `go.sum`
+pins their C sources by hash. Renovate waits out three days on them and merges none by itself,
+since a grammar release can move a recorded complexity. The link is static, so the binary runs
+on any linux/amd64 image, including ones with no libc; it no longer cross compiles without a
+cross C compiler, and the build image is Debian for its compiler.
+
+**Parity was the acceptance test.** Before the Python scorer was deleted, the two ran over LCOV
+from both whole suites, through a parity check that compares every output byte for byte and
+exits 1 on any difference: the table, the FAIL lines, standard error, the exit status and the
+JSON artefact against the committed baseline and against planted copies of it, one per verdict
+(worse, new and gone, simpler, lost tests on the band and on the floor); a first shrink and a
+shrink of the committed baseline; the listing; and the push check over planted pairs (raised,
+lowered coverage, renamed, moved, unrelated, simpler). Run on builder on 2026-11-07, over LCOV
+from whole suite runs of the same day, all 25 cases were identical, and every plant drew the
+verdict it was written for. A control run against a candidate that printed one extra line
+differed in all 25. Each other output was witnessed by a stand in candidate differing from its
+reference in that output alone: standard error and the exit status differed in all 25 cases,
+the JSON artefact in the 12 that write one, and the written baseline in the 4 shrinks.
+
+Matching the Python scorer took emulating three things CPython does differently from Go, and
+they stay, because the baseline was recorded under them: text decoding (one U+FFFD per maximal
+invalid subpart, CRLF and a lone CR read as LF), numbers (`round`, `.1f` and `repr` exactly, and
+a CRAP formula that may not fuse its multiply and add into one rounding, which arm64 does), and
+JSON (`indent=1` with ASCII escapes, keys in file order). The check stays beside the scorer, to
+compare two builds of it, as a grammar bump would want.
+
+**Its tests sit beside the code, as Go requires.** Go compiles a package's tests from inside its
+directory, so the scorer's tests are `_test.go` files beside each package, the one exception to
+tests mirroring the source tree; that rule is about the two suites, which do not run them. Its
+own gate is `crap:go`: vet, golangci-lint, and the race detector with a 90% floor on statement
+coverage, at versions pinned beside the module.
+
+**govulncheck runs in `crap:vuln`, a job of its own that may fail and that no publisher waits
+on.** It reads a live advisory feed, so inside `crap:go` an advisory published overnight would
+have redded every pipeline and held every publish with nothing in the tree changed. The scorer
+never ships, so it is judged as the source scan judges the tree, informational on every ref. The
+advisory audit, which every publisher waits on, judges only what ships. A red here pages nobody:
+it is seen in the pipeline view, and its finding is in the job log alone.
+
+**Fuzzing and mutation testing run in a pod on demand**: four fuzz targets, and gremlins over
+every package. Over the ratchet, the file discovery and the command line, the code ported last,
+gremlins runs on 2026-11-07 killed every mutant the tests reached but two, one in the ratchet
+and one in the command line, and both are equivalent: no input tells either apart from the
+code. Three more once lived in the sort of the removed keys that the pairing tries. Which added keys
+are refused does not depend on that order, so the sort was deleted, and it came back for another
+reason: a greedy pairing fails the module split test every time with the removed keys sorted by
+name, where in map order, which Go varies from run to run, a greedy mutant failed it 173 runs in
+200. The sort has no comparator, so it leaves no arithmetic for a mutant to survive in, and a run
+is reproducible. The mutation build caps each test
+binary's heap at 1 GiB, after a mutant that broke the parse walk appended nodes until a pod was
+killed; planting that mutant ends the run on the cap.
+
+**Accepted residue.**
+
+* The unscored function values above are a known blind spot, left as said.
+* A function renamed and moved in one push is refused, as said above; the two go in separate
+  pushes.
+* The coverage floor can refuse falsely where a recorded function has six branch arms or fewer
+  and a property test reaches one of them, since one arm then moves coverage by more than 15
+  points. No such function was seen in the runs measured, and no count of the functions that
+  could is published: the instrument that tried to count them disagreed with the scorer.
+* A CRAP step skipped by a `rules:` clause on a tag pipeline is not caught by the guard that holds
+  a suite red when no scorer exists. GitLab refuses such a pipeline loudly, which is why the guard
+  does not try.
+* The guard harness runs its scripts without `pipefail`, so a step piped to another command is
+  refused even where the runner would have let it pass. It fails safe, and its message leads to
+  the fix.
+* The glob matcher's bracket edge cases are reached by no test; the pinned omit list holds no
+  bracket, so a bracket arrives only through a reviewed scorer change.
+
+## SonarQube is read by hand at a wave's end and before a tag, and never gated on
+
+**What.** A SonarQube analysis of one commit, with both suites' coverage, run by hand on a
+wave's final merged tree and before every release tag. It never runs from the local gate, the
+pipeline or a push (owner, 2026-11-07): the analysis is a reading for whoever leads the wave to
+triage, not a check a commit waits on. A test refuses a code line naming it in the files those
+three run.
+
+**The verdict is an exit code, and an empty gate is not a pass.** 0 is a passed gate with at
+least one condition carrying a value, 1 a failed gate, 2 no verdict (a refusal, an error on the
+way, or a gate status the script does not know) and 3 an empty gate. The project's gate is
+SonarQube's own `Sonar way`, kept as it is, and every condition in it is about new code: new
+issues, coverage of new lines, duplication in new lines and hotspots reviewed. A condition with
+nothing new to measure carries no value and still reads `OK`, which is how the project's first
+analysis came back. Read as a pass, that would have certified a commit nobody judged.
+
+**History goes with the tree, so the gate judges what changed since the previous analysis**
+(owner, 2026-11-07). SonarQube decides which lines are new by their git blame date, and with no
+history it can date none, so the coverage and duplication conditions would judge nothing on
+every scan. The scan ships the commit's whole history, cut from its own `HEAD` alone, so no
+other branch or ref goes with it, and refuses with exit 2 a scan root that is at another commit
+or shallow: a shallow history dates every line to its boundary commit, so all of it would read
+as new. Each analysis is versioned by the full sha, and the new code period is the previous
+version, so new code is everything since the last analysis. **Accepted**: a line keeps its
+commit's date, so a branch committed before one scan and merged after it reads as old.
+
+**The token reaches the scanner on its standard input and nowhere else.** It is on no command
+line, in no manifest and in no Kubernetes object, so neither the process list, the API server's
+audit log nor etcd holds it, and the script takes it out of its own environment before its first
+child starts.
+
+### SonarQube's style rules are not this repository's rules
+
+The house style is decided in two places, ruff's selection and oxlint's enforced categories, each
+held by a ratchet the suites run. A SonarQube rule with no enforced twin in either is a second
+opinion on style, not a defect, and fixing its issues one by one would set a second house style
+through a tool no suite runs. The owner turned those rule groups off in a custom quality profile
+named Endpaper on the server (2026-11-07), so the analysis raises a style issue only where the
+house already enforces the style. A style rule worth holding is added to ruff or oxlint, where
+every commit meets it, rather than turned back on in the profile.
+
+### A regex SonarQube calls super linear is accepted where its input is bounded
+
+Accepted, and marked so on the server, where the input is bounded before the pattern runs, or is
+a member's own file parsed in their own browser, so the worst case costs only that member and
+only their own tab. A pattern reached by unbounded input from outside the house, a catalogue
+response among them, is fixed instead: the DDC heading pattern was.
+
+### The DDC heading separator is possessive, and its test refuses by size
+
+A catalogue response is of no fixed length, and the separator between a DDC number and its
+caption, written `\s+`, backtracked quadratically over a run of whitespace followed by more text
+and a line break. Possessive, it never gives the run back, which changes no answer. The test
+feeds a run of whitespace nearly the size of the largest response the fetcher accepts, which
+the old pattern cannot finish inside the per test ceiling, as [`testing.md`](testing.md)
+prescribes; it reads no clock.
+
+### The error page takes the app's accent as literal values
+
+It cannot read the app's tokens, because it must render when the asset pipeline is down, so it
+copies them: in light mode a fill of accent 600 under white text, accent 700 on hover; in dark
+mode a fill of accent 500 under paper 950, accent 400 on hover, the pairing the app's dark
+theme gives; the status line at accent 700 and accent 400. Every text pair meets WCAG AA in both
+modes, and each fill stands out from its card by at least 3:1. The card and ink greys stay the
+page's own.
+
+**No test pins the error page's contrast.** SonarQube's CSS contrast rule reads it at each scan,
+and a CSS parsing guard would police a template that changes about once a year. A palette change
+in the app's stylesheet does not reach the page, and only its comment says so.
+
+### A bidirectional control character is refused in every file the suite reads
+
+One renders as nothing and reorders what a reader sees after it, so a line can review as one
+thing and run as another. One backend house rule refuses all twelve `Bidi_Control` code points
+in every file the repository versions outside a dotted directory or one a tool owns, published
+or stripped. A test that needs one spells it as an escape, and a captured catalogue fixture as
+its format's character reference, which its parser reads as the same string, so no file is
+exempt. It skips a file that is not UTF-8, and a tracked dotted directory the mirror publishes
+would go unread.
+
+ruff's `PLE2502` stays selected beside it: it fires in the editor and costs nothing, but it misses
+the left to right mark, so it is not the rule.
+
+## The local gate runs the backend job's two ruff steps
+
+**What.** The local gate script's lint leg runs `ruff check .` and `ruff format --check` from
+`backend/`, the two steps of the pipeline's backend job, with the configuration they discover
+there, and judges both even when the first fails.
+
+**Why.** The backend suite runs ruff over the application too, but judges only the codes its
+backlog ratchet holds a count for, so a finding under any other code passed it. On 2026-11-07 a
+`FURB167` gated GREEN on a wave's merged tree that the pipeline would have refused. A test runs
+the leg's script against a stub ruff failing each step in turn and expects red, and another pins
+its steps to the pipeline's.
+
+**Still not in the gate**: mypy and the frontend's `bun run lint`, each a separate run.

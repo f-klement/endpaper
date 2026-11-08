@@ -15,6 +15,7 @@ import typing
 from base64 import b64encode
 from collections import defaultdict, deque
 from collections.abc import Sequence
+from html.parser import HTMLParser
 from pathlib import Path
 
 import httpx
@@ -43,6 +44,7 @@ from models import (
     DESCRIPTION_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     PUBLISHER_MAX,
+    PURCHASE_SOURCE_MAX,
     SUBTITLE_MAX,
     TITLE_MAX,
     Book,
@@ -488,6 +490,34 @@ class TestAddBook:
     def test_scan_endpoint_creates_a_book_too(self, client, admin):
         res = client.post("/api/books/scan", json={"title": "Scanned"}, headers=admin["headers"])
         assert res.status_code == 201
+
+    def test_a_scan_stores_the_condition_and_the_purchase_it_was_sent(self, client, admin):
+        """The scan form carries these from the last book, so the add has to keep them."""
+        res = client.post(
+            "/api/books/scan",
+            json={
+                "title": "Scanned",
+                "condition": "fair",
+                "purchased_at": "2026-11-07",
+                "purchase_source": "The Oxfam on the high street",
+            },
+            headers=admin["headers"],
+        )
+        assert res.status_code == 201
+        body = res.json()
+        assert (body["condition"], body["purchased_at"], body["purchase_source"]) == (
+            "fair",
+            "2026-11-07",
+            "The Oxfam on the high street",
+        )
+
+    def test_a_scan_refuses_a_purchase_source_wider_than_the_column(self, client, admin):
+        res = client.post(
+            "/api/books/scan",
+            json={"title": "Scanned", "purchase_source": "x" * (PURCHASE_SOURCE_MAX + 1)},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 422
 
     def test_scan_rejects_a_duplicate_isbn(self, client, admin, make_book):
         make_book(admin["headers"], isbn="9780441013593")
@@ -1188,6 +1218,131 @@ class TestExport:
         )
         rows = self._rows(client.get("/api/books/export", headers=admin["headers"]))
         assert rows[0]["Purchase Currency"] == "'=A1"
+
+
+class _ExportedPage(HTMLParser):
+    """The elements and attributes an exported page opens, and its body rows."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.elements: set[str] = set()
+        self.attributes: set[str] = set()
+        self.rows: list[list[str]] = []
+        #: The `<meta http-equiv>` policy, directive name to its sources.
+        self.policy: dict[str, str] = {}
+        self._in_body = False
+        self._cell: list[str] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        self.elements.add(tag)
+        self.attributes.update(name for name, _ in attrs)
+        named = dict(attrs)
+        if tag == "meta" and (named.get("http-equiv") or "").lower() == "content-security-policy":
+            for directive in (named.get("content") or "").split(";"):
+                name, _, sources = directive.strip().partition(" ")
+                self.policy[name] = sources.strip()
+        if tag == "tbody":
+            self._in_body = True
+        elif tag == "tr" and self._in_body:
+            self.rows.append([])
+        elif tag == "td":
+            self._cell = []
+
+    def handle_endtag(self, tag):
+        if tag == "td" and self._cell is not None:
+            self.rows[-1].append("".join(self._cell))
+            self._cell = None
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+def _exported_page(text: str) -> _ExportedPage:
+    page = _ExportedPage()
+    page.feed(text)
+    page.close()
+    return page
+
+
+class TestTheHtmlExport:
+    """A page of the member's shelf that opens offline and shows every value as text."""
+
+    #: What the page is built from. A value that opened any other element got
+    #: past `_html_safe`.
+    ELEMENTS = {"html", "head", "meta", "title", "style", "body", "table", "thead", "tbody", "tr", "th", "td"}
+
+    def _export(self, client, headers):
+        res = client.get("/api/books/export", params={"format": "html"}, headers=headers)
+        assert res.status_code == 200
+        return res
+
+    def test_it_is_sent_as_html_and_saved_as_a_file(self, client, admin, make_book):
+        make_book(admin["headers"])
+        res = self._export(client, admin["headers"])
+        assert res.headers["content-type"] == "text/html; charset=utf-8"
+        assert res.headers["content-disposition"].startswith("attachment;")
+        assert res.headers["content-disposition"].endswith('.html"')
+
+    def test_a_title_carrying_markup_and_a_script_reaches_the_page_as_text(self, client, admin, make_book):
+        title = '<script>alert("x")</script><b onclick="steal()">Bold</b>'
+        make_book(admin["headers"], title=title)
+        page = _exported_page(self._export(client, admin["headers"]).text)
+        assert page.rows[0][0] == title
+        assert page.elements <= self.ELEMENTS
+
+    def test_no_free_text_column_can_open_an_element(self, client, admin, make_book):
+        markup = '<img src="http://evil.test/x.png">'
+        make_book(admin["headers"], title=markup, author=markup, location=markup)
+        page = _exported_page(self._export(client, admin["headers"]).text)
+        assert page.elements <= self.ELEMENTS
+        assert [page.rows[0][i] for i in (0, 1, 4)] == [markup] * 3
+
+    def test_the_page_names_nothing_a_browser_would_fetch(self, client, admin, make_book):
+        make_book(admin["headers"])
+        page = _exported_page(self._export(client, admin["headers"]).text)
+        assert "script" not in page.elements
+        assert not page.attributes & {"src", "href", "srcset", "action", "data", "poster"}
+
+    def test_the_page_s_own_policy_refuses_a_fetch_a_form_and_a_base_url(self, client, admin):
+        """A file opened from disk has no response header, so this is the only
+        policy it carries. `default-src` does not reach `form-action` or
+        `base-uri`, so each is named."""
+        page = _exported_page(self._export(client, admin["headers"]).text)
+        assert {name: page.policy.get(name) for name in ("default-src", "form-action", "base-uri")} == {
+            "default-src": "'none'",
+            "form-action": "'none'",
+            "base-uri": "'none'",
+        }
+
+    def test_a_row_carries_title_author_year_isbn_location_and_status(self, client, admin, make_book):
+        book = make_book(
+            admin["headers"],
+            title="Viralata",
+            author="Fabián Severo",
+            isbn="9789974882461",
+            year=2018,
+            location="Hall",
+        )
+        client.put(f"/api/books/{book['id']}/status", json={"status": "read"}, headers=admin["headers"])
+        page = _exported_page(self._export(client, admin["headers"]).text)
+        assert page.rows == [["Viralata", "Fabián Severo", "2018", "9789974882461", "Hall", "read"]]
+
+    def test_it_lists_exactly_the_books_the_csv_export_does(self, client, admin, member, make_book):
+        """The privacy scope is the shared walk's, so this is the arm that would
+        see a second walk: one member's view of another's private book."""
+        make_book(admin["headers"], title="Secret", is_private=True)
+        make_book(admin["headers"], title="Public")
+        make_book(member["headers"], title="Mine", is_private=True)
+        page = _exported_page(self._export(client, member["headers"]).text)
+        exported = client.get("/api/books/export", params={"format": "csv"}, headers=member["headers"])
+        in_csv = [row["Title"] for row in csv.DictReader(io.StringIO(exported.text))]
+        assert sorted(row[0] for row in page.rows) == sorted(in_csv) == ["Mine", "Public"]
+
+    def test_an_empty_shelf_still_downloads_a_whole_page(self, client, admin):
+        text = self._export(client, admin["headers"]).text
+        assert text.rstrip().endswith("</html>")
+        assert _exported_page(text).rows == []
 
 
 def _underlying(member: object) -> object | None:

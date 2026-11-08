@@ -44,7 +44,16 @@ _NOTATION: Final = re.compile(r"^\d{3}(?:\.\d+)?$")
 #: A heading is one token then, optionally, a caption. The token is put through
 #: `notation`, so what separates a heading from a subject heading is the shape
 #: of the notation and not the shape of the line.
-_HEADING: Final = re.compile(r"^(\S+)(?:\s+(.*))?$")
+#:
+#: **The separator is possessive (`\s++`), and that is a bound, not a style.**
+#: The value comes from a catalogue response of no fixed length. With a plain
+#: `\s+`, a run of whitespace followed by more text and a line break that does
+#: not end the value makes the engine hand the run back one character at a
+#: time and retry `(.*)` from each, which is quadratic in the length of the
+#: run. Never giving whitespace back changes no answer: a start inside the run
+#: can reach `$` only at the end of the value or before a final newline, and
+#: the start after the run has already matched there.
+_HEADING: Final = re.compile(r"^(\S+)(?:\s++(.*))?$")
 
 #: MARC's segmentation prime. 082 `$a` marks where a library may cut the number
 #: short for its own shelves (`005.13/3`); it is a printing instruction, not

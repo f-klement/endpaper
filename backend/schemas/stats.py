@@ -33,6 +33,30 @@ class CollectionStat(BaseModel):
     count: int = Field(ge=0)
 
 
+class CurrencyTotal(BaseModel):
+    """What the visible copies priced in one currency cost, summed.
+
+    One row per currency and never converted: no exchange rate is consulted,
+    so a library that bought in two currencies gets two totals.
+    """
+
+    #: As stored on the copy: three characters, upper cased on write, and not
+    #: checked against ISO 4217, so a client formatting it must expect a code
+    #: its formatter does not know.
+    currency: str
+    #: Hundredths of the currency, the unit `purchase_price_minor` is stored
+    #: in whatever the currency: the client divides by 100 for every code, so
+    #: a yen total arrives as a hundred times the yen.
+    #:
+    #: No lower bound, unlike every count here. A write refuses a negative
+    #: price, but a restored archive bypasses that check, and a lower bound
+    #: would fail response validation on one such row and answer the whole
+    #: route with a 500. Clamping was refused too: it would print a total that
+    #: no set of the recorded prices adds up to, and hide the bad row besides.
+    total_minor: int
+    copies: int = Field(ge=1)
+
+
 class MonthStat(BaseModel):
     # A "YYYY-MM" bucket key, produced by `database.MonthBucket`.
     month: str = Field(pattern=r"^\d{4}-\d{2}$")
@@ -68,3 +92,10 @@ class StatsOut(BaseModel):
     pages_by_month: list[MonthStat] = []
     average_rating: float | None = None
     rated_count: int = Field(default=0, ge=0)
+    # What the visible copies cost, one total per currency, by currency code.
+    # Shared like `total`: a fact about the shelf, not about a reader.
+    purchase_totals: list[CurrencyTotal] = []
+    # Copies with a price and no currency. Counted rather than summed: adding
+    # them to any one total would be guessing the currency, and summing them
+    # together could add yen to pounds.
+    priced_without_currency: int = Field(default=0, ge=0)

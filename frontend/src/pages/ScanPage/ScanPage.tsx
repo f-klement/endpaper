@@ -6,6 +6,7 @@ import { FolderSweepNotice, LocationField } from "../components";
 import { useTranslation, type MessageKey } from "../../i18n";
 import { parseIsbn } from "../../lib/isbn";
 import BarcodeScanner from "./components/BarcodeScanner";
+import CarriedFields from "./components/CarriedFields";
 import FilePickPanel from "./components/FilePickPanel";
 import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
@@ -14,10 +15,15 @@ import LookupResult from "./components/LookupResult";
 import RapidQueue from "./components/RapidQueue";
 import { useBookSearch, useRapidIntake, useScanFlow } from "./hooks";
 
-export default function ScanPage() {
+interface ScanPageProps {
+  /** The signed in account, whose carried fields the add form starts from. */
+  accountId: number;
+}
+
+export default function ScanPage({ accountId }: ScanPageProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
-  const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`));
+  const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`), accountId);
   const search = useBookSearch();
   const rapid = useRapidIntake();
   const folderSweep = useFolderSweep();
@@ -307,23 +313,35 @@ export default function ScanPage() {
         />
       )}
 
+      {/* One condition over both, as a fragment, so they stay siblings: the
+          carried fields sit above the confirm card rather than inside it, so
+          the privacy notice is read before the book is, and before the button
+          that adds it. */}
       {draft && (
-        <LookupResult
-          pending={{ ...scan.pending, draft }}
-          onChange={scan.update}
-          tags={scan.tags}
-          locations={scan.locations}
-          isAdding={scan.isAdding}
-          error={scan.error}
-          onToggleTag={scan.toggleTag}
-          onCreateTag={scan.createTag}
-          onForgetTagName={scan.forgetTagName}
-          onConfirm={scan.confirm}
-          onCancel={handleCancel}
-          onAddCopy={scan.addCopy}
-          isAddingCopy={scan.isAddingCopy}
-          enteredByHand={scan.enteredByHand}
-        />
+        <>
+          <CarriedFields
+            pending={scan.pending}
+            onChange={scan.update}
+            collections={scan.collections}
+            privacyCarried={scan.privacyCarried}
+          />
+          <LookupResult
+            pending={{ ...scan.pending, draft }}
+            onChange={scan.update}
+            tags={scan.tags}
+            locations={scan.locations}
+            isAdding={scan.isAdding}
+            error={scan.error}
+            onToggleTag={scan.toggleTag}
+            onCreateTag={scan.createTag}
+            onForgetTagName={scan.forgetTagName}
+            onConfirm={scan.confirm}
+            onCancel={handleCancel}
+            onAddCopy={scan.addCopy}
+            isAddingCopy={scan.isAddingCopy}
+            enteredByHand={scan.enteredByHand}
+          />
+        </>
       )}
     </div>
   );

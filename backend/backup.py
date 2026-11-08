@@ -429,6 +429,7 @@ def _parse_row(
     _parse_dates(parsed, parsers)
     _storable_cover(parsed)
     _blank_text_is_null(parsed, table)
+    _blank_currency_is_null(parsed, table)
     _fold_name(parsed, table)
     _blank_tag_key(parsed, table)
     _file_classification(parsed, table)
@@ -510,6 +511,19 @@ def _blank_text_is_null(parsed: dict[str, Any], table: Table) -> None:
         for name in BLANK_IS_NULL:
             if name in parsed:
                 parsed[name] = blank_as_none(parsed[name])
+
+
+def _blank_currency_is_null(parsed: dict[str, Any], table: Table) -> None:
+    """A book's blank `purchase_currency`, restored as null.
+
+    A write never stores a blank code (its validator wants three letters), so
+    only an archive can bring one. The statistics page groups priced copies by
+    their code and counts a null one apart as priced without a currency; a
+    blank one would instead print as a total of its own with no code beside
+    it. Not in `BLANK_IS_NULL`, which is the free text columns: this is a code.
+    """
+    if table.name == Book.__tablename__ and "purchase_currency" in parsed:
+        parsed["purchase_currency"] = blank_as_none(parsed["purchase_currency"])
 
 
 def _fold_name(parsed: dict[str, Any], table: Table) -> None:

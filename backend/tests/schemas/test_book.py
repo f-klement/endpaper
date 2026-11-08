@@ -2407,7 +2407,7 @@ class TestTheSchemaModuleRefusesToImport:
     def test_it_refuses_when_an_update_only_field_has_no_column(self, monkeypatch) -> None:
         """The second refusal, reached in isolation.
 
-        `purchase_source` is a field of `BookDetailsUpdate` and not of
+        `purchase_price_minor` is a field of `BookDetailsUpdate` and not of
         `BookCreate`, so dropping its column leaves the create refusal clean
         and only the update one fires. Without a column no `BookCreate` field
         names, this arm would be green because the **first** block raised, and
@@ -2416,12 +2416,12 @@ class TestTheSchemaModuleRefusesToImport:
         monkeypatch.setattr(
             models,
             "Book",
-            _book_whose_table_has([c for c in _book_columns() if c != "purchase_source"]),
+            _book_whose_table_has([c for c in _book_columns() if c != "purchase_price_minor"]),
         )
         with pytest.raises(RuntimeError, match="update route") as refusal:
             _load_schemas_book()
 
-        assert "purchase_source" in str(refusal.value)
+        assert "purchase_price_minor" in str(refusal.value)
 
     def test_the_create_refusal_is_the_one_that_names_the_constructor(self, monkeypatch) -> None:
         """The pair the arm above needs. `isbn` is a field of `BookCreate` and

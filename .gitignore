@@ -26,6 +26,7 @@ runtime-requirements.txt
 junit-*.xml
 trivy-*.json
 .uv-cache/
+.go-cache/
 
 # Pipeline job artifacts. A job extracts the artifacts of every job it needs into its own
 # checkout, beside the versioned files, where a test walking the tree would otherwise
@@ -37,6 +38,7 @@ trivy-*.json
 /outbound
 /image.digest
 /smoked.digest
+/crap
 
 # Competitor research, internal
 

@@ -36,6 +36,7 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  getAlreadyHeldQueryKey,
   getListAuthorSuggestionsQueryKey,
   getListAuthorsQueryKey,
   getGetBookQueryKey,
@@ -136,6 +137,11 @@ const LIBRARY_WIDE: ReadonlySet<unknown> = new Set([
   // loan or a trashed book changes it. Separate from `listLoans` because it is
   // a separate path, and react-query matches on the path.
   getListOverdueQueryKey()[0],
+  // The scan card's "you already have this" answer. Derived from the books
+  // table, so every book write moves it: without this a cached "not held"
+  // outlives the save, and a second copy scanned within the staleTime shows
+  // no warning.
+  getAlreadyHeldQueryKey()[0],
 ]);
 
 /**

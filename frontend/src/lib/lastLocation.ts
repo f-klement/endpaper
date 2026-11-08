@@ -9,6 +9,10 @@
  * localStorage rather than component state, so it survives a reload halfway
  * along a shelf, and per browser rather than per account, because it records
  * where somebody is standing and not who they are.
+ *
+ * The first of the fields the add form carries, and still its own module
+ * because the rapid queue carries it alone. `carryOver.ts` holds the rest and
+ * lists this one beside them.
  */
 
 import { declarePreference } from "./preference";

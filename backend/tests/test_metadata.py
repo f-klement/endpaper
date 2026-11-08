@@ -237,6 +237,9 @@ ENGLISH_ISBN = "9780743273565"
 #: `sources.SERVES_GROUPS` makes a lookup's chain depend on the group, so a test
 #: that wants the NLG asked has to hand it a book the NLG could hold.
 GREEK_ISBN = "9789602118962"
+#: A real Uruguayan registration group, 978-9974, for the reason above: the
+#: BNU's remit is that group alone.
+URUGUAYAN_ISBN = "9789974713390"
 
 #: One DNB MARC21 record, in the shape the live endpoint returns since the
 #: switch away from Dublin Core. Copied from ISBN 9783446249974's real response
@@ -533,6 +536,10 @@ NKP_EMPTY = _nkp_envelope()
 #: because the library publishes no hostname, and the `/BNA01` database path is
 #: part of the address: see `targets.SEEDED[CatalogueSource.BNA]`.
 BNA = "http://200.123.191.9:9991/BNA01"
+
+#: The Biblioteca Nacional de Uruguay, the BNA's shape on port 9992: see
+#: `targets.SEEDED[CatalogueSource.BNU]`.
+BNU = "http://164.73.2.157:9992/BNU01"
 
 #: A real BNA record, trimmed to what this app reads.
 #:
@@ -7213,6 +7220,18 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
                     )
                 ),
             ),
+            "bnu": (
+                BNU,
+                _xml(
+                    _nkp_envelope(
+                        "<dc-record><type>text</type>"
+                        "<identifier>0743273567</identifier>"
+                        "<title>The Great Gatsby</title>"
+                        "<date>1925</date>"
+                        "<format>218 p.</format></dc-record>"
+                    )
+                ),
+            ),
             "open_library": (
                 OPEN_LIBRARY,
                 httpx.Response(200, json={"title": "The Great Gatsby"}),
@@ -7278,25 +7297,25 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 #:
 #: **One property of its own, and breadth beyond it.** The rotations carry
 #: position and precedence; what this buys and they cannot is adjacency. The
-#: rotations are one circular arrangement cut eleven ways, so all eleven put the
+#: rotations are one circular arrangement cut twelve ways, so all twelve put the
 #: same pairs **next to each other in the lookup chain**: one adjacency per
-#: source, so 9 of the 72 ordered pairs, and the sample takes that to 72 of 72.
+#: source, so 10 of the 90 ordered pairs, and the sample takes that to 90 of 90.
 #:
 #: **"Next to each other" means in the chain and never in the roster**, and the
 #: two are different numbers: `bnf` and `loc` sit side by side at the end of
 #: `DEFAULT_ORDER` and are never asked, so counting roster adjacencies with both
-#: endpoints a lookup source gives 8 rather than 9. The chain is what `lookup`
+#: endpoints a lookup source gives 9 rather than 10. The chain is what `lookup`
 #: walks, and it is what both tests below collect.
 #:
 #: Neither figure is left stated.
 #: `test_the_rotations_are_one_circular_arrangement` recomputes the 9 from the
-#: roster and `test_every_source_is_tried_next_to_every_other` the 72, so lowering
+#: roster and `test_every_source_is_tried_next_to_every_other` the 90, so lowering
 #: this constant fails rather than quietly staling the figures below.
 #:
 #: **It is not a coverage figure and must not be read as one**, and the unit is
-#: the trap in it. The 211 orders reach 209 of the **362,880 distinct lookup
-#: chains** the nine lookup sources can be put in, which is 0.06%. Measured
-#: 2026-09-07; the figure that stood here quoted a denominator whose unit no
+#: the trap in it. The 212 orders reach 209 of the **3,628,800 distinct lookup
+#: chains** the ten lookup sources can be put in, which is 0.006%. Measured
+#: 2026-11-07; the figure that stood here quoted a denominator whose unit no
 #: reader could reconstruct, and it was stale in both numbers besides.
 _SAMPLED_ORDERS = 200
 
@@ -7321,11 +7340,12 @@ def _rotations[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
     **Its own function so the claim can be tested on it alone.** The claims held
     for the whole set with this deleted, because 200 sampled orders happen to
     cover every cell and every pair on their own, so a test over the whole set
-    left this family at "a docstring says so". Re-measured at eleven sources on
-    2026-09-07 and it still holds, which is a reason to keep this function
-    rather than a reason to trust the sampling: the sample reaches every cell at
-    60 orders and every pair at 40, so the margin it leaves is the roster's to
-    spend and nothing recomputes it.
+    left this family at "a docstring says so". Re-measured at twelve sources on
+    2026-11-07 through `Plan.lookup_chain` and it still holds, which is a reason
+    to keep this function rather than a reason to trust the sampling: the
+    sample reaches every cell and every ordered pair well inside
+    `_SAMPLED_ORDERS`, so the margin it leaves is the roster's to spend and
+    nothing recomputes it.
     `test_every_source_reaches_every_position_in_the_lookup_chain` and
     `test_every_pair_of_sources_is_tried_in_both_directions` read this, and
     `test_the_orders_asked_hold_every_rotation` is what ties it back to the set
@@ -7343,11 +7363,11 @@ def _orders_worth_asking[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
 
     **The reversed roster and its rotations were here and were measured out.**
     They cover no cell and no pair the rotations do not, and their only
-    contribution, the 9 mirrored **chain** adjacencies, is inside what the sample
+    contribution, the 10 mirrored **chain** adjacencies, is inside what the sample
     already reaches. The unit is named because this is the one adjacency figure
     in this module no test can recompute: the family it counts is gone. In the
-    roster the same figure reads 8, which is the collision `_SAMPLED_ORDERS`
-    describes. Both re-derived on 2026-09-07 at the eleven sources the roster
+    roster the same figure reads 9, which is the collision `_SAMPLED_ORDERS`
+    describes. Both re-derived on 2026-11-07 at the twelve sources the roster
     now holds, and both had gone stale unnoticed, which is the reading to take
     from a figure whose family no longer exists. A family kept for a property
     another family already carries is a reason a reviewer agrees with and a hole
@@ -7387,8 +7407,8 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     **This enumerated the roster's permutations and no longer does.** Enumeration
     is factorial in the roster and the roster grows: a ninth source multiplied the
     work ninefold overnight and a tenth would have multiplied it again, with the
-    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is **211**
-    orders where `itertools.permutations` over eleven sources is **39,916,800**,
+    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is **212**
+    orders where `itertools.permutations` over twelve sources is **479,001,600**,
     and it grows by one per source rather than by a factor of it.
 
     **Both figures are recomputed by
@@ -7436,6 +7456,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     ISBNS = {
         CatalogueSource.NLG: GREEK_ISBN,
         CatalogueSource.OENB: GERMAN_ISBN,
+        CatalogueSource.BNU: URUGUAYAN_ISBN,
     }
 
     def _plan(self, order: tuple[CatalogueSource, ...]) -> sources.Plan:
@@ -7577,19 +7598,19 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     def test_every_source_is_tried_next_to_every_other(self):
         """The sample's one purchase, recomputed rather than stated.
 
-        The rotations are one circular arrangement cut eleven ways, so all eleven
-        put the same 9 of the 72 ordered pairs next to each other in the chain,
+        The rotations are one circular arrangement cut twelve ways, so all twelve
+        put the same 10 of the 90 ordered pairs next to each other in the chain,
         which `test_the_rotations_are_one_circular_arrangement` is what says; the
-        other 63 come from the sample. Nothing else here notices
+        other 80 come from the sample. Nothing else here notices
         `_SAMPLED_ORDERS` being lowered, and three figures in this module move
         with it.
 
         **A red here means the sample is too small for a roster that grew, not
         that the chain is broken**, and that is the one thing to know before
         chasing it: this is the only property the construction reaches
-        statistically rather than by construction. Measured at seed 0 and eleven
-        sources on 2026-09-07, 20 orders reach 65 of the 72, 30 reach 70, and 40
-        reach all of them.
+        statistically rather than by construction. At seed 0 and twelve sources
+        the sample reaches every adjacency inside `_SAMPLED_ORDERS`; re-derive the
+        margin before lowering it, since no figure for it is kept.
         """
         beside: set[tuple[CatalogueSource, CatalogueSource]] = set()
         for order in ORDERS_UNDER_TEST:
@@ -8059,13 +8080,13 @@ class TestThePlaintextSourcesAreCounted:
                 index = flat.find(phrase, index + 1)
         return True
 
-    def test_the_set_is_the_four_this_repository_has_accepted(self):
+    def test_the_set_is_the_five_this_repository_has_accepted(self):
         """The guard's own subject, pinned.
 
         Without this the test passes on an empty set, which is what it would
         compute if every endpoint moved to HTTPS or was renamed.
 
-        **The fourth is the one that carries a login**, which is a different
+        **The last two are the ones that carry a login**, which is a different
         exposure from the other three rather than more of the same: a plaintext
         request that authenticates puts an `Authorization` header on the wire.
         `targets.SEEDED[CatalogueSource.BNA]` carries what that costs and why the
@@ -8076,6 +8097,7 @@ class TestThePlaintextSourcesAreCounted:
             "nlg.base_url",
             "nkp.base_url",
             "bna.base_url",
+            "bnu.base_url",
         }
 
     def test_the_legend_states_the_current_count(self):

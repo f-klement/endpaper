@@ -1,8 +1,9 @@
 """Tests for backend/routers/stats.py."""
 
 import pytest
+from sqlalchemy import update
 
-from models import Tag
+from models import Book, Tag
 
 
 @pytest.fixture
@@ -314,3 +315,93 @@ class TestPagesByMonth:
         client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
 
         assert stats()["pages_by_month"] == []
+
+
+class TestPurchaseTotals:
+    """What the visible copies cost: one total per currency, never converted."""
+
+    @pytest.fixture
+    def priced(self, client, make_book):
+        def _priced(headers, price=None, currency=None, **overrides):
+            book = make_book(headers, **overrides)
+            res = client.patch(
+                f"/api/books/{book['id']}",
+                json={"purchase_price_minor": price, "purchase_currency": currency},
+                headers=headers,
+            )
+            assert res.status_code == 200, res.text
+            return book
+
+        return _priced
+
+    def test_copies_in_one_currency_are_summed(self, admin, priced, stats):
+        priced(admin["headers"], 1999, "EUR")
+        priced(admin["headers"], 1001, "EUR")
+        assert stats()["purchase_totals"] == [{"currency": "EUR", "total_minor": 3000, "copies": 2}]
+
+    def test_each_currency_is_its_own_total(self, admin, priced, stats):
+        priced(admin["headers"], 8500, "GBP")
+        priced(admin["headers"], 124050, "EUR")
+        assert stats()["purchase_totals"] == [
+            {"currency": "EUR", "total_minor": 124050, "copies": 1},
+            {"currency": "GBP", "total_minor": 8500, "copies": 1},
+        ]
+
+    def test_a_price_with_no_currency_is_counted_but_not_summed(self, admin, priced, stats):
+        priced(admin["headers"], 500)
+        body = stats()
+        assert (body["purchase_totals"], body["priced_without_currency"]) == ([], 1)
+
+    def test_a_currency_with_no_price_counts_nowhere(self, admin, priced, stats):
+        priced(admin["headers"], None, "EUR")
+        body = stats()
+        assert (body["purchase_totals"], body["priced_without_currency"]) == ([], 0)
+
+    def test_a_zero_price_is_a_price(self, admin, priced, stats):
+        """A gift recorded as 0 was priced; a truthiness test would drop it."""
+        priced(admin["headers"], 0, "EUR")
+        assert stats()["purchase_totals"] == [{"currency": "EUR", "total_minor": 0, "copies": 1}]
+
+    def test_another_members_copy_is_counted(self, admin, member, priced, stats):
+        """Shared like `total`: the figure is about the shelf, not the reader."""
+        priced(admin["headers"], 700, "EUR")
+        assert stats(member["headers"])["purchase_totals"] == [
+            {"currency": "EUR", "total_minor": 700, "copies": 1}
+        ]
+
+    def test_another_members_private_copy_is_not_counted(self, admin, member, priced, stats):
+        priced(admin["headers"], 700, "EUR", is_private=True)
+        priced(admin["headers"], 300, is_private=True)
+        body = stats(member["headers"])
+        assert (body["purchase_totals"], body["priced_without_currency"]) == ([], 0)
+
+    def test_a_trashed_copy_drops_out(self, client, admin, priced, stats):
+        book = priced(admin["headers"], 700, "EUR")
+        client.delete(f"/api/books/{book['id']}", headers=admin["headers"])
+        assert stats()["purchase_totals"] == []
+
+    @pytest.fixture
+    def restored(self, db):
+        """Set the purchase columns through Core, past every write validator, as a
+        backup restore inserts them."""
+
+        def _restored(book, price, currency):
+            db.execute(
+                update(Book)
+                .where(Book.id == book["id"])
+                .values(purchase_price_minor=price, purchase_currency=currency)
+            )
+            db.commit()
+
+        return _restored
+
+    def test_a_restored_lower_case_code_joins_its_upper_case_total(
+        self, admin, make_book, priced, restored, stats
+    ):
+        priced(admin["headers"], 1000, "EUR")
+        restored(make_book(admin["headers"]), 500, "eur")
+        assert stats()["purchase_totals"] == [{"currency": "EUR", "total_minor": 1500, "copies": 2}]
+
+    def test_a_restored_negative_price_still_answers(self, admin, make_book, restored, stats):
+        restored(make_book(admin["headers"]), -700, "EUR")
+        assert stats()["purchase_totals"] == [{"currency": "EUR", "total_minor": -700, "copies": 1}]

@@ -501,6 +501,11 @@ export const customFetch = async <T>(
  *
  * `application/json` stays, and is the one entry the schema does not supply: it
  * is the error body FastAPI sends when a download is refused.
+ *
+ * **`text/html` is the one declared type left out**, though the HTML export is
+ * sent as it. Accepting it is what makes Authelia redirect rather than answer
+ * 401, so it would undo this list's reason for existing; the server negotiates
+ * nothing here, so the page arrives anyway.
  */
 const DOWNLOAD_ACCEPT =
   "text/csv, text/plain, application/marcxml+xml, application/zip, application/json";

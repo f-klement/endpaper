@@ -1362,6 +1362,37 @@ class TestRestoringABlankTextColumn:
         }
 
 
+class TestRestoringABlankCurrency:
+    """A write never stores a blank `purchase_currency`, so only an archive brings
+    one, and the statistics page would print it as a total with no code rather
+    than counting the copy as priced without a currency. A code is kept as it is."""
+
+    @pytest.mark.parametrize("blank", ["", "  "])
+    def test_a_blank_currency_is_restored_as_null_and_a_code_is_kept(self, client, admin, library, blank):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        rows = sorted(manifest["tables"]["books"], key=lambda row: row["id"])
+        assert len(rows) > 1
+        rows[0]["purchase_currency"] = blank
+        for row in rows[1:]:
+            row["purchase_currency"] = "EUR"
+
+        response = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+
+        session = SessionLocal()
+        try:
+            restored = {book.id: book.purchase_currency for book in session.query(Book)}
+        finally:
+            session.close()
+        assert restored == {row["id"]: None if row is rows[0] else "EUR" for row in rows}
+
+
 class TestRestoringANul:
     """SQLite stores a NUL and Postgres text cannot hold one, so an archive taken
     on SQLite before the request door refused one could not be restored onto

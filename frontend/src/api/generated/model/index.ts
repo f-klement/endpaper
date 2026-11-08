@@ -9,6 +9,9 @@
 export * from "./accessDecision.ts";
 export * from "./accessRequestOut.ts";
 export * from "./accessStatus.ts";
+export * from "./alreadyHeldOut.ts";
+export * from "./alreadyHeldOutMatch.ts";
+export * from "./alreadyHeldParams.ts";
 export * from "./appearanceOut.ts";
 export * from "./appearanceUpdate.ts";
 export * from "./applyEnrichmentParams.ts";
@@ -77,6 +80,7 @@ export * from "./copyCreate.ts";
 export * from "./coverBackfillOut.ts";
 export * from "./credentialKeyOut.ts";
 export * from "./credentialProvenance.ts";
+export * from "./currencyTotal.ts";
 export * from "./customFieldCreate.ts";
 export * from "./customFieldKind.ts";
 export * from "./customFieldOut.ts";

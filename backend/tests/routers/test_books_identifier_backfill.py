@@ -339,12 +339,16 @@ class TestWhatABatchCostsTheDatabase:
         # candidates and the next measurement is over the two new ones only.
         four = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[2:4])
 
-        assert (two, four) == (12, 12), (
+        # Eleven of the thirteen are fixed. Among them is a credential read for
+        # each sealed source in `settings_store.ready_sources`, so a source that
+        # joins `NEEDS_A_KEY` with a secret outside the settings row moves this
+        # figure by one, as the Uruguayan national library did.
+        assert (two, four) == (13, 13), (
             f"a batch of two costs {two} SELECTs and the next two cost {four}. "
             "Both are the same batch size, so the two figures must agree; they "
             "are taken twice because the second runs against a larger library, "
             "and a cost that grew with the library rather than with the batch "
-            "would show up here and nowhere else. Ten of the twelve are fixed "
+            "would show up here and nowhere else. Eleven of the thirteen are fixed "
             "and are **not itemised**: what this pins is that the figure does "
             "not move, and `test_the_slope_is_one_statement_a_book` below is "
             "what says which part of it is per book."

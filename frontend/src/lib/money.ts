@@ -9,6 +9,8 @@
  * that touches a price.
  */
 
+import type { Locale } from "../api/generated/model";
+
 /** Cents as a plain decimal string, or empty when there is no price. */
 export function formatMinor(minor: number | null | undefined): string {
   if (minor === null || minor === undefined) return "";
@@ -35,4 +37,32 @@ export function parseMinor(raw: string): number | null | undefined {
   // `Math.round(12.99 * 100)` is 1299 here but the same pattern is what makes
   // 8.29 come out as 828 in other currencies' worth of cases.
   return Math.round(Number(normalised) * 100);
+}
+
+/**
+ * A stored total in its currency, spelled for the reader's locale.
+ *
+ * `minor` is hundredths whatever the currency, because that is what
+ * `parseMinor` stores for every code. `Intl` then applies the currency's own
+ * exponent, so yen show no decimals. The code is shown rather than a symbol:
+ * `$` alone does not say which dollar.
+ *
+ * The stored code is any three characters and `Intl` throws on one that is
+ * not three letters, so that case falls back to the plain amount and the code
+ * as written, rather than losing the total.
+ */
+export function formatTotal(
+  minor: number,
+  currency: string,
+  locale: Locale,
+): string {
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency,
+      currencyDisplay: "code",
+    }).format(minor / 100);
+  } catch {
+    return `${formatMinor(minor)} ${currency}`;
+  }
 }

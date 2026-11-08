@@ -155,12 +155,11 @@ function formatterFor(format: Format, locale: Locale): Intl.DateTimeFormat {
  * jq '[paths(type=="object" and .format=="date")] | length' frontend/openapi.json
  * ```
  *
- * answers 4, and dropping the `length` names them: `purchased_at` on each of
- * `BookColumns`, `BookDetailsUpdate`, `BookOut` and `CopyCreate`, which is one
- * field reaching the wire through four models.
+ * names them once the `length` is dropped: `purchased_at` on every model that
+ * carries it, which is one field reaching the wire through several.
  *
  * **The alternative was to declare the kind at the caller, and it was refused on
- * that count.** Those four properties are one field. Against it, from
+ * that count.** Those properties are one field. Against it, from
  * `frontend/`:
  *
  * ```sh
@@ -168,12 +167,12 @@ function formatterFor(format: Format, locale: Locale): Intl.DateTimeFormat {
  *   src --include='*.ts' --include='*.tsx' | grep -cv '^src/lib/date.ts:'
  * ```
  *
- * answers 20 call sites, the four it excludes being these functions' own
+ * counts the call sites, leaving out the four that are these functions' own
  * declarations. **A second parameter would have to be passed at every one of
  * them, to change the answer at the sites `numericDate` names below**, which is
- * where that second number lives rather than here: two figures over one corpus
- * drift apart, and this paragraph has already been wrong about this count
- * twice. `monthLabel` below already reads its own date-only shape here rather
+ * where that number lives rather than here: two figures over one corpus
+ * drift apart, so this paragraph names the command and not its answer.
+ * `monthLabel` below already reads its own date-only shape here rather
  * than at the statistics page, for the same reason.
  *
  * **What it cannot see**: a date-only string that genuinely means UTC midnight

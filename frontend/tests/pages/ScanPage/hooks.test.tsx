@@ -10,10 +10,24 @@
 import { act, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { BookFormat, type BookMatch } from "../../../src/api/generated/model";
 import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+
+import {
+  BookFormat,
+  OwnershipStatus,
+  type BookMatch,
+} from "../../../src/api/generated/model";
+import {
+  ALREADY_HELD_SETTLE_MS,
+  useAlreadyHeldWarning,
   useBookSearch,
   useRapidIntake,
   useScanFlow,
@@ -24,7 +38,9 @@ import {
 } from "../../../src/pages/ScanPage/queue";
 import * as calibreFolder from "../../../src/lib/calibreFolder";
 import { partialMd5 } from "../../../src/lib/fileDigest";
-import { makeBook, resetIds } from "../../factories";
+import { makeBook, makeCollection, makeTag, resetIds } from "../../factories";
+import { readCarried, rememberCarried } from "../../../src/lib/carryOver";
+import { clearSession } from "../../../src/api/mutator";
 import { epubFile, packageDocument } from "../../zipFixtures";
 import { id3v2, mp3, plainFrame } from "../../audioFixtures";
 import { mockApi, renderHookWithProviders, type MockApi } from "../../utils";
@@ -107,6 +123,11 @@ describe("the modules the scan page loads lazily", () => {
   });
 });
 
+/** The signed in member the scan flow is for, unless a test says another. */
+const ME = 1;
+/** Another member, signing in on the same browser. */
+const SOMEBODY_ELSE = 2;
+
 let api: MockApi;
 
 function match(overrides: Partial<BookMatch> = {}): BookMatch {
@@ -129,6 +150,7 @@ beforeEach(() => {
   resetIds();
   api = mockApi();
   api.on("/api/books/tags", { body: [] });
+  api.on("/api/collections", { body: [] });
   api.on("/api/settings/features", {
     body: {
       google_books_ready: true,
@@ -429,7 +451,7 @@ describe("useBookSearch", () => {
 
 describe("useScanFlow.chooseMatch", () => {
   function renderFlow() {
-    return renderHookWithProviders(() => useScanFlow(() => {}));
+    return renderHookWithProviders(() => useScanFlow(() => {}, ME));
   }
 
   it("prefills the draft from the chosen record", () => {
@@ -501,6 +523,13 @@ describe("useScanFlow.chooseMatch", () => {
     expect(result.current.pending.draft?.classifications).toEqual([
       { scheme: "ddc", number: "004", label: "Informatik" },
     ]);
+  });
+
+  it("replaces the suggestions of a match the member moved away from", () => {
+    const { result } = renderFlow();
+    act(() => result.current.chooseMatch(match({ suggested_tag_ids: [7] })));
+    act(() => result.current.chooseMatch(match({ suggested_tag_ids: [11] })));
+    expect(result.current.pending.tagIds).toEqual([11]);
   });
 
   it("is undone by reset", () => {
@@ -1204,7 +1233,7 @@ describe("useScanFlow and a book already on the shelf", () => {
   async function scanADuplicate(onAdded: (bookId: number) => void = () => {}) {
     api.on("/api/books/lookup", { body: LOOKUP });
     api.on("/api/books/scan", CONFLICT);
-    const rendered = renderHookWithProviders(() => useScanFlow(onAdded));
+    const rendered = renderHookWithProviders(() => useScanFlow(onAdded, ME));
 
     act(() => rendered.result.current.lookup("9780441013593"));
     await waitFor(() =>
@@ -1217,7 +1246,7 @@ describe("useScanFlow and a book already on the shelf", () => {
 
   it("does nothing when there was no conflict to copy from", async () => {
     // The id comes off the 409, so with no 409 there is no book to copy.
-    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}, ME));
 
     act(() => result.current.addCopy());
 
@@ -1281,7 +1310,7 @@ describe("the shelf location carries over", () => {
 
   it("starts a scan from the shelf last used", async () => {
     localStorage.setItem("lastLocation", "Loft box 2");
-    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}, ME));
     await waitFor(() =>
       expect(result.current.pending.location).toBe("Loft box 2"),
     );
@@ -1290,7 +1319,7 @@ describe("the shelf location carries over", () => {
   it("sends the shelf with the book", async () => {
     api.on("/api/books/lookup", { body: LOOKUP });
     api.on("/api/books/scan", { body: makeBook() });
-    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}, ME));
 
     act(() => result.current.lookup("9780441013593"));
     await waitFor(() => expect(result.current.pending.draft).not.toBeNull());
@@ -1313,7 +1342,7 @@ describe("the shelf location carries over", () => {
       status: 409,
       body: { detail: "Book with this ISBN already in catalog" },
     });
-    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}, ME));
 
     act(() => result.current.lookup("9780441013593"));
     await waitFor(() => expect(result.current.pending.draft).not.toBeNull());
@@ -1326,7 +1355,7 @@ describe("the shelf location carries over", () => {
 
   it("keeps the shelf across a cancel, which is the whole point", async () => {
     api.on("/api/books/lookup", { body: LOOKUP });
-    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}, ME));
 
     act(() => result.current.update({ location: "Kitchen" }));
     act(() => result.current.reset());
@@ -1358,6 +1387,358 @@ describe("the shelf location carries over", () => {
     await waitFor(() =>
       expect(result.current.locations[0]?.name).toBe("Living room shelf 3"),
     );
+  });
+});
+
+/** What the last book left, against a library that still holds its rows. */
+function carriedFromTheLastBook() {
+  rememberCarried(ME, {
+    isPrivate: true,
+    collectionId: 4,
+    format: BookFormat.paperback,
+    condition: "fair",
+    tagIds: [7],
+    ownership: "not_owned",
+    purchaseSource: "Oxfam",
+    purchasedAt: "2026-11-07",
+  });
+  api.on("/api/books/tags", { body: [makeTag({ id: 7 }), makeTag({ id: 9 })] });
+  api.on("/api/collections", { body: [makeCollection({ id: 4 })] });
+}
+
+describe("the rest of the form carries over", () => {
+  const LOOKUP = {
+    isbn: "9780441013593",
+    title: "Dune",
+    author: "Frank Herbert",
+    suggested_tag_ids: [],
+  };
+
+  async function drafted() {
+    api.on("/api/books/lookup", { body: LOOKUP });
+    const rendered = renderHookWithProviders(() => useScanFlow(() => {}, ME));
+    act(() => rendered.result.current.lookup("9780441013593"));
+    await waitFor(() =>
+      expect(rendered.result.current.pending.draft).not.toBeNull(),
+    );
+    return rendered;
+  }
+
+  it("starts a book from every value the last one was added with", async () => {
+    carriedFromTheLastBook();
+    const { result } = await drafted();
+    await waitFor(() => expect(result.current.collections).toHaveLength(1));
+    expect(result.current.pending).toMatchObject({
+      isPrivate: true,
+      collectionId: 4,
+      format: "paperback",
+      condition: "fair",
+      tagIds: [7],
+      ownership: "not_owned",
+      purchaseSource: "Oxfam",
+      purchasedAt: "2026-11-07",
+    });
+  });
+
+  it("sends the carried values with the book", async () => {
+    carriedFromTheLastBook();
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
+    api.on("/api/books/42/tags/7", { body: makeBook({ id: 42 }) }, "POST");
+    const { result } = await drafted();
+    await waitFor(() => expect(result.current.collections).toHaveLength(1));
+
+    act(() => result.current.confirm());
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/scan", "POST")).toBeDefined(),
+    );
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      is_private: true,
+      collection_id: 4,
+      format: "paperback",
+      condition: "fair",
+      ownership: "not_owned",
+      purchase_source: "Oxfam",
+      purchased_at: "2026-11-07",
+    });
+  });
+
+  it("remembers what the book was added with for the next one", async () => {
+    api.on("/api/collections", { body: [makeCollection({ id: 5 })] });
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
+    const { result } = await drafted();
+
+    act(() =>
+      result.current.update({ collectionId: 5, purchaseSource: "Oxfam" }),
+    );
+    act(() => result.current.confirm());
+
+    await waitFor(() => expect(readCarried(ME).collectionId).toBe(5));
+    expect(readCarried(ME).purchaseSource).toBe("Oxfam");
+  });
+
+  it("carries a typed tag name as the tag it became", async () => {
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
+    api.on(
+      "/api/books/42/tags",
+      { body: makeBook({ id: 42, tags: [makeTag({ id: 12, name: "Loft" })] }) },
+      "POST",
+    );
+    const { result } = await drafted();
+
+    act(() => result.current.createTag("Loft"));
+    act(() => result.current.confirm());
+
+    await waitFor(() => expect(readCarried(ME).tagIds).toEqual([12]));
+  });
+
+  it("remembers nothing when the book is refused", async () => {
+    api.on(
+      "/api/books/scan",
+      {
+        status: 409,
+        body: { detail: "Book with this ISBN already in catalog" },
+      },
+      "POST",
+    );
+    const { result } = await drafted();
+
+    act(() => result.current.update({ purchaseSource: "Oxfam" }));
+    act(() => result.current.confirm());
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(readCarried(ME).purchaseSource).toBe("");
+  });
+
+  it("joins the tags a lookup suggests to the carried ones", async () => {
+    carriedFromTheLastBook();
+    api.on("/api/books/lookup", {
+      body: { ...LOOKUP, suggested_tag_ids: [9] },
+    });
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}, ME));
+
+    act(() => result.current.lookup("9780441013593"));
+
+    await waitFor(() => expect(result.current.pending.tagIds).toEqual([7, 9]));
+  });
+
+  it("posts no carried collection while the list of collections has failed", async () => {
+    carriedFromTheLastBook();
+    api.on("/api/collections", { status: 500, body: { detail: "down" } });
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
+    api.on("/api/books/42/tags/7", { body: makeBook({ id: 42 }) }, "POST");
+    const { result } = await drafted();
+
+    expect(result.current.pending.collectionId).toBeNull();
+    act(() => result.current.confirm());
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/scan", "POST")).toBeDefined(),
+    );
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      collection_id: null,
+    });
+  });
+
+  it("drops a carried collection that has been deleted since", async () => {
+    carriedFromTheLastBook();
+    api.on("/api/collections", { body: [makeCollection({ id: 5 })] });
+    const { result } = await drafted();
+
+    await waitFor(() => expect(result.current.collections).toHaveLength(1));
+    expect(result.current.pending.collectionId).toBeNull();
+  });
+
+  it("drops a carried tag that has been deleted since", async () => {
+    carriedFromTheLastBook();
+    api.on("/api/books/tags", { body: [makeTag({ id: 9 })] });
+    const { result } = await drafted();
+
+    await waitFor(() => expect(result.current.tags).toHaveLength(1));
+    expect(result.current.pending.tagIds).toEqual([]);
+  });
+
+  it("says privacy was carried while the book is still private", async () => {
+    carriedFromTheLastBook();
+    const { result } = await drafted();
+    expect(result.current.privacyCarried).toBe(true);
+  });
+
+  it("stops saying privacy was carried once the book is made public", async () => {
+    carriedFromTheLastBook();
+    const { result } = await drafted();
+    act(() => result.current.update({ isPrivate: false }));
+    expect(result.current.privacyCarried).toBe(false);
+  });
+
+  it("does not say privacy was carried for a book ticked private here", async () => {
+    const { result } = await drafted();
+    act(() => result.current.update({ isPrivate: true }));
+    expect(result.current.privacyCarried).toBe(false);
+  });
+
+  it("restarts a cancelled form from what the last book added left", async () => {
+    carriedFromTheLastBook();
+    const { result } = await drafted();
+
+    act(() => result.current.update({ condition: "poor", tagIds: [7, 9] }));
+    act(() => result.current.reset());
+
+    expect(result.current.pending).toMatchObject({
+      condition: "fair",
+      tagIds: [7],
+    });
+  });
+
+  it("remembers only what a copy was filed with", async () => {
+    // A copy inherits privacy and tags from the book it copies and takes its
+    // ownership from the server, so the form's values for those were never
+    // applied and must not carry.
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on(
+      "/api/books/scan",
+      { status: 409, body: { detail: { message: "already", book_id: 7 } } },
+      "POST",
+    );
+    api.on("/api/books/7/copies", { body: makeBook({ id: 8 }) }, "POST");
+    const { result } = await drafted();
+
+    act(() =>
+      result.current.update({
+        isPrivate: true,
+        tagIds: [9],
+        ownership: OwnershipStatus.not_owned,
+        location: "Loft",
+        collectionId: 5,
+        format: BookFormat.hardcover,
+        condition: "good",
+        purchaseSource: "Oxfam",
+        purchasedAt: "2026-11-01",
+      }),
+    );
+    act(() => result.current.confirm());
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    act(() => result.current.addCopy());
+
+    await waitFor(() => expect(readCarried(ME).purchaseSource).toBe("Oxfam"));
+    expect(readCarried(ME)).toMatchObject({
+      location: "Loft",
+      collectionId: 5,
+      format: BookFormat.hardcover,
+      condition: "good",
+      purchasedAt: "2026-11-01",
+      isPrivate: false,
+      tagIds: [],
+      ownership: OwnershipStatus.owned,
+    });
+  });
+
+  it("carries the tags a member chose and not what each lookup suggested", async () => {
+    // Joined into the carry, book one's suggestions would land on book two
+    // and every book after it.
+    carriedFromTheLastBook();
+    api.on("/api/books/tags", {
+      body: [7, 9, 11, 12].map((id) => makeTag({ id })),
+    });
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
+    // An attach answers with every tag on the book, suggestions included.
+    api.on(
+      "/api/books/42/tags",
+      {
+        body: makeBook({ id: 42, tags: [11, 12].map((id) => makeTag({ id })) }),
+      },
+      "POST",
+    );
+
+    async function add(isbn: string, suggested: number[], typed?: string) {
+      api.on("/api/books/lookup", {
+        body: { ...LOOKUP, isbn, suggested_tag_ids: suggested },
+      });
+      const onAdded = vi.fn<(bookId: number) => void>();
+      const rendered = renderHookWithProviders(() => useScanFlow(onAdded, ME));
+      act(() => rendered.result.current.lookup(isbn));
+      await waitFor(() =>
+        expect(rendered.result.current.pending.draft).not.toBeNull(),
+      );
+      const offered = rendered.result.current.pending.tagIds;
+      if (typed !== undefined)
+        act(() => rendered.result.current.createTag(typed));
+      act(() => rendered.result.current.confirm());
+      await waitFor(() => expect(onAdded).toHaveBeenCalled());
+      rendered.unmount();
+      return offered;
+    }
+
+    expect(await add("9780441013593", [9])).toEqual([7, 9]);
+    expect(await add("9780306406157", [11], "Loft")).toEqual([7, 11]);
+    expect(readCarried(ME).tagIds).toEqual([7, 12]);
+  });
+
+  it("starts another member's book from nothing the last member carried", async () => {
+    carriedFromTheLastBook();
+    api.on("/api/books/lookup", { body: LOOKUP });
+    const { result } = renderHookWithProviders(() =>
+      useScanFlow(() => {}, SOMEBODY_ELSE),
+    );
+    act(() => result.current.lookup("9780441013593"));
+    await waitFor(() => expect(result.current.pending.draft).not.toBeNull());
+
+    expect(result.current.pending).toMatchObject({
+      isPrivate: false,
+      collectionId: null,
+      condition: "",
+      tagIds: [],
+      ownership: "owned",
+      purchaseSource: "",
+      purchasedAt: "",
+    });
+    expect(result.current.privacyCarried).toBe(false);
+  });
+
+  it("keeps a member's carry across signing out and back in", async () => {
+    api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
+    const before = await drafted();
+    act(() =>
+      before.result.current.update({
+        isPrivate: true,
+        purchaseSource: "Oxfam",
+      }),
+    );
+    act(() => before.result.current.confirm());
+    await waitFor(() => expect(readCarried(ME).purchaseSource).toBe("Oxfam"));
+    before.unmount();
+    // What a sign out does to storage. The query cache it also clears is
+    // per render here already.
+    clearSession();
+
+    const { result } = await drafted();
+
+    expect(result.current.pending).toMatchObject({
+      isPrivate: true,
+      purchaseSource: "Oxfam",
+    });
+    expect(result.current.privacyCarried).toBe(true);
+  });
+
+  it("carries nothing but the shelf into a rapid run", async () => {
+    // The queue shows no control for the rest, so a carried collection or
+    // privacy would file a whole batch somewhere nothing on screen said.
+    carriedFromTheLastBook();
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on("/api/books/scan", { body: makeBook() });
+    const { result } = renderHookWithProviders(() => useRapidIntake());
+
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    act(() => result.current.addAll());
+
+    await waitFor(() => expect(result.current.result?.added).toBe(1));
+    expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+      is_private: false,
+      collection_id: null,
+      condition: null,
+      purchase_source: null,
+    });
   });
 });
 
@@ -2930,7 +3311,7 @@ describe("confirming a scanned book", () => {
   async function readyToConfirm(onAdded: (bookId: number) => void) {
     api.on("/api/books/lookup", { body: LOOKUP });
     api.on("/api/books/scan", { body: makeBook({ id: 42 }) }, "POST");
-    const rendered = renderHookWithProviders(() => useScanFlow(onAdded));
+    const rendered = renderHookWithProviders(() => useScanFlow(onAdded, ME));
     act(() => rendered.result.current.lookup("9780441013593"));
     await waitFor(() =>
       expect(rendered.result.current.pending.draft).not.toBeNull(),
@@ -2939,7 +3320,7 @@ describe("confirming a scanned book", () => {
   }
 
   it("sends nothing before there is a draft to send", async () => {
-    const { result } = renderHookWithProviders(() => useScanFlow(() => {}));
+    const { result } = renderHookWithProviders(() => useScanFlow(() => {}, ME));
 
     await act(async () => {
       result.current.confirm();
@@ -3970,5 +4351,50 @@ describe("useRapidIntake and a Calibre library folder", () => {
         .map((call) => (call.body as { relative_path: string }).relative_path),
     ).toEqual(DUNE_FILES);
     expect(result.current.result).toMatchObject({ added: 0, already: 1 });
+  });
+});
+
+const ALREADY_HELD = "/api/books/already-held";
+
+/** The titles asked about so far, in order. */
+function titlesAsked(): (string | null)[] {
+  return api.calls
+    .filter((call) => call.url.includes(ALREADY_HELD))
+    .map((call) => new URL(call.url, "http://test").searchParams.get("title"));
+}
+
+async function wait(ms: number): Promise<void> {
+  await act(() => vi.advanceTimersByTimeAsync(ms));
+}
+
+describe("asking whether the draft is already held", () => {
+  beforeEach(() => {
+    api.on(ALREADY_HELD, { body: { match: null, book_ids: [] } });
+    // Only the debounce's own clock; promises stay real so a request resolves.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("asks a typed title once typing pauses, not once per keystroke", async () => {
+    let title = "D";
+    const { rerender } = renderHookWithProviders(() =>
+      useAlreadyHeldWarning(title, null, null),
+    );
+    await wait(ALREADY_HELD_SETTLE_MS);
+    expect(titlesAsked()).toEqual(["D"]);
+
+    title = "Du";
+    rerender();
+    await wait(ALREADY_HELD_SETTLE_MS - 1);
+    title = "Dun";
+    rerender();
+    await wait(ALREADY_HELD_SETTLE_MS - 1);
+    expect(titlesAsked()).toEqual(["D"]);
+
+    await wait(1);
+    expect(titlesAsked()).toEqual(["D", "Dun"]);
   });
 });

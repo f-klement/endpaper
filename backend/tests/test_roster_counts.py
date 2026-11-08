@@ -15,13 +15,13 @@ the sentence somebody thought to guard.
 ## Why a scan alone cannot do this
 
 **"The roster count" is not one number.** There are **seven** named sets a claim
-may bind to, and only **four** distinct sizes among them, because three of the
-seven are the roster's own size and two more collide on a smaller one. Nothing
-in a sentence's shape says which one is meant. So "eleven sources" in this tree
+may bind to, and only **five** distinct sizes among them, because three of the
+seven are the roster's own size. Nothing
+in a sentence's shape says which one is meant. So "twelve sources" in this tree
 is a correct count of the roster, a correct count of what a lookup or a search
 may ask, or a stale count of some other subject entirely. Measured over the census below,
-**18** of its occurrences count something that is not the roster, so a scan
-with no classification fails 18 times on its first run and is switched off.
+**20** of its occurrences count something that is not the roster, so a scan
+with no classification fails 20 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -52,20 +52,17 @@ rather than reread, because this file's own prose is inside its subject.
 ## What it does not see, measured rather than left to be discovered
 
 The census reads a quantified noun phrase, so a roster count written any other
-way is invisible. Each of the first five rows is a real sentence in this tree,
+way is invisible. Each of the first four rows is a real sentence in this tree,
 correct today and unguarded. The last two name a shape and deliberately name no
 sentence, each for its own reason:
 
-* the noun is elided, `docs/api.md` "A new install has all nine on". It was
-  stale at "eight" and was corrected in the commit that added this file, by
-  hand, because nothing here can see it.
 * an ordinal, `backend/fetch.py` "The NKP is the ninth". An ordinal states a
   position rather than a size, so there is nothing to compare it with.
-* a sub count with its own denominator, `docs/legend.md` "One of the three
-  sources fetched over plaintext HTTP". Invisible because neither 1 nor 3 is a
+* a sub count with its own denominator, `docs/legend.md` "One of the five
+  sources fetched over plaintext HTTP". Invisible because neither 1 nor 5 is a
   live cardinality.
-* the first half of "N of the M sources", `docs/legend.md`, where the nine is
-  checked and the seven beside it is not.
+* the first half of "N of the M sources", `docs/legend.md`, where the twelve
+  is checked and the ten beside it is not.
 * the noun is elided, `backend/metadata.py` "Building all eight and dropping
   some would leave un-awaited coroutines". A live `SEARCH_SOURCES` count with
   no census occurrence anywhere in its block, unlike the two other "all N"
@@ -86,7 +83,7 @@ sentence, each for its own reason:
 **No sentence is named for the drift row either, and there the omission is the
 row.** Every instance of it is by construction a count that is wrong, so every
 instance gets corrected, and a row naming one is stale as soon as it works. The
-five rows at the head of the list can name a sentence precisely because those
+four rows at the head of the list can name a sentence precisely because those
 sentences are right.
 
 **It is the bound narrowing, where the comment at `live_cardinalities` says only
@@ -309,9 +306,9 @@ def roster_sets() -> dict[str, int]:
 #: sources there are.
 #:
 #: **`Counts` compares a number, not a set, and a reader will read it as the
-#: set.** Three of these seven names are 11 today and two more are 8, so seven
-#: names discriminate four ways and a claim can bind to the wrong one and pass. Live instance:
-#: `test_books_google.py` says enrichment reaches all eleven sources and binds
+#: set.** Three of these seven names are 12 today, so seven names discriminate
+#: five ways and a claim can bind to the wrong one and pass. Live instance:
+#: `test_books_google.py` says enrichment reaches all twelve sources and binds
 #: to `the whole roster`, while `helpers.py` states the identical fact about the
 #: identical helper and binds to `lookup or search`. Both pass. The day those
 #: two stop being equal, one fails naming a set it was never about. No test can
@@ -328,9 +325,9 @@ def roster_sets() -> dict[str, int]:
 #: asks it, and the subtraction was wrong in the other direction.
 #:
 #: **So there are two names now, and a measurement keeps the one it was taken
-#: over.** `sources.STOCK_INSTALL_ASKS` is eight; the seven that need no
+#: over.** `sources.STOCK_INSTALL_ASKS` is nine; the seven that need no
 #: credential are the set the 395 of 500 pass ran against, and a set growing does
-#: not turn a measurement over seven into a measurement over eight. Each of the
+#: not turn a measurement over seven into a measurement over nine. Each of the
 #: three sentences was re-read and bound to whichever it is actually about.
 CARDINALITIES = {
     "the whole roster": lambda: len(CatalogueSource),
@@ -375,6 +372,9 @@ NOT_A_ROSTER_COUNT = {
 #: spelled, and covering the digit costs one alternation. A guard that covers
 #: only the shape that has failed before is a guard one edit behind.
 SPELLED = {
+    # Never a cardinality, so a candidate spelled with it is out of bound; here
+    # so the declaration cost below can state an empty corpus.
+    "zero": 0,
     "one": 1,
     "two": 2,
     "three": 3,
@@ -520,10 +520,11 @@ NOT_PROSE = ("/generated/", "/dist/")
 #
 # **What the rule costs is recomputed rather than recounted.** Every file
 # carrying the declaration in its header is stripped from the mirror, and between
-# them they hold **one** census candidate, in a stripped research document. So
-# the rule drops what the mirror drops and costs that one claim's coverage. The
-# figure moves only when a stripped document gains or loses a roster count,
-# which is the event the sentence exists to disclose, and
+# them they hold **zero** census candidates. The one they held, `section 11
+# found for sources` in a stripped research document, was never a roster count
+# and left the census's bound when the roster grew to twelve. So today the rule
+# costs no claim's coverage. The figure moves when a stripped document gains or
+# loses a candidate, which is the event the sentence exists to disclose, and
 # `test_the_coverage_the_declaration_rule_costs_is_the_figure_it_states` is what
 # stops it reading zero over a corpus that holds one. It already had.
 #
@@ -1287,9 +1288,7 @@ _MARC_IMPORT = "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components
 #: count of something that is not the roster, or both.
 OUT_OF_BOUND: frozenset[str] = frozenset(
     {
-        "backend/sources.py '{n} frames a source' entry[0]",
         "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
-        "backend/tests/test_marc.py '{n} source' entry[0]",
         "backend/tests/test_authority.py '{n} viaf source' entry[0]",
         "backend/tests/test_fetch.py '{n} sources' entry[0]",
         "backend/tests/test_fetch.py '{n} sources' entry[3]",
@@ -1378,7 +1377,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         # than a re-run.
         Counts(
             "STOCK_INSTALL_ASKS",
-            near="answer 399 of the 500 ISBNs",
+            near="answer 407 of the 500 ISBNs",
         ),
         Counts(
             "the lookup sources that need no credential",
@@ -1397,7 +1396,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("SEARCH_SOURCES", near="asked at once"),
         # The chain a default install actually runs, in the block that says so
         # and in the Argentine block's denominator, and **they are two different
-        # sets now**. The first is what an install asks, which is eight. The
+        # sets now**. The first is what an install asks, which is nine. The
         # second is the denominator of what the Argentine row **adds**, which
         # cannot include the row itself and is therefore the seven.
         Counts(
@@ -1406,11 +1405,15 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         ),
         Counts(
             "the lookup sources that need no credential",
-            near="need nothing answer 395 and miss 105",
+            near="answer 395 and miss 105, are the two",
         ),
         Counts(
             "the lookup sources that need no credential",
             near="The frame goes from 24 answered to 28",
+        ),
+        Counts(
+            "the lookup sources that need no credential",
+            near="**8 that none of the",
         ),
     ],
     ("backend/tests/helpers.py", "{n} sources"): [Counts("lookup or search")],
@@ -1536,7 +1539,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         ),
         Counts(
             "the lookup sources that need no credential",
-            near="Four of those books are the Argentine catalogue's",
+            near="Twelve of those books are the two credentialled",
         ),
     ],
     ("docs/data-model.md", "{n} catalogues"): [

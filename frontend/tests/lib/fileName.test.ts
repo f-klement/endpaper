@@ -347,7 +347,7 @@ describe("what is handed to the catalogue", () => {
     // A bidirectional override, which renders as nothing and reverses what a
     // reader sees after it. Debris in a name rather than a reason to drop a
     // book, so it is removed rather than refused.
-    const found = clues("Du ne‮reversed.epub");
+    const found = clues("Du ne\u202Ereversed.epub");
     expect(found.query).not.toMatch(/[\p{Cc}\p{Cf}]/u);
   });
 
@@ -386,7 +386,7 @@ describe("a name as it is printed", () => {
   it("carries no control character into the row it is printed in", () => {
     // A bidirectional override renders as nothing and reverses what a reader
     // sees after it. It is printed beside a title that was cleaned.
-    expect(plainName("Du‮ne.pdf")).toBe("Dune.pdf");
+    expect(plainName("Du\u202Ene.pdf")).toBe("Dune.pdf");
   });
 
   it("does not take a name apart the way a query is taken apart", () => {

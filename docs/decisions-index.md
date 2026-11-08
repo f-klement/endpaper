@@ -567,7 +567,7 @@ repeat the argument.
 |  | [A shipped login is the bottom of one ladder, and the ladder is walked once](decisions.md#a-shipped-login-is-the-bottom-of-one-ladder-and-the-ladder-is-walked-once) | 160 |
 |  | [The pair lives on the target row, so the origin it is bound to is not stored twice](decisions.md#the-pair-lives-on-the-target-row-so-the-origin-it-is-bound-to-is-not-stored-twice) | 84 |
 |  | [The provenance is one field, because the levels are ordered and booleans are not](decisions.md#the-provenance-is-one-field-because-the-levels-are-ordered-and-booleans-are-not) | 77 |
-|  | [A stock install and a set that needs no credential are two different names](decisions.md#a-stock-install-and-a-set-that-needs-no-credential-are-two-different-names) | 130 |
+|  | [A stock install and a set that needs no credential are two different names](decisions.md#a-stock-install-and-a-set-that-needs-no-credential-are-two-different-names) | 141 |
 |  | [The import seam is a reader per service, and selection is shown rather than trusted](decisions.md#the-import-seam-is-a-reader-per-service-and-selection-is-shown-rather-than-trusted) | 204 |
 |  | [A claim is a predicate over the front of the file, not a set of header names](decisions.md#a-claim-is-a-predicate-over-the-front-of-the-file-not-a-set-of-header-names) | 144 |
 |  | [A row exclusion is honoured wherever the column appears, and a repeated one is refused](decisions.md#a-row-exclusion-is-honoured-wherever-the-column-appears-and-a-repeated-one-is-refused) | 328 |
@@ -988,4 +988,19 @@ repeat the argument.
 | The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [More than one contexts line refuses narrowing](decisions.md#more-than-one-contexts-line-refuses-narrowing) | 72 |
 | The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [A red recording baseline runs a plain baseline before the sweep is refused](decisions.md#a-red-recording-baseline-runs-a-plain-baseline-before-the-sweep-is-refused) | 42 |
 | The mutation sweep narrows each mutant's run to the tests whose coverage contexts reach it | [Every distinct set of tests the arms run is run on the shipped tree first](decisions.md#every-distinct-set-of-tests-the-arms-run-is-run-on-the-shipped-tree-first) | 137 |
+|  | [The add form carries every per copy field from the last book, per account, and privacy carries visibly](decisions.md#the-add-form-carries-every-per-copy-field-from-the-last-book-per-account-and-privacy-carries-visibly) | 641 |
+|  | [The duplicate warning before a save is a recognition ladder that reads only the Shelf](decisions.md#the-duplicate-warning-before-a-save-is-a-recognition-ladder-that-reads-only-the-shelf) | 592 |
+|  | [What the collection cost counts, and for whom](decisions.md#what-the-collection-cost-counts-and-for-whom) | 519 |
+|  | [The Uruguayan catalogue ships its published login, and carries a remit the Argentine one could not](decisions.md#the-uruguayan-catalogue-ships-its-published-login-and-carries-a-remit-the-argentine-one-could-not) | 175 |
+|  | [The HTML export is not asked for by the download's Accept header](decisions.md#the-html-export-is-not-asked-for-by-the-downloads-accept-header) | 89 |
+|  | [The HTML export carries six columns, not the CSV's](decisions.md#the-html-export-carries-six-columns-not-the-csvs) | 114 |
+|  | [Five exports a minute is held to the formats the menu offers](decisions.md#five-exports-a-minute-is-held-to-the-formats-the-menu-offers) | 76 |
+|  | [CRAP under 10 on every pipeline, as a ratchet, with a scorer of our own in Go](decisions.md#crap-under-10-on-every-pipeline-as-a-ratchet-with-a-scorer-of-our-own-in-go) | 3,689 |
+|  | [SonarQube is read by hand at a wave's end and before a tag, and never gated on](decisions.md#sonarqube-is-read-by-hand-at-a-waves-end-and-before-a-tag-and-never-gated-on) | 998 |
+| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [SonarQube's style rules are not this repository's rules](decisions.md#sonarqubes-style-rules-are-not-this-repositorys-rules) | 116 |
+| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [A regex SonarQube calls super linear is accepted where its input is bounded](decisions.md#a-regex-sonarqube-calls-super-linear-is-accepted-where-its-input-is-bounded) | 63 |
+| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [The DDC heading separator is possessive, and its test refuses by size](decisions.md#the-ddc-heading-separator-is-possessive-and-its-test-refuses-by-size) | 81 |
+| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [The error page takes the app's accent as literal values](decisions.md#the-error-page-takes-the-apps-accent-as-literal-values) | 145 |
+| SonarQube is read by hand at a wave's end and before a tag, and never gated on | [A bidirectional control character is refused in every file the suite reads](decisions.md#a-bidirectional-control-character-is-refused-in-every-file-the-suite-reads) | 132 |
+|  | [The local gate runs the backend job's two ruff steps](decisions.md#the-local-gate-runs-the-backend-jobs-two-ruff-steps) | 129 |
 <!-- index: end -->

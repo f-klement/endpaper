@@ -28,6 +28,7 @@ import { decodeFromStream, emitBarcode } from "../../doubles/zxing";
 import { en } from "../../../src/i18n/en";
 import ScanPage from "../../../src/pages/ScanPage";
 import { makeBook, makeTagSet, resetIds } from "../../factories";
+import { rememberCarried } from "../../../src/lib/carryOver";
 import { answersOf, DISTINCT } from "../../lib/schemaArbitrary";
 import { holds, PROFILE, PROPERTY, witness } from "../../property";
 import { forget, overSchema, type OverSchema } from "../../schemaPage";
@@ -47,13 +48,22 @@ const LOOKUP = {
   suggested_tag_ids: [] as number[],
 };
 
+/** The signed in member every render here is for. */
+const ME = 1;
+/** Another member, who used this browser before. */
+const SOMEBODY_ELSE = 2;
+
 let api: MockApi;
+
+const ALREADY_HELD = "/api/books/already-held";
 
 beforeEach(() => {
   resetIds();
   installCamera();
   api = mockApi();
   api.on("/api/books/tags", { body: [] });
+  api.on(ALREADY_HELD, { body: { match: null, book_ids: [] } });
+  api.on("/api/collections", { body: [] });
 });
 
 /**
@@ -95,7 +105,7 @@ describe("ScanPage", () => {
     Object.defineProperty(file, "webkitRelativePath", {
       value: "Books/notes.txt",
     });
-    renderWithProviders(<ScanPage />);
+    renderWithProviders(<ScanPage accountId={ME} />);
 
     await user.upload(screen.getByLabelText("A whole folder of books"), file);
 
@@ -105,18 +115,18 @@ describe("ScanPage", () => {
   });
 
   it("offers manual ISBN entry alongside the camera", () => {
-    renderWithProviders(<ScanPage />);
+    renderWithProviders(<ScanPage accountId={ME} />);
     expect(screen.getByLabelText("ISBN")).toBeInTheDocument();
   });
 
   describe("a file is the fourth way of choosing which book", () => {
     it("offers the picker beside the camera and the search box", () => {
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
       expect(screen.getByLabelText("Book files")).toBeInTheDocument();
     });
 
     it("shows no queue until something is in it", () => {
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
       expect(screen.queryByText("Nothing scanned yet")).not.toBeInTheDocument();
     });
 
@@ -126,7 +136,7 @@ describe("ScanPage", () => {
       // path beside it.
       const user = userEvent.setup();
       const file = await epubFile("dune.epub");
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await user.upload(screen.getByLabelText("Book files"), file);
 
@@ -153,7 +163,7 @@ describe("ScanPage", () => {
             `<dc:subject>Science Fiction</dc:subject>`,
         ),
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await user.upload(screen.getByLabelText("Book files"), file);
 
@@ -182,7 +192,7 @@ describe("ScanPage", () => {
       // A dead end until the filename fallback shipped: the file is still a
       // book and the name is what is left to go on.
       const user = userEvent.setup();
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await user.upload(
         screen.getByLabelText("Book files"),
@@ -198,7 +208,7 @@ describe("ScanPage", () => {
     it("offers a whole folder as well as single files", async () => {
       // Only a folder pick carries the path, and the folder above a file is
       // often the one thing that names its author.
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
       expect(
         screen.getByLabelText("A whole folder of books"),
       ).toBeInTheDocument();
@@ -206,7 +216,7 @@ describe("ScanPage", () => {
 
     it("offers the catalogue lookup rather than running it", async () => {
       const user = userEvent.setup();
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await user.upload(
         screen.getByLabelText("Book files"),
@@ -223,7 +233,7 @@ describe("ScanPage", () => {
 
     it("says what it passed over rather than showing an empty queue", async () => {
       const user = userEvent.setup();
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       // Through the folder input, which is where a format the picker filters
       // out actually arrives: a browser applies `accept` to a file dialog and
@@ -249,20 +259,20 @@ describe("ScanPage", () => {
     // held it there through everything that followed.
 
     it("does not open the camera on arrival", () => {
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
       expect(
         screen.queryByRole("button", { name: "Stop scanning" }),
       ).not.toBeInTheDocument();
     });
 
     it("says the camera is off rather than showing a black rectangle", () => {
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
       expect(screen.getByText("The camera is off")).toBeInTheDocument();
     });
 
     it("opens it when asked", async () => {
       const user = userEvent.setup();
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await user.click(screen.getByRole("button", { name: "Start scanning" }));
 
@@ -273,7 +283,7 @@ describe("ScanPage", () => {
 
     it("closes it again when asked", async () => {
       const user = userEvent.setup();
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await user.click(screen.getByRole("button", { name: "Start scanning" }));
       await user.click(screen.getByRole("button", { name: "Stop scanning" }));
@@ -288,7 +298,7 @@ describe("ScanPage", () => {
       // that form keeps the indicator lit for as long as somebody takes to
       // check a title.
       api.on("/api/books/lookup", { body: LOOKUP });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan();
 
@@ -304,7 +314,7 @@ describe("ScanPage", () => {
     it("says what it read instead of going quiet", async () => {
       // Silence here reads as a broken scanner, when what happened is that the
       // price code beside the ISBN was read.
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan("4001234567890");
 
@@ -312,7 +322,7 @@ describe("ScanPage", () => {
     });
 
     it("clears the notice when scanning starts again", async () => {
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan("4001234567890");
       await user.click(screen.getByRole("button", { name: "Stop scanning" }));
@@ -324,7 +334,7 @@ describe("ScanPage", () => {
   describe("lookup", () => {
     it("looks up a scanned barcode", async () => {
       api.on("/api/books/lookup", { body: LOOKUP });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan();
 
@@ -334,7 +344,7 @@ describe("ScanPage", () => {
 
     it("sends the ISBN as a query parameter", async () => {
       api.on("/api/books/lookup", { body: LOOKUP });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan();
 
@@ -347,7 +357,7 @@ describe("ScanPage", () => {
 
     it("looks up a manually typed ISBN", async () => {
       api.on("/api/books/lookup", { body: LOOKUP });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = userEvent.setup();
       fireEvent.change(screen.getByLabelText("ISBN"), {
@@ -359,7 +369,7 @@ describe("ScanPage", () => {
     });
 
     it("ignores an empty manual submission", async () => {
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await userEvent
         .setup()
@@ -374,7 +384,7 @@ describe("ScanPage", () => {
         status: 404,
         body: { detail: "Book not found" },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan();
 
@@ -390,7 +400,7 @@ describe("ScanPage", () => {
         status: 503,
         body: { detail: "Could not reach the book catalogues." },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       const retry = await screen.findByRole("button", { name: "Try again" });
@@ -405,7 +415,7 @@ describe("ScanPage", () => {
         status: 503,
         body: { detail: "Could not reach the book catalogues." },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -424,7 +434,7 @@ describe("ScanPage", () => {
       api.on("/api/books/lookup", {
         body: { ...LOOKUP, suggested_tag_ids: [tags[1]!.id] },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan();
 
@@ -437,6 +447,59 @@ describe("ScanPage", () => {
     });
   });
 
+  describe("the warning before the save", () => {
+    beforeEach(() => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+    });
+
+    it("says the same ISBN is already held and links to it", async () => {
+      api.on(ALREADY_HELD, { body: { match: "isbn", book_ids: [42] } });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      const sentence = await screen.findByText(en["scan.alreadyHeldIsbn"]);
+      const warning = sentence.closest<HTMLElement>('[role="status"]');
+      expect(warning).not.toBeNull();
+      expect(
+        within(warning as HTMLElement).getByRole("link", {
+          name: en["scan.openTheOneWeHave"],
+        }),
+      ).toHaveAttribute("href", "/book/42");
+    });
+
+    it("says a title and author match is only possibly the same book", async () => {
+      api.on(ALREADY_HELD, { body: { match: "title_author", book_ids: [7] } });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      expect(
+        await screen.findByText(en["scan.alreadyHeldTitleAuthor"]),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(en["scan.alreadyHeldIsbn"]),
+      ).not.toBeInTheDocument();
+    });
+
+    it("leaves a missing author out of the question rather than sending null", async () => {
+      // The generated client spells a null as the string "null", which the
+      // server would compare as an author called that.
+      api.on("/api/books/lookup", { status: 404, body: { detail: "nope" } });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+      fireEvent.change(await screen.findByLabelText("Title *"), {
+        target: { value: "Dune" },
+      });
+
+      await waitFor(() =>
+        expect(api.lastCall("title=Dune", "GET")).toBeDefined(),
+      );
+      expect(api.lastCall("title=Dune", "GET")?.url).not.toContain("author");
+    });
+  });
+
   describe("adding the book", () => {
     beforeEach(() => {
       api.on("/api/books/lookup", { body: LOOKUP });
@@ -444,7 +507,7 @@ describe("ScanPage", () => {
 
     it("posts the looked-up fields", async () => {
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -463,7 +526,7 @@ describe("ScanPage", () => {
     it("strips the client-only fields from the payload", async () => {
       // suggested_tag_ids and notFound are UI state, not columns.
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -485,7 +548,7 @@ describe("ScanPage", () => {
       // These are not UI state: the lookup is the only place they exist, and a
       // payload that dropped them would leave the scan flow storing none.
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -503,7 +566,7 @@ describe("ScanPage", () => {
 
     it("navigates to the new book", async () => {
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
-      const { path } = renderWithProviders(<ScanPage />);
+      const { path } = renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -517,7 +580,7 @@ describe("ScanPage", () => {
 
     it("marks the book private when the box is ticked", async () => {
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(await screen.findByRole("checkbox"));
@@ -535,7 +598,7 @@ describe("ScanPage", () => {
       api.on("/api/books/tags", { body: tags });
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
       api.on(/\/api\/books\/12\/tags\//, { body: makeBook({ id: 12 }) });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       // The tag categories start closed: the curated vocabulary is 105 tags.
@@ -555,7 +618,7 @@ describe("ScanPage", () => {
       api.on("/api/books/tags", { body: tags });
       api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
       api.on("/api/books/12/tags", { body: makeBook({ id: 12 }) });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.type(await screen.findByLabelText("New tag"), "Loft finds");
@@ -578,7 +641,7 @@ describe("ScanPage", () => {
     it("and cancelling the scan asks the server for nothing at all", async () => {
       const tags = makeTagSet();
       api.on("/api/books/tags", { body: tags });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.type(await screen.findByLabelText("New tag"), "Loft finds");
@@ -599,7 +662,7 @@ describe("ScanPage", () => {
         status: 404,
         body: { detail: "Tag not found" },
       });
-      const { path } = renderWithProviders(<ScanPage />);
+      const { path } = renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       // The tag categories start closed: the curated vocabulary is 105 tags.
@@ -615,7 +678,7 @@ describe("ScanPage", () => {
         status: 409,
         body: { detail: "Book with this ISBN already in catalog" },
       });
-      const { path } = renderWithProviders(<ScanPage />);
+      const { path } = renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -641,7 +704,7 @@ describe("ScanPage", () => {
           },
         },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -662,7 +725,7 @@ describe("ScanPage", () => {
         status: 409,
         body: { detail: "Book with this ISBN already in catalog" },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -686,7 +749,7 @@ describe("ScanPage", () => {
           detail: { message: "The server's sentence", code: "in_trash" },
         },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       const user = await scan();
       await user.click(
@@ -707,7 +770,7 @@ describe("ScanPage", () => {
         status: 404,
         body: { detail: "not found" },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan();
 
@@ -722,7 +785,7 @@ describe("ScanPage", () => {
         status: 404,
         body: { detail: "not found" },
       });
-      renderWithProviders(<ScanPage />);
+      renderWithProviders(<ScanPage accountId={ME} />);
 
       await scan();
       fireEvent.change(await screen.findByLabelText("Title *"), {
@@ -737,7 +800,7 @@ describe("ScanPage", () => {
 
   it("Cancel returns to the scanner", async () => {
     api.on("/api/books/lookup", { body: LOOKUP });
-    renderWithProviders(<ScanPage />);
+    renderWithProviders(<ScanPage accountId={ME} />);
 
     const user = await scan();
     await user.click(await screen.findByRole("button", { name: "Cancel" }));
@@ -754,7 +817,7 @@ describe("ScanPage", () => {
       body: { detail: "Book not found" },
     });
     api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
-    renderWithProviders(<ScanPage />);
+    renderWithProviders(<ScanPage accountId={ME} />);
 
     const user = await scan();
     fireEvent.change(await screen.findByLabelText("Title *"), {
@@ -789,6 +852,60 @@ const lookedUpTitle = (rendered: OverSchema) => {
   return typeof title === "string" && DISTINCT.test(title) ? title : undefined;
 };
 
+describe("ScanPage and a book that starts private", () => {
+  it("says on the form that the book is private because the last one was", async () => {
+    rememberCarried(ME, { isPrivate: true });
+    api.on("/api/books/lookup", { body: LOOKUP });
+    renderWithProviders(<ScanPage accountId={ME} />);
+
+    await scan();
+
+    // By its words: the lookup's spinner is a status too.
+    expect(
+      await screen.findByText(
+        "This book starts private because the last one you added was.",
+        { exact: false },
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("checkbox")).toBeChecked();
+  });
+
+  it("says nothing of another member's last book", async () => {
+    rememberCarried(SOMEBODY_ELSE, { isPrivate: true });
+    api.on("/api/books/lookup", { body: LOOKUP });
+    renderWithProviders(<ScanPage accountId={ME} />);
+
+    await scan();
+
+    await screen.findByRole("button", { name: "Add to Library" });
+    expect(
+      screen.queryByText("the last one you added was", { exact: false }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+  });
+
+  it("adds it public once the notice is answered", async () => {
+    rememberCarried(ME, { isPrivate: true });
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
+    renderWithProviders(<ScanPage accountId={ME} />);
+
+    const user = await scan();
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Make it visible to everyone",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Add to Library" }));
+
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/scan", "POST")?.body).toMatchObject({
+        is_private: false,
+      }),
+    );
+  });
+});
+
 describe("ScanPage over any answer the schema permits", () => {
   // What the page's hooks are handed is drawn from `openapi.json`, per
   // request. `tests/schemaPage.tsx` holds what the page may not do. The page
@@ -809,18 +926,22 @@ describe("ScanPage over any answer the schema permits", () => {
         fc.gen(),
         async (answers) => {
           try {
-            const rendered = await overSchema(<ScanPage />, answers, {
-              uses: [
-                (page) =>
-                  fireEvent.change(within(page).getByLabelText("ISBN"), {
-                    target: { value: LOOKUP.isbn },
-                  }),
-                (page) =>
-                  fireEvent.click(
-                    within(page).getByRole("button", { name: "Look up" }),
-                  ),
-              ],
-            });
+            const rendered = await overSchema(
+              <ScanPage accountId={ME} />,
+              answers,
+              {
+                uses: [
+                  (page) =>
+                    fireEvent.change(within(page).getByLabelText("ISBN"), {
+                      target: { value: LOOKUP.isbn },
+                    }),
+                  (page) =>
+                    fireEvent.click(
+                      within(page).getByRole("button", { name: "Look up" }),
+                    ),
+                ],
+              },
+            );
             expect(rendered.problems).toEqual([]);
             return rendered;
           } finally {

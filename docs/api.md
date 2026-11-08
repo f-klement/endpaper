@@ -89,7 +89,7 @@ is discarded, and only a token naming a test account does. See [security.md](sec
 | POST | `/api/books/tags` | user | Invent a tag. Returns the existing one on a name clash |
 | DELETE | `/api/books/tags/{id}` | user | Only a custom tag. **400** for a seeded one |
 | GET | `/api/books/lookup?isbn=` | user | Metadata lookup, **404** if unknown |
-| GET | `/api/books/export?format=csv\|txt\|marcxml` | user | File download, not paginated. `marcxml` needs library mode, **403** without |
+| GET | `/api/books/export?format=csv\|txt\|html\|marcxml` | user | File download, not paginated. `marcxml` needs library mode, **403** without |
 | GET | `/api/books/search?q=&harder=` | user | Free-text search for the add flow. Needs no API key. `harder` also asks the slow catalogues |
 | GET | `/api/books/series` | user | Every series, with the gaps in it |
 | GET | `/api/books/authors` | user | Everybody credited on the shelf, with counts, spellings and merges |
@@ -507,8 +507,8 @@ cluster with the book's own ISBN: every row in it is a printing of the same book
 Library's own merge rather than by a title match. Underneath it sits the free text search
 across every catalogue the library has switched on, which is the only answer for a book
 with no ISBN, for a work Open Library has not merged, and for a good deal of German
-publishing, where Open Library returns 404. A new install has all nine on; see the
-provider list below.
+publishing, where Open Library returns 404. A new install has every catalogue on except
+Google Books; see the provider list below.
 
 **Open Library switched off answers no cluster at all**, because nothing else here holds
 one. The search half still answers, so the endpoint degrades rather than failing.
@@ -678,7 +678,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks nine catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks ten catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
@@ -691,23 +691,24 @@ the same book.
 **Phase two, asked in turn, only if neither knew the book:** **Open Library**, then the
 **Czech National Library**, then the **Spanish National Library**, then the **National
 Library of Greece**, then the **Austrian National Library**, then the **Biblioteca Nacional
-Argentina**, then **Google Books**. Phase two stops at the first hit, so it is ordered by
+Argentina**, then the **Biblioteca Nacional de Uruguay**, then **Google Books**. Phase two stops at the first hit, so it is ordered by
 how often a source answers a book phase one missed: of 278 such ISBNs in 500, Open Library
 answers 82, the NKP 42, the BNE 40, the NLG 34 and the ÖNB 1. Open Library is the broadest
 source and much the slowest, which is why it is here rather than in phase one.
 
-**Two of the nine need a credential and only one of them costs money**, which is why the
-last two are where they are. Google Books has a key, a quota and a bill attached, so it is
-last and an ordinary lookup spends no quota at all. The Biblioteca Nacional Argentina needs
-a login and charges nothing: the library publishes a username and password on its own page
-for librarians and Endpaper carries that pair, so every install asks it, and it sits after
-every source measured on that sample and before the one with the bill. It answers ten of
-the fifty Argentine ISBNs in that sample, four of which no other free source in the chain
-holds.
+**Three of the ten need a credential and only one of them costs money**, which is why the
+last three are where they are. Google Books has a key, a quota and a bill attached, so it is
+last and an ordinary lookup spends no quota at all. The Argentine and Uruguayan national
+libraries each need a login and charge nothing: each library publishes a username and
+password on its own page for librarians and Endpaper carries those pairs, so every install
+asks them, and they sit after every source measured on that sample and before the one with
+the bill. The Argentine catalogue answers ten of the fifty Argentine ISBNs in that sample,
+four of which no other free source in the chain holds; the Uruguayan one answers 26 of the
+fifty Uruguayan ISBNs, eight of which nothing else holds.
 
 **A login this library enters wins over the one Endpaper ships, and a login the deployment
-pins wins over both.** So an institution with its own arrangement with the Biblioteca
-Nacional Argentina uses that arrangement. The settings screen says which of the three a
+pins wins over both.** So an institution with its own arrangement with either library uses
+that arrangement. The settings screen says which of the three a
 catalogue is using, and removing one an admin entered falls back to the shipped pair rather
 than to nothing.
 
@@ -720,7 +721,7 @@ for.
 
 **And in phase two it is asked only about the ISBNs it could hold.** An ISBN names its own
 registration group, `978-3` for German language publishing, `978-960` and `978-618` for
-Greek, and a catalogue whose collecting remit is one of those is skipped for a book from
+Greek, `978-9974` for Uruguayan, and a catalogue whose collecting remit is one of those is skipped for a book from
 another. So a German library stops paying a round trip to Athens on every scan the German
 pair misses. Measured over the same 500 ISBNs: **1.435s per lookup becoming 1.336s**, and
 **872 phase two requests becoming 673**, for the same 395 books.
@@ -732,9 +733,11 @@ Portuguese, one Argentine and two Uruguayan. A remit would stop it being asked a
 **Any lookup that reaches phase two can reach three national catalogues**: the Czech, the
 Spanish and the Argentine. The first two are measured and fail the zero book bar below.
 The Argentine one is not measured at all: the survey never put these ISBNs to it, so
-there is no evidence either way and a group rule there would be a guess. It is also the
-only catalogue in the roster carrying a login over a plaintext connection, which is what
-makes its fan out worth stating rather than leaving to be discovered.
+there is no evidence either way and a group rule there would be a guess. It carries a login
+over a plaintext connection, which is what makes its fan out worth stating rather than
+leaving to be discovered. The Uruguayan catalogue carries one too and is not in that list,
+because all 500 were put to it: it answers nothing outside `978-9974`, so it is asked only
+about Uruguayan books.
 
 **No book is lost to it, and that is a measured bound rather than an intention.** A
 catalogue may carry a remit only if there is no book it alone answers outside that remit,
@@ -759,7 +762,7 @@ asymmetry in this table and is the server's rather than a preference: it returns
 filled in record per reply whatever page size is asked for, so ten search results would be
 ten requests. A lookup wants one record and gets one.
 
-**No order of the nine finds more books than another.** Every enabled source is asked
+**No order of the ten finds more books than another.** Every enabled source is asked
 until one answers, so the order decides latency and which records are merged, never
 coverage. Reordering is not the fix for a book the chain misses.
 
@@ -769,16 +772,15 @@ the registration groups it collects and no others. The bound on that is zero boo
 sentence above holds in practice as well as in principle.
 
 **What the chain covers on a stock install, which is one that has typed nothing.**
-Seven of the nine need no credential at all, an eighth ships the one its library publishes,
+Seven of the ten need no credential at all, two ship the one their library publishes,
 and only Google Books takes a key you supply. Measured over 500
-domestic ISBNs across ten countries, the eight sources a stock install asks answer **399 and
-miss 101**,
-and outside German language publishing they miss **97 of 400**.
+domestic ISBNs across ten countries, the nine sources a stock install asks answer **407 and
+miss 93**,
+and outside German language publishing they miss **89 of 400**.
 
-Four of those books are the Argentine catalogue's, which is the difference between that
-figure and the one this page quoted before: the seven sources that need nothing answer
-**395 and miss 105**, and the four the Argentine catalogue uniquely adds are all in its own
-frame.
+Twelve of those books are the two credentialled catalogues': the seven sources that need
+nothing answer **395 and miss 105**, the Argentine catalogue uniquely adds four and the
+Uruguayan one eight, each in its own country's frame.
 
 The same books under an
 earlier release answered 300: the three national catalogues added since, the NLG, the NKP
@@ -815,7 +817,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the nine sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the ten sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the

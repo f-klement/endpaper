@@ -187,7 +187,7 @@ class Reading:
         from and the reason a debugging session on a developer's machine can
         raise `OperationalError` where CI and production would not.
 
-        **5** callers, and **none** of them is the size of the library:
+        **6** callers, and **none** of them is the size of the library:
 
         | Caller | Bounded by |
         |---|---|
@@ -196,6 +196,7 @@ class Reading:
         | `serialisation.books_to_out` | its own caller: see below |
         | `routers.books._csv_chunks` | `marc.EXPORT_PAGE_RECORDS`, one page |
         | `routers.books._text_chunks` | `marc.EXPORT_PAGE_RECORDS`, one page |
+        | `routers.books._html_chunks` | `marc.EXPORT_PAGE_RECORDS`, one page |
 
         **The names are qualified through the class**, because the pass that
         derives them keys on the whole enclosing path: two methods of that
@@ -211,7 +212,7 @@ class Reading:
         **A caller is a function, not a call**, which is why the count above
         says callers. The pass keys a row on the enclosing function, so two
         calls in one body are one row. **The two numbers coincide today**,
-        because each of the five bodies calls once; the word is what stays
+        because each of the six bodies calls once; the word is what stays
         right when one of them calls twice.
 
         **What that pass checks is the first column and the count above it.**

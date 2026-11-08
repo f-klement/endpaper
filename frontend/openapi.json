@@ -84,6 +84,39 @@
         "title": "AccessStatus",
         "type": "string"
       },
+      "AlreadyHeldOut": {
+        "description": "What the member already holds of a looked up record, asked before it is\nsaved so a duplicate is caught before the press rather than by the 409.\n\n`match` says how strong the claim is: `isbn` is a Book on the member's\nshelf carrying the same ISBN, which the save will refuse; `title_author`\nis one sharing only the title and author, which may be another edition.\nThis answer does not say whether the save refuses that one: the save asks\nabout its ISBN past the member's shelf, and this answer never does. Neither\never names a Book the member cannot see.",
+        "properties": {
+          "book_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Book Ids",
+            "type": "array"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "enum": [
+                  "isbn",
+                  "title_author"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match"
+          }
+        },
+        "required": [
+          "match",
+          "book_ids"
+        ],
+        "title": "AlreadyHeldOut",
+        "type": "object"
+      },
       "AppearanceOut": {
         "description": "One member's own appearance. Never another member's.\n\nDeliberately not part of `UserOut`, which is served inside every book\npayload and the member list: appearance on that schema would tell everyone\nin the library what everyone else's library looks like.\n\nEvery field is nullable and null means \"has not chosen\", which is what a\nnew account and every directory shadow account start as. The client then\nfollows the system for the mode, uses the house palette, and picks a\ndifferent wallpaper each visit.",
         "properties": {
@@ -1210,6 +1243,16 @@
             ],
             "title": "Collection Id"
           },
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BookCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cover_url": {
             "anyOf": [
               {
@@ -1322,6 +1365,30 @@
               }
             ],
             "title": "Publisher"
+          },
+          "purchase_source": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchase Source"
+          },
+          "purchased_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purchased At"
           },
           "series_index": {
             "anyOf": [
@@ -2679,7 +2746,7 @@
         "type": "object"
       },
       "CatalogueSource": {
-        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP, BNE and BNA are the other way round, **lookup\nonly**, and for two different reasons. The NKP's and the BNA's is the\nserver's: each renders one populated record per response whatever page size\nis asked for, so a search for ten candidates would be ten requests. The\nBNE's is ours: its search works and nobody has measured what it would find,\nso it holds the conservative default. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.\n\n**One member needs a credential and is free**, which is new: the BNA. What\nthat costs the roster's rules is on `sources.NEEDS_A_KEY`.",
+        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP, BNE, BNA and BNU are the other way round,\n**lookup only**, and for two different reasons. The NKP's, the BNA's and\nthe BNU's is the server's: each renders one populated record per response\nwhatever page size is asked for, so a search for ten candidates would be\nten requests. The\nBNE's is ours: its search works and nobody has measured what it would find,\nso it holds the conservative default. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.\n\n**Two members need a credential and are free**: the BNA and the BNU. What\nthat costs the roster's rules is on `sources.NEEDS_A_KEY`.",
         "enum": [
           "open_library",
           "google_books",
@@ -2691,7 +2758,8 @@
           "bnf",
           "loc",
           "bne",
-          "bna"
+          "bna",
+          "bnu"
         ],
         "title": "CatalogueSource",
         "type": "string"
@@ -3231,6 +3299,31 @@
         "title": "CredentialProvenance",
         "type": "string"
       },
+      "CurrencyTotal": {
+        "description": "What the visible copies priced in one currency cost, summed.\n\nOne row per currency and never converted: no exchange rate is consulted,\nso a library that bought in two currencies gets two totals.",
+        "properties": {
+          "copies": {
+            "minimum": 1.0,
+            "title": "Copies",
+            "type": "integer"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "total_minor": {
+            "title": "Total Minor",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "currency",
+          "total_minor",
+          "copies"
+        ],
+        "title": "CurrencyTotal",
+        "type": "object"
+      },
       "CustomFieldCreate": {
         "description": "A field the Library is defining.\n\nThe kind is chosen here and never afterwards. Changing it would reinterpret\nevery value already under it: a TEXT field turned URL would start linking\nstrings nobody wrote as links, and the other direction would silently\nunmake links people are using. Delete and redefine is the honest version of\nthat, and it says out loud that the values go.",
         "properties": {
@@ -3699,10 +3792,11 @@
         "type": "object"
       },
       "ExportFormat": {
-        "description": "What `GET /api/books/export` may write.\n\nTwo of these are for a person and one is for another institution, and the\ndifference decides who may ask for it. CSV and plain text carry a\nhousehold's own columns (what a book cost, which room it is in, who added\nit) and go to a spreadsheet. MARCXML carries the catalogue record and goes\nto another library's system, so it is offered only in library mode: see\n`routers/books.export_books`.",
+        "description": "What `GET /api/books/export` may write.\n\nThree of these are for a person and one is for another institution, and the\ndifference decides who may ask for it. CSV carries a household's own\ncolumns (what a book cost, which room it is in, who added it) and goes to a\nspreadsheet; plain text carries fewer and goes to an editor. HTML is a page\na person opens offline or hands to somebody, with the narrower set of\ncolumns `routers/books._html_chunks` names. MARCXML carries the catalogue record and goes\nto another library's system, so it is offered only in library mode: see\n`routers/books.export_books`.",
         "enum": [
           "csv",
           "txt",
+          "html",
           "marcxml"
         ],
         "title": "ExportFormat",
@@ -7458,7 +7552,7 @@
                 "items": {
                   "$ref": "#/components/schemas/CatalogueSourcePreference"
                 },
-                "maxItems": 11,
+                "maxItems": 12,
                 "type": "array"
               },
               {
@@ -7880,6 +7974,20 @@
               "$ref": "#/components/schemas/PerUserStat"
             },
             "title": "Per User",
+            "type": "array"
+          },
+          "priced_without_currency": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Priced Without Currency",
+            "type": "integer"
+          },
+          "purchase_totals": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CurrencyTotal"
+            },
+            "title": "Purchase Totals",
             "type": "array"
           },
           "rated_count": {
@@ -8909,6 +9017,100 @@
           }
         ],
         "summary": "Add Book",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/already-held": {
+      "get": {
+        "description": "Whether the member already has the record they are about to save.\n\nAsked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:\na Book held where they cannot see it answers as nothing here, though the\nsave itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a\ntitle is compared as it would be stored.",
+        "operationId": "already_held",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "title",
+            "required": true,
+            "schema": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "author",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Author"
+            }
+          },
+          {
+            "in": "query",
+            "name": "isbn",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 20,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Isbn"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlreadyHeldOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Already Held",
         "tags": [
           "books"
         ]
@@ -10180,7 +10382,7 @@
     },
     "/api/books/export": {
       "get": {
-        "description": "The shelf this member can see, as a file.\n\n**CSV is `text/csv`, plain text is `text/plain` and MARCXML is\n`application/marcxml+xml`.** All three are declared for the 200 because the\ndocument has no way to say which of them `?format=` selects.\n\n**Rationed, and the schema does not say so.** The refusal is a 429 carrying\n`Retry-After`. It is not declared here because this document declares a\nrefusal only where it declares one for every operation that can answer\nit: a 401, a 403 or a 404, derived in `refusals.py` from what each route\nruns, and nothing else. So declaring a 429 here alone would make this\nrefusal look deliberate and every other operation's look accidental, which\nis a decision about the whole error surface rather than about this route.\n`docs/decisions.md` records that reasoning, having refused the same move\nonce already, and\n`tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this\nparagraph rests on rather than a reader's memory of it. The mechanism behind\nthe refusal is shared by every route in `ratelimit.py`, so what would make\ndeclaring it honest is declaring it at all of them. The counter is not:\nthis route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.\n\n**MARCXML needs library mode and the other two do not.** A CSV export is a\nhousehold reading its own shelf in a spreadsheet. A MARC record is a\ncatalogue record handed to another institution, which is what library mode\nis for, and offering it everywhere would put a format nobody in a household\ncan use in front of everybody. Enforced here rather than by hiding the menu\nentry: disabling a control in the browser is advice to one client, which is\nthe sentence `routers/public.py` already states about the public catalogue.\n\n**403, not 404.** The route exists and the member may call it; the format\nis switched off. That is the same answer registration gives when it is\nclosed, and there is nothing to conceal: `GET /api/settings/features`\nalready tells any caller whether library mode is on.",
+        "description": "The shelf this member can see, as a file.\n\n**CSV is `text/csv`, plain text is `text/plain`, HTML is `text/html` and\nMARCXML is `application/marcxml+xml`.** All are declared for the 200\nbecause the document has no way to say which of them `?format=` selects.\n\n**Rationed, and the schema does not say so.** The refusal is a 429 carrying\n`Retry-After`. It is not declared here because this document declares a\nrefusal only where it declares one for every operation that can answer\nit: a 401, a 403 or a 404, derived in `refusals.py` from what each route\nruns, and nothing else. So declaring a 429 here alone would make this\nrefusal look deliberate and every other operation's look accidental, which\nis a decision about the whole error surface rather than about this route.\n`docs/decisions.md` records that reasoning, having refused the same move\nonce already, and\n`tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this\nparagraph rests on rather than a reader's memory of it. The mechanism behind\nthe refusal is shared by every route in `ratelimit.py`, so what would make\ndeclaring it honest is declaring it at all of them. The counter is not:\nthis route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.\n\n**MARCXML needs library mode and the other three do not.** A CSV export is a\nhousehold reading its own shelf in a spreadsheet. A MARC record is a\ncatalogue record handed to another institution, which is what library mode\nis for, and offering it everywhere would put a format nobody in a household\ncan use in front of everybody. Enforced here rather than by hiding the menu\nentry: disabling a control in the browser is advice to one client, which is\nthe sentence `routers/public.py` already states about the public catalogue.\n\n**403, not 404.** The route exists and the member may call it; the format\nis switched off. That is the same answer registration gives when it is\nclosed, and there is nothing to conceal: `GET /api/settings/features`\nalready tells any caller whether library mode is on.",
         "operationId": "export_books",
         "parameters": [
           {
@@ -10198,6 +10400,7 @@
             "content": {
               "application/marcxml+xml": {},
               "text/csv": {},
+              "text/html": {},
               "text/plain": {}
             },
             "description": "Successful Response",
@@ -12433,7 +12636,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain; then by\nthe book's own Google Books volume id, where it carries one and the library\nasks Google Books; and by title and author otherwise, which runs the ranked\nsearch. **Exact keys first, and the store identifier is an exact key**: a\nbook imported from Google Play Books carries a volume id and no ISBN, so\nwithout that middle step it is matched by its title, which is the weakest\ninstrument here. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds nine lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\n\n**It writes what a refresh writes, less the title.**\nCategories, the series, the Google Books volume id and Classifications\nneed a selected candidate through `enrich/apply`: this record was chosen by\nno Member. The volume id says which volume this book is, and a wrong one\nsilently drops the book out of the identifier backfill. The one exception\nis a record found by the book's own volume id and carrying that id, which\nrecords it, as the identifier backfill does.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain; then by\nthe book's own Google Books volume id, where it carries one and the library\nasks Google Books; and by title and author otherwise, which runs the ranked\nsearch. **Exact keys first, and the store identifier is an exact key**: a\nbook imported from Google Play Books carries a volume id and no ISBN, so\nwithout that middle step it is matched by its title, which is the weakest\ninstrument here. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds ten lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\n\n**It writes what a refresh writes, less the title.**\nCategories, the series, the Google Books volume id and Classifications\nneed a selected candidate through `enrich/apply`: this record was chosen by\nno Member. The volume id says which volume this book is, and a wrong one\nsilently drops the book out of the identifier backfill. The one exception\nis a record found by the book's own volume id and carrying that id, which\nrecords it, as the identifier backfill does.",
         "operationId": "enrich_book",
         "parameters": [
           {

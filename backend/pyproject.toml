@@ -279,16 +279,24 @@ source_paths = ["."]
 
 [tool.coverage.run]
 source = ["."]
-# **What a coverage run cannot see, said where it is left out.** Nothing gates on
-# a coverage figure here, so this list exists to keep a gap that is a fact about
-# the instrument from reading as a test somebody forgot.
+# Branch coverage, because the CRAP gate in the pipeline scores a function by its
+# branches where it has any. Here rather than on each command line, so the pipeline's
+# run and the local gate's cannot measure two different things.
+branch = true
+# **What a coverage run cannot see, said where it is left out.** The pipeline's
+# CRAP score reads this run's figures, and a file listed here is one it does not
+# score at all, rather than one it scores at 0%. So a file goes here only when no
+# test in this process can reach it, never to make a score pass. The score pins
+# this list too, and refuses a run whose list differs, so a change here is made in
+# both places at once.
 #
 # Measured and not listed, deliberately: `migrations/`, whose upgrades build the
 # schema every run uses and whose downgrades `tests/test_schema.py` runs back to
 # an empty database, so an arm of a revision neither reaches shows as unreached
 # rather than vanishing; its `env.py` reads the logging file only when run from
 # a terminal, which no test is. And `scripts/postgres_database.py`, whose server half runs only against
-# Postgres, which its test file's docstring states.
+# Postgres, which its test file's docstring states. That half scores as unreached,
+# so a branch added to it raises its CRAP score with no test able to lower it.
 omit = [
     "tests/*",
     ".venv/*",

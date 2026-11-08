@@ -247,9 +247,11 @@ PUBLIC_CATALOGUE_LIMIT = RateLimit(max_attempts=120, window_seconds=60)
 # `COVER_BACKFILL_LIMIT`. It cost one row in the documentation table and one
 # word in that table's guard, which is a price rather than a reason.
 #
-# Five a minute, because the menu offers **three** formats and a member
-# comparing all three spends three; five leaves a retry without touching
-# anybody using the feature, and past it somebody is looping.
+# Five a minute, because a member comparing every format the menu offers
+# spends one start on each, and five leaves at least one retry over that
+# without touching anybody using the feature; past it somebody is looping.
+# `tests/test_ratelimit.py::TestTheExportDoorIsRationed` fails when a format
+# added to `ExportFormat` leaves no retry.
 #
 # **What this does not bound, stated here because a counter reads as though it
 # bounded all three.** It counts *starts*, not responses in flight, so five

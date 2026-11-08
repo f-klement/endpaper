@@ -9,10 +9,12 @@
 /**
  * What `GET /api/books/export` may write.
  *
- * Two of these are for a person and one is for another institution, and the
- * difference decides who may ask for it. CSV and plain text carry a
- * household's own columns (what a book cost, which room it is in, who added
- * it) and go to a spreadsheet. MARCXML carries the catalogue record and goes
+ * Three of these are for a person and one is for another institution, and the
+ * difference decides who may ask for it. CSV carries a household's own
+ * columns (what a book cost, which room it is in, who added it) and goes to a
+ * spreadsheet; plain text carries fewer and goes to an editor. HTML is a page
+ * a person opens offline or hands to somebody, with the narrower set of
+ * columns `routers/books._html_chunks` names. MARCXML carries the catalogue record and goes
  * to another library's system, so it is offered only in library mode: see
  * `routers/books.export_books`.
  */
@@ -21,5 +23,6 @@ export type ExportFormat = (typeof ExportFormat)[keyof typeof ExportFormat];
 export const ExportFormat = {
   csv: "csv",
   txt: "txt",
+  html: "html",
   marcxml: "marcxml",
 } as const;

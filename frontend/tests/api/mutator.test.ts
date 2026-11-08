@@ -690,9 +690,16 @@ describe("downloadFile", () => {
     expect(declaredDownloadTypes().length).toBeGreaterThan(1);
   });
 
-  it("asks for every type a download is declared to be", async () => {
+  it("asks for every type a download is declared to be but a page", async () => {
+    // `text/html`, which the HTML export is declared as, is the one left out:
+    // asking for it puts the request on the portal's redirecting side, which
+    // the arm below refuses. The export still arrives, because the server
+    // negotiates nothing on these routes.
     const accept = await sentAcceptHeader();
-    for (const type of declaredDownloadTypes()) expect(accept).toContain(type);
+    const asked = declaredDownloadTypes().filter(
+      (type) => type !== "text/html",
+    );
+    for (const type of asked) expect(accept).toContain(type);
   });
 
   it("asks for the error body as well, which no operation declares", async () => {

@@ -28,6 +28,7 @@ answer it, for a door that asks once a request.
 | `Tied` | two or more Books on the shelf answer and the tie rule picks none | their ids |
 | `InTrash` | only Books in this Member's trash view hold the ISBN | their ids |
 | `Hidden` | a Book this Member cannot see holds the ISBN | nothing |
+| `Resembles` | Books on the shelf share the title key, on a ladder whose title rung is a guess | their ids |
 
 **`Hidden` carries no id, and a caller must not name the row it answered.**
 ADR 0003: a Book's existence is private to whoever may see it, and an id or a
@@ -49,6 +50,7 @@ identifier are a stronger claim than any title.
 | `CALIBRE` (an add) | Calibre uuid | none | the lowest id |
 | `STORE` (an add) | ASIN, Google volume id | none | the lowest id |
 | `ADD` (an add) | ISBN | none | the lowest id |
+| `LOOKUP` (before an add) | ISBN, shelf only | `identity.work_key`, answering `Resembles` | the lowest id |
 
 Any other tie is no answer. **An add asks no title**: two Books may share one,
 and an add refused on a title would refuse a second edition. Every visible
@@ -69,6 +71,14 @@ canonicalisation as an ISBN-10, with hyphens or with a lower case x, meets
 the ISBN-13 every reader now produces. A value `parse` refuses is compared as
 stored, less surrounding space.
 
+**`LOOKUP` warns and decides nothing**: a member about to save a looked up
+record is told what they already have. Its title rung answers `Resembles`
+rather than `Seen`, so a caller cannot read a title match as the identifier
+match it is weaker than, and no import ladder's title answer changes. **It reads
+nothing past the Shelf**, so it never answers `Hidden` or `InTrash`: a warning
+shown before the save must not say that a Book somebody else keeps private holds
+the ISBN. The add door's own 409 stays the backstop.
+
 ## Not here
 
 The file key, a partial MD5 or a file location, is `file_references`'.
@@ -79,7 +89,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Final, Self
+from typing import Any, Final, Self
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -100,6 +110,7 @@ class Source(Enum):
     CALIBRE = "calibre"
     STORE = "store"
     ADD = "add"
+    LOOKUP = "lookup"
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +138,12 @@ class Hidden:
     pass
 
 
-type Answer = Seen | Unknown | Tied | InTrash | Hidden
+@dataclass(frozen=True, slots=True)
+class Resembles:
+    book_ids: frozenset[int]
+
+
+type Answer = Seen | Unknown | Tied | InTrash | Hidden | Resembles
 
 
 #: What one identifier is compared by: an ISBN alone, or a scheme with its
@@ -147,6 +163,26 @@ class _Ladder:
     #: The title key asked second, or `None` where no title is asked.
     title: Callable[[str, str | None], str] | None
     copies_take_the_lowest: bool
+    #: Whether a title rung hit answers `Resembles` rather than settling to
+    #: `Seen` or `Tied`. Only a ladder that warns may set it: an import acting
+    #: on a `Resembles` would have nothing to act on, and `importing.py` would
+    #: report the row unmatched without an error.
+    title_is_a_guess: bool = False
+    #: Whether an ISBN ladder reads past the Shelf, for `InTrash` and `Hidden`.
+    #: Off for a ladder whose answer is shown before anything is written:
+    #: `Hidden` there would tell the member that a Book they cannot see holds
+    #: the ISBN, and the member's own trashed holder needs no warning, because
+    #: the save purges it.
+    asks_off_the_shelf: bool = True
+
+    def __post_init__(self) -> None:
+        # Refused here rather than stated: both flags are read on one branch
+        # each, so a ladder setting either where it is not read would answer
+        # differently from what it declares, silently.
+        if not self.asks_off_the_shelf and self.schemes is not None:
+            raise ValueError("only an ISBN ladder can be kept on the Shelf")
+        if self.title_is_a_guess and (self.title is None or self.asks_off_the_shelf):
+            raise ValueError("a title guess needs a title rung and a ladder kept on the Shelf")
 
 
 _LADDERS: Final[Mapping[Source, _Ladder]] = {
@@ -169,6 +205,13 @@ _LADDERS: Final[Mapping[Source, _Ladder]] = {
         copies_take_the_lowest=True,
     ),
     Source.ADD: _Ladder(schemes=None, title=None, copies_take_the_lowest=True),
+    Source.LOOKUP: _Ladder(
+        schemes=None,
+        title=identity.work_key,
+        copies_take_the_lowest=True,
+        title_is_a_guess=True,
+        asks_off_the_shelf=False,
+    ),
 }
 
 
@@ -234,6 +277,16 @@ def _grouped[K](pairs: Iterable[tuple[K, int]]) -> dict[K, set[int]]:
     for key, book_id in pairs:
         grouped.setdefault(key, set()).add(book_id)
     return grouped
+
+
+def _isbns_of(rows: Iterable[Any]) -> dict[_Key, set[int]]:
+    """The Books holding each ISBN key, from shelf rows read with `Index._read`'s
+    columns."""
+    return _grouped(
+        (key, book_id)
+        for book_id, isbn, _title, _author, _group in rows
+        if (key := _isbn_key(isbn)) is not None
+    )
 
 
 class Index:
@@ -320,6 +373,55 @@ class Index:
         )
         return cls._read(db, member_id, ladder, narrow=narrow)
 
+    @staticmethod
+    def _past_the_shelf(
+        db: Session, member_id: int, narrow: _Narrow | None, shelf: Shelf, columns: tuple[Any, ...]
+    ) -> tuple[list[Any], dict[_Key, set[int]], dict[_Key, set[int]], dict[_Key, set[int]]]:
+        """An ISBN ladder's reads past the Shelf: the shelf rows the title rung
+        and the identifier rung read, the ISBNs on the shelf, in the trash, and
+        anywhere. Apart from `_read`, so that the shelf alone ladder's branch
+        there did not take `_read` past its recorded complexity."""
+        # The one read past the viewer, counted by
+        # `tests/test_shelf.py::test_the_named_ways_past_a_viewer_have_the_callers_they_claim`.
+        # Ids of rows nobody here may see stay inside this object: `Hidden`
+        # is the only thing they ever decide, and it carries none of them.
+        anywhere = whole_table_for_uniqueness(db, Book.id, Book.isbn)
+        if narrow is None:
+            anywhere = anywhere.filter(Book.isbn.isnot(None))
+        else:
+            # **A scan of `books.isbn`, not the unique index**: an exact
+            # comparison misses a row stored with hyphens or a lower case
+            # x, which the full index finds through `isbn.parse`, and the
+            # door then made a second Book. The patterns are a superset;
+            # the keys below decide.
+            anywhere = anywhere.filter(
+                or_(*(Book.isbn.ilike(pattern, escape="\\") for pattern in narrow.isbn_patterns))
+            )
+        held_anywhere: dict[_Key, set[int]] = _grouped(
+            (key, book_id)
+            for book_id, isbn in anywhere
+            if (key := _isbn_key(isbn)) is not None and (narrow is None or key in narrow.isbn_keys)
+        )
+        # The full build reads every shelf row, which the title rung needs.
+        # A narrowed one asks the shelf and the trash for the holders alone,
+        # by primary key, since every holder is in `held_anywhere`, and not
+        # at all when nothing holds the ISBN.
+        holders: set[int] = set().union(*held_anywhere.values())
+        in_the_trash = Shelf.trashed_by(db, member_id).select(Book.id, Book.isbn)
+        if narrow is None:
+            rows = shelf.select(*columns).all()
+            trashed = in_the_trash.filter(Book.isbn.isnot(None)).all()
+        elif holders:
+            rows = shelf.select(*columns).filter(Book.id.in_(holders)).all()
+            trashed = in_the_trash.filter(Book.id.in_(holders)).all()
+        else:
+            rows, trashed = [], []
+        in_trash: dict[_Key, set[int]] = _grouped(
+            (key, book_id) for book_id, isbn in trashed if (key := _isbn_key(isbn)) is not None
+        )
+        by_identifier = _isbns_of(rows)
+        return rows, by_identifier, in_trash, held_anywhere
+
     @classmethod
     def _read(cls, db: Session, member_id: int, ladder: _Ladder, narrow: _Narrow | None) -> Self:
         shelf = Shelf.seen_by(db, member_id)
@@ -328,49 +430,14 @@ class Index:
         in_trash: dict[_Key, set[int]] = {}
         held_anywhere: dict[_Key, set[int]] = {}
 
-        if ladder.schemes is None:
-            # The one read past the viewer, counted by
-            # `tests/test_shelf.py::test_the_named_ways_past_a_viewer_have_the_callers_they_claim`.
-            # Ids of rows nobody here may see stay inside this object: `Hidden`
-            # is the only thing they ever decide, and it carries none of them.
-            anywhere = whole_table_for_uniqueness(db, Book.id, Book.isbn)
-            if narrow is None:
-                anywhere = anywhere.filter(Book.isbn.isnot(None))
-            else:
-                # **A scan of `books.isbn`, not the unique index**: an exact
-                # comparison misses a row stored with hyphens or a lower case
-                # x, which the full index finds through `isbn.parse`, and the
-                # door then made a second Book. The patterns are a superset;
-                # the keys below decide.
-                anywhere = anywhere.filter(
-                    or_(*(Book.isbn.ilike(pattern, escape="\\") for pattern in narrow.isbn_patterns))
-                )
-            held_anywhere = _grouped(
-                (key, book_id)
-                for book_id, isbn in anywhere
-                if (key := _isbn_key(isbn)) is not None and (narrow is None or key in narrow.isbn_keys)
-            )
-            # The full build reads every shelf row, which the title rung needs.
-            # A narrowed one asks the shelf and the trash for the holders alone,
-            # by primary key, since every holder is in `held_anywhere`, and not
-            # at all when nothing holds the ISBN.
-            holders: set[int] = set().union(*held_anywhere.values())
-            in_the_trash = Shelf.trashed_by(db, member_id).select(Book.id, Book.isbn)
-            if narrow is None:
-                rows = shelf.select(*columns).all()
-                trashed = in_the_trash.filter(Book.isbn.isnot(None)).all()
-            elif holders:
-                rows = shelf.select(*columns).filter(Book.id.in_(holders)).all()
-                trashed = in_the_trash.filter(Book.id.in_(holders)).all()
-            else:
-                rows, trashed = [], []
-            in_trash = _grouped(
-                (key, book_id) for book_id, isbn in trashed if (key := _isbn_key(isbn)) is not None
-            )
-            by_identifier = _grouped(
-                (key, book_id)
-                for book_id, isbn, _title, _author, _group in rows
-                if (key := _isbn_key(isbn)) is not None
+        if ladder.schemes is None and not ladder.asks_off_the_shelf:
+            # The shelf alone. Never narrowed: `_narrowed` refuses a ladder
+            # asking a title, and `LOOKUP`, the one such ladder, asks one.
+            rows = shelf.select(*columns).all()
+            by_identifier = _isbns_of(rows)
+        elif ladder.schemes is None:
+            rows, by_identifier, in_trash, held_anywhere = cls._past_the_shelf(
+                db, member_id, narrow, shelf, columns
             )
         else:
             carrying = (
@@ -428,7 +495,7 @@ class Index:
         if self._ladder.title is not None:
             held = self._by_title.get(self._ladder.title(title, author), set())
             if held:
-                return self._settle(held)
+                return Resembles(frozenset(held)) if self._ladder.title_is_a_guess else self._settle(held)
 
         if self._ladder.schemes is None:
             trashed = _union(self._in_trash, keys)

@@ -961,7 +961,7 @@ hold to it.
 **It is not the only outbound door that can be cleartext, and this is a pointer rather
 than a closed list.** The webhook's `http://` destination is beside the notification
 channels; the household OPDS feed's `Authorization: Basic` is under `## Known limits`; and
-the one catalogue that answers only over plaintext and only to an authenticated request is
+the two catalogues that answer only over plaintext and only to an authenticated request are
 under `## Catalogue requests`, which is the only one of the three whose host an operator
 cannot move: the other two are addresses somebody chose, and a seeded catalogue's is a
 module constant.
@@ -1110,7 +1110,7 @@ paragraph.
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | address | The fifth reason, and both of these rows are it: getting back into an account, from a caller who by definition holds no session. One budget across both routes, because they are the same act (ask for a one time code to be produced) and splitting it would let a caller spend five of each. **Charged on the address so a botnet cannot queue a hundred requests against one member** |
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | account | The other half of the same charge, and both halves are needed: an address limit alone leaves one address free to work through the roster slowly, one member at a time. **The key is caller chosen, so this is a denial of service on recovery**, stated rather than argued away. What bounds the damage is that the thing being rationed is already bounded: at most one live request exists per account however many times it is asked for. **The wider residual, stated because it is a property of this window rather than of the key**: the limiter refuses a key it has never seen once its table is full rather than evicting a live one, so 4,096 distinct account keys held live deny recovery to every account not already tracked, for an hour. Filling them takes 4,096 requests across about 820 addresses at five each. Refusing rather than evicting is still right, because every eviction policy lets an attacker choose which key leaves |
 | `/auth/reset/redeem`, `/auth/verify` | 10 / hour | username + address | Guessing a one time code. The code is 60 bits, so the keyspace is not what is doing the work here and this is: an approved reset code lives one hour. Keyed like a sign in rather than on the account alone, because an account-only key would let anybody lock a member out of the recovery they had just been granted |
-| `GET /api/books/export` | 5 / min | username | **The import row's reason, not a new one**: the cost lands on this deployment's own resources rather than on a credential, a supplier or a stranger, which is the cost the `/api/imports/*` row above states and measures. One call walks the whole of one member's visible shelf, `marc.EXPORT_PAGE_RECORDS` rows at a time, holding a worker thread and a database session for the life of the response. Five a minute because the menu offers three formats and a member comparing all three spends three. **It counts starts, not responses in flight**, so five concurrent walks by one member are inside it and nothing counts across members at all; bounding that is a concurrency limit, which this is not. Keyed on the authenticated username rather than the address, because behind a reverse proxy an address collapses a household into one bucket and the retry hint is computed from that bucket's first hit, so a shared bucket would tell one member when another last exported |
+| `GET /api/books/export` | 5 / min | username | **The import row's reason, not a new one**: the cost lands on this deployment's own resources rather than on a credential, a supplier or a stranger, which is the cost the `/api/imports/*` row above states and measures. One call walks the whole of one member's visible shelf, `marc.EXPORT_PAGE_RECORDS` rows at a time, holding a worker thread and a database session for the life of the response. Five a minute because a member comparing every format the menu offers spends one start on each, and five leaves at least one retry over that; `tests/test_ratelimit.py::TestTheExportDoorIsRationed` fails when a new format leaves none. **It counts starts, not responses in flight**, so five concurrent walks by one member are inside it and nothing counts across members at all; bounding that is a concurrency limit, which this is not. Keyed on the authenticated username rather than the address, because behind a reverse proxy an address collapses a household into one bucket and the retry hint is computed from that bucket's first hit, so a shared bucket would tell one member when another last exported |
 | `GET /api/backup` | 3 / min | username | The same reason and a different unit, which is why it is a second counter rather than a share of the one above: this builds the whole database and every cover image in one pass and holds the result in memory before a byte is sent. Sharing a budget would let a member's exports ration the administrator's backup. Three a minute is the impatient second click plus one. **It bounds how often an archive is built and neither how large one is nor how many are built at once**: the archive byte ceiling is the restore upload's cap and is not read on the way out, so the download is capped by nothing |
 
 The last three of the first six are the ones that are not about this deployment: spending somebody else's
@@ -1196,8 +1196,8 @@ whole catalogue in memory. Measured through the route with descriptions of 200 c
 `tracemalloc` peak above the baseline: 55.05 MiB against 1.02 at 10,000 books and 219.06
 against 1.05 at 40,000, where the first rises with the shelf and the second does not. The
 download and the wall clock are not bounded, and neither is the number of concurrent
-exports. **The CSV and txt arms of the same route walk the same pages**, and they had to:
-neither is gated by library mode, so any authenticated member reaches them, and the CSV
+exports. **The CSV, txt and HTML arms of the same route walk the same pages**, and they had
+to: none is gated by library mode, so any authenticated member reaches them, and the CSV
 arm carries the description column as well.
 
 **So the concurrency hazard is not behind a feature flag any more.** It is stated here
@@ -1212,7 +1212,9 @@ shape, from an instance with library mode on to every authenticated account.
 line goes out before the first page, so a failure at page k answers 200 and stops. For
 MARCXML the artefact self invalidates, because an unclosed `<collection>` is refused by
 every parser. **A short CSV is a valid CSV**, and it is the file `POST /api/imports/csv`
-reads back, so the same failure loses member data quietly on the backup path. It needs no
+reads back, so the same failure loses member data quietly on the backup path. A short HTML
+page renders too, because a browser closes an unclosed `<tbody>` without complaint; nothing
+reads that page back, so it loses no data. It needs no
 privilege to induce: the work is spread across the download now, so a write holding the
 lock for longer than the five second `busy_timeout` raises under the walk instead of
 before it, and `database.py` names an import, a restore and emptying the trash as the
@@ -1443,10 +1445,10 @@ separator, so nothing is written outside the covers directory whatever the entry
 
 ## Catalogue requests
 
-Eleven third party catalogues are asked for records: Open Library, the DNB, K10plus, the
+Twelve third party catalogues are asked for records: Open Library, the DNB, K10plus, the
 BnF, the Library of Congress, the Austrian National Library, the Spanish National Library,
 the National Library of Greece, the Czech National Library, the Biblioteca Nacional
-Argentina and Google Books. `backend/fetch.py` is the only place an HTTP
+Argentina, the Biblioteca Nacional de Uruguay and Google Books. `backend/fetch.py` is the only place an HTTP
 client for them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass
 over the tree, because the defect that produced the module was ten hand built clients that
 agreed on the timeout and agreed on nothing else.
@@ -1470,7 +1472,7 @@ that costs.
 member input, so `covers.is_fetchable` has to decide whether this server may connect at all,
 per redirect hop. A catalogue URL is a module constant plus a query string, so an attacker
 cannot choose the host and there is nothing an allowlist would refuse. Merging the two would
-mean adding eleven catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
+mean adding twelve catalogue hosts to `COVER_HOSTS`, which is what the CSP's `img-src` is
 generated from: the browser policy would be widened to pay for a fetch policy.
 
 ### An address a person typed is resolved once and connected to at that address
@@ -1506,7 +1508,7 @@ unchanged and is in Known limits below. A name at a public address that proxies 
 refused by nothing here, and no address policy anywhere can see it.
 
 **Three of the five outbound doors are not wired to it**, and the count is worth reading
-against the list rather than past it. The eleven seeded catalogues are not, because their
+against the list rather than past it. The twelve seeded catalogues are not, because their
 hosts are module constants. The webhook is not, because which policy fits it is undecided
 rather than known. Z39.50 cannot be, because pinning is done by rewriting an HTTP request and
 it speaks none: `fetch.classify` and `fetch.AddressPolicy` are reusable there, and the pin is
@@ -1521,9 +1523,9 @@ send this server to a host of its choosing. `fetch.get` therefore sets
 implicit 443 and 80 filled in, at most `MAX_REDIRECTS` of them. Anything else raises
 `RedirectedOffHost`.
 
-That matters most at the four catalogues with no TLS endpoint, the Library of Congress,
-the National Library of Greece, the Czech national library and the Biblioteca Nacional
-Argentina, where an on path attacker could answer for the catalogue:
+That matters most at the five catalogues with no TLS endpoint, the Library of Congress,
+the National Library of Greece, the Czech national library, the Biblioteca Nacional
+Argentina and the Biblioteca Nacional de Uruguay, where an on path attacker could answer for the catalogue:
 `docs/decisions.md`, "The Library of Congress is fetched over plaintext HTTP, knowingly"
 and "The National Library of Greece is plaintext too, and the identity check is what that
 costs". Substituting a record is still open to such an attacker; turning one request into a
@@ -1538,11 +1540,11 @@ picks one from a list. That second path is exactly the Library of Congress's exp
 which is title search only: the Greek source's search surface is **not** narrower than it,
 and its lookup surface is the half that is checked.
 
-**One of those four carries a login, and that is a different exposure rather than more of
-the same.** The Argentine national library answers only over plaintext and only to an
-authenticated request, so a lookup there puts an HTTP Basic header on an unencrypted
-connection. What that credential opens is a public catalogue and nothing else: the library
-publishes the pair itself, and this build ships that published pair, so a stock install puts
+**Two of those five carry a login, and that is a different exposure rather than more of
+the same.** The Argentine and Uruguayan national libraries answer only over plaintext and
+only to an authenticated request, so a lookup there puts an HTTP Basic header on an
+unencrypted connection. What that credential opens is a public catalogue and nothing else:
+each library publishes its pair itself, and this build ships that published pair, so a stock install puts
 nothing on the wire its issuer has not already disclosed. **An install that has its own
 arrangement with a library is putting a private login on an unencrypted connection**, which
 is stated here and beside the field because that install is anticipated rather than
@@ -1716,10 +1718,11 @@ settings screen, not only here. On a machine nobody
 administers this is also the restore story: a backup carries the sealed rows and never the
 key, so restoring onto a new machine needs the phrase. That is why there is one.
 
-**One catalogue's login ships with the build, and it is the bottom of a ladder of four.**
-The Biblioteca Nacional Argentina publishes a username and password on its own page for
-librarians, beside a contact address and with no stated restriction on use, so carrying that
-pair discloses nothing the issuing library has not. Owner's decision of 2026-09-07;
+**Two catalogues' logins ship with the build, and each is the bottom of a ladder of four.**
+The Biblioteca Nacional Argentina and the Biblioteca Nacional de Uruguay each publish a
+username and password on their own page for librarians, with no stated restriction on use,
+so carrying those pairs discloses nothing the issuing library has not. Owner's decisions of
+2026-09-07 and, for Uruguay, 2026-09-05;
 `docs/decisions.md`, "The catalogue that publishes its own login ships with it", keeps the
 case against it as well.
 

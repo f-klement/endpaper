@@ -7,7 +7,7 @@ from database import MonthBucket
 from dependencies import CurrentUser, DbSession
 from models import Book, Collection, ReadingProgress, Tag, User, book_tags
 from reading import Reading
-from schemas import CollectionStat, MonthStat, PerUserStat, StatsOut, TagStat
+from schemas import CollectionStat, CurrencyTotal, MonthStat, PerUserStat, StatsOut, TagStat
 from shelf import Shelf
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -141,6 +141,36 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
 
     average, rated_count = reading.rating_summary(shelf)
 
+    # Summed in SQL over the integer column, so no float ever holds a price.
+    # Priced copies only: a currency with no price is an unpriced copy, and
+    # counts nowhere here. The NULL currency group is the priced copies whose
+    # currency nobody recorded, split out below rather than summed.
+    #
+    # Grouped by the upper cased code, because a write upper cases it but a
+    # restored archive goes in through Core and keeps whatever case it holds:
+    # grouped as stored, `eur` beside `EUR` would come back as two totals that
+    # the page prints as two "EUR" figures. SQLite's `upper()` folds ASCII
+    # only, where PostgreSQL and the write validator fold Unicode, so a
+    # restored non ASCII code groups apart from its upper case on SQLite.
+    code = func.upper(Book.purchase_currency)
+    priced = (
+        shelf.select(
+            code,
+            func.sum(Book.purchase_price_minor),
+            func.count(Book.id),
+        )
+        .filter(Book.purchase_price_minor.isnot(None))
+        .group_by(code)
+        .order_by(code)
+        .all()
+    )
+    purchase_totals = [
+        CurrencyTotal(currency=currency, total_minor=total_minor, copies=copies)
+        for currency, total_minor, copies in priced
+        if currency is not None
+    ]
+    priced_without_currency = sum(copies for currency, _, copies in priced if currency is None)
+
     return StatsOut(
         total=total,
         per_user=[PerUserStat(username=username, count=count) for username, count in per_user],
@@ -162,4 +192,6 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
         # sensible precision, and every client would round it the same way.
         average_rating=round(float(average), 2) if average is not None else None,
         rated_count=rated_count or 0,
+        purchase_totals=purchase_totals,
+        priced_without_currency=priced_without_currency,
     )

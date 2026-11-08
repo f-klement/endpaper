@@ -12,6 +12,7 @@ import { useTranslation, type MessageKey } from "../../../i18n";
 import { CoverImage, LocationField, TagPicker } from "../../components";
 import { FORMAT_LABELS, FORMAT_ORDER } from "../../types";
 import type { BookDraft, PendingBook } from "../types";
+import { useAlreadyHeldWarning } from "../hooks";
 
 interface LookupResultProps {
   /**
@@ -59,6 +60,45 @@ interface LookupResultProps {
 const FORMATS: { value: BookFormat; label: MessageKey }[] = FORMAT_ORDER.map(
   (value) => ({ value, label: FORMAT_LABELS[value] }),
 );
+
+/**
+ * Before the press, not after it: the 409 below says the same of an
+ * ISBN only once the member has filled in everything else. Hidden
+ * while a refusal shows, which carries its own link. A title and
+ * author match is said to be weaker, because another edition of a
+ * book is often wanted and the save accepts it.
+ */
+function AlreadyHeldNotice({
+  draft,
+  refused,
+}: {
+  draft: BookDraft;
+  /** Whether a refusal shows, which carries its own link. */
+  refused: boolean;
+}) {
+  const { t } = useTranslation();
+  const held = useAlreadyHeldWarning(draft.title, draft.author, draft.isbn);
+  const heldId = held?.match != null ? held.book_ids[0] : undefined;
+  if (heldId === undefined || refused) return null;
+  return (
+    <div
+      role="status"
+      className="mt-4 rounded-lg border border-paper-200 bg-paper-50 p-3 text-sm dark:border-paper-700 dark:bg-paper-800"
+    >
+      <p className="text-paper-700 dark:text-paper-200">
+        {held?.match === "isbn"
+          ? t("scan.alreadyHeldIsbn")
+          : t("scan.alreadyHeldTitleAuthor")}
+      </p>
+      <Link
+        to={`/book/${heldId}`}
+        className="mt-1 inline-block font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+      >
+        {t("scan.openTheOneWeHave")}
+      </Link>
+    </div>
+  );
+}
 
 export default function LookupResult({
   pending,
@@ -164,6 +204,8 @@ export default function LookupResult({
             </p>
           </>
         )}
+
+        <AlreadyHeldNotice draft={draft} refused={error != null} />
 
         {tags.length > 0 && (
           <div className="mt-4">

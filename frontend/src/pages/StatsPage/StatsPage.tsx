@@ -1,7 +1,8 @@
-import { TagCategory } from "../../api/generated/model";
+import { TagCategory, type StatsOut } from "../../api/generated/model";
 import { ErrorState, Spinner } from "../../components";
 import { tagName, useTranslation, type MessageKey } from "../../i18n";
 import { monthLabel } from "../../lib/date";
+import { formatTotal } from "../../lib/money";
 import { TAG_CATEGORY_ORDER } from "../types";
 import StatSection from "./components/StatSection";
 import { useStats } from "./hooks";
@@ -20,6 +21,49 @@ const CATEGORY_HEADINGS: Record<TagCategory, MessageKey> = {
   [TagCategory.age]: "stats.byAge",
   [TagCategory.custom]: "stats.byCustomTag",
 };
+
+/**
+ * One total per currency and never converted, by the owner's ruling:
+ * a rate would need an outside source and a date, and either one
+ * chosen silently would make the figure wrong. Priced copies with no
+ * currency are counted beside it rather than added to any total.
+ */
+function PurchaseTotals({ stats }: { stats: StatsOut }) {
+  const { t, locale } = useTranslation();
+  const purchaseTotals = stats.purchase_totals ?? [];
+  const pricedWithoutCurrency = stats.priced_without_currency ?? 0;
+  if (purchaseTotals.length === 0 && pricedWithoutCurrency === 0) return null;
+  const pricedCopies = purchaseTotals.reduce(
+    (total, row) => total + row.copies,
+    0,
+  );
+  return (
+    <div className="mt-4 card p-4 text-center">
+      {purchaseTotals.length > 0 && (
+        <>
+          <p className="text-2xl font-bold text-paper-900 tabular-nums dark:text-paper-50">
+            {purchaseTotals
+              .map((row) => formatTotal(row.total_minor, row.currency, locale))
+              .join(" · ")}
+          </p>
+          <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
+            {t("stats.purchaseTotal", {
+              count: pricedCopies,
+              total: stats.total,
+            })}
+          </p>
+        </>
+      )}
+      {pricedWithoutCurrency > 0 && (
+        <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
+          {t("stats.pricedWithoutCurrency", {
+            count: pricedWithoutCurrency,
+          })}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function StatsPage() {
   const { t, locale } = useTranslation();
@@ -56,6 +100,8 @@ export default function StatsPage() {
           {t("stats.booksInLibrary")}
         </p>
       </div>
+
+      <PurchaseTotals stats={stats} />
 
       {/* Two series the server has always sent and this page ignored, so the
           only question it answered was "what have we bought". Reading is the

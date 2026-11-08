@@ -65,6 +65,11 @@ export const de: Messages = {
   "nav.menuFor": "Menü für {name}",
   "nav.switchAccount": "Konto wechseln",
   "nav.exportLibrary": "Bibliothek exportieren",
+  "nav.exportFormat.csv": "Eine Tabelle mit allen Spalten",
+  "nav.exportFormat.txt": "Reiner Text, ein Buch nach dem anderen",
+  "nav.exportFormat.html": "Eine Webseite, die sich ohne Verbindung öffnet",
+  "nav.exportFormat.marcxml":
+    "MARC-Datensätze für das System einer anderen Bibliothek",
   "nav.logout": "Abmelden",
   "nav.returnToMyAccount": "Zurück zu meinem Konto",
 
@@ -295,6 +300,10 @@ export const de: Messages = {
   "scan.openTheOneWeHave": "Vorhandenes Exemplar öffnen",
   "scan.inTrash":
     "Liegt im Papierkorb und wurde nicht selbst hinzugefügt, deshalb wurde es nicht aufgenommen. Wird es zurückgelegt oder von dem Mitglied, das es hinzugefügt hat (oder von einem Admin, wenn es niemand hinzugefügt hat), endgültig gelöscht, lässt es sich erneut hinzufügen.",
+  "scan.alreadyHeldIsbn":
+    "Dieses Buch ist schon in der Bibliothek: gleiche ISBN.",
+  "scan.alreadyHeldTitleAuthor":
+    "Möglicherweise dasselbe Buch: eines in der Bibliothek hat diesen Titel und Autor.",
   "scan.authorField": "Autor",
   "scan.addCover": "Coverfoto hinzufügen (optional)",
   "scan.replaceCover": "Coverfoto ersetzen (optional)",
@@ -425,6 +434,11 @@ export const de: Messages = {
   "stats.overTime": "Hinzugefügt im Zeitverlauf",
   "stats.couldNotLoad": "Die Statistik konnte nicht geladen werden.",
   "stats.loading": "Statistik wird geladen",
+
+  "stats.purchaseTotal":
+    "ausgegeben für die Bücher mit Preis in einer Währung ({count} von {total})",
+  "stats.pricedWithoutCurrency":
+    "Nicht mitgezählt: mit Preis, ohne Währung ({count})",
 
   // ── Schlagwörter ────────────────────────────────────────────────────────
   "tags.type": "Art",
@@ -1027,6 +1041,15 @@ export const de: Messages = {
   "location.carriedOver":
     "Bleibt für das nächste Buch stehen, damit ein ganzes Regal nur einmal getippt wird.",
   "location.batchLabel": "Regal für alles aus diesem Durchgang",
+
+  // ── Vom letzten Buch übernommen ───────────────────────────────────────
+  "carry.heading": "Vom letzten Buch übernommen",
+  "carry.hint":
+    "Alles beginnt wie beim zuletzt hinzugefügten Buch und lässt sich für dieses Buch ändern oder leeren.",
+  "carry.privateNotice":
+    "Dieses Buch ist zunächst privat, weil das zuletzt hinzugefügte Buch privat war. Niemand sonst sieht es.",
+  "carry.makePublic": "Für alle sichtbar machen",
+  "carry.clearDate": "Leeren",
 
   // ── Sammlungen ──────────────────────────────────────────────────────────
   "collections.title": "Sammlungen",
@@ -1827,6 +1850,7 @@ export const de: Messages = {
   "providers.name.nkp": "Tschechische Nationalbibliothek",
   "providers.name.bne": "Spanische Nationalbibliothek",
   "providers.name.bna": "Argentinische Nationalbibliothek",
+  "providers.name.bnu": "Uruguayische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

@@ -48,7 +48,13 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
-      <Route path="/scan" element={<ScanPage />} />
+      {/* Keyed on the account, so a change of identity with the page open
+          (under proxy it needs nothing from this app) starts the form again
+          from the new member's carry rather than the last one's. */}
+      <Route
+        path="/scan"
+        element={<ScanPage key={user.id} accountId={user.id} />}
+      />
       <Route path="/book/:id" element={<BookDetail currentUser={user} />} />
       <Route path="/loans" element={<LoansPage />} />
       {/* A child path of `/loans` rather than a sibling at the root, because

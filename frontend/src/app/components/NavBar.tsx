@@ -97,9 +97,21 @@ const ITEM_CLASS =
  * clutter rather than about access.
  */
 function exportFormats(libraryMode: boolean): ExportFormat[] {
-  const formats: ExportFormat[] = [ExportFormat.csv, ExportFormat.txt];
+  const formats: ExportFormat[] = [
+    ExportFormat.csv,
+    ExportFormat.txt,
+    ExportFormat.html,
+  ];
   return libraryMode ? [...formats, ExportFormat.marcxml] : formats;
 }
+
+/** What each format writes, typed over the whole enum so a new one needs a line. */
+const EXPORT_HINTS: Record<ExportFormat, MessageKey> = {
+  csv: "nav.exportFormat.csv",
+  txt: "nav.exportFormat.txt",
+  html: "nav.exportFormat.html",
+  marcxml: "nav.exportFormat.marcxml",
+};
 
 /**
  * The application bar.
@@ -291,6 +303,7 @@ export default function NavBar({
                     // and on every navigation item, which is how every other
                     // popover here closes.
                     onClick={() => exportLibrary(format)}
+                    title={t(EXPORT_HINTS[format])}
                     disabled={isExporting}
                     aria-busy={isExporting}
                     className="flex-1 text-center py-1.5 text-xs font-medium rounded-lg border border-paper-200 bg-paper-0 text-paper-700 hover:border-accent-300 hover:text-accent-700 transition-colors uppercase tracking-wide disabled:opacity-60 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200 dark:hover:text-accent-300"

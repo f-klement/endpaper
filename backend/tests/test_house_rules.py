@@ -64,6 +64,7 @@ TREE_GUARDS = {
     "TestEveryIntParameterFromTheOutsideIsBounded": ("application_modules",),
     "TestEveryMarkdownFileHasBalancedCodeFences": ("markdown_files",),
     "TestNoFileUsesADashAsPunctuation": ("project_files",),
+    "TestNoFileHoldsABidirectionalControl": ("project_files",),
     "TestEveryNumericQueryParamIsBoundedBothWays": ("application_modules",),
     "TestEveryPythonFileCompilesWithoutAWarning": ("every_python_file",),
     "TestEveryRequestBodyRowIdIsBounded": ("application_modules",),
@@ -1005,7 +1006,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **146** models under `schemas/`, **52** of
+    Measured on the tree as it stands: **148** models under `schemas/`, **52** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -5140,7 +5141,7 @@ class TestEveryTargetResolvesToADoorAndAReader:
         """Not a restatement of the derivation: it names the roster's answer.
 
         A derivation compared against itself is vacuous, so this writes out what
-        the eleven rows actually say. A row whose capability changes has to change
+        the twelve rows actually say. A row whose capability changes has to change
         this line too, which is the argument the old test made for writing
         `SEARCH_SOURCES` out rather than deriving it, kept in the one place where
         it still costs nothing.
@@ -5155,6 +5156,7 @@ class TestEveryTargetResolvesToADoorAndAReader:
             "open_library",
             "google_books",
             "bna",
+            "bnu",
         }
         assert {source.value for source in sources.SEARCH_SOURCES} == {
             "dnb",
@@ -5191,11 +5193,11 @@ class TestEveryTargetResolvesToADoorAndAReader:
         **The second line names a row, and that is the weaker half.** There is
         no capability saying "the credential is published", so the exception is
         registered here rather than derived; giving it one is open work, and
-        until then a second such catalogue changes this line.
+        until then each such catalogue changes this line, as the BNU did.
         """
         assert sources.METERED <= sources.NEEDS_A_KEY
         free_but_credentialled = sources.NEEDS_A_KEY - sources.METERED
-        assert free_but_credentialled == {CatalogueSource.BNA}
+        assert free_but_credentialled == {CatalogueSource.BNA, CatalogueSource.BNU}
 
 
 class TestBeliefIsStatedOnceRatherThanTwice:
@@ -5296,7 +5298,7 @@ class TestNoModuleHardCodesASourceOrder:
       neither is ever two or more sources and neither is reported.
       `test_dropping_an_exemption_surfaces_only_its_own_literal` is what said
       so: with the entry kept, dropping it surfaced nothing.
-    * `targets.SEEDED`, the eleven catalogue rows. **A mapping consulted by key**,
+    * `targets.SEEDED`, the twelve catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
       `frozenset`s, which have no order to read. The order a household gets is
@@ -11236,3 +11238,53 @@ class TestNoFileUsesADashAsPunctuation:
             name for name in _DASH_HOLDERS if any(name == e or name.startswith(e + "/") for e in denied)
         }
         assert stripped == _STRIPPED_HOLDERS
+
+
+#: Unicode's `Bidi_Control` property, all twelve, written as escapes so that this
+#: file holds none: the Arabic letter mark, the left to right and right to left
+#: marks, the five embeddings and overrides, and the four isolates.
+_BIDI_CONTROLS: Final = re.compile("[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+class TestNoFileHoldsABidirectionalControl:
+    """No file carries a raw bidirectional control character.
+
+    One renders as nothing and reorders what a reader sees after it, so a line
+    can review as one thing and run as another. A test that needs one spells it
+    as an escape, which is the same string at run time, and a captured fixture
+    spells it as its format's reference (`&#x200F;` in XML, `\\u200f` in JSON),
+    which its parser reads as the same string, so no file is exempt.
+
+    It reads what `project_files` yields: the files the repository versions
+    outside a dotted directory or one a tool owns. So it lets through every
+    dotted directory, `.claude` among them, which no suite is sent, and would
+    miss a tracked one the mirror publishes. It also lets through a file that is
+    not UTF-8, which is skipped as a binary since its bytes can spell one by
+    chance.
+    """
+
+    def test_no_file_holds_one(self) -> None:
+        repo = BACKEND.parent
+        offenders = []
+        for path in project_files(repo):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            if _BIDI_CONTROLS.search(text):
+                offenders.append(str(path.relative_to(repo)))
+        assert offenders == []
+
+    def test_the_gate_script_greps_for_exactly_these_controls(self) -> None:
+        """The gate script spells the set in octal for `.claude`, which a regex over the
+        text cannot read, so this test decodes it.
+        """
+        script = (BACKEND.parent / "ci" / "gate.sh").read_text(encoding="utf-8")
+        leg = script.split("bidi_status=0\n", 1)[1].split("|| bidi_status=$?", 1)[0]
+        spelt = re.findall(r"printf '((?:\\\d{3})+)'", leg)
+        in_script = {
+            bytes(int(octal, 8) for octal in sequence.split("\\")[1:]).decode("utf-8") for sequence in spelt
+        }
+        in_regex = {chr(code) for code in range(0x2100) if _BIDI_CONTROLS.match(chr(code))}
+        assert len(in_regex) == 12
+        assert in_script == in_regex

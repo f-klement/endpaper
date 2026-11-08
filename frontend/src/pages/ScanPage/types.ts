@@ -1,4 +1,3 @@
-import { BookFormat } from "../../api/generated/model";
 import type {
   BookCreate,
   BookIdentifierIn,
@@ -8,6 +7,11 @@ import type {
 } from "../../api/generated/model";
 import { boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
+import {
+  calendarDate,
+  nothingCarried,
+  type Carried,
+} from "../../lib/carryOver";
 import { identifiersOf, type CalibreBook } from "../../lib/calibre";
 import type { FileIdentifier, FileMetadata } from "../../lib/fileReaders";
 import type { StoreIdentifier, StoreIdentifierScheme } from "../../lib/stores";
@@ -86,32 +90,31 @@ export interface BookDraft extends BookLookup {
  * The whole book being added: the metadata, and everything chosen about this
  * copy of it.
  *
- * One value with one door rather than six states with a setter each. Six of
- * them cost the hook's interface, the page and the confirm card a line apiece
- * to add a field, and no caller stopped knowing anything. Same shape and same
- * vocabulary as `BookFilters` and `useLibrary.update`, which is the point:
+ * One value with one door rather than a state with a setter per field. A
+ * setter each cost the hook's interface, the page and the confirm card a line
+ * apiece to add a field, and no caller stopped knowing anything. Same shape and
+ * same vocabulary as `BookFilters` and `useLibrary.update`, which is the point:
  * two of these in one app should read as one pattern.
  *
+ * **Every field `Carried` names starts as the last book added left it**, and
+ * `lib/carryOver.ts` owns which those are and how each is normalised. The shelf
+ * was the first: a shelf is catalogued in one sitting. Format is offered here
+ * because the person scanning is holding the book, which is the one moment
+ * they can answer without going to look; the condition and the purchase are
+ * offered for the same reason.
+ *
  * `draft` is nullable because the page reads it to decide whether the scanner
- * or the confirm card is on screen. The value around it is not: `location`
- * survives a cancel, so there is always a pending book even before a lookup.
+ * or the confirm card is on screen. The value around it is not: the carried
+ * fields survive a cancel, so there is always a pending book even before a
+ * lookup.
  */
-export interface PendingBook {
+export interface PendingBook extends Carried {
   draft: BookDraft | null;
   coverFile: File | null;
-  isPrivate: boolean;
   /**
-   * Where this copy goes. Carried over from the last book added rather than
-   * cleared, because a shelf is catalogued in one sitting.
+   * Selected before the book exists, applied one call each after it does.
+   * Carried, and joined by what a lookup suggests rather than replaced by it.
    */
-  location: string;
-  /**
-   * Hardback or paperback. Offered here because the person scanning is
-   * holding the book, which is the one moment they can answer without going
-   * to look.
-   */
-  format: BookFormat | "";
-  /** Selected before the book exists, applied one call each after it does. */
   tagIds: number[];
   /**
    * Names typed into the picker on this form, held here and nowhere else.
@@ -125,21 +128,78 @@ export interface PendingBook {
 }
 
 /**
- * Nothing chosen yet, on the given shelf.
+ * Nothing chosen yet but what is carried.
  *
- * The shelf is a parameter rather than a blank because that is the one field
- * a reset keeps: clearing it would undo the carry-over on every cancel.
+ * **Partial, and blank for what it is not given**, because the rapid queue
+ * builds its rows here from a shelf alone: it shows no control for the rest, so
+ * carrying them there would file a batch into a collection, or hide it, with
+ * nothing on screen to say so.
  */
-export function blankPending(location: string): PendingBook {
+export function blankPending(carried: Partial<Carried> = {}): PendingBook {
   return {
+    ...nothingCarried(),
+    ...carried,
     draft: null,
     coverFile: null,
-    isPrivate: false,
-    location,
-    format: "",
-    tagIds: [],
     tagNames: [],
   };
+}
+
+/** The fields of a pending book the next one inherits. */
+export function carriedOf(pending: PendingBook): Carried {
+  return {
+    location: pending.location,
+    isPrivate: pending.isPrivate,
+    collectionId: pending.collectionId,
+    format: pending.format,
+    condition: pending.condition,
+    tagIds: pending.tagIds,
+    ownership: pending.ownership,
+    purchaseSource: pending.purchaseSource,
+    purchasedAt: pending.purchasedAt,
+  };
+}
+
+/**
+ * What a copy carries: what it was filed with, which is every carried field
+ * but these. A copy inherits its tags and privacy from the book it copies and
+ * is given its ownership by the server, so the form's values for those were
+ * never applied and are not carried.
+ */
+const A_COPY_INHERITS = [
+  "tagIds",
+  "isPrivate",
+  "ownership",
+] as const satisfies readonly (keyof Carried)[];
+
+/** The carried fields a copy was filed with, derived from `carriedOf`. */
+export function carriedByACopy(pending: PendingBook): Partial<Carried> {
+  const filed: Partial<Carried> = carriedOf(pending);
+  for (const field of A_COPY_INHERITS) delete filed[field];
+  return filed;
+}
+
+/**
+ * The tags on a form that the member chose, without what the lookup suggested.
+ *
+ * **A suggestion is about one book, so it is not carried to the next.** Joined
+ * into what carries, every book's suggestions would land on every later book
+ * until somebody removed them one at a time. A suggested tag that was also
+ * carried in stays, because a member chose it on an earlier book.
+ *
+ * **A tag the member keeps or picks by hand that the lookup also suggested does
+ * not carry**, because nothing on the form tells the two apart. Accepted rather
+ * than built: recording which tags were picked would cost more than the edge,
+ * which shows itself on the next form and ends once the member adds the tag
+ * there, since a tag carried in is kept from then on.
+ */
+export function chosenTags(
+  tagIds: readonly number[],
+  draft: BookDraft | null,
+  carriedIn: readonly number[],
+): number[] {
+  const suggested = new Set(draft?.suggested_tag_ids ?? []);
+  return tagIds.filter((id) => !suggested.has(id) || carriedIn.includes(id));
 }
 
 /**
@@ -148,8 +208,9 @@ export function blankPending(location: string): PendingBook {
  * **What the app holds and what the request carries are two vocabularies**,
  * which is the whole reason this is one function rather than an inline
  * spread at each of the two call sites. `isPrivate` is `is_private`; an empty
- * shelf or format is `null` rather than `""`, because the column is nullable
- * and a blank string is a value; `coverFile`, `tagIds` and `tagNames` are not
+ * shelf, format, condition, shop or date is `null` rather than `""`, because
+ * the column is nullable and a blank string is a value; `coverFile`, `tagIds`
+ * and `tagNames` are not
  * in the body at all, since each is a separate call made after the book has
  * an id; and
  * `notFound` and `suggested_tag_ids` are client state that no column matches.
@@ -170,20 +231,37 @@ export function toScanRequest(
     ...fields,
     authors: authorsAgreeing(fields.author, fields.authors),
     is_private: pending.isPrivate,
-    location: normaliseLocation(pending.location) || null,
-    format: pending.format || null,
+    ...perCopy(pending),
+    ownership: pending.ownership,
   };
+}
+
+/**
+ * What both endpoints take about the object in hand, spelled once.
+ *
+ * The purchase date stays the string the date input gave, checked and never
+ * parsed: see `carryOver.calendarDate`.
+ */
+function perCopy(pending: PendingBook) {
+  return {
+    location: normaliseLocation(pending.location) || null,
+    collection_id: pending.collectionId,
+    format: pending.format || null,
+    condition: pending.condition || null,
+    purchase_source: pending.purchaseSource.trim() || null,
+    purchased_at: calendarDate(pending.purchasedAt) || null,
+  } satisfies Partial<BookCreate> & CopyCreate;
 }
 
 /**
  * The same pending book, as the **copy** endpoint takes it.
  *
  * A sibling of `toScanRequest` rather than a branch of it, because the two
- * endpoints do not accept the same fields: `CopyCreate` takes `condition`,
- * `purchase_price_minor`, `purchase_currency`, `purchase_source`,
- * `purchased_at`, `lending` and `collection_id`, none of which `BookCreate`
- * has, and `BookCreate` takes the whole bibliographic record, which a copy
- * inherits from the book it copies.
+ * endpoints do not accept the same fields: `CopyCreate` takes
+ * `purchase_price_minor`, `purchase_currency` and `lending`, which `BookCreate`
+ * has not, and `BookCreate` takes the whole bibliographic record, its privacy
+ * and its ownership, which a copy inherits or is given by the server. What the
+ * two share is `perCopy`.
  *
  * **It exists because the second writer was a literal.** `addCopy` built its
  * body by hand from two fields, so a new per-copy field reached the scan
@@ -197,10 +275,7 @@ export function toScanRequest(
  * other while naming different books.
  */
 export function toCopyRequest(pending: PendingBook): CopyCreate {
-  return {
-    location: normaliseLocation(pending.location) || null,
-    format: pending.format || null,
-  };
+  return perCopy(pending);
 }
 
 export function draftFromLookup(lookup: BookLookup): BookDraft {

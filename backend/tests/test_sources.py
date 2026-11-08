@@ -1103,7 +1103,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         is the only source **in the sample** holding `9789727765584`
         (Portuguese) and `9789878853932` (Argentinian). In the sample and not in
         the roster, because this loop iterates the sample's columns and there are
-        seven of those against eleven seeded rows: the Argentine catalogue has no
+        eight of those against twelve seeded rows: the Argentine catalogue has no
         column, and an Argentine book is the one it would most likely answer.
 
         `TIER_MAX_CONCENTRATION` refused it
@@ -1212,6 +1212,23 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         before = sum(_walk(row, tier, tail)[1] for row in rows)
         after = sum(_walk(row, tier, _served_tail(tail, row))[1] for row in rows)
         assert before == after == 395
+
+    def test_the_uruguayan_figures_the_prose_states_recompute_from_its_column(self):
+        """`metadata`'s block for the BNU, `sources`' stock install paragraph and
+        `docs/api.md` state these: 26 found, all in the Uruguayan frame, 8 that
+        none of the sources needing no credential holds, and that frame going
+        from 35 of 50 to 43. The 395 plus the 8 is the 403 that the Argentine
+        catalogue's 4, measured once and held by no column, takes to 407."""
+        rows = _sample()
+        found = [row for row in rows if row[CatalogueSource.BNU.value] == "found"]
+        free = [row for row in rows if any(row[name] == "found" for name in SAMPLED)]
+        uruguayan = [row for row in rows if row["frame"] == "uruguay"]
+        assert len(found) == 26
+        assert {row["frame"] for row in found} == {"uruguay"}
+        assert sum(row not in free for row in found) == 8
+        assert sum(row in free for row in uruguayan) == 35
+        assert sum(row in free or row in found for row in uruguayan) == 43
+        assert sum(row in free or row in found for row in rows) == 403
 
     def test_the_saving_the_constant_claims_recomputes(self):
         """`SERVES_GROUPS` states 1.435s becoming 1.336s and 872 tail requests

@@ -11,9 +11,10 @@ from datetime import datetime
 
 import pytest
 
+import identity
 from enums import BookIdentifierScheme
 from models import Book, BookIdentifier, User
-from recognition import Hidden, Index, InTrash, Seen, Source, Tied, Unknown, recognise_one
+from recognition import Hidden, Index, InTrash, Resembles, Seen, Source, Tied, Unknown, _Ladder, recognise_one
 
 DUNE = "9780441013593"
 #: The ISBN-10 of `DUNE`'s printing, as a row written before
@@ -106,6 +107,57 @@ class TestTheAnswers:
         index = Index.build(db, member.id, Source.READING_HISTORY)
 
         assert index.recognise(title="Dune", isbn=DUNE) == Seen(mine.id)
+
+
+class TestTheLookupLadder:
+    """The check a member sees before saving: it warns, and decides nothing."""
+
+    def test_a_title_and_author_match_resembles_rather_than_is_seen(self, db, member):
+        """Another edition's ISBN still finds the work, as the weaker answer."""
+        mine = _book(db, member, "Dune", author="Frank Herbert", isbn=DUNE)
+
+        index = Index.build(db, member.id, Source.LOOKUP)
+
+        answer = index.recognise(title="Dune", author="Frank Herbert", isbn="9780340960196")
+        assert answer == Resembles(frozenset({mine.id}))
+
+    def test_a_book_the_member_cannot_see_answers_as_nothing(self, db, member, other):
+        """Unlike `Hidden` on an import ladder: shown before any write, it would
+        tell this member that a Book somebody keeps private holds the ISBN."""
+        _book(db, other, "Dune", author="Frank Herbert", isbn=DUNE, is_private=True)
+
+        index = Index.build(db, member.id, Source.LOOKUP)
+
+        assert index.recognise(title="Dune", author="Frank Herbert", isbn=DUNE) == Unknown()
+
+
+class TestALadderDeclaresOnlyWhatItReads:
+    """`_Ladder` refuses a flag set where nothing reads it."""
+
+    def test_a_title_guess_on_a_ladder_reading_past_the_shelf_is_refused(self):
+        """An import ladder with a guessed title would report every title match unmatched."""
+        with pytest.raises(ValueError, match="title guess"):
+            _Ladder(schemes=None, title=identity.work_key, copies_take_the_lowest=True, title_is_a_guess=True)
+
+    def test_a_title_guess_on_a_ladder_asking_no_title_is_refused(self):
+        with pytest.raises(ValueError, match="title guess"):
+            _Ladder(
+                schemes=None,
+                title=None,
+                copies_take_the_lowest=True,
+                title_is_a_guess=True,
+                asks_off_the_shelf=False,
+            )
+
+    def test_staying_on_the_shelf_on_a_scheme_ladder_is_refused(self):
+        """A scheme ladder never reads past the Shelf's ISBN branch, so the flag would be ignored."""
+        with pytest.raises(ValueError, match="only an ISBN ladder"):
+            _Ladder(
+                schemes=(BookIdentifierScheme.ASIN,),
+                title=None,
+                copies_take_the_lowest=True,
+                asks_off_the_shelf=False,
+            )
 
 
 class TestTheTieRule:

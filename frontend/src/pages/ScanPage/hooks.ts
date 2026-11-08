@@ -24,6 +24,7 @@ import {
   useAddBookTag,
   useAddCopy,
   useAddBookTagByName,
+  useAlreadyHeld,
   useListLocations,
   useListTags,
   useLookupIsbn,
@@ -32,11 +33,16 @@ import {
   useSearchBooks,
   useUploadCover,
 } from "../../api/generated/endpoints/books/books";
+import { useListCollections } from "../../api/generated/endpoints/collections/collections";
 import { BookFormat } from "../../api/generated/model";
 import { useGoogleBooksReady } from "../../app/hooks";
 import type {
+  AlreadyHeldOut,
+  AlreadyHeldParams,
   AskedFileIn,
   BookMatch,
+  BookOut,
+  CollectionOut,
   BookSearchOut,
   CatalogueSource,
   DigitalReferenceIn,
@@ -61,6 +67,11 @@ import {
   supportedExtension,
   type SupportedExtension,
 } from "../../lib/fileName";
+import {
+  readCarried,
+  rememberCarried,
+  withoutVanished,
+} from "../../lib/carryOver";
 import {
   normaliseLocation,
   readLastLocation,
@@ -99,6 +110,9 @@ import {
 import {
   blankDraft,
   blankPending,
+  carriedByACopy,
+  carriedOf,
+  chosenTags,
   draftFromFile,
   draftFromMatch,
   draftFromLookup,
@@ -168,6 +182,49 @@ function useKnownLocations(): LocationOut[] {
   return locations.data ?? [];
 }
 
+/**
+ * The tag ids an attach by name answered with that `held` does not hold. Each
+ * answer is the whole book, so its tags include every one already chosen; a
+ * failed attach answers undefined and adds nothing.
+ */
+function tagIdsTheNamesBecame(
+  answers: readonly (BookOut | undefined)[],
+  held: readonly number[],
+): number[] {
+  return answers
+    .flatMap((answer) => answer?.tags?.map((tag) => tag.id) ?? [])
+    .filter((id) => !held.includes(id));
+}
+
+/** The ids of a list that has arrived, or undefined while it has not. */
+function idsOf(
+  rows: readonly { id: number }[] | undefined,
+): ReadonlySet<number> | undefined {
+  return rows === undefined ? undefined : new Set(rows.map((row) => row.id));
+}
+
+/**
+ * A draft landing on the form, its suggested tags joining the chosen ones.
+ *
+ * **Joined rather than replacing**, because tags carry: a shelf of one
+ * collection's books shares a tag the catalogue knows nothing about. **What
+ * the draft it replaces suggested goes**, unless it was carried in, because a
+ * suggestion is about that book alone: picking a second match would otherwise
+ * keep the first one's subjects (`chosenTags`).
+ */
+function withSuggestions(
+  current: PendingBook,
+  draft: BookDraft,
+  carriedIn: readonly number[],
+): PendingBook {
+  const chosen = chosenTags(current.tagIds, current.draft, carriedIn);
+  return {
+    ...current,
+    draft,
+    tagIds: [...new Set([...chosen, ...(draft.suggested_tag_ids ?? [])])],
+  };
+}
+
 export interface UseScanFlowResult {
   isbn: string | null;
   /** The book being added. Null `draft` means no lookup has landed yet. */
@@ -220,6 +277,17 @@ export interface UseScanFlowResult {
 
   /** Shelves already in use, for the suggestions. */
   locations: LocationOut[];
+  /** This member's collections, for the carried collection's picker. */
+  collections: CollectionOut[];
+  /**
+   * The book starts private because the last one added was, and it still is.
+   *
+   * **The form has to say so in words**, which is the condition the owner
+   * carried privacy on: a tick box nobody looked at hides the book from every
+   * other member with nothing to tell them. False once the member unticks it,
+   * and false for a book they ticked themselves, which they already know about.
+   */
+  privacyCarried: boolean;
 
   confirm: () => void;
   isAdding: boolean;
@@ -240,13 +308,17 @@ export interface UseScanFlowResult {
 
 export function useScanFlow(
   onAdded: (bookId: number) => void,
+  /** The signed in account, whose carry this form starts from and keeps. */
+  account: number,
 ): UseScanFlowResult {
   const [isbn, setIsbn] = useState<string | null>(null);
-  // One state for the whole book being built. The shelf is read from storage
-  // once, as the initial value, so the first scan of a session starts on the
-  // shelf the last one ended on.
+  // What the last book this account added left, read from storage once as the
+  // initial value, so the first scan of a session starts where the last ended.
+  // Kept beside the book rather than only inside it, because the privacy
+  // notice is about where the value came from and not about what it is.
+  const [carriedIn, setCarriedIn] = useState(() => readCarried(account));
   const [pending, setPending] = useState<PendingBook>(() =>
-    blankPending(readLastLocation()),
+    blankPending(carriedIn),
   );
   const [addError, setAddError] = useState<unknown>(null);
   // Beside the draft rather than on it: a `BookDraft` field is a `WHO_WINS`
@@ -263,6 +335,15 @@ export function useScanFlow(
   const invalidate = useInvalidate();
   const tags = useListTags();
   const locations = useKnownLocations();
+  const collections = useListCollections({ query: { staleTime: 5 * 60_000 } });
+
+  // **What the form shows and what is sent are this, never `pending` itself**,
+  // so a tag or collection deleted since the last book is neither drawn nor
+  // posted. `withoutVanished` says why only those two are checked.
+  const book = withoutVanished(pending, carriedIn, {
+    tagIds: idsOf(tags.data),
+    collectionIds: idsOf(collections.data),
+  });
 
   // Only runs once an ISBN has been scanned or typed.
   const lookupQuery = useLookupIsbn(
@@ -281,10 +362,11 @@ export function useScanFlow(
   if (isbn !== null && pending.draft === null && !lookupQuery.isPending) {
     if (lookupQuery.data) {
       const next = draftFromLookup(lookupQuery.data);
-      update({ draft: next, tagIds: next.suggested_tag_ids ?? [] });
+      setPending((current) => withSuggestions(current, next, carriedIn.tagIds));
     } else if (lookupQuery.error && nobodyKnows(lookupQuery.error)) {
       // Neither source knew it: offer manual entry rather than a dead end.
-      update({ draft: blankDraft(isbn), tagIds: [] });
+      // The carried tags stay: nothing was suggested to join them.
+      update({ draft: blankDraft(isbn) });
     }
   }
 
@@ -321,45 +403,72 @@ export function useScanFlow(
     // a cancelled scan left a tag carried by no book, absent from the
     // vocabulary listing, holding its globally unique name for good and
     // attachable by any member. Nothing here commits until confirm now.
-    setPending((current) => blankPending(current.location));
+    //
+    // **The shelf is kept as typed and the rest are read back from what the
+    // last book added left.** The shelf's behaviour predates the others and is
+    // unchanged; for the rest, a cancelled form filed nothing, and its tags
+    // hold what the cancelled lookup suggested, which belongs to that book.
+    const carried = readCarried(account);
+    setCarriedIn(carried);
+    setPending((current) =>
+      blankPending({ ...carried, location: current.location }),
+    );
   }
 
   async function confirm() {
-    const { draft } = pending;
+    const { draft } = book;
     if (!draft) return;
     setAddError(null);
 
-    const shelf = normaliseLocation(pending.location);
-
     try {
-      const book = await scanAdd.mutateAsync({
-        data: toScanRequest({ ...pending, draft }),
+      const added = await scanAdd.mutateAsync({
+        data: toScanRequest({ ...book, draft }),
       });
-
-      // Only after the write succeeded. Remembering a shelf for a book that
-      // was rejected as a duplicate would carry a value nothing was filed at.
-      rememberLastLocation(shelf);
 
       // The book exists by now. A failed cover or tag is not worth discarding
       // it and making the member scan again, so these are best-effort.
-      if (pending.coverFile) {
+      if (book.coverFile) {
         await uploadCover
-          .mutateAsync({ bookId: book.id, data: { file: pending.coverFile } })
+          .mutateAsync({ bookId: added.id, data: { file: book.coverFile } })
           .catch(() => undefined);
       }
-      await Promise.all([
-        ...pending.tagIds.map((tagId) =>
-          addTag.mutateAsync({ bookId: book.id, tagId }).catch(() => undefined),
+      const [, named] = await Promise.all([
+        Promise.all(
+          book.tagIds.map((tagId) =>
+            addTag
+              .mutateAsync({ bookId: added.id, tagId })
+              .catch(() => undefined),
+          ),
         ),
         // The names typed on this form, applied now that there is a book to
         // apply them to. One request each, the same one `BookDetail` sends,
         // and the server invents the tag if the library has none.
-        ...pending.tagNames.map((name) =>
-          addTagByName
-            .mutateAsync({ bookId: book.id, data: { name } })
-            .catch(() => undefined),
+        Promise.all(
+          book.tagNames.map((name) =>
+            addTagByName
+              .mutateAsync({ bookId: added.id, data: { name } })
+              .catch(() => undefined),
+          ),
         ),
       ]);
+
+      // Only after the write succeeded. Remembering a value for a book that
+      // was rejected as a duplicate would carry one nothing was filed with.
+      //
+      // **A typed name carries as the tag it became.** Each attach answers
+      // with the book, so the ids it now holds are read off the answers rather
+      // than carrying the name, which would invent the tag again on the next
+      // book after somebody had deleted it. **Only an id the form did not
+      // already hold**: an answer lists every tag on the book, the suggested
+      // ones included, which `chosenTags` has just left out.
+      const typed = tagIdsTheNamesBecame(named, book.tagIds);
+      rememberCarried(account, {
+        ...carriedOf(book),
+        tagIds: [
+          ...chosenTags(book.tagIds, book.draft, carriedIn.tagIds),
+          ...typed,
+        ],
+      });
 
       // The catalogue, not the whole cache. A keyless invalidate here also
       // refetched `/api/settings/features` and, worse, `/api/books/search`,
@@ -379,7 +488,7 @@ export function useScanFlow(
       // holds why the refusal is silent and what it does not close. The
       // member lands on the saved book, where its tags are what they are.
       invalidate.catalogue();
-      onAdded(book.id);
+      onAdded(added.id);
     } catch (error) {
       setAddError(error);
     }
@@ -409,7 +518,6 @@ export function useScanFlow(
     // the ISBN is somebody else's private one and its id was withheld.
     if (holder === undefined) return;
 
-    const shelf = normaliseLocation(pending.location);
     setAddError(null);
     try {
       const copy = await addAnotherCopy.mutateAsync({
@@ -417,9 +525,10 @@ export function useScanFlow(
         // `toCopyRequest`, not a literal. See its docstring: this was the
         // second writer of a request body and the one the schema guard could
         // not see.
-        data: toCopyRequest(pending),
+        data: toCopyRequest(book),
       });
-      rememberLastLocation(shelf);
+      // Only what the copy was filed with: `carriedByACopy` says why.
+      rememberCarried(account, carriedByACopy(book));
       // A copy is a new book. Same group as `confirm`, same reason.
       invalidate.catalogue();
       onAdded(copy.id);
@@ -436,14 +545,16 @@ export function useScanFlow(
     // scan flow stays parked at null and the draft carries the ISBN instead.
     setIsbn(null);
     setEnteredByHand(false);
-    update({ draft: next, tagIds: next.suggested_tag_ids ?? [] });
+    setPending((current) => withSuggestions(current, next, carriedIn.tagIds));
   }
 
   return {
     isbn,
-    pending,
+    pending: book,
     update,
     tags: tags.data ?? [],
+    collections: collections.data ?? [],
+    privacyCarried: carriedIn.isPrivate && book.isPrivate,
 
     chooseMatch,
 
@@ -461,7 +572,7 @@ export function useScanFlow(
     enterByHand: () => {
       if (isbn === null) return;
       setEnteredByHand(true);
-      update({ draft: blankDraft(isbn), tagIds: [] });
+      update({ draft: blankDraft(isbn) });
     },
     enteredByHand,
 
@@ -1768,7 +1879,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
           // the entry, because a picked file answers it and a barcode does
           // not.
           body: toScanRequest({
-            ...blankPending(shelf),
+            ...blankPending({ location: shelf }),
             format: entry.format,
             draft: entry.draft,
           }),
@@ -1886,7 +1997,7 @@ export function useRapidIntake(): UseRapidIntakeResult {
       const copy = await addAnotherCopy.mutateAsync({
         bookId: holderId,
         data: toCopyRequest({
-          ...blankPending(normaliseLocation(location)),
+          ...blankPending({ location: normaliseLocation(location) }),
           format,
         }),
       });
@@ -1976,5 +2087,55 @@ export function useRapidIntake(): UseRapidIntakeResult {
     },
     addProgress,
     result,
+  };
+}
+
+/**
+ * How long typing must pause before a hand entered title is asked about. A
+ * looked up record is asked at once, since its fields arrive whole.
+ */
+export const ALREADY_HELD_SETTLE_MS = 400;
+
+/**
+ * Whether the member already has the book this draft describes, asked before
+ * the save so the duplicate is seen before the press. `undefined` while it is
+ * asked, and when asking failed: the add door's 409 is the backstop, so a
+ * failure here costs only the early warning.
+ */
+export function useAlreadyHeldWarning(
+  title: string,
+  author: string | null | undefined,
+  isbn: string | null | undefined,
+): AlreadyHeldOut | undefined {
+  const typed = paramsOf(title, author, isbn);
+  const [asked, setAsked] = useState(typed);
+  const key = JSON.stringify(typed);
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setAsked(JSON.parse(key) as AlreadyHeldParams),
+      ALREADY_HELD_SETTLE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [key]);
+
+  const query = useAlreadyHeld(asked, {
+    query: { enabled: asked.title !== "", retry: false },
+  });
+  return query.data;
+}
+
+/**
+ * Absent rather than null for a missing author or ISBN: the generated client
+ * sends a null as the string `"null"`, which would be compared as an author.
+ */
+function paramsOf(
+  title: string,
+  author: string | null | undefined,
+  isbn: string | null | undefined,
+): AlreadyHeldParams {
+  return {
+    title,
+    ...(author ? { author } : {}),
+    ...(isbn ? { isbn } : {}),
   };
 }

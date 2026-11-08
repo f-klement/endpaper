@@ -81,6 +81,34 @@ _2026-10-25_
 - The release image scan reads the image by the digest the build pushed, so a later push to the
   release tag cannot change what is scanned.
 
+- The statistics page shows what the collection cost, one total per currency, from the copies with a
+  recorded price.
+
+- The scan card warns before the save when a book is already in the library, saying whether it has
+  the same ISBN or only possibly is the same book by its title and author. It also shows for a
+  second copy scanned straight after the first is saved. It is shown on the single scan card only;
+  rapid mode still meets a duplicate when it saves.
+
+- The scan form starts each book with the collection, format, condition, tags, ownership, purchase
+  source and date of the last book added, each shown and clearable, and says so when a book starts
+  private because the last one was.
+
+- The fields the scan form carries from one book to the next, all but the shelf, are kept per
+  member, so somebody else signing in on the same browser starts clean. A lookup's suggested tags
+  are not carried on to the next book.
+
+- Book lookups also ask the Uruguayan National Library about Uruguayan ISBNs, using the login the
+  library publishes; a library with its own account can enter it in Settings instead.
+
+- The library can be exported as a single web page that opens offline, listing title, author,
+  year, ISBN, location and reading status. The page's own content policy also refuses form
+  submission and a base URL, which its default rule does not cover.
+
+- A book lookup no longer stalls when a catalogue's classification carries a long run of spaces.
+
+- The error page uses the app's green accent, and its status line and button meet WCAG AA
+  contrast in both light and dark mode.
+
 ## v0.21.0
 
 _2026-10-24_

@@ -61,7 +61,10 @@
      The wallpaper's stem colour (see src/theme/patterns.ts). Deliberately the
      same hue: the background and the buttons then belong to one design rather
      than to two people's opinions. A bookbinder's green, and unlike the sky
-     blue it replaced it does not read as a generic web app. */
+     blue it replaced it does not read as a generic web app.
+     The accent also exists as literal copies outside this file, which CSS tokens
+     cannot reach: backend/templates/error.html, frontend/index.html and
+     frontend/public/manifest.json. Changing the accent means changing those too. */
   --color-accent-50: #eefbf7;
   --color-accent-100: #d3f5eb;
   --color-accent-200: #a9ead9;

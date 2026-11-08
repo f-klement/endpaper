@@ -64,20 +64,21 @@ Then open **server-ip:port** you set in your yml in your browser (or your local 
 ## Features
 - **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
 - **Auto metadata**: title, author, publisher, page count, language and cover art, looked
-  up in nine catalogues (the German National Library, K10plus, Open Library, the Czech
+  up in ten catalogues (the German National Library, K10plus, Open Library, the Czech
   National Library, the Spanish National Library, the National Library of Greece, the
-  Austrian National Library, the Argentine National Library, Google Books). The first two
+  Austrian National Library, the Argentine National Library, the Uruguayan National
+  Library, Google Books). The first two
   are asked together and their
   records are merged; the rest are asked
   in turn until one answers. A national catalogue in that second group is asked only about
   the ISBN registration groups it collects, so a German library is not waiting on Athens for
   a German book. The Spanish National Library is the exception and declares no such remit,
   because it alone answers for Spanish language books published outside Spain.
-  Seven are free and need nothing. Two need a login: Google Books takes an API key you
-  supply and bills for what it answers, and the Argentine National Library takes a username
-  and password that the library publishes itself and charges nothing for. Endpaper carries
-  that published pair, so a stock install runs eight of the nine and only Google Books needs
-  anything typed. A library with its own account at the Argentine National Library enters it
+  Seven are free and need nothing. Three need a login: Google Books takes an API key you
+  supply and bills for what it answers, and the Argentine and Uruguayan national libraries
+  each take a username and password that the library publishes itself and charges nothing
+  for. Endpaper carries those published pairs, so a stock install runs nine of the ten and
+  only Google Books needs anything typed. A library with its own account at either enters it
   under Settings and that is what gets used instead.
   A catalogue's Dewey number is kept and read as a suggested tag, so a German record and an
   English one suggest the same one
@@ -295,6 +296,7 @@ Phone (PWA) ──► FastAPI ──► scan an ISBN:  DNB + K10plus  (together,
                   │                       ↳ National Library of Greece (Greek ISBNs)
                   │                       ↳ Austrian National Library (978-3 ISBNs)
                   │                       ↳ Argentine National Library (login shipped)
+                  │                       ↳ Uruguayan National Library (978-9974, login shipped)
                   │                       ↳ Google Books  (needs a key)
                   │
                   │          search a title: Open Library + K10plus + DNB
@@ -375,10 +377,10 @@ held here on its behalf. Those go in their own table as sealed envelopes, and th
 never written to the database, so a backup archive carries logins that nobody can read
 without it.
 
-**One catalogue's login ships with Endpaper, and it is the last resort rather than the
-first.** The Argentine National Library publishes a username and password on its own page for
-librarians, so carrying that pair discloses nothing the library has not, and the source
-answers on a stock install. A login entered in Settings replaces it and the environment
+**Two catalogues' logins ship with Endpaper, and each is the last resort rather than the
+first.** The Argentine and Uruguayan national libraries each publish a username and password
+on their own page for librarians, so carrying those pairs discloses nothing the libraries have
+not, and both sources answer on a stock install. A login entered in Settings replaces it and the environment
 variable replaces both; removing the one in Settings falls back to the shipped pair rather
 than to nothing. The Settings screen names which of the three is being used.
 

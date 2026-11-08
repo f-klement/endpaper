@@ -7,7 +7,11 @@
     <style>
       /* Self-contained: an error page must not depend on the asset pipeline,
          since a build or storage failure is one of the things it has to
-         report. Colours mirror the app's sky palette. */
+         report. The accent is the app's green, copied as values: the light fill,
+         hover and foreground are its accent 600, 700 and white, the dark ones
+         its accent 500, 400 and paper 950, and the code line takes the
+         text steps the app uses, 700 and 400. Each pair clears 4.5:1, and
+         each fill clears 3:1 against its card. */
       :root { color-scheme: light dark; }
       * { box-sizing: border-box; }
       body {
@@ -39,7 +43,7 @@
         font-weight: 600;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: #0ea5e9;
+        color: #0f766e;
         margin-bottom: 0.5rem;
       }
       h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
@@ -48,18 +52,21 @@
         display: inline-block;
         margin-top: 1.5rem;
         padding: 0.625rem 1.25rem;
-        background: #0ea5e9;
+        background: #13816f;
         color: #fff;
         border-radius: 0.5rem;
         text-decoration: none;
         font-size: 0.875rem;
         font-weight: 600;
       }
-      a:hover { background: #0284c7; }
+      a:hover { background: #0f766e; }
       @media (prefers-color-scheme: dark) {
         body { background: #0b1220; color: #e5e7eb; }
         .card { background: #111827; border-color: #1f2937; }
         p { color: #9ca3af; }
+        .code { color: #3cbda4; }
+        a { background: #1fa189; color: #100e0c; }
+        a:hover { background: #3cbda4; }
       }
     </style>
   </head>

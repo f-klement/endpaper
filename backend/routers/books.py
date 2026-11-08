@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import html
 import io
 import logging
 from collections.abc import Callable, Iterator
@@ -97,12 +98,14 @@ from lending import Loans
 from logvalues import clipped
 from models import (
     AUTHOR_KEY_MAX,
+    AUTHOR_LINE_MAX,
     DIGITAL_REFERENCE_PATH_MAX,
     ISBN_MAX,
     LOCATION_MAX,
     MAX_SERIES_INDEX,
     QUOTE_TEXT_MAX,
     SERIES_NAME_MAX,
+    TITLE_MAX,
     AccessRequest,
     AuthorIdentifier,
     Book,
@@ -136,6 +139,7 @@ from schemas import (
     POPPED_BEFORE_THE_CONSTRUCTOR,
     AccessDecision,
     AccessRequestOut,
+    AlreadyHeldOut,
     AuthorBatchMergeOut,
     AuthorIdentifierOut,
     AuthorIdentifierRequest,
@@ -802,6 +806,32 @@ def _lookup_failure(result: metadata.Lookup) -> HTTPException:
     )
 
 
+@router.get("/already-held", response_model=AlreadyHeldOut)
+def already_held(
+    db: DbSession,
+    current_user: CurrentUser,
+    title: Annotated[str, Query(min_length=1, max_length=TITLE_MAX)],
+    author: Annotated[str | None, Query(max_length=AUTHOR_LINE_MAX)] = None,
+    isbn: Annotated[str | None, Query(max_length=ISBN_MAX)] = None,
+) -> AlreadyHeldOut:
+    """Whether the member already has the record they are about to save.
+
+    Asked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:
+    a Book held where they cannot see it answers as nothing here, though the
+    save itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a
+    title is compared as it would be stored.
+    """
+    index = recognition.Index.build(db, current_user.id, recognition.Source.LOOKUP)
+    match index.recognise(title=title, author=author, isbn=isbn):
+        case recognition.Seen(book_id=book_id):
+            return AlreadyHeldOut(match="isbn", book_ids=[book_id])
+        case recognition.Tied(book_ids=book_ids):
+            return AlreadyHeldOut(match="isbn", book_ids=sorted(book_ids))
+        case recognition.Resembles(book_ids=book_ids):
+            return AlreadyHeldOut(match="title_author", book_ids=sorted(book_ids))
+    return AlreadyHeldOut(match=None, book_ids=[])
+
+
 @router.get("/search", response_model=BookSearchOut)
 async def search_books(
     db: DbSession,
@@ -886,7 +916,7 @@ def _export_pages(db: Session, viewer_id: int, load: Loading) -> Iterator[list[B
 
     **Every arm of `export_books` walks the shelf through this**, so the peak
     is one page of rows whatever format was asked for, and everything below
-    is a guarantee all three arms hold rather than the MARCXML arm's.
+    is a guarantee every arm holds rather than the MARCXML arm's.
     `tests/routers/test_books.py::TestNoExportArmResolvesMoreBooksThanAPage`
     drives every member of `ExportFormat` against it.
 
@@ -951,9 +981,9 @@ def _export_pages(db: Session, viewer_id: int, load: Loading) -> Iterator[list[B
 
     **The page size is read here rather than passed in**, so one knob bounds
     every arm and a test that moves it moves all of them together. A MARCXML
-    page is the dearest of the three per row: it carries the description in
+    page is the dearest of the four per row: it carries the description in
     `520 $a` as the CSV arm does and wraps every value in XML, so a number
-    measured against it is not tight for the other two.
+    measured against it is not tight for the other three.
     """
     after: int | None = None
     while True:
@@ -993,7 +1023,7 @@ def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
     `_export_pages` and every arm shares it. **So the guarantees this arm
     relies on are not this arm's**: the paging, the key it resumes on and the
     privacy rule all belong to `_export_pages`, and the classes covering them
-    cover the CSV and txt arms too. Retiring MARCXML means deleting this
+    cover the CSV, txt and html arms too. Retiring MARCXML means deleting this
     function, not that walk.
 
     **"The privacy rule re-applied per page" is what this sentence used to
@@ -1024,17 +1054,17 @@ def _marcxml_pages(db: Session, viewer_id: int) -> Iterator[list[Book]]:
     return _export_pages(db, viewer_id, Loading.PUBLISHED)
 
 
-#: What the export's 200 promises, and it is three media types rather than one.
+#: What the export's 200 promises, and it is one media type per format.
 #:
-#: **Derived from `EXPORT_MEDIA_TYPES` rather than listed**, so a fourth format
+#: **Derived from `EXPORT_MEDIA_TYPES` rather than listed**, so a new format
 #: is declared by the same line that makes it sendable and the document cannot
 #: be short a type while the route sends it.
 #:
 #: **Which one arrives depends on `?format=`, and OpenAPI cannot say that.**
 #: There is no expression for a response content type conditioned on a request
-#: parameter, so the honest declaration is all three under 200 with the mapping
-#: written into the route description below. Splitting the route into three, one exact type
-#: each, is the only shape that makes it exact and it changes three URLs and
+#: parameter, so the honest declaration is every one under 200 with the mapping
+#: written into the route description below. Splitting the route, one exact type
+#: each, is the only shape that makes it exact and it changes every URL and
 #: the client's URL builder to buy exactness in a document.
 #:
 #: **No schema under each type, which is the OpenAPI 3.1 spelling for opaque
@@ -1079,9 +1109,9 @@ def export_books(
 ) -> StreamingResponse:
     """The shelf this member can see, as a file.
 
-    **CSV is `text/csv`, plain text is `text/plain` and MARCXML is
-    `application/marcxml+xml`.** All three are declared for the 200 because the
-    document has no way to say which of them `?format=` selects.
+    **CSV is `text/csv`, plain text is `text/plain`, HTML is `text/html` and
+    MARCXML is `application/marcxml+xml`.** All are declared for the 200
+    because the document has no way to say which of them `?format=` selects.
 
     **Rationed, and the schema does not say so.** The refusal is a 429 carrying
     `Retry-After`. It is not declared here because this document declares a
@@ -1098,7 +1128,7 @@ def export_books(
     declaring it honest is declaring it at all of them. The counter is not:
     this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
 
-    **MARCXML needs library mode and the other two do not.** A CSV export is a
+    **MARCXML needs library mode and the other three do not.** A CSV export is a
     household reading its own shelf in a spreadsheet. A MARC record is a
     catalogue record handed to another institution, which is what library mode
     is for, and offering it everywhere would put a format nobody in a household
@@ -1172,9 +1202,9 @@ def export_books(
             # writes one page of XML at a time, so the peak is a page of each
             # at any shelf size. The library in library mode is the instance
             # with the most books, and this arm used to materialise every one
-            # of them for an ordinary account. The CSV and txt arms below walk
-            # the same pages: neither is gated by library mode, so an ordinary
-            # account reaches them, which made them the worse of the two. What
+            # of them for an ordinary account. Every arm below walks the same
+            # pages: none is gated by library mode, so an ordinary account
+            # reaches them, which made them the worse case. What
             # this constant is, and what refusing and truncating would each
             # have cost, is at `marc.EXPORT_PAGE_RECORDS`.
             marc.stream(_marcxml_pages(db, current_user.id)),
@@ -1182,9 +1212,8 @@ def export_books(
             headers=downloads.attachment(filename),
         )
 
-    chunks = (
-        _csv_chunks(db, current_user.id) if format is ExportFormat.CSV else _text_chunks(db, current_user.id)
-    )
+    writers = {ExportFormat.CSV: _csv_chunks, ExportFormat.TXT: _text_chunks, ExportFormat.HTML: _html_chunks}
+    chunks = writers[format](db, current_user.id)
 
     # Handed over unstarted. Both are generator functions, so the shelf is not
     # read until the transport pulls the body, and neither holds more than the
@@ -1386,6 +1415,97 @@ def _text_chunks(db: Session, viewer_id: int) -> Iterator[str]:
             )
         yield separator + "\n\n".join(blocks)
         separator = "\n\n"
+
+
+#: The page around the rows, inline because the file has to open offline.
+#:
+#: **The policy is the half of "no script, nothing fetched" a browser
+#: enforces.** `default-src 'none'` refuses any script, image, font or frame the
+#: file could name, so a value that somehow escaped `_html_safe` still could not
+#: run a script or load a resource. It does not reach a form's target or a base
+#: URL, so `form-action` and `base-uri` are named; it does not reach navigation
+#: either, and nothing here covers a link a reader clicks or a `<meta>` refresh.
+#: `style-src 'unsafe-inline'` admits the one `<style>` below and nothing else.
+#: A file opened from disk carries no response header, so the `<meta>` is the
+#: only place a policy can live.
+_HTML_HEAD: Final = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+content="default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Endpaper export</title>
+<style>
+body{font:15px/1.45 system-ui,sans-serif;margin:2rem;color:#1d1d1f;background:#fff}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;vertical-align:top;padding:.4rem .6rem;border-bottom:1px solid #ddd}
+th{background:#f4f1ea}
+@media (prefers-color-scheme:dark){
+body{color:#eee;background:#161616}th{background:#2a2622}th,td{border-color:#333}
+}
+</style>
+</head>
+<body>
+<table>
+<thead><tr>
+<th>Title</th><th>Author</th><th>Year</th><th>ISBN</th><th>Location</th><th>My Status</th>
+</tr></thead>
+<tbody>
+"""
+
+_HTML_TAIL: Final = "</tbody>\n</table>\n</body>\n</html>\n"
+
+
+def _html_chunks(db: Session, viewer_id: int) -> Iterator[str]:
+    """The `html` export, one chunk a page, between a head and a tail.
+
+    **Six columns, fewer than CSV or txt, and that is deliberate**: title,
+    author, year, ISBN, location and the viewer's status. The page is one a
+    person reads or hands to somebody, so it carries what finds a book on a
+    shelf and leaves out the prices, descriptions, tags and bookkeeping a
+    spreadsheet wants.
+    The rows are the other formats' rows, from the same `_export_pages` walk.
+
+    The head is yielded before the first page, so an empty shelf still
+    downloads a page that opens, with its headings and no rows.
+    """
+    # Truncates the same way `_csv_chunks` does, for the same reason; that
+    # comment is the one home. A truncated page is an unclosed `<tbody>`, which
+    # a browser renders without complaint, so it is the CSV arm's case rather
+    # than the MARCXML arm's.
+    yield _HTML_HEAD
+    for books in _export_pages(db, viewer_id, Loading.EXPORTED):
+        # Batched per page, for the reason `_csv_chunks` states.
+        statuses = Reading.by(db, viewer_id).of([book.id for book in books])
+        rows: list[str] = []
+        for book in books:
+            values = (
+                book.title,
+                book.author,
+                book.year,
+                book.isbn,
+                book.location,
+                statuses.status_of(book.id),
+            )
+            # **Escaped where the cell is written rather than per value**, so a
+            # column added to the tuple above is escaped by the line that adds
+            # it to the row. A title comes from an outside catalogue, and a
+            # restored archive writes every column through Core, so no column is
+            # trusted to be free of markup.
+            rows.append("<tr>" + "".join(f"<td>{_html_safe(value)}</td>" for value in values) + "</tr>\n")
+        yield "".join(rows)
+    yield _HTML_TAIL
+
+
+def _html_safe(value: object) -> str:
+    """A value as text inside an HTML element, never as markup.
+
+    `quote=True` escapes both quote characters as well. No value is written into
+    an attribute today; escaping them costs a few bytes and means a later column
+    written into one does not need a second rule.
+    """
+    return html.escape("" if value is None else str(value), quote=True)
 
 
 #: Characters that make a spreadsheet treat a cell as a formula rather than as
@@ -6074,7 +6194,7 @@ async def enrich_book(
     without that middle step it is matched by its title, which is the weakest
     instrument here. **Which
     catalogues either of those asks is the library's own provider list**, set
-    in Settings: the roster holds nine lookup sources that answer an ISBN and
+    in Settings: the roster holds ten lookup sources that answer an ISBN and
     eight search sources that answer a title, the leading pair is asked together
     and the rest one at a time, and a source switched off is not asked on either
     path. Google Books answers only when its own section is on and a key is in

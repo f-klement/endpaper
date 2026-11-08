@@ -107,6 +107,7 @@ const KEYS: Record<string, readonly unknown[]> = {
   listClassifications: books.getListClassificationsQueryKey(),
   listTrash: books.getListTrashQueryKey(),
   listQuotes: books.getListQuotesQueryKey(),
+  alreadyHeld: books.getAlreadyHeldQueryKey({ title: "Dune" }),
   exportBooks: books.getExportBooksQueryKey(),
   lookupIsbn: books.getLookupIsbnQueryKey({ isbn: "9780441013593" }),
   searchBooks: books.getSearchBooksQueryKey({ q: "dune" }),
@@ -286,7 +287,10 @@ describe("the inventory is complete", () => {
     //
     // 62 on 2026-10-15, counted with that same command: the references under
     // one root, read by a folder sweep.
-    expect(Object.keys(KEYS).length).toBe(62);
+    //
+    // 63 on 2026-11-07, counted with that same command: the scan card's
+    // duplicate warning, one route and one key.
+    expect(Object.keys(KEYS).length).toBe(63);
   });
 });
 
@@ -295,6 +299,9 @@ describe("the catalogue is everything derived from the books table", () => {
     expect(
       invalidatedBy((client) => invalidateWith(client).catalogue()),
     ).toEqual([
+      // Whether the scanned record is already held: a book write moves it, and
+      // a stale "not held" hides the warning from the next copy scanned.
+      "alreadyHeld",
       "getBook",
       "getStats",
       "listAuthorSuggestions",

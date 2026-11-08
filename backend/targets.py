@@ -429,7 +429,7 @@ class Target:
     #: the measurement and which rows fail it.
     serves_groups: frozenset[str]
     #: The login this build ships for the target, where the library publishes
-    #: one about itself. None everywhere else, which is every row but one.
+    #: one about itself. None everywhere else, which is every row but two.
     #:
     #: **On the row rather than in `credentials.py`, so the address is not a
     #: fact stored twice.** A shipped default has to be bound to the origin it
@@ -839,10 +839,10 @@ class Target:
 #: is on `enums.SourceFamily`.
 FAMILY: Final = SourceFamily.CATALOGUE
 
-#: The eleven catalogues this application ships knowing about.
+#: The twelve catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
-#: migrations write ten of these rows into `catalogue_targets` and
+#: migrations write every one of these rows into `catalogue_targets` and
 #: `main.seed_catalogue_targets` reconciles them on every start, and **nothing
 #: reads that table back**, deliberately, because #127's decision D2 sends a
 #: member supplied host to #131 and an address read off a row is that decision.
@@ -976,7 +976,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             # Empty, and measured rather than assumed: it answers 59 and holds 2
             # outside `978-80` that nothing else **in the sample** does, so it
             # fails the zero book bar in `sources.SERVES_GROUPS` by two books.
-            # The sample is seven columns of an eleven row roster, so that is the
+            # The sample is eight columns of a twelve row roster, so that is the
             # scope of the claim; one of the two is Argentine and the catalogue
             # most likely to hold it has no column here.
             serves_groups=frozenset(),
@@ -1140,9 +1140,53 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             isbn_attribute=z3950.USE_ISBN,
             lookup_records=1,
         ),
+        CatalogueSource.BNU: Target(
+            source=CatalogueSource.BNU,
+            rank=8,
+            transport=Transport.SRU,
+            # **The BNA's two compromises again**: port 9992 speaks no TLS and the
+            # library publishes a bare address. That row's comment carries what
+            # an `Authorization` header over plaintext costs, and it applies here
+            # unchanged. The port is the Z39.50 one the library publishes; the
+            # same YAZ front end answers SRU on it, measured 2026-11-07.
+            base_url="http://164.73.2.157:9992/BNU01",
+            reader=Reader.DUBLIN_CORE_BARE,
+            answers_lookup=True,
+            # **Not every hit carries a record**, the BNA's property at a second
+            # Aleph and looser here: of six sampled ISBNs with several hits, at
+            # `maximumRecords=5`, five filled one `recordData` and one filled
+            # three. Asked for one record, all three ISBNs tried filled it. So a
+            # lookup asks for one, and a search, which would want ten, is not
+            # offered. Measured 2026-11-07.
+            answers_search=False,
+            metered=False,
+            needs_key=True,
+            # **Published by the library itself**, in its section for
+            # librarians at `bibna.gub.uy/protocolo-z39-50`, beside the host,
+            # port and database, with no stated restriction on use. The argument
+            # is the Argentine row's and is at `ShippedCredential`. Owner's
+            # decision of 2026-09-05 on #117.
+            #
+            # Verified by hand against the live target on 2026-11-07:
+            # unauthenticated the endpoint answers SRU diagnostic 1/3,
+            # `Authentication error`, and with this pair it answers records.
+            shipped_credential=ShippedCredential("Z39.50", "z39.bnu"),
+            # **Uruguayan publishing, and measured rather than assumed**, which is
+            # what the BNA's row could not say of itself. The whole committed
+            # sample was put to this catalogue on 2026-11-07, so it has a column
+            # there: it hits 27 of the 500, and all 27 are in this group.
+            serves_groups=frozenset({"978-9974"}),
+            sru_version="1.1",
+            query_parameter="x-pquery",
+            query_language=QueryLanguage.PQF,
+            # No `recordSchema`: `marcxml` answers diagnostic 1/66, as at the BNA.
+            record_schema="",
+            isbn_attribute=z3950.USE_ISBN,
+            lookup_records=1,
+        ),
         CatalogueSource.GOOGLE_BOOKS: Target(
             source=CatalogueSource.GOOGLE_BOOKS,
-            rank=8,
+            rank=9,
             transport=Transport.BESPOKE,
             base_url="https://www.googleapis.com/books/v1/volumes",
             reader=Reader.GOOGLE_BOOKS,
@@ -1159,7 +1203,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNF: Target(
             source=CatalogueSource.BNF,
-            rank=9,
+            rank=10,
             transport=Transport.SRU,
             base_url="https://catalogue.bnf.fr/api/SRU",
             reader=Reader.DUBLIN_CORE,
@@ -1179,7 +1223,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LOC: Target(
             source=CatalogueSource.LOC,
-            rank=10,
+            rank=11,
             transport=Transport.SRU,
             base_url="http://lx2.loc.gov:210/lcdb",
             reader=Reader.MODS,
@@ -1229,10 +1273,10 @@ def origin(base_url: str) -> str:
 #: Every origin this application will open a catalogue connection to.
 #:
 #: **Scheme, host and port, and not just the host**, so a row cannot downgrade a
-#: TLS target to plaintext or move it to another port on the same name. **Four**
-#: targets are plain HTTP by necessity (ports 210, 210, 9991 and 9991 speak no
-#: TLS) and an allowlist of bare hostnames would let the other seven join them.
-#: One of the four authenticates, so a plaintext origin here is not only a
+#: TLS target to plaintext or move it to another port on the same name. **Five**
+#: targets are plain HTTP by necessity (ports 210, 210, 9991, 9991 and 9992 speak
+#: no TLS) and an allowlist of bare hostnames would let the other seven join them.
+#: Two of the five authenticate, so a plaintext origin here is not only a
 #: question of what an eavesdropper reads.
 #: `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` recomputes that
 #: count from the rows and checks this sentence against it, because it had gone

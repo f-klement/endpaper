@@ -623,16 +623,21 @@ class AuthorityProvenance(StrEnum):
 class ExportFormat(StrEnum):
     """What `GET /api/books/export` may write.
 
-    Two of these are for a person and one is for another institution, and the
-    difference decides who may ask for it. CSV and plain text carry a
-    household's own columns (what a book cost, which room it is in, who added
-    it) and go to a spreadsheet. MARCXML carries the catalogue record and goes
+    Three of these are for a person and one is for another institution, and the
+    difference decides who may ask for it. CSV carries a household's own
+    columns (what a book cost, which room it is in, who added it) and goes to a
+    spreadsheet; plain text carries fewer and goes to an editor. HTML is a page
+    a person opens offline or hands to somebody, with the narrower set of
+    columns `routers/books._html_chunks` names. MARCXML carries the catalogue record and goes
     to another library's system, so it is offered only in library mode: see
     `routers/books.export_books`.
     """
 
     CSV = "csv"
     TXT = "txt"
+    #: One self contained page: inline CSS, no script, nothing fetched. Every
+    #: value is escaped, because titles arrive from outside catalogues.
+    HTML = "html"
     #: MARC21 in XML, and deliberately not ISO 2709. The binary serialisation
     #: needs a directory of byte offsets that has to agree with the field data
     #: after every change, and every system that reads it reads this too.
@@ -656,6 +661,7 @@ class ExportFormat(StrEnum):
 EXPORT_MEDIA_TYPES: dict[ExportFormat, str] = {
     ExportFormat.CSV: "text/csv; charset=utf-8",
     ExportFormat.TXT: "text/plain; charset=utf-8",
+    ExportFormat.HTML: "text/html; charset=utf-8",
     ExportFormat.MARCXML: "application/marcxml+xml; charset=utf-8",
 }
 
@@ -997,15 +1003,16 @@ class CatalogueSource(StrEnum):
 
     **Not every source answers every question**, and the split is real rather
     than incidental. BNF and LOC are title search only, because neither was
-    worth an ISBN request. NKP, BNE and BNA are the other way round, **lookup
-    only**, and for two different reasons. The NKP's and the BNA's is the
-    server's: each renders one populated record per response whatever page size
-    is asked for, so a search for ten candidates would be ten requests. The
+    worth an ISBN request. NKP, BNE, BNA and BNU are the other way round,
+    **lookup only**, and for two different reasons. The NKP's, the BNA's and
+    the BNU's is the server's: each renders one populated record per response
+    whatever page size is asked for, so a search for ten candidates would be
+    ten requests. The
     BNE's is ours: its search works and nobody has measured what it would find,
     so it holds the conservative default. See `sources.LOOKUP_SOURCES` and
     `SEARCH_SOURCES`, which is why those are two sets and not one.
 
-    **One member needs a credential and is free**, which is new: the BNA. What
+    **Two members need a credential and are free**: the BNA and the BNU. What
     that costs the roster's rules is on `sources.NEEDS_A_KEY`.
     """
 
@@ -1025,6 +1032,10 @@ class CatalogueSource(StrEnum):
     #: same bare Dublin Core, and the first source here that is free and
     #: credentialled at once: see `sources.NEEDS_A_KEY`. #116.
     BNA = "bna"
+    #: The Biblioteca Nacional de Uruguay. The BNA's profile exactly: another
+    #: Aleph behind the same YAZ front end, the same bare Dublin Core, and a
+    #: login its library publishes. #117.
+    BNU = "bnu"
 
 
 class SourceFamily(StrEnum):

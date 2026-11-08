@@ -18,9 +18,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BookCondition,
   BookFormat,
   BookIdentifierScheme,
   ClassificationScheme,
+  OwnershipStatus,
 } from "../../../src/api/generated/model";
 import type { AudiobookGroup } from "../../../src/lib/audiobookGroups";
 import {
@@ -99,6 +101,12 @@ const PENDING: { [K in keyof PendingBook]-?: PendingBook[K] } = {
   format: BookFormat.paperback,
   tagIds: [7, 9],
   tagNames: ["Holiday reads"],
+  collectionId: 4,
+  condition: BookCondition.fair,
+  // Not the default, so the arm comparing against a blank book can see it.
+  ownership: OwnershipStatus.not_owned,
+  purchaseSource: "The Oxfam on the high street",
+  purchasedAt: "2026-11-07",
 };
 
 /** `PENDING` with one field changed, still carrying a draft. */
@@ -107,16 +115,36 @@ function pending(patch: Partial<PendingBook> = {}) {
 }
 
 describe("blankPending", () => {
-  it("keeps the shelf it is given and nothing else", () => {
-    // The carry-over is the whole reason it takes one: a cancel resets the
-    // book and keeps the bookcase somebody is standing in front of.
-    expect(blankPending("Loft box 2")).toEqual({
+  it("keeps the shelf it is given and blanks everything else", () => {
+    // The rapid queue builds its rows from a shelf alone, so a carried
+    // collection or privacy must not reach a batch nobody showed them for.
+    expect(blankPending({ location: "Loft box 2" })).toEqual({
       draft: null,
       coverFile: null,
       isPrivate: false,
       location: "Loft box 2",
       format: "",
       tagIds: [],
+      tagNames: [],
+      collectionId: null,
+      condition: "",
+      ownership: "owned",
+      purchaseSource: "",
+      purchasedAt: "",
+    });
+  });
+
+  it("starts from every carried value it is given", () => {
+    const {
+      draft: _draft,
+      coverFile: _cover,
+      tagNames: _names,
+      ...carried
+    } = PENDING;
+    expect(blankPending(carried)).toEqual({
+      ...carried,
+      draft: null,
+      coverFile: null,
       tagNames: [],
     });
   });
@@ -132,19 +160,37 @@ describe("toCopyRequest", () => {
    * 141 tests green. `location` was covered by accident, through an end to end
    * assertion in `hooks.test.tsx`; `format` was covered by nothing.
    */
-  it("sends the shelf and the format chosen for this copy", () => {
+  it("sends every per copy value chosen for this copy", () => {
     expect(
       toCopyRequest(
-        pending({ location: "  Loft box 2  ", format: BookFormat.paperback }),
+        pending({ location: "  Loft box 2  ", purchaseSource: "  Oxfam  " }),
       ),
-    ).toEqual({ location: "Loft box 2", format: "paperback" });
+    ).toEqual({
+      location: "Loft box 2",
+      collection_id: 4,
+      format: "paperback",
+      condition: "fair",
+      purchase_source: "Oxfam",
+      purchased_at: "2026-11-07",
+    });
   });
 
-  it("sends null rather than a blank shelf or format", () => {
-    expect(toCopyRequest(pending({ location: "   ", format: "" }))).toEqual({
+  it("sends null rather than a blank value", () => {
+    expect(toCopyRequest(blankPending({ location: "   " }))).toEqual({
       location: null,
+      collection_id: null,
       format: null,
+      condition: null,
+      purchase_source: null,
+      purchased_at: null,
     });
+  });
+
+  it("sends no purchase date that names no day", () => {
+    // The server refuses it, so sending it would fail the press that adds.
+    expect(
+      toCopyRequest(pending({ purchasedAt: "2026-02-30" })).purchased_at,
+    ).toBeNull();
   });
 });
 
@@ -169,6 +215,15 @@ describe("toScanRequest", () => {
     expect(toScanRequest(pending()).classifications).toEqual([
       { scheme: "ddc", number: "813.54", label: "Fiction" },
     ]);
+  });
+
+  it("sends the ownership chosen for this book", () => {
+    expect(toScanRequest(pending()).ownership).toBe("not_owned");
+  });
+
+  it("sends the purchase date as the calendar date it was typed as", () => {
+    // Never through `new Date`, which is the day before west of Greenwich.
+    expect(toScanRequest(pending()).purchased_at).toBe("2026-11-07");
   });
 
   it("spells the privacy flag the way the column does", () => {
@@ -266,7 +321,7 @@ function requestSchema(operationId: string, expectedRef: string): BodySchema {
 function sentNames(): string[] {
   const drafts: BookDraft[] = [DRAFT, draftFromFile(record())];
   const books: (PendingBook & { draft: BookDraft })[] = drafts.flatMap(
-    (draft) => [pending({ draft }), { ...blankPending(""), draft }],
+    (draft) => [pending({ draft }), { ...blankPending(), draft }],
   );
   return [
     ...new Set(books.flatMap((book) => Object.keys(toScanRequest(book)))),
@@ -281,29 +336,9 @@ function sentNames(): string[] {
  * the other does not know about.
  */
 const NOT_SENT_BY_THE_SCAN_FLOW: Record<string, string> = {
-  // Accepted by the endpoint and sent by nothing in the scan flow: the confirm
-  // card offers a shelf, a format and a privacy tick, and no collection.
-  // Filing happens afterwards from the book's own page. Named here so that
-  // stays a decision rather than a discovery.
-  collection_id: "the confirm card offers no collection",
-  // Accepted by the endpoint and deliberately not sent, because the default is
-  // already the true answer for this flow: somebody scanning a barcode is
-  // holding the book. `routers/books.py` gives that same reason where a copy is
-  // created, and `schemas/book.py` gives it on the field. The flow that has to
-  // send it is the store import, where a catalogue may be recording a library
-  // loan, and `LibrarySettingsPage/types.ts` sends `unknown` there.
-  ownership: "scanning a barcode means holding the book, which is the default",
-  // **`categories` used to be the third row and is now sent**, which is what
-  // deleted it: this table is only ever subtracted from the endpoint's names,
-  // so an excuse for a field the flow sends costs nothing and the third arm
-  // below is what refuses it.
-  //
-  // That row carried two claims and only one stopped being true. The other,
-  // that `draftFromMatch` does not read the joined column a match carries,
-  // moved to that function's own docstring in the same commit: deleting the
-  // row outright would have dropped a live refusal out of the tree, and
-  // nothing here would have said so, because a table this size going green is
-  // exactly what removing a row does.
+  // Empty, and kept: the arms below read it, and a field the endpoint gains
+  // that the scan flow should not send is a row here with its reason.
+  // `collection_id` and `ownership` were rows until the form carried them.
 };
 
 /**
@@ -393,14 +428,14 @@ describe("the scan request agrees with the API", () => {
     // A field the confirm card collects, shows a control for and never sends
     // is a control that appears to do nothing.
     const blank = JSON.stringify(
-      toScanRequest({ ...blankPending(""), draft: { isbn: "", title: "" } }),
+      toScanRequest({ ...blankPending(), draft: { isbn: "", title: "" } }),
     );
     const fields = Object.keys(PENDING) as (keyof PendingBook)[];
     const unsent = fields.filter(
       (field) =>
         JSON.stringify(
           toScanRequest({
-            ...blankPending(""),
+            ...blankPending(),
             draft: { isbn: "", title: "" },
             [field]: PENDING[field],
           }),
@@ -410,6 +445,23 @@ describe("the scan request agrees with the API", () => {
     expect(unsent).toEqual([]);
   });
 });
+
+/** The pending fields whose value reaches the copy body, by changing one. */
+function fieldsOnTheCopyWire(): Set<string> {
+  // **By value rather than by key name**, because the two vocabularies
+  // differ: `collectionId` is sent as `collection_id`, so a comparison of
+  // names reads it as dropped. The scan request's arm has the same shape.
+  const blank = JSON.stringify(toCopyRequest(blankPending()));
+  const fields = Object.keys(PENDING) as (keyof PendingBook)[];
+  return new Set(
+    fields.filter(
+      (field) =>
+        JSON.stringify(
+          toCopyRequest({ ...blankPending(), [field]: PENDING[field] }),
+        ) !== blank,
+    ),
+  );
+}
 
 /**
  * The copy endpoint, guarded the same way and for the reason it was missed.
@@ -422,16 +474,10 @@ describe("the scan request agrees with the API", () => {
 describe("the copy request agrees with the API", () => {
   /** Fields `POST /api/books/{id}/copies` accepts that the scan flow omits. */
   const NOT_SENT_WHEN_COPYING: Record<string, string> = {
-    collection_id:
-      "the scan flow has no collection control at all, on either endpoint. " +
-      "Same omission as the scan request records, and the same decision.",
-    condition:
-      "a per copy note about wear. There is no control for it on the confirm " +
-      "step, and adding one is a design change rather than a plumbing one.",
-    purchase_price_minor: "no purchase fields on the scan screen.",
-    purchase_currency: "no purchase fields on the scan screen.",
-    purchase_source: "no purchase fields on the scan screen.",
-    purchased_at: "no purchase fields on the scan screen.",
+    purchase_price_minor:
+      "no price on the scan screen: a price is per book, not carried along a " +
+      "shelf, and is set on the book page with its currency.",
+    purchase_currency: "set with the price, on the book page.",
     lending:
       "willingness to lend is a property of the copy and is set on the book " +
       "page afterwards, where the rest of the lending fields live.",
@@ -485,6 +531,9 @@ describe("the copy request agrees with the API", () => {
       "`CopyCreate` has no privacy field: a copy inherits it from the book it " +
       "copies. The tick above the button is inert for this press, which is why " +
       "`copies.fromScanHint` says so before it is pressed.",
+    ownership:
+      "`CopyCreate` has no ownership field: the server records a copy as " +
+      "owned, because somebody adding one is holding it.",
   };
 
   it("puts every field of the pending book on the copy wire, or names why not", () => {
@@ -492,7 +541,7 @@ describe("the copy request agrees with the API", () => {
     // stops a new field with a live control being silently dropped here while
     // the schema guards above stay green: they only compare against the
     // endpoint, and a field the endpoint never had is invisible to them.
-    const sent = new Set(Object.keys(toCopyRequest(pending())));
+    const sent = fieldsOnTheCopyWire();
 
     const unaccounted = Object.keys(PENDING).filter(
       (field) => !sent.has(field) && !(field in NOT_ON_THE_COPY),
@@ -517,9 +566,10 @@ describe("the copy request agrees with the API", () => {
         (name) => sent.has(name) || !accepted.has(name),
       ),
     ).toEqual([]);
+    const carried = fieldsOnTheCopyWire();
     expect(
       Object.keys(NOT_ON_THE_COPY).filter(
-        (field) => !(field in PENDING) || sent.has(field),
+        (field) => !(field in PENDING) || carried.has(field),
       ),
     ).toEqual([]);
   });
@@ -749,7 +799,7 @@ describe("draftFromFile", () => {
     // The half a field by field assertion cannot reach: this is what actually
     // goes on the wire.
     const draft = draftFromFile(record());
-    const body = toScanRequest({ ...blankPending(""), draft });
+    const body = toScanRequest({ ...blankPending(), draft });
     expect(body).toMatchObject({ title: "Dune", is_private: false });
     expect(body).not.toHaveProperty("notFound");
   });

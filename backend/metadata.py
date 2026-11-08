@@ -1788,6 +1788,60 @@ def _nkp_record(record: ElementTree.Element, isbn: str, *, source: str) -> Recor
 # own comment records. Whichever ticket gives this source a second pass writes
 # it, from records rather than from a dictionary.
 
+# ── Biblioteca Nacional de Uruguay ───────────────────────────────────────────
+#
+# **The Argentine row again, and every property that block states holds here
+# unless this one says otherwise**: Aleph behind YAZ 4.2.66, SRU 1.1, PQF in
+# `x-pquery`, use attribute 7, bare Dublin Core through `_nkp_record`, a login
+# the library publishes, plaintext. No adapter, no reader, no new door.
+# Measured 2026-11-07 against `targets.SEEDED[CatalogueSource.BNU].base_url`:
+#
+#   * `operation=explain`: HTTP 404 from YAZ, with or without the login. The
+#     Argentine target answers the same, so nothing here asks for an explain.
+#   * unauthenticated `searchRetrieve`: HTTP 200 carrying diagnostic
+#     `info:srw/diagnostic/1/3`, `Authentication error`, whose details quote
+#     the user name the request carried, as at the BNA.
+#   * with the published pair: `numberOfRecords` and records.
+#   * `recordSchema=marcxml`: diagnostic 1/66. CQL, `query=isbn=...`:
+#     diagnostic 1/11, `Unsupported query type`. So the ticket's MARC21 is the
+#     Z39.50 route's format, exactly as the BNA's was.
+#
+# **The port is the one the library publishes for Z39.50**, 9992, and the same
+# YAZ front end answers SRU on it. The page publishing it needs `curl -k`,
+# because its TLS chain is incomplete; that is the documentation's property and
+# nothing about fetching the catalogue, so it is no reason to relax `fetch.py`.
+#
+# **What it answers, over all 500 ISBNs of the sample committed at
+# `tests/fixtures/catalogue_survey_2026_08_31.json`**, one serial pass with the
+# published login on 2026-11-07 with nothing else in flight against the host.
+# Unlike the Argentine pass this covered every row, so the result is committed
+# as a `bnu` column:
+#
+#   * **27 of 500 hit, all 27 in the Uruguayan frame and all in `978-9974`**,
+#     and 0 of the 450 rows outside it. So the remit on its row loses no book in
+#     the sample, which is `sources.SERVES_GROUPS`' bar, and it is the first
+#     credentialled row to carry one.
+#   * **26 of the 27 name the ISBN asked for in a form `isbn.parse` reads**, and
+#     the column records 26: the 27th is the trap below, which the identity check
+#     refuses, so this source answers it with nothing.
+#   * **8 that none of the seven sources needing no credential holds**, and the
+#     Argentine catalogue, asked about those 8 the same day, holds none of them.
+#     The Uruguayan frame goes from 35 of 50 answered to 43.
+#     `tests/test_sources.py` recomputes these and the 26 from the column.
+#   * Lookup latency min 0.364s, median 0.382s, p90 0.417s, max 3.487s over all
+#     500, the maximum one outlier.
+#
+# **Six of the 27 had several hits, and one of them is a trap a lookup walks
+# into without noticing.** `9789974712003` is a twelve volume set's ISBN for the
+# whole work, and each volume's record carries it beside its own, written
+# `9789974712003 (obra completa)`. The first record answered is volume one,
+# whose title is not the set's. **The identity check refuses it, and that is the
+# right answer by accident**: `isbn.parse` keeps the qualifier's letters, so the
+# value is not an ISBN and the record claims nothing. Reading the ISBN out of
+# the qualified value would put volume one's title on a scan of the set, so a
+# reader that learns to strip qualifiers has to learn this case first. K10plus
+# and Open Library both hold the set.
+
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -1836,15 +1890,15 @@ def _nkp_record(record: ElementTree.Element, isbn: str, *, source: str) -> Recor
 # did not, which is the question the fallback order turns on.
 #
 # **What this chain covers without a Google Books key, which is what a default
-# install runs.** Two sources need a credential (`sources.NEEDS_A_KEY`), one of
-# them ships the login its library publishes and the other does not, so the
-# chain most deployments actually run is the eight sources a stock install asks.
-# Measured over 500 domestic ISBNs across ten frames, it answers 399 and misses
-# 101, and outside German language publishing it misses 97 of 400.
+# install runs.** Three sources need a credential (`sources.NEEDS_A_KEY`), two
+# of them ship the login their library publishes and Google Books does not, so
+# the chain most deployments actually run is the nine sources a stock install
+# asks. Measured over 500 domestic ISBNs across ten frames, it answers 407 and
+# misses 93, and outside German language publishing it misses 89 of 400.
 #
-# The four books between that and the figure this module quoted before are the
-# Argentine row's: the seven sources that need nothing answer 395 and miss 105,
-# and the row above uniquely adds 4 of those.
+# The twelve books between that and the seven sources that need nothing, which
+# answer 395 and miss 105, are the two credentialled rows above: the Argentine
+# one uniquely adds 4 and the Uruguayan one 8.
 #
 # The same 500 books
 # under the roster of three releases
@@ -3449,17 +3503,17 @@ _LANGUAGE_WEIGHT: Final = 3
 #: promoting, so a point comes off. One point is less than a single term match,
 #: so this only ever breaks a tie.
 #:
-#: **The NKP, BNE and BNA entries are inert and are here so they stay correct if
-#: that changes.** This set is read only from `_relevance`, which scores
-#: **search** rows, and none of the three answers a title search:
-#: `sources.SEARCH_SOURCES` leaves all three out, the NKP and the BNA because
-#: their server renders one populated record per response whatever page size is
-#: asked, the BNE because its search gain was never measured. So none can reach
-#: this comparison today. Listing them costs nothing and omitting them would put
-#: a wrong default in place the day one does, which is the same reasoning
-#: `_MATCH_PRECEDENCE` records for the same three. A reader meeting this line
-#: should not conclude that any of them appears in search results.
-_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna"})
+#: **The NKP, BNE, BNA and BNU entries are inert and are here so they stay
+#: correct if that changes.** This set is read only from `_relevance`, which
+#: scores **search** rows, and none of the four answers a title search:
+#: `sources.SEARCH_SOURCES` leaves all four out, the NKP, the BNA and the BNU
+#: because their server renders one populated record per response whatever page
+#: size is asked, the BNE because its search gain was never measured. So none
+#: can reach this comparison today. Listing them costs nothing and omitting them
+#: would put a wrong default in place the day one does, which is the same
+#: reasoning `_MATCH_PRECEDENCE` records for the same four. A reader meeting
+#: this line should not conclude that any of them appears in search results.
+_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna", "bnu"})
 _SECONDARY_PENALTY: Final = 1
 
 #: Fields that make a search row pickable rather than a stub. Scored
@@ -4020,28 +4074,29 @@ _MATCH_PRECEDENCE: Final = (
     "dnb",
     "bnf",
     "loc",
-    # Last five, and named rather than left to the default so that a reader can
+    # Last six, and named rather than left to the default so that a reader can
     # see it was decided. They are the newest and the least compared of the
-    # eleven, and the field any of them would win is a field the DNB or K10plus
-    # has already filled for any book all five hold. Where one is the only
+    # twelve, and the field any of them would win is a field the DNB or K10plus
+    # has already filled for any book all six hold. Where one is the only
     # catalogue with a row, precedence never runs.
     #
-    # **The order among the five national catalogues is arbitrary**, which is
+    # **The order among the six national catalogues is arbitrary**, which is
     # worth saying rather than implying a comparison nobody made. They collect
     # different countries, so a book two of them hold is a book the primary
     # three hold as well, and the tie this would break has not been observed.
     #
-    # The NKP, the BNE and the BNA are here rather than absent because a source
-    # missing from this tuple sorts last by default and silently, which is the
-    # thing `test_precedence_names_every_source_and_nothing_else` exists to
-    # catch. It caught the NKP. None of the three answers a title search, so
+    # The NKP, the BNE, the BNA and the BNU are here rather than absent because
+    # a source missing from this tuple sorts last by default and silently, which
+    # is the thing `test_precedence_names_every_source_and_nothing_else` exists
+    # to catch. It caught the NKP. None of the four answers a title search, so
     # none can reach this comparison today; see `_SECONDARY_SOURCES`, which
-    # carries the same three for the same reason.
+    # carries the same four for the same reason.
     "oenb",
     "nlg",
     "nkp",
     "bne",
     "bna",
+    "bnu",
 )
 
 

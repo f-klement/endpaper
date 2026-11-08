@@ -5,6 +5,7 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { BookCondition } from "./bookCondition.ts";
 import type { BookFormat } from "./bookFormat.ts";
 import type { BookIdentifierIn } from "./bookIdentifierIn.ts";
 import type { ClassificationIn } from "./classificationIn.ts";
@@ -22,6 +23,7 @@ export interface BookCreate {
   /** @maxItems 8 */
   classifications?: ClassificationIn[];
   collection_id?: number | null;
+  condition?: BookCondition | null;
   cover_url?: string | null;
   description?: string | null;
   format?: BookFormat | null;
@@ -34,6 +36,8 @@ export interface BookCreate {
   ownership?: OwnershipStatus;
   page_count?: number | null;
   publisher?: string | null;
+  purchase_source?: string | null;
+  purchased_at?: string | null;
   series_index?: number | null;
   series_name?: string | null;
   subtitle?: string | null;
