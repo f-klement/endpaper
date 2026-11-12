@@ -281,6 +281,16 @@ describe("BookDetail", () => {
       // icon is decorative and carries no accessible name by design.
       expect(await screen.findByText("Private")).toBeInTheDocument();
     });
+
+    it("shows no marker on someone else's public book", async () => {
+      stubLoad({
+        book: makeBook({ id: 1, is_private: false, added_by: OWNER }),
+      });
+      renderDetail(OTHER);
+
+      await screen.findByRole("heading", { name: "Dune" });
+      expect(screen.queryByText("Private")).not.toBeInTheDocument();
+    });
   });
 
   describe("tags", () => {
@@ -1338,6 +1348,39 @@ describe("BookDetail enrichment", () => {
     expect(
       await screen.findByRole("button", { name: "Find more details" }),
     ).toBeInTheDocument();
+  });
+
+  it("opens the Google Books help from beside the button", async () => {
+    stubLoad({ googleBooks: false });
+    renderDetail();
+
+    await userEvent
+      .setup()
+      .click(
+        await screen.findByRole("button", { name: "About extra book details" }),
+      );
+
+    expect(
+      await screen.findByRole("dialog", { name: "Google Books lookup" }),
+    ).toBeInTheDocument();
+  });
+
+  it("closes the Google Books help", async () => {
+    stubLoad({ googleBooks: false });
+    renderDetail();
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", { name: "About extra book details" }),
+    );
+    const help = await screen.findByRole("dialog", {
+      name: "Google Books lookup",
+    });
+
+    await user.click(within(help).getByRole("button", { name: "Close" }));
+
+    expect(
+      screen.queryByRole("dialog", { name: "Google Books lookup" }),
+    ).not.toBeInTheDocument();
   });
 
   it("writes nothing until an edition is chosen", async () => {

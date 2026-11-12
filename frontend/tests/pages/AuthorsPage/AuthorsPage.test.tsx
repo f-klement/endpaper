@@ -339,6 +339,55 @@ describe("AuthorsPage", () => {
     expect(screen.getByLabelText("Fold into J. Smith")).toBeChecked();
   });
 
+  it("folds a group the reader unticked and then ticked again", async () => {
+    // The plain round trip, with no name narrowed: the second click has to
+    // take the group out of the unticked set as well as restore its names.
+    stub([author()], [TOLKIEN, LE_GUIN]);
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", { body: { merged: [author()] } });
+    renderWithProviders(<AuthorsPage />);
+    const user = userEvent.setup();
+
+    await user.click(
+      await screen.findByLabelText("Fold into J. R. R. Tolkien"),
+    );
+    await user.click(screen.getByLabelText("Fold into J. R. R. Tolkien"));
+    await user.click(
+      screen.getByRole("button", { name: "Fold the ticked groups" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/authors/merge/batch", "POST")?.body,
+      ).toEqual({
+        groups: [
+          { keys: TOLKIEN.keys, keep_name: "J. R. R. Tolkien" },
+          { keys: LE_GUIN.keys, keep_name: "Ursula K. Le Guin" },
+        ],
+      }),
+    );
+  });
+
+  it("shows why a batch fold failed", async () => {
+    stub([author()], [TOLKIEN]);
+    api.on("/api/books/authors/merge", { body: author() });
+    api.on("/api/books/authors/merge/batch", {
+      status: 500,
+      body: { detail: "The fold was refused" },
+    });
+    renderWithProviders(<AuthorsPage />);
+
+    await userEvent
+      .setup()
+      .click(
+        await screen.findByRole("button", { name: "Fold the ticked groups" }),
+      );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The fold was refused",
+    );
+  });
+
   it("says a narrowed group is out for the reader's own reason", async () => {
     stub([author()], [SMITHS, TOLKIEN]);
     renderWithProviders(<AuthorsPage />);
@@ -433,6 +482,19 @@ describe("AuthorsPage", () => {
     stub([author()]);
     renderWithProviders(<AuthorsPage />);
     await screen.findByText("Frank Herbert");
+
+    expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
+  });
+
+  it("takes an author out of the selection when it is clicked again", async () => {
+    stub([author()]);
+    renderWithProviders(<AuthorsPage />);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByLabelText("Select Frank Herbert"));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Select Frank Herbert"));
 
     expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
   });

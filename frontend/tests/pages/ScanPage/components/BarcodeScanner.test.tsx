@@ -455,6 +455,27 @@ describe("the camera light", () => {
     );
     expect(screen.queryByText("Camera unavailable")).not.toBeInTheDocument();
   });
+
+  it("is off on the next camera after the scanner closed with it on", async () => {
+    // Otherwise the reopened camera's button reads pressed while its light is off.
+    getUserMedia.mockResolvedValue(fakeStream({ torch: true }));
+    const user = userEvent.setup();
+    const { rerender } = renderLocalised(
+      <BarcodeScanner active onDetected={vi.fn<OnDetected>()} />,
+    );
+    const first = await screen.findByRole("button", { name: "Camera light" });
+    await user.click(first);
+    await waitFor(() => expect(first).toHaveAttribute("aria-pressed", "true"));
+
+    rerender(
+      <BarcodeScanner active={false} onDetected={vi.fn<OnDetected>()} />,
+    );
+    rerender(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+
+    expect(
+      await screen.findByRole("button", { name: "Camera light" }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
 });
 
 /** The hint a camera that may face the member shows after a quiet wait. */
@@ -612,6 +633,18 @@ describe("a rear camera", () => {
     renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
     await act(async () => {});
     expect(decodeFromStream).toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(60000));
+
+    expect(screen.getByText("Point at barcode")).toBeInTheDocument();
+  });
+
+  it("never suggests holding the book further back after a read", async () => {
+    // A read on a rear camera must not start the wait a front camera uses.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    await act(async () => {});
+    act(() => emitBarcode("9780441013593"));
 
     act(() => vi.advanceTimersByTime(60000));
 

@@ -13,41 +13,47 @@ import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import { useFolderSweep } from "../hooks";
 import LookupResult from "./components/LookupResult";
 import RapidQueue from "./components/RapidQueue";
-import { useBookSearch, useRapidIntake, useScanFlow } from "./hooks";
+import {
+  useBookSearch,
+  useRapidIntake,
+  useScanFlow,
+  type UseRapidIntakeResult,
+  type UseScanFlowResult,
+} from "./hooks";
 
-interface ScanPageProps {
-  /** The signed in account, whose carried fields the add form starts from. */
-  accountId: number;
+/** The header's switch into and out of rapid scanning. */
+function RapidSwitch({
+  rapid,
+  onSwitch,
+}: {
+  rapid: UseRapidIntakeResult;
+  onSwitch: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={() => {
+        onSwitch();
+        if (rapid.isActive) rapid.stop();
+        else rapid.start();
+      }}
+    >
+      {rapid.isActive ? t("rapid.stop") : t("rapid.start")}
+    </Button>
+  );
 }
 
-export default function ScanPage({ accountId }: ScanPageProps) {
-  const navigate = useNavigate();
+/** Rapid mode's camera, and the queue that rapid mode and the file picker fill. */
+function RapidPanel({
+  rapid,
+  onRejected,
+}: {
+  rapid: UseRapidIntakeResult;
+  onRejected: (code: string) => void;
+}) {
   const { t } = useTranslation();
-  const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`), accountId);
-  const search = useBookSearch();
-  const rapid = useRapidIntake();
-  const folderSweep = useFolderSweep();
-  const [showSearchHelp, setShowSearchHelp] = useState(false);
-  const [manualIsbn, setManualIsbn] = useState("");
-  const [manualError, setManualError] = useState<MessageKey | null>(null);
-
-  // The camera is opened on request, never on arrival.
-  //
-  // It used to start the moment this tab was opened and run until the tab was
-  // left, so walking past the Scan tab lit the phone's camera indicator and
-  // held it there. Opening a camera is not something a page should do because
-  // somebody looked at it.
-  const [isCameraOn, setIsCameraOn] = useState(false);
-  const [rejectedCode, setRejectedCode] = useState<string | null>(null);
-
-  // The one field of the pending book this page reads for itself: it decides
-  // which of the three panels is on screen. The rest of it is the confirm
-  // card's business and is handed over whole.
-  const { draft } = scan.pending;
-
-  // The scanner and the search box are both ways of choosing *which* book.
-  // Once a draft exists that question is answered, so both step aside.
-  const showEntry = draft === null && !scan.isLookingUp && !rapid.isActive;
 
   // **The queue outlives rapid mode, because the file picker fills it too.**
   // It used to be rendered inside the rapid block, so a picked file joined a
@@ -56,63 +62,8 @@ export default function ScanPage({ accountId }: ScanPageProps) {
   const showQueue =
     rapid.isActive || rapid.entries.length > 0 || rapid.result !== null;
 
-  function handleManualLookup(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmed = manualIsbn.trim();
-    if (!trimmed) return;
-
-    // Validated here rather than at the server: a typo should be told to the
-    // reader immediately, and the parser accepts the hyphenated form people
-    // paste from a copyright page.
-    const canonical = parseIsbn(trimmed);
-    if (canonical === null) {
-      setManualError("scan.invalidIsbn");
-      return;
-    }
-
-    setManualError(null);
-    scan.lookup(canonical);
-  }
-
-  function handleCancel() {
-    scan.reset();
-    setManualIsbn("");
-    setManualError(null);
-    setRejectedCode(null);
-    search.clear();
-  }
-
-  function handleDetected(isbn: string) {
-    // Close the camera on a hit. The next step is confirming a draft, and
-    // leaving the stream running behind that form keeps the indicator lit for
-    // as long as somebody takes to check a title.
-    setIsCameraOn(false);
-    setRejectedCode(null);
-    scan.lookup(isbn);
-  }
-
   return (
-    <div className="max-w-lg mx-auto px-4 pt-5">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-semibold text-paper-900 dark:text-paper-100">
-          {t("scan.title")}
-        </h1>
-        {draft === null && (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              setIsCameraOn(false);
-              setRejectedCode(null);
-              if (rapid.isActive) rapid.stop();
-              else rapid.start();
-            }}
-          >
-            {rapid.isActive ? t("rapid.stop") : t("rapid.start")}
-          </Button>
-        )}
-      </div>
-
+    <>
       {rapid.isActive && (
         <>
           {/* Rapid mode has its own start and stop in the header, so the
@@ -120,7 +71,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
           <BarcodeScanner
             active
             onDetected={rapid.capture}
-            onRejected={setRejectedCode}
+            onRejected={onRejected}
           />
           <p className="text-xs text-paper-600 mt-3 leading-relaxed dark:text-paper-400">
             {t("rapid.explain")}
@@ -166,89 +117,250 @@ export default function ScanPage({ accountId }: ScanPageProps) {
           />
         </>
       )}
+    </>
+  );
+}
 
-      {/* **No catalogue answered, which is not "nobody knows it"**, so this
-          offers the retry a 503 is for, and the hand entry the server's own
-          sentence names. Above the entry panel, which is back on screen so a
-          different book can be scanned instead. */}
-      {scan.lookupError != null && (
-        <div className="mb-4 space-y-2">
-          <ErrorState error={scan.lookupError} onRetry={scan.retryLookup} />
-          <Button variant="secondary" size="sm" onClick={scan.enterByHand}>
-            {t("scan.addByHand")}
-          </Button>
+/**
+ * **No catalogue answered, which is not "nobody knows it"**, so this offers
+ * the retry a 503 is for, and the hand entry the server's own sentence names.
+ */
+function LookupFailure({
+  scan,
+}: {
+  scan: Pick<UseScanFlowResult, "lookupError" | "retryLookup" | "enterByHand">;
+}) {
+  const { t } = useTranslation();
+  if (scan.lookupError == null) return null;
+  return (
+    <div className="mb-4 space-y-2">
+      <ErrorState error={scan.lookupError} onRetry={scan.retryLookup} />
+      <Button variant="secondary" size="sm" onClick={scan.enterByHand}>
+        {t("scan.addByHand")}
+      </Button>
+    </div>
+  );
+}
+
+/** The camera, idle or reading, its switch, and what it last refused. */
+function CameraPanel({
+  isOn,
+  onToggle,
+  onDetected,
+  rejectedCode,
+  onRejected,
+}: {
+  isOn: boolean;
+  onToggle: () => void;
+  onDetected: (isbn: string) => void;
+  rejectedCode: string | null;
+  onRejected: (code: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {isOn ? (
+        <BarcodeScanner
+          active
+          onDetected={onDetected}
+          onRejected={onRejected}
+        />
+      ) : (
+        <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
+          <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
+            <Icon name="camera" className="w-5 h-5" />
+          </span>
+          <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
+            {t("scan.cameraIdle")}
+          </p>
+          <p className="text-xs text-paper-600 text-center px-8 dark:text-paper-400">
+            {t("scan.cameraIdleHint")}
+          </p>
         </div>
       )}
 
+      <Button
+        variant={isOn ? "secondary" : "primary"}
+        fullWidth
+        className="mt-3"
+        icon={isOn ? null : <Icon name="camera" className="w-4 h-4" />}
+        onClick={onToggle}
+      >
+        {isOn ? t("scan.stopScanning") : t("scan.startScanning")}
+      </Button>
+
+      {/* A barcode that decoded but is not a book. Saying so is the whole
+          point: silence here reads as a scanner that does not work, when
+          what actually happened is that the price code was read instead of
+          the ISBN. */}
+      {rejectedCode && (
+        <p
+          role="status"
+          className="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40"
+        >
+          {t("scan.notABook", { code: rejectedCode })}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * The typed ISBN. Its value and its error are the page's, so a cancel clears
+ * them and a failed lookup leaves the typing where it was.
+ */
+function ManualIsbnForm({
+  value,
+  onChange,
+  error,
+  onError,
+  onLookup,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  error: MessageKey | null;
+  onError: (error: MessageKey | null) => void;
+  onLookup: (isbn: string) => void;
+}) {
+  const { t } = useTranslation();
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    // Validated here rather than at the server: a typo should be told to the
+    // reader immediately, and the parser accepts the hyphenated form people
+    // paste from a copyright page.
+    const canonical = parseIsbn(trimmed);
+    if (canonical === null) {
+      onError("scan.invalidIsbn");
+      return;
+    }
+
+    onError(null);
+    onLookup(canonical);
+  }
+
+  return (
+    <>
+      <form onSubmit={handleSubmit} className="flex gap-2">
+        <input
+          type="text"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="9780743273565"
+          aria-label={t("scan.isbnLabel")}
+          className="field flex-1"
+        />
+        <Button type="submit">{t("scan.lookUp")}</Button>
+      </form>
+      {error && (
+        <div className="mt-2">
+          <ErrorState error={t(error)} />
+        </div>
+      )}
+    </>
+  );
+}
+
+interface ScanPageProps {
+  /** The signed in account, whose carried fields the add form starts from. */
+  accountId: number;
+}
+
+export default function ScanPage({ accountId }: ScanPageProps) {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`), accountId);
+  const search = useBookSearch();
+  const rapid = useRapidIntake();
+  const folderSweep = useFolderSweep();
+  const [showSearchHelp, setShowSearchHelp] = useState(false);
+  const [manualIsbn, setManualIsbn] = useState("");
+  const [manualError, setManualError] = useState<MessageKey | null>(null);
+
+  // The camera is opened on request, never on arrival.
+  //
+  // It used to start the moment this tab was opened and run until the tab was
+  // left, so walking past the Scan tab lit the phone's camera indicator and
+  // held it there. Opening a camera is not something a page should do because
+  // somebody looked at it.
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [rejectedCode, setRejectedCode] = useState<string | null>(null);
+
+  // The one field of the pending book this page reads for itself: it decides
+  // which of the three panels is on screen. The rest of it is the confirm
+  // card's business and is handed over whole.
+  const { draft } = scan.pending;
+
+  // The scanner and the search box are both ways of choosing *which* book.
+  // Once a draft exists that question is answered, so both step aside.
+  const showEntry = draft === null && !scan.isLookingUp && !rapid.isActive;
+
+  function handleCancel() {
+    scan.reset();
+    setManualIsbn("");
+    setManualError(null);
+    setRejectedCode(null);
+    search.clear();
+  }
+
+  function handleDetected(isbn: string) {
+    // Close the camera on a hit. The next step is confirming a draft, and
+    // leaving the stream running behind that form keeps the indicator lit for
+    // as long as somebody takes to check a title.
+    setIsCameraOn(false);
+    setRejectedCode(null);
+    scan.lookup(isbn);
+  }
+
+  return (
+    <div className="max-w-lg mx-auto px-4 pt-5">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-xl font-semibold text-paper-900 dark:text-paper-100">
+          {t("scan.title")}
+        </h1>
+        {draft === null && (
+          <RapidSwitch
+            rapid={rapid}
+            onSwitch={() => {
+              setIsCameraOn(false);
+              setRejectedCode(null);
+            }}
+          />
+        )}
+      </div>
+
+      <RapidPanel rapid={rapid} onRejected={setRejectedCode} />
+
+      {/* Above the entry panel, which is back on screen so a different book
+          can be scanned instead. */}
+      <LookupFailure scan={scan} />
+
       {showEntry && (
         <>
-          {isCameraOn ? (
-            <BarcodeScanner
-              active
-              onDetected={handleDetected}
-              onRejected={setRejectedCode}
-            />
-          ) : (
-            <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
-              <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
-                <Icon name="camera" className="w-5 h-5" />
-              </span>
-              <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
-                {t("scan.cameraIdle")}
-              </p>
-              <p className="text-xs text-paper-600 text-center px-8 dark:text-paper-400">
-                {t("scan.cameraIdleHint")}
-              </p>
-            </div>
-          )}
-
-          <Button
-            variant={isCameraOn ? "secondary" : "primary"}
-            fullWidth
-            className="mt-3"
-            icon={
-              isCameraOn ? null : <Icon name="camera" className="w-4 h-4" />
-            }
-            onClick={() => {
+          <CameraPanel
+            isOn={isCameraOn}
+            onToggle={() => {
               setRejectedCode(null);
               setIsCameraOn((on) => !on);
             }}
-          >
-            {isCameraOn ? t("scan.stopScanning") : t("scan.startScanning")}
-          </Button>
-
-          {/* A barcode that decoded but is not a book. Saying so is the whole
-              point: silence here reads as a scanner that does not work, when
-              what actually happened is that the price code was read instead of
-              the ISBN. */}
-          {rejectedCode && (
-            <p
-              role="status"
-              className="mt-2 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950/40"
-            >
-              {t("scan.notABook", { code: rejectedCode })}
-            </p>
-          )}
+            onDetected={handleDetected}
+            rejectedCode={rejectedCode}
+            onRejected={setRejectedCode}
+          />
 
           <p className="text-center text-sm text-paper-600 mt-4 mb-4 dark:text-paper-400">
             {t("scan.orEnterManually")}
           </p>
-          <form onSubmit={handleManualLookup} className="flex gap-2">
-            <input
-              type="text"
-              value={manualIsbn}
-              onChange={(event) => setManualIsbn(event.target.value)}
-              placeholder="9780743273565"
-              aria-label={t("scan.isbnLabel")}
-              className="field flex-1"
-            />
-            <Button type="submit">{t("scan.lookUp")}</Button>
-          </form>
-          {manualError && (
-            <div className="mt-2">
-              <ErrorState error={t(manualError)} />
-            </div>
-          )}
+          <ManualIsbnForm
+            value={manualIsbn}
+            onChange={setManualIsbn}
+            error={manualError}
+            onError={setManualError}
+            onLookup={scan.lookup}
+          />
 
           {/* The third way in, for a book with no barcode, a damaged one, or
               one printed before ISBNs existed. Always available: it no longer

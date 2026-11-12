@@ -210,6 +210,21 @@ describe("MarcImport", () => {
     expect(screen.getByText(/ddc:813.54/)).toBeInTheDocument();
   });
 
+  it("shows a record with no author or classification as its title alone", () => {
+    // A dangling separator reads as a field the file holds empty.
+    renderMarc({
+      preview: preview({ rows: [{ title: "Beowulf", classifications: [] }] }),
+    });
+    expect(screen.getByRole("listitem")).toHaveTextContent(/^Beowulf$/);
+  });
+
+  it("says how many records have no title and will be left out", () => {
+    renderMarc({ preview: preview({ skipped: 3 }) });
+    expect(
+      screen.getByText(/3 records have no title and will be left out/),
+    ).toBeInTheDocument();
+  });
+
   it("imports only when the confirm button is pressed", async () => {
     const props = renderMarc({ preview: preview() });
 
@@ -250,6 +265,16 @@ describe("MarcImport", () => {
     expect(
       screen.getByText(/10 records read, 4 matched, 6 added/),
     ).toBeInTheDocument();
+  });
+
+  it("reports how many records the import left out", () => {
+    renderMarc({ result: outcome({ skipped: 2 }) });
+    expect(screen.getByText(/2 records were left out/)).toBeInTheDocument();
+  });
+
+  it("does not say records were left out when the import left none out", () => {
+    renderMarc({ result: outcome({ skipped: 0 }) });
+    expect(screen.queryByText(/were left out/)).not.toBeInTheDocument();
   });
 
   it("names the records it left because their book is in the trash", () => {

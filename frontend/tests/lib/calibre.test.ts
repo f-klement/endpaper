@@ -317,8 +317,51 @@ describe("a database that is not a Calibre library", () => {
     reading.database.close();
   });
 
+  it("is refused when its books table has no title column", async () => {
+    // Both link tables are present, so only the column check stands between
+    // this database and a SELECT naming a column it does not have.
+    const reading = await openSqlite(
+      await databaseOf(
+        "CREATE TABLE books (id INTEGER PRIMARY KEY)",
+        "CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INTEGER, author INTEGER)",
+        "INSERT INTO books VALUES (1)",
+      ),
+      engine,
+    );
+    if (!reading.ok) throw new Error(reading.failure);
+
+    expect(readCalibreLibrary(reading.database)).toEqual({
+      ok: false,
+      failure: "not-a-calibre-library",
+    });
+    reading.database.close();
+  });
+
   it("says a Calibre library with no books is empty", async () => {
     expect(await library()).toEqual({ ok: false, failure: "empty" });
+  });
+});
+
+describe("a books row with no id", () => {
+  it("is passed over and the rest of the library is read", async () => {
+    // Calibre declares `id INTEGER PRIMARY KEY`, which cannot hold NULL; a
+    // library that moved its schema can. Every relation is keyed by the id, so
+    // a book without one could carry none of them.
+    const reading = await openSqlite(
+      await databaseOf(
+        "CREATE TABLE books (id INTEGER, title TEXT)",
+        "CREATE TABLE books_authors_link (id INTEGER PRIMARY KEY, book INTEGER, author INTEGER)",
+        "INSERT INTO books VALUES (NULL, 'Nobody'), (1, 'Dune')",
+      ),
+      engine,
+    );
+    if (!reading.ok) throw new Error(reading.failure);
+    const read = readCalibreLibrary(reading.database);
+    reading.database.close();
+
+    if (!read.ok) throw new Error(`expected books: ${read.failure}`);
+    const kept = read.books.map((book) => [book.id, book.title]);
+    expect(kept).toEqual([[1, "Dune"]]);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ChangeEvent } from "react";
 
 import {
   OverdueSender,
@@ -6,7 +6,11 @@ import {
   type SettingsOut,
   type SettingsUpdate,
 } from "../../../../api/generated/model";
-import { useTranslation } from "../../../../i18n";
+import {
+  useTranslation,
+  type MessageKey,
+  type Translate,
+} from "../../../../i18n";
 import { SettingsSection } from "../../../components";
 import SecretField from "../../components/SecretField";
 import ToggleField from "../../components/ToggleField";
@@ -96,12 +100,7 @@ export default function ReminderSendersSection({
 }: ReminderSendersSectionProps) {
   const { t } = useTranslation();
 
-  // A draft rather than a controlled mirror of `settings`, like the mail
-  // fields in `MailBlock`.
-  const [chat, setChat] = useState(settings.telegram_chat_id ?? "");
-
   const tokenPinned = settings.telegram_bot_token_from_env === true;
-  const chatPinned = settings.telegram_chat_id_from_env === true;
 
   return (
     <SettingsSection title={t("settings.senders")} icon="inbox">
@@ -167,15 +166,19 @@ export default function ReminderSendersSection({
           placeholder={t("settings.telegramTokenPlaceholder")}
           showLabel={t("settings.telegramTokenShow")}
           hideLabel={t("settings.telegramTokenHide")}
-          status={
-            tokenPinned
-              ? t("settings.telegramFromEnv")
-              : settings.has_telegram_bot_token
-                ? t("settings.telegramTokenSet", {
-                    preview: settings.telegram_bot_token_preview ?? "",
-                  })
-                : t("settings.telegramTokenMissing")
-          }
+          status={secretStatus(
+            {
+              pinned: tokenPinned,
+              stored: settings.has_telegram_bot_token,
+              preview: settings.telegram_bot_token_preview,
+            },
+            {
+              pinned: t("settings.telegramFromEnv"),
+              set: "settings.telegramTokenSet",
+              missing: "settings.telegramTokenMissing",
+            },
+            t,
+          )}
           saveLabel={t("settings.telegramTokenSave")}
           clearLabel={t("settings.telegramTokenClear")}
           hasStored={settings.has_telegram_bot_token === true}
@@ -185,46 +188,103 @@ export default function ReminderSendersSection({
           onClear={() => onSave({ telegram_bot_token: "" })}
         />
 
-        <div className="space-y-1.5">
-          <label htmlFor="telegram-chat-id" className={LABEL_CLASS}>
-            {t("settings.telegramChat")}
-          </label>
-          <input
-            id="telegram-chat-id"
-            type="text"
-            autoComplete="off"
-            disabled={chatPinned}
-            value={chat}
-            onChange={(event) => setChat(event.target.value)}
-            placeholder={t("settings.telegramChatPlaceholder")}
-            className={FIELD_CLASS}
-          />
-          <p className={HINT_CLASS}>
-            {chatPinned
-              ? t("settings.telegramFromEnv")
-              : t("settings.telegramChatHint")}
-          </p>
-          {!chatPinned && chat !== (settings.telegram_chat_id ?? "") && (
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={() => onSave({ telegram_chat_id: chat.trim() })}
-              className={SAVE_CLASS}
-            >
-              {isSaving ? t("common.saving") : t("settings.telegramChatSave")}
-            </button>
-          )}
-        </div>
+        <TelegramChatField
+          settings={settings}
+          isSaving={isSaving}
+          onSave={onSave}
+        />
       </div>
     </SettingsSection>
   );
 }
 
-interface MailBlockProps {
+interface ChannelProps {
   settings: SettingsOut;
   isSaving: boolean;
   onSave: (patch: SettingsUpdate) => void;
+}
+
+/** The chat a Telegram digest goes to, and its save. */
+function TelegramChatField({ settings, isSaving, onSave }: ChannelProps) {
+  const { t } = useTranslation();
+
+  // A draft rather than a controlled mirror of `settings`, like the mail
+  // fields in `MailBlock`.
+  const stored = settings.telegram_chat_id ?? "";
+  const [chat, setChat] = useState(stored);
+  const chatPinned = settings.telegram_chat_id_from_env === true;
+
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor="telegram-chat-id" className={LABEL_CLASS}>
+        {t("settings.telegramChat")}
+      </label>
+      <input
+        id="telegram-chat-id"
+        type="text"
+        autoComplete="off"
+        disabled={chatPinned}
+        value={chat}
+        onChange={(event) => setChat(event.target.value)}
+        placeholder={t("settings.telegramChatPlaceholder")}
+        className={FIELD_CLASS}
+      />
+      <p className={HINT_CLASS}>
+        {chatPinned
+          ? t("settings.telegramFromEnv")
+          : t("settings.telegramChatHint")}
+      </p>
+      {!chatPinned && chat !== stored && (
+        <SaveButton
+          isSaving={isSaving}
+          label={t("settings.telegramChatSave")}
+          onClick={() => onSave({ telegram_chat_id: chat.trim() })}
+        />
+      )}
+    </div>
+  );
+}
+
+interface MailBlockProps extends ChannelProps {
   health: SenderHealth | undefined;
+}
+
+/** The mail fields a deployment may pin from its environment. */
+const PINNABLE_MAIL_DRAFTS = [
+  "mail_server",
+  "mail_port",
+  "mail_username",
+  "mail_default_sender",
+] as const;
+
+/** Every mail field edited as a draft; the recipient is never pinned. */
+const MAIL_DRAFTS = [...PINNABLE_MAIL_DRAFTS, "overdue_mail_to"] as const;
+
+type MailDrafts = Record<(typeof MAIL_DRAFTS)[number], string>;
+
+function storedMailDrafts(settings: SettingsOut): MailDrafts {
+  return {
+    mail_server: settings.mail_server ?? "",
+    mail_port: settings.mail_port ?? "",
+    mail_username: settings.mail_username ?? "",
+    mail_default_sender: settings.mail_default_sender ?? "",
+    overdue_mail_to: settings.overdue_mail_to ?? "",
+  };
+}
+
+// Only the fields this deployment does not pin. Sending a pinned one back
+// would be a 409 the admin cannot act on from here.
+function mailPatch(
+  drafts: MailDrafts,
+  pinned: ReadonlySet<string>,
+): SettingsUpdate {
+  const patch: SettingsUpdate = {
+    overdue_mail_to: drafts.overdue_mail_to.trim(),
+  };
+  for (const field of PINNABLE_MAIL_DRAFTS) {
+    if (!pinned.has(field)) patch[field] = drafts[field].trim();
+  }
+  return patch;
 }
 
 /**
@@ -240,34 +300,21 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
   // Drafts rather than controlled mirrors of `settings`: typing a host should
   // not save it a character at a time, and a controlled field whose value only
   // changes after a round trip snaps back mid edit.
-  const [server, setServer] = useState(settings.mail_server ?? "");
-  const [port, setPort] = useState(settings.mail_port ?? "");
-  const [username, setUsername] = useState(settings.mail_username ?? "");
-  const [from, setFrom] = useState(settings.mail_default_sender ?? "");
-  const [to, setTo] = useState(settings.overdue_mail_to ?? "");
+  const [drafts, setDrafts] = useState(() => storedMailDrafts(settings));
 
   const pinned = new Set(settings.mail_from_env ?? []);
 
-  const mailDirty =
-    server !== (settings.mail_server ?? "") ||
-    port !== (settings.mail_port ?? "") ||
-    username !== (settings.mail_username ?? "") ||
-    from !== (settings.mail_default_sender ?? "") ||
-    to !== (settings.overdue_mail_to ?? "");
+  const stored = storedMailDrafts(settings);
+  const mailDirty = MAIL_DRAFTS.some(
+    (field) => drafts[field] !== stored[field],
+  );
 
-  // Only the fields this deployment does not pin. Sending a pinned one back
-  // would be a 409 the admin cannot act on from here.
-  function saveMail() {
-    const patch: SettingsUpdate = { overdue_mail_to: to.trim() };
-    if (!pinned.has("mail_server")) patch.mail_server = server.trim();
-    if (!pinned.has("mail_port")) patch.mail_port = port.trim();
-    if (!pinned.has("mail_username")) patch.mail_username = username.trim();
-    if (!pinned.has("mail_default_sender"))
-      patch.mail_default_sender = from.trim();
-    onSave(patch);
+  function edit(field: keyof MailDrafts) {
+    return (event: ChangeEvent<HTMLInputElement>) => {
+      const value = event.target.value;
+      setDrafts((current) => ({ ...current, [field]: value }));
+    };
   }
-
-  const encryption = encryptionOf(settings);
 
   return (
     <div className="space-y-3">
@@ -301,8 +348,8 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
           type="text"
           autoComplete="off"
           disabled={pinned.has("mail_server")}
-          value={server}
-          onChange={(event) => setServer(event.target.value)}
+          value={drafts.mail_server}
+          onChange={edit("mail_server")}
           placeholder={t("settings.mailServerPlaceholder")}
           className={FIELD_CLASS}
         />
@@ -318,39 +365,18 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
           inputMode="numeric"
           autoComplete="off"
           disabled={pinned.has("mail_port")}
-          value={port}
-          onChange={(event) => setPort(event.target.value)}
+          value={drafts.mail_port}
+          onChange={edit("mail_port")}
           className={`${FIELD_CLASS} w-24`}
         />
       </div>
 
-      <fieldset className="space-y-1.5">
-        <legend className={LABEL_CLASS}>{t("settings.mailSecurity")}</legend>
-        <div className="flex gap-2">
-          {(["starttls", "tls", "none"] as const).map((choice) => (
-            <label
-              key={choice}
-              className="flex items-center gap-1.5 text-sm text-paper-700 dark:text-paper-200"
-            >
-              <input
-                type="radio"
-                name="mail-encryption"
-                checked={encryption === choice}
-                disabled={
-                  isSaving ||
-                  pinned.has("mail_use_tls") ||
-                  pinned.has("mail_use_ssl")
-                }
-                onChange={() => onSave(flagsFor(choice))}
-              />
-              {t(ENCRYPTION_LABELS[choice])}
-            </label>
-          ))}
-        </div>
-        <p className={`${HINT_CLASS} leading-relaxed`}>
-          {t("settings.mailSecurityHint")}
-        </p>
-      </fieldset>
+      <EncryptionChoice
+        settings={settings}
+        isSaving={isSaving}
+        onSave={onSave}
+        pinned={pinned}
+      />
 
       <div className="space-y-1.5">
         <label htmlFor="mail-username" className={LABEL_CLASS}>
@@ -361,8 +387,8 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
           type="text"
           autoComplete="off"
           disabled={pinned.has("mail_username")}
-          value={username}
-          onChange={(event) => setUsername(event.target.value)}
+          value={drafts.mail_username}
+          onChange={edit("mail_username")}
           placeholder={t("settings.mailUsernamePlaceholder")}
           className={FIELD_CLASS}
         />
@@ -374,15 +400,19 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
         placeholder={t("settings.mailPasswordPlaceholder")}
         showLabel={t("settings.mailPasswordShow")}
         hideLabel={t("settings.mailPasswordHide")}
-        status={
-          pinned.has("mail_password")
-            ? t("settings.mailFromEnv", { fields: "mail_password" })
-            : settings.has_mail_password
-              ? t("settings.mailPasswordSet", {
-                  preview: settings.mail_password_preview ?? "",
-                })
-              : t("settings.mailPasswordMissing")
-        }
+        status={secretStatus(
+          {
+            pinned: pinned.has("mail_password"),
+            stored: settings.has_mail_password,
+            preview: settings.mail_password_preview,
+          },
+          {
+            pinned: t("settings.mailFromEnv", { fields: "mail_password" }),
+            set: "settings.mailPasswordSet",
+            missing: "settings.mailPasswordMissing",
+          },
+          t,
+        )}
         saveLabel={t("settings.mailPasswordSave")}
         clearLabel={t("settings.mailPasswordClear")}
         hasStored={settings.has_mail_password === true}
@@ -401,8 +431,8 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
           type="email"
           autoComplete="off"
           disabled={pinned.has("mail_default_sender")}
-          value={from}
-          onChange={(event) => setFrom(event.target.value)}
+          value={drafts.mail_default_sender}
+          onChange={edit("mail_default_sender")}
           placeholder={t("settings.mailFromPlaceholder")}
           className={FIELD_CLASS}
         />
@@ -416,8 +446,8 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
           id="mail-to"
           type="text"
           autoComplete="off"
-          value={to}
-          onChange={(event) => setTo(event.target.value)}
+          value={drafts.overdue_mail_to}
+          onChange={edit("overdue_mail_to")}
           placeholder={t("settings.mailToPlaceholder")}
           className={FIELD_CLASS}
         />
@@ -425,15 +455,92 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
       </div>
 
       {mailDirty && (
-        <button
-          type="button"
-          disabled={isSaving}
-          onClick={saveMail}
-          className={SAVE_CLASS}
-        >
-          {isSaving ? t("common.saving") : t("settings.mailSave")}
-        </button>
+        <SaveButton
+          isSaving={isSaving}
+          label={t("settings.mailSave")}
+          onClick={() => onSave(mailPatch(drafts, pinned))}
+        />
       )}
     </div>
+  );
+}
+
+interface EncryptionChoiceProps extends ChannelProps {
+  pinned: ReadonlySet<string>;
+}
+
+/** The transport as one of three radio buttons; why three is above. */
+function EncryptionChoice({
+  settings,
+  isSaving,
+  onSave,
+  pinned,
+}: EncryptionChoiceProps) {
+  const { t } = useTranslation();
+  const encryption = encryptionOf(settings);
+  const disabled =
+    isSaving || pinned.has("mail_use_tls") || pinned.has("mail_use_ssl");
+
+  return (
+    <fieldset className="space-y-1.5">
+      <legend className={LABEL_CLASS}>{t("settings.mailSecurity")}</legend>
+      <div className="flex gap-2">
+        {(["starttls", "tls", "none"] as const).map((choice) => (
+          <label
+            key={choice}
+            className="flex items-center gap-1.5 text-sm text-paper-700 dark:text-paper-200"
+          >
+            <input
+              type="radio"
+              name="mail-encryption"
+              checked={encryption === choice}
+              disabled={disabled}
+              onChange={() => onSave(flagsFor(choice))}
+            />
+            {t(ENCRYPTION_LABELS[choice])}
+          </label>
+        ))}
+      </div>
+      <p className={`${HINT_CLASS} leading-relaxed`}>
+        {t("settings.mailSecurityHint")}
+      </p>
+    </fieldset>
+  );
+}
+
+/**
+ * What a `SecretField` says about its stored value. A pinned value comes
+ * first, because then the stored one is not the one in use.
+ */
+function secretStatus(
+  state: { pinned: boolean; stored: boolean | undefined; preview?: string },
+  says: { pinned: string; set: MessageKey; missing: MessageKey },
+  t: Translate,
+): string {
+  if (state.pinned) return says.pinned;
+  if (state.stored) return t(says.set, { preview: state.preview ?? "" });
+  return t(says.missing);
+}
+
+/** A draft's save button, shown by its caller only while the draft differs. */
+function SaveButton({
+  isSaving,
+  label,
+  onClick,
+}: {
+  isSaving: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      disabled={isSaving}
+      onClick={onClick}
+      className={SAVE_CLASS}
+    >
+      {isSaving ? t("common.saving") : label}
+    </button>
   );
 }

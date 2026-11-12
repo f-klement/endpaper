@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   OwnershipStatus,
   ReadStatus,
+  type BookOut,
   type UserOut,
 } from "../../api/generated/model";
 import { CollapsibleSection, ErrorState, Spinner } from "../../components";
@@ -53,6 +54,13 @@ import {
   useBookProgress,
   useBookQuotes,
   useBookSections,
+  type UseBookAccessResult,
+  type UseBookActionsResult,
+  type UseBookCustomFieldsResult,
+  type UseBookEnrichmentResult,
+  type UseBookLoanResult,
+  type UseBookResult,
+  type UseBookSectionsResult,
 } from "./hooks";
 
 interface BookDetailProps {
@@ -111,7 +119,6 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const files = useBookFiles(bookId);
   const customFields = useBookCustomFields(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
-  const [showEnrichHelp, setShowEnrichHelp] = useState(false);
   // Above the early returns, because hooks are. Null until the book lands, and
   // the page shows a spinner until then, so no section is ever drawn against a
   // default computed from a book that was not there.
@@ -131,16 +138,15 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
     );
   }
 
-  const isOwner = book.added_by?.id === currentUser.id;
-  const otherMembers = users.filter((member) => member.id !== currentUser.id);
-  const pageError =
-    actions.error ??
-    notes.error ??
-    quotes.error ??
-    highlights.error ??
-    loan.error ??
-    access.error ??
-    progress.error;
+  const pageError = firstError([
+    actions.error,
+    notes.error,
+    quotes.error,
+    highlights.error,
+    loan.error,
+    access.error,
+    progress.error,
+  ]);
 
   return (
     <div className="max-w-lg mx-auto">
@@ -158,28 +164,11 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
       <div className="px-4 py-5 space-y-4">
         {pageError != null && <ErrorState error={pageError} />}
 
-        {/* Privacy is the owner's decision alone: making someone else's book
-            private would hide it from everyone. */}
-        {isOwner ? (
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={book.is_private}
-              onChange={(event) => actions.setPrivacy(event.target.checked)}
-              className="w-4 h-4 rounded border-paper-300 text-accent-600"
-            />
-            <span className="text-sm text-paper-600 dark:text-paper-300">
-              {t("book.privateToggle")}
-            </span>
-          </label>
-        ) : (
-          book.is_private && (
-            <span className="inline-flex items-center gap-1 text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
-              <Icon name="lock" className="w-3.5 h-3.5" />{" "}
-              {t("book.privateBadge")}
-            </span>
-          )
-        )}
+        <PrivacyControl
+          book={book}
+          currentUserId={currentUser.id}
+          onChange={actions.setPrivacy}
+        />
 
         {book.active_loan && <LoanBadge loan={book.active_loan} />}
 
@@ -229,73 +218,15 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             />
           </CollapsibleSection>
 
-          <CollapsibleSection
-            id="filing"
-            title={t("section.filing")}
-            isOpen={sections.isOpen("filing")}
-            onToggle={() => sections.toggle("filing")}
-          >
-            <TagEditor
-              bookTags={book.tags ?? []}
-              allTags={tags}
-              onAdd={actions.addTag}
-              onRemove={actions.removeTag}
-              onCreate={actions.createTag}
-              isCreating={actions.isCreatingTag}
-              onDelete={actions.deleteTag}
-            />
-
-            <OwnershipPicker
-              value={book.ownership ?? OwnershipStatus.owned}
-              onChange={actions.setOwnership}
-            />
-
-            <ShelfPanel
-              book={book}
-              knownLocations={locations}
-              isSaving={actions.isSavingDetails}
-              onSave={actions.updateDetails}
-            />
-
-            {/* Between the tags and the shelf, because it answers the same
-                question they do and answers it with somebody else's authority.
-                Its own heading rather than more chips in the tag row: a
-                published scheme and a household word are different kinds of
-                claim, and the whole reason this is stored as a scheme, a number
-                and a caption is that flattening them loses which is which. */}
-            <ClassificationPanel classifications={book.classifications ?? []} />
-
-            {/* Beside the classification: both are a catalogue's statements
-                about the book, kept apart from the household's own. */}
-            <OnlineLinksPanel
-              links={book.online_links ?? []}
-              onRemove={actions.removeOnlineLink}
-            />
-
-            {/* Under the shelf, because both answer "where does this one
-                live": one physically, one in this library's own filing. */}
-            <CollectionPicker
-              book={book}
-              collections={collections}
-              isSaving={actions.isFiling}
-              onChange={actions.setCollection}
-              onCreate={actions.createCollection}
-            />
-
-            {/* Last in the group, and in this group rather than a sixth
-                section, because a custom field is this library's own filing of
-                a fact about the book, beside its tags, its shelf and its
-                collection. It draws nothing at all until somebody defines a
-                field in Settings, so a household that never uses the feature
-                never sees a handle for it. */}
-            <CustomFieldsPanel
-              definitions={customFields.definitions}
-              values={customFields.values}
-              isSaving={customFields.isSaving}
-              error={customFields.error}
-              onSave={customFields.save}
-            />
-          </CollapsibleSection>
+          <FilingSection
+            book={book}
+            tags={tags}
+            locations={locations}
+            collections={collections}
+            actions={actions}
+            customFields={customFields}
+            sections={sections}
+          />
 
           <CollapsibleSection
             id="copies"
@@ -332,35 +263,15 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             />
           </CollapsibleSection>
 
-          <CollapsibleSection
-            id="lending"
-            title={t("section.lending")}
-            isOpen={sections.isOpen("lending")}
-            onToggle={() => sections.toggle("lending")}
-          >
-            {/* A digital copy is requested rather than lent. One already out
-                on a loan from before that rule keeps the return button. */}
-            {access.isRequested && !book.active_loan ? (
-              <AccessPanel
-                book={book}
-                currentUserId={currentUser.id}
-                requests={access.requests}
-                isBusy={access.isBusy}
-                onRequest={access.request}
-                onDecide={access.decide}
-              />
-            ) : (
-              <LoanPanel
-                book={book}
-                members={otherMembers}
-                isBusy={loan.isBusy}
-                isSavingDetails={actions.isSavingDetails}
-                onSaveLending={actions.updateDetails}
-                onLend={loan.lend}
-                onMarkReturned={loan.markReturned}
-              />
-            )}
-          </CollapsibleSection>
+          <LendingSection
+            book={book}
+            currentUserId={currentUser.id}
+            users={users}
+            access={access}
+            loan={loan}
+            actions={actions}
+            sections={sections}
+          />
 
           <CollapsibleSection
             id="writing"
@@ -402,48 +313,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             />
           </CollapsibleSection>
 
-          {/* Drawn only when the catalogue knows something. Unlike the other
-              five it offers no action of its own, so with no blurb and no
-              categories its handle would open onto nothing. */}
-          {hasAbout(book) && (
-            <CollapsibleSection
-              id="about"
-              title={t("section.about")}
-              isOpen={sections.isOpen("about")}
-              onToggle={() => sections.toggle("about")}
-            >
-              {book.description && (
-                <div>
-                  <p className="text-sm font-semibold text-paper-700 mb-1 dark:text-paper-200">
-                    {t("book.description")}
-                  </p>
-                  <p className="text-sm text-paper-600 leading-relaxed dark:text-paper-300">
-                    {book.description}
-                  </p>
-                </div>
-              )}
-
-              {book.categories && book.categories.length > 0 && (
-                <div>
-                  <p className="text-sm font-semibold text-paper-700 mb-1.5 dark:text-paper-200">
-                    {t("book.categories")}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {/* Once each: a catalogue can send a category twice,
-                        and the name is the chip's identity. */}
-                    {[...new Set(book.categories)].map((category) => (
-                      <span
-                        key={category}
-                        className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800"
-                      >
-                        {category}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CollapsibleSection>
-          )}
+          <AboutSection book={book} sections={sections} />
         </div>
 
         {/* Outside every section, with the two dialogues it raises.
@@ -453,38 +323,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             an API key, and that left a library unable to fill in exactly the
             books the national catalogues cover best. Folding it away on a bare
             book is the same fault by a different route. */}
-        {enrichment.isEnabled && (
-          <EnrichPanel
-            isConfigured={enrichment.isConfigured}
-            onOpenHelp={() => setShowEnrichHelp(true)}
-            isWorking={enrichment.isWorking}
-            result={enrichment.result}
-            error={enrichment.error}
-            onBrowse={enrichment.browse}
-            onDismiss={enrichment.dismiss}
-          />
-        )}
-
-        {/* A dialogue is not part of any group, and one opened from a section
-            that is then collapsed would go with it. */}
-        {enrichment.isPickerOpen && (
-          <EnrichPicker
-            candidates={enrichment.candidates}
-            isSearching={enrichment.isSearching}
-            isWorking={enrichment.isWorking}
-            isConfigured={enrichment.isConfigured}
-            error={enrichment.error}
-            onChoose={enrichment.choose}
-            onClose={enrichment.close}
-          />
-        )}
-
-        {showEnrichHelp && (
-          <GoogleBooksHelp
-            isUnconfigured={!enrichment.isConfigured}
-            onClose={() => setShowEnrichHelp(false)}
-          />
-        )}
+        <Enrichment enrichment={enrichment} />
 
         {/* No confirmation dialog. The delete is reversible and raises a
             toast offering exactly that, so a modal here would be friction in
@@ -498,5 +337,306 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * The first error any of the page's own requests raised, in the order the page
+ * reports them: one banner, never a stack of them.
+ */
+function firstError(errors: readonly unknown[]): unknown {
+  return errors.find((error) => error != null);
+}
+
+interface PrivacyControlProps {
+  book: BookOut;
+  currentUserId: number;
+  onChange: (isPrivate: boolean) => void;
+}
+
+/**
+ * The owner's privacy switch, or for anybody else a badge on a private book.
+ *
+ * Privacy is the owner's decision alone: making someone else's book private
+ * would hide it from everyone.
+ */
+function PrivacyControl({
+  book,
+  currentUserId,
+  onChange,
+}: PrivacyControlProps) {
+  const { t } = useTranslation();
+
+  if (book.added_by?.id === currentUserId) {
+    return (
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={book.is_private}
+          onChange={(event) => onChange(event.target.checked)}
+          className="w-4 h-4 rounded border-paper-300 text-accent-600"
+        />
+        <span className="text-sm text-paper-600 dark:text-paper-300">
+          {t("book.privateToggle")}
+        </span>
+      </label>
+    );
+  }
+  if (!book.is_private) return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
+      <Icon name="lock" className="w-3.5 h-3.5" /> {t("book.privateBadge")}
+    </span>
+  );
+}
+
+interface FilingSectionProps {
+  book: BookOut;
+  tags: UseBookResult["tags"];
+  locations: UseBookResult["locations"];
+  collections: UseBookResult["collections"];
+  actions: UseBookActionsResult;
+  customFields: UseBookCustomFieldsResult;
+  sections: UseBookSectionsResult;
+}
+
+/** Where the book sits in this library: its tags, shelf and collection. */
+function FilingSection({
+  book,
+  tags,
+  locations,
+  collections,
+  actions,
+  customFields,
+  sections,
+}: FilingSectionProps) {
+  const { t } = useTranslation();
+
+  return (
+    <CollapsibleSection
+      id="filing"
+      title={t("section.filing")}
+      isOpen={sections.isOpen("filing")}
+      onToggle={() => sections.toggle("filing")}
+    >
+      <TagEditor
+        bookTags={book.tags ?? []}
+        allTags={tags}
+        onAdd={actions.addTag}
+        onRemove={actions.removeTag}
+        onCreate={actions.createTag}
+        isCreating={actions.isCreatingTag}
+        onDelete={actions.deleteTag}
+      />
+
+      <OwnershipPicker
+        value={book.ownership ?? OwnershipStatus.owned}
+        onChange={actions.setOwnership}
+      />
+
+      <ShelfPanel
+        book={book}
+        knownLocations={locations}
+        isSaving={actions.isSavingDetails}
+        onSave={actions.updateDetails}
+      />
+
+      {/* Between the tags and the shelf, because it answers the same
+          question they do and answers it with somebody else's authority.
+          Its own heading rather than more chips in the tag row: a
+          published scheme and a household word are different kinds of
+          claim, and the whole reason this is stored as a scheme, a number
+          and a caption is that flattening them loses which is which. */}
+      <ClassificationPanel classifications={book.classifications ?? []} />
+
+      {/* Beside the classification: both are a catalogue's statements
+          about the book, kept apart from the household's own. */}
+      <OnlineLinksPanel
+        links={book.online_links ?? []}
+        onRemove={actions.removeOnlineLink}
+      />
+
+      {/* Under the shelf, because both answer "where does this one
+          live": one physically, one in this library's own filing. */}
+      <CollectionPicker
+        book={book}
+        collections={collections}
+        isSaving={actions.isFiling}
+        onChange={actions.setCollection}
+        onCreate={actions.createCollection}
+      />
+
+      {/* Last in the group, and in this group rather than a sixth
+          section, because a custom field is this library's own filing of
+          a fact about the book, beside its tags, its shelf and its
+          collection. It draws nothing at all until somebody defines a
+          field in Settings, so a household that never uses the feature
+          never sees a handle for it. */}
+      <CustomFieldsPanel
+        definitions={customFields.definitions}
+        values={customFields.values}
+        isSaving={customFields.isSaving}
+        error={customFields.error}
+        onSave={customFields.save}
+      />
+    </CollapsibleSection>
+  );
+}
+
+interface LendingSectionProps {
+  book: BookOut;
+  currentUserId: number;
+  users: UserOut[];
+  access: UseBookAccessResult;
+  loan: UseBookLoanResult;
+  actions: UseBookActionsResult;
+  sections: UseBookSectionsResult;
+}
+
+/** Who has the book, or who asked for the digital copy. */
+function LendingSection({
+  book,
+  currentUserId,
+  users,
+  access,
+  loan,
+  actions,
+  sections,
+}: LendingSectionProps) {
+  const { t } = useTranslation();
+
+  return (
+    <CollapsibleSection
+      id="lending"
+      title={t("section.lending")}
+      isOpen={sections.isOpen("lending")}
+      onToggle={() => sections.toggle("lending")}
+    >
+      {/* A digital copy is requested rather than lent. One already out
+          on a loan from before that rule keeps the return button. */}
+      {access.isRequested && !book.active_loan ? (
+        <AccessPanel
+          book={book}
+          currentUserId={currentUserId}
+          requests={access.requests}
+          isBusy={access.isBusy}
+          onRequest={access.request}
+          onDecide={access.decide}
+        />
+      ) : (
+        <LoanPanel
+          book={book}
+          members={users.filter((member) => member.id !== currentUserId)}
+          isBusy={loan.isBusy}
+          isSavingDetails={actions.isSavingDetails}
+          onSaveLending={actions.updateDetails}
+          onLend={loan.lend}
+          onMarkReturned={loan.markReturned}
+        />
+      )}
+    </CollapsibleSection>
+  );
+}
+
+interface AboutSectionProps {
+  book: BookOut;
+  sections: UseBookSectionsResult;
+}
+
+/**
+ * The catalogue's blurb and categories.
+ *
+ * Drawn only when the catalogue knows something. Unlike the other five
+ * sections it offers no action of its own, so with no blurb and no categories
+ * its handle would open onto nothing.
+ */
+function AboutSection({ book, sections }: AboutSectionProps) {
+  const { t } = useTranslation();
+
+  if (!hasAbout(book)) return null;
+  return (
+    <CollapsibleSection
+      id="about"
+      title={t("section.about")}
+      isOpen={sections.isOpen("about")}
+      onToggle={() => sections.toggle("about")}
+    >
+      {book.description && (
+        <div>
+          <p className="text-sm font-semibold text-paper-700 mb-1 dark:text-paper-200">
+            {t("book.description")}
+          </p>
+          <p className="text-sm text-paper-600 leading-relaxed dark:text-paper-300">
+            {book.description}
+          </p>
+        </div>
+      )}
+
+      {book.categories && book.categories.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold text-paper-700 mb-1.5 dark:text-paper-200">
+            {t("book.categories")}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {/* Once each: a catalogue can send a category twice,
+                and the name is the chip's identity. */}
+            {[...new Set(book.categories)].map((category) => (
+              <span
+                key={category}
+                className="text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800"
+              >
+                {category}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </CollapsibleSection>
+  );
+}
+
+/**
+ * The enrichment button with the two dialogues it raises: the edition picker
+ * and the help on a Google Books key. Whether the help is open is this
+ * group's own state, since nothing else on the page reads it.
+ */
+function Enrichment({ enrichment }: { enrichment: UseBookEnrichmentResult }) {
+  const [showHelp, setShowHelp] = useState(false);
+
+  return (
+    <>
+      {enrichment.isEnabled && (
+        <EnrichPanel
+          isConfigured={enrichment.isConfigured}
+          onOpenHelp={() => setShowHelp(true)}
+          isWorking={enrichment.isWorking}
+          result={enrichment.result}
+          error={enrichment.error}
+          onBrowse={enrichment.browse}
+          onDismiss={enrichment.dismiss}
+        />
+      )}
+
+      {/* A dialogue is not part of any group, and one opened from a section
+          that is then collapsed would go with it. */}
+      {enrichment.isPickerOpen && (
+        <EnrichPicker
+          candidates={enrichment.candidates}
+          isSearching={enrichment.isSearching}
+          isWorking={enrichment.isWorking}
+          isConfigured={enrichment.isConfigured}
+          error={enrichment.error}
+          onChoose={enrichment.choose}
+          onClose={enrichment.close}
+        />
+      )}
+
+      {showHelp && (
+        <GoogleBooksHelp
+          isUnconfigured={!enrichment.isConfigured}
+          onClose={() => setShowHelp(false)}
+        />
+      )}
+    </>
   );
 }

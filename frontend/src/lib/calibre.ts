@@ -717,17 +717,35 @@ export function plainText(html: string): string | null {
  */
 export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
   const tables = tablesIn(db);
-  if (!REQUIRED_TABLES.every((name) => tables.has(name))) {
-    return { ok: false, failure: "not-a-calibre-library" };
-  }
+  const rows = bookRows(db, tables);
+  if (rows === null) return { ok: false, failure: "not-a-calibre-library" };
+  if (rows.length === 0) return { ok: false, failure: "empty" };
 
-  const bookColumns = columnsIn(db, "books");
-  if (!bookColumns.has("id") || !bookColumns.has("title")) {
-    return { ok: false, failure: "not-a-calibre-library" };
+  const relations = relationsIn(db, tables);
+  const books: CalibreBook[] = [];
+  for (const row of rows) {
+    const book = bookOf(row, relations);
+    if (book !== null) books.push(book);
   }
-  const has = (column: string) => bookColumns.has(column);
+  return { ok: true, books };
+}
 
-  const rows = db.query(
+/**
+ * Every row of `books`, or `null` where this is not a Calibre library.
+ *
+ * `id` and `title` are the two columns a library cannot do without; every
+ * other one is selected as a constant where the table lacks it, so a missing
+ * column reads as an empty field rather than failing the query.
+ */
+function bookRows(
+  db: SqliteDatabase,
+  tables: ReadonlySet<string>,
+): readonly SqliteRow[] | null {
+  if (!REQUIRED_TABLES.every((name) => tables.has(name))) return null;
+  const columns = columnsIn(db, "books");
+  if (!columns.has("id") || !columns.has("title")) return null;
+  const has = (column: string) => columns.has(column);
+  return db.query(
     `SELECT id, title,
             ${has("path") ? "path" : "'' AS path"},
             ${has("uuid") ? "uuid" : "NULL AS uuid"},
@@ -735,126 +753,139 @@ export function readCalibreLibrary(db: SqliteDatabase): CalibreReading {
             ${has("series_index") ? "series_index" : "NULL AS series_index"}
        FROM books ORDER BY id`,
   );
-  if (rows.length === 0) return { ok: false, failure: "empty" };
+}
 
-  const authors = relation(
-    tables,
-    "authors",
-    () =>
-      db.query(
-        `SELECT link.book AS book, authors.name AS name
-           FROM books_authors_link link
-           JOIN authors ON authors.id = link.author
-          ORDER BY link.id`,
-      ),
-    (row) => {
-      const name = text(row["name"]);
-      return name !== null && CALIBRE_PLACEHOLDER.author(name) ? null : name;
-    },
-  );
+/** What every link table says, grouped by the book it points at. */
+interface Relations {
+  readonly authors: Map<number, string[]>;
+  readonly publishers: Map<number, string[]>;
+  readonly languages: Map<number, string[]>;
+  readonly series: Map<number, string[]>;
+  readonly comments: Map<number, string[]>;
+  readonly files: Map<number, CalibreFile[]>;
+  readonly identifiers: Map<number, CalibreIdentifier[]>;
+}
 
-  const publishers = relation(
-    tables,
-    "books_publishers_link",
-    () =>
-      db.query(
-        `SELECT link.book AS book, publishers.name AS name
-           FROM books_publishers_link link
-           JOIN publishers ON publishers.id = link.publisher`,
-      ),
-    (row) => text(row["name"]),
-  );
+function relationsIn(
+  db: SqliteDatabase,
+  tables: ReadonlySet<string>,
+): Relations {
+  return {
+    authors: relation(
+      tables,
+      "authors",
+      () =>
+        db.query(
+          `SELECT link.book AS book, authors.name AS name
+             FROM books_authors_link link
+             JOIN authors ON authors.id = link.author
+            ORDER BY link.id`,
+        ),
+      (row) => {
+        const name = text(row["name"]);
+        return name !== null && CALIBRE_PLACEHOLDER.author(name) ? null : name;
+      },
+    ),
+    publishers: relation(
+      tables,
+      "books_publishers_link",
+      () =>
+        db.query(
+          `SELECT link.book AS book, publishers.name AS name
+             FROM books_publishers_link link
+             JOIN publishers ON publishers.id = link.publisher`,
+        ),
+      (row) => text(row["name"]),
+    ),
+    languages: relation(
+      tables,
+      "books_languages_link",
+      () =>
+        db.query(
+          `SELECT link.book AS book, languages.lang_code AS code
+             FROM books_languages_link link
+             JOIN languages ON languages.id = link.lang_code
+            ORDER BY link.id`,
+        ),
+      (row) => text(row["code"]),
+    ),
+    series: relation(
+      tables,
+      "books_series_link",
+      () =>
+        db.query(
+          `SELECT link.book AS book, series.name AS name
+             FROM books_series_link link
+             JOIN series ON series.id = link.series`,
+        ),
+      (row) => text(row["name"]),
+    ),
+    comments: relation(
+      tables,
+      "comments",
+      () => db.query("SELECT book, text FROM comments"),
+      (row) => text(row["text"]),
+    ),
+    files: relation(
+      tables,
+      "data",
+      () =>
+        db.query(
+          `SELECT book, format,
+                  ${columnsIn(db, "data").has("name") ? "name" : "NULL AS name"}
+             FROM data`,
+        ),
+      (row): CalibreFile | null => {
+        const format = text(row["format"]);
+        return format === null ? null : { format, name: text(row["name"]) };
+      },
+    ),
+    identifiers: relation(
+      tables,
+      "identifiers",
+      () => db.query("SELECT book, type, val FROM identifiers"),
+      (row): CalibreIdentifier | null => {
+        const type = text(row["type"]);
+        const value = text(row["val"]);
+        return type === null || value === null ? null : { type, value };
+      },
+    ),
+  };
+}
 
-  const languages = relation(
-    tables,
-    "books_languages_link",
-    () =>
-      db.query(
-        `SELECT link.book AS book, languages.lang_code AS code
-           FROM books_languages_link link
-           JOIN languages ON languages.id = link.lang_code
-          ORDER BY link.id`,
-      ),
-    (row) => text(row["code"]),
-  );
+/** The first value a relation holds for one book, which is the one read. */
+function firstOf<T>(links: Map<number, T[]>, id: number): T | null {
+  return links.get(id)?.[0] ?? null;
+}
 
-  const series = relation(
-    tables,
-    "books_series_link",
-    () =>
-      db.query(
-        `SELECT link.book AS book, series.name AS name
-           FROM books_series_link link
-           JOIN series ON series.id = link.series`,
-      ),
-    (row) => text(row["name"]),
-  );
-
-  const comments = relation(
-    tables,
-    "comments",
-    () => db.query("SELECT book, text FROM comments"),
-    (row) => text(row["text"]),
-  );
-
-  const files = relation(
-    tables,
-    "data",
-    () =>
-      db.query(
-        `SELECT book, format,
-                ${columnsIn(db, "data").has("name") ? "name" : "NULL AS name"}
-           FROM data`,
-      ),
-    (row): CalibreFile | null => {
-      const format = text(row["format"]);
-      return format === null ? null : { format, name: text(row["name"]) };
-    },
-  );
-
-  const identifiers = relation(
-    tables,
-    "identifiers",
-    () => db.query("SELECT book, type, val FROM identifiers"),
-    (row): CalibreIdentifier | null => {
-      const type = text(row["type"]);
-      const value = text(row["val"]);
-      return type === null || value === null ? null : { type, value };
-    },
-  );
-
-  const books: CalibreBook[] = [];
-  for (const row of rows) {
-    const id = integer(row["id"]);
-    if (id === null) continue;
-    const title = text(row["title"]);
-    const ownIdentifiers = identifiers.get(id) ?? [];
-    const seriesName = series.get(id)?.[0] ?? null;
-
-    books.push({
-      id,
-      path: text(row["path"]) ?? "",
-      uuid: text(row["uuid"]),
-      title: title !== null && CALIBRE_PLACEHOLDER.title(title) ? null : title,
-      authors: authors.get(id) ?? [],
-      // One `authors` row per person, linked to the book.
-      authorsSeparated: true,
-      identifiers: ownIdentifiers,
-      isbn: readIsbn(ownIdentifiers),
-      publisher: publishers.get(id)?.[0] ?? null,
-      year: readYear(row["pubdate"]),
-      language: languages.get(id)?.[0] ?? null,
-      description: readDescription(comments.get(id)?.[0] ?? null),
-      seriesName,
-      // Only where a series exists: Calibre defaults this column to 1.0 on
-      // every row, so reading it unconditionally files every standalone book
-      // as the first volume of nothing.
-      seriesIndex: seriesName === null ? null : decimal(row["series_index"]),
-      files: files.get(id) ?? [],
-    });
-  }
-
-  return { ok: true, books };
+/** One row of `books` and what links to it, or `null` for a row with no id. */
+function bookOf(row: SqliteRow, relations: Relations): CalibreBook | null {
+  const id = integer(row["id"]);
+  if (id === null) return null;
+  const title = text(row["title"]);
+  const identifiers = relations.identifiers.get(id) ?? [];
+  const seriesName = firstOf(relations.series, id);
+  return {
+    id,
+    path: text(row["path"]) ?? "",
+    uuid: text(row["uuid"]),
+    title: title !== null && CALIBRE_PLACEHOLDER.title(title) ? null : title,
+    authors: relations.authors.get(id) ?? [],
+    // One `authors` row per person, linked to the book.
+    authorsSeparated: true,
+    identifiers,
+    isbn: readIsbn(identifiers),
+    publisher: firstOf(relations.publishers, id),
+    year: readYear(row["pubdate"]),
+    language: firstOf(relations.languages, id),
+    description: readDescription(firstOf(relations.comments, id)),
+    seriesName,
+    // Only where a series exists: Calibre defaults this column to 1.0 on
+    // every row, so reading it unconditionally files every standalone book
+    // as the first volume of nothing.
+    seriesIndex: seriesName === null ? null : decimal(row["series_index"]),
+    files: relations.files.get(id) ?? [],
+  };
 }
 
 function readDescription(html: string | null): string | null {
@@ -996,72 +1027,17 @@ export function crossCheck(
   // nor a disagreement, and counting one as either is what puts 57 books of
   // noise in front of the member.
   const opf = withoutPlaceholders(file);
-  let filled = 0;
-  let disagreed = 0;
-
-  /** Keep the database's value, or take the file's where there is none. */
-  function gap(mine: string | null, theirs: string | null): string | null;
-  function gap(mine: number | null, theirs: number | null): number | null;
-  function gap(
-    mine: string | number | null,
-    theirs: string | number | null,
-  ): string | number | null {
-    if (mine !== null && theirs !== null && mine !== theirs) disagreed += 1;
-    if (mine !== null) return mine;
-    if (theirs !== null) filled += 1;
-    return theirs;
-  }
-
-  /**
-   * The series and the position in it, together.
-   *
-   * **One decision rather than two**, because a position belongs to the series
-   * it counts in: pairing this file's number with the database's name would
-   * invent a volume neither source claims.
-   */
-  function readSeries(): { name: string | null; index: number | null } {
-    if (book.seriesName === null) {
-      if (opf.seriesName === null) return { name: null, index: null };
-      // Two fields when the file supplied both. One was the count for a name
-      // and an index together, which is not what `filled` means.
-      filled += opf.seriesIndex === null ? 1 : 2;
-      return { name: opf.seriesName, index: opf.seriesIndex };
-    }
-    if (opf.seriesName !== null && opf.seriesName !== book.seriesName) {
-      disagreed += 1;
-    }
-    const sameSeries = opf.seriesName === book.seriesName;
-    const index = book.seriesIndex ?? (sameSeries ? opf.seriesIndex : null);
-    if (book.seriesIndex === null && index !== null) filled += 1;
-    return { name: book.seriesName, index };
-  }
-
-  // **Filled and never compared.** The two spell a person differently far more
-  // often than they disagree about who wrote the book, so counting `Le Guin,
-  // Ursula K.` against `Ursula K. Le Guin` would bury the count this screen
-  // exists to show under a difference nobody would act on.
-  const authors = book.authors.length > 0 ? book.authors : opf.authors;
-  if (book.authors.length === 0 && authors.length > 0) filled += 1;
-
-  // Both sides are already `parseIsbn` output, so this is "whichever of the two
-  // is a real ISBN, the database first" written as a coalesce.
-  if (book.isbn === null && opf.isbn !== null) filled += 1;
-  if (book.isbn !== null && opf.isbn !== null && book.isbn !== opf.isbn) {
-    disagreed += 1;
-  }
-
-  const series = readSeries();
+  const tally: Tally = { filled: 0, disagreed: 0 };
+  const series = seriesOf(book, opf, tally);
   return {
     book: {
       ...book,
-      title: gap(book.title, opf.title),
-      authors,
-      authorsSeparated:
-        book.authors.length > 0 ? book.authorsSeparated : opf.authorsSeparated,
-      isbn: book.isbn ?? opf.isbn,
-      publisher: gap(book.publisher, opf.publisher),
-      year: gap(book.year, opf.year),
-      language: gap(book.language, opf.language),
+      ...authorsOf(book, opf, tally),
+      title: gap(tally, book.title, opf.title),
+      isbn: isbnOf(book, opf, tally),
+      publisher: gap(tally, book.publisher, opf.publisher),
+      year: gap(tally, book.year, opf.year),
+      language: gap(tally, book.language, opf.language),
       // **Through `plainText` like the database's own comment.** A Calibre
       // `metadata.opf` writes `dc:description` as escaped HTML, and `opf.ts`
       // hands back the element's text, so filling this gap raw put the markup
@@ -1072,13 +1048,105 @@ export function crossCheck(
       // itself. It is the same trade the database's own comment already makes,
       // and the other way round is a description reading `<p>`.
       description: gap(
+        tally,
         book.description,
         opf.description === null ? null : plainText(opf.description),
       ),
       seriesName: series.name,
       seriesIndex: series.index,
     },
-    filled,
-    disagreed,
+    filled: tally.filled,
+    disagreed: tally.disagreed,
   };
+}
+
+/** The two counts `crossCheck` reports, added to by each field it decides. */
+interface Tally {
+  filled: number;
+  disagreed: number;
+}
+
+/** Keep the database's value, or take the file's where there is none. */
+function gap<T extends string | number>(
+  tally: Tally,
+  mine: T | null,
+  theirs: T | null,
+): T | null {
+  if (mine !== null && theirs !== null && mine !== theirs) tally.disagreed += 1;
+  if (mine !== null) return mine;
+  if (theirs !== null) tally.filled += 1;
+  return theirs;
+}
+
+/**
+ * The authors, filled and never compared.
+ *
+ * The two spell a person differently far more often than they disagree about
+ * who wrote the book, so counting `Le Guin, Ursula K.` against `Ursula K. Le
+ * Guin` would bury the count this screen exists to show under a difference
+ * nobody would act on.
+ */
+function authorsOf(
+  book: CalibreBook,
+  opf: FileMetadata,
+  tally: Tally,
+): Pick<CalibreBook, "authors" | "authorsSeparated"> {
+  if (book.authors.length > 0) {
+    return { authors: book.authors, authorsSeparated: book.authorsSeparated };
+  }
+  if (opf.authors.length > 0) tally.filled += 1;
+  return { authors: opf.authors, authorsSeparated: opf.authorsSeparated };
+}
+
+/**
+ * Whichever of the two is a real ISBN, the database first.
+ *
+ * Both sides are already `parseIsbn` output, so that is a coalesce.
+ */
+function isbnOf(
+  book: CalibreBook,
+  opf: FileMetadata,
+  tally: Tally,
+): string | null {
+  if (book.isbn === null && opf.isbn !== null) tally.filled += 1;
+  if (book.isbn !== null && opf.isbn !== null && book.isbn !== opf.isbn) {
+    tally.disagreed += 1;
+  }
+  return book.isbn ?? opf.isbn;
+}
+
+interface SeriesPlace {
+  readonly name: string | null;
+  readonly index: number | null;
+}
+
+/**
+ * The series and the position in it, together.
+ *
+ * **One decision rather than two**, because a position belongs to the series
+ * it counts in: pairing this file's number with the database's name would
+ * invent a volume neither source claims.
+ */
+function seriesOf(
+  book: CalibreBook,
+  opf: FileMetadata,
+  tally: Tally,
+): SeriesPlace {
+  if (book.seriesName === null) return seriesFromFile(opf, tally);
+  if (opf.seriesName !== null && opf.seriesName !== book.seriesName) {
+    tally.disagreed += 1;
+  }
+  const sameSeries = opf.seriesName === book.seriesName;
+  const index = book.seriesIndex ?? (sameSeries ? opf.seriesIndex : null);
+  if (book.seriesIndex === null && index !== null) tally.filled += 1;
+  return { name: book.seriesName, index };
+}
+
+/** The file's series, for a book the database files in none. */
+function seriesFromFile(opf: FileMetadata, tally: Tally): SeriesPlace {
+  if (opf.seriesName === null) return { name: null, index: null };
+  // Two fields when the file supplied both. One was the count for a name
+  // and an index together, which is not what `filled` means.
+  tally.filled += opf.seriesIndex === null ? 1 : 2;
+  return { name: opf.seriesName, index: opf.seriesIndex };
 }

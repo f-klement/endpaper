@@ -308,6 +308,79 @@ describe("ScanPage", () => {
         ).not.toBeInTheDocument(),
       );
     });
+
+    it("opens it for rapid scanning, and closes it when that is finished", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await user.click(screen.getByRole("button", { name: "Scan several" }));
+      await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+      expect(screen.getByText(en["rapid.explain"])).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Finish scanning" }));
+      expect(screen.queryByText(en["rapid.explain"])).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Scan several" }),
+      ).toBeInTheDocument();
+    });
+
+    it.each([
+      [
+        "after Cancel on the book it read",
+        async (user: ReturnType<typeof userEvent.setup>) => {
+          api.on("/api/books/lookup", { body: LOOKUP });
+          await act(async () => {
+            emitBarcode("9780441013593");
+          });
+          await user.click(
+            await screen.findByRole("button", { name: "Cancel" }),
+          );
+        },
+      ],
+      [
+        "after rapid scanning is finished",
+        async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.click(
+            screen.getByRole("button", { name: "Scan several" }),
+          );
+          await user.click(
+            screen.getByRole("button", { name: "Finish scanning" }),
+          );
+        },
+      ],
+    ])("stays off %s", async (_, leave) => {
+      // The entry panel unmounts the scanner on both routes, so a camera left
+      // switched on underneath comes back with no tap once the panel returns.
+      renderWithProviders(<ScanPage accountId={ME} />);
+      const user = await openCamera();
+
+      await leave(user);
+
+      expect(await screen.findByText("The camera is off")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Stop scanning" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the queue on screen to say what the run added once it is empty", async () => {
+    // The banner is where "1 added" is said, and it sits in the queue: hiding
+    // the queue with its last row would hide the verdict with it.
+    api.on("/api/books/lookup", { body: LOOKUP });
+    api.on("/api/books/scan", { body: makeBook({ id: 12 }) });
+    const user = userEvent.setup();
+    renderWithProviders(<ScanPage accountId={ME} />);
+    await user.click(screen.getByRole("button", { name: "Scan several" }));
+    await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
+    await act(async () => {
+      emitBarcode("9780441013593");
+    });
+    await screen.findByText("Dune");
+    await user.click(screen.getByRole("button", { name: "Finish scanning" }));
+
+    await user.click(screen.getByRole("button", { name: "Add all" }));
+
+    expect(await screen.findByText(/^1 added\./)).toBeInTheDocument();
   });
 
   describe("a barcode that is not a book", () => {
@@ -366,6 +439,33 @@ describe("ScanPage", () => {
       await user.click(screen.getByRole("button", { name: "Look up" }));
 
       expect(await screen.findByText("Dune")).toBeInTheDocument();
+    });
+
+    it("refuses a mistyped ISBN without asking the server, until it is corrected", async () => {
+      // A typo is told to the member at once rather than sent as a lookup for
+      // a book that cannot exist. The corrected lookup reaches no catalogue,
+      // which is the answer that puts the form back on screen to read.
+      api.on("/api/books/lookup", {
+        status: 503,
+        body: { detail: "Could not reach the book catalogues." },
+      });
+      renderWithProviders(<ScanPage accountId={ME} />);
+      const user = userEvent.setup();
+      const isbn = screen.getByLabelText("ISBN");
+
+      fireEvent.change(isbn, { target: { value: "9780441013594" } });
+      await user.click(screen.getByRole("button", { name: "Look up" }));
+
+      expect(screen.getByText(en["scan.invalidIsbn"])).toBeInTheDocument();
+      expect(api.lastCall("/api/books/lookup")).toBeUndefined();
+
+      fireEvent.change(isbn, { target: { value: "9780441013593" } });
+      await user.click(screen.getByRole("button", { name: "Look up" }));
+      await screen.findByRole("button", { name: "Try again" });
+
+      expect(
+        screen.queryByText(en["scan.invalidIsbn"]),
+      ).not.toBeInTheDocument();
     });
 
     it("ignores an empty manual submission", async () => {

@@ -3,8 +3,16 @@ import {
   BrowserMultiFormatReader,
   DecodeHintType,
   NotFoundException,
+  type Exception,
+  type Result,
 } from "@zxing/library";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import { Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
@@ -135,46 +143,183 @@ interface BarcodeScannerProps {
   onRejected?: (code: string) => void;
 }
 
-/** The camera viewfinder. Used only by ScanPage. */
-export default function BarcodeScanner({
-  onDetected,
-  active,
-  onRejected,
-}: BarcodeScannerProps) {
+type ScanHandlers = Pick<BarcodeScannerProps, "onDetected" | "onRejected">;
+
+/** Stop every track of a stream, which is what puts the camera indicator out. */
+function stopTracks(stream: MediaStream | null) {
+  stream?.getTracks().forEach((track) => track.stop());
+}
+
+/** Hand one decoded barcode to the page: a book, or a code that is not one. */
+function reportRead(text: string, handlers: ScanHandlers) {
+  // Report the canonical form, not the raw scan, so an ISBN-10 barcode and its
+  // ISBN-13 reprint resolve to the same book.
+  const canonical = readIsbnBarcode(text);
+  if (canonical) {
+    handlers.onDetected(canonical);
+  } else {
+    handlers.onRejected?.(text);
+  }
+}
+
+/** The hold further back hint, which `useHoldFurtherBackHint` owns. */
+interface HoldFurtherBackHint {
+  showing: boolean;
+  /** Start, or restart, the wait before the hint. */
+  arm: () => void;
+  /** A barcode read: take the hint down and start the wait again. */
+  withdraw: () => void;
+  /** The scanner closed: no hint, and no wait left to show one. */
+  clear: () => void;
+}
+
+/** One frame from the reader: a read, a decode error, or both. */
+function handleFrame(
+  result: Result | undefined,
+  err: Exception | undefined,
+  facingMember: boolean,
+  handlers: ScanHandlers,
+  withdrawHint: () => void,
+) {
+  if (result && facingMember) withdrawHint();
+  if (result) reportRead(result.getText(), handlers);
+  // NotFoundException fires continuously while no barcode is in frame.
+  if (err && !(err instanceof NotFoundException)) {
+    console.warn("Scanner error:", err);
+  }
+}
+
+/** What one opening of the camera reports back to the component. */
+interface CameraSession {
+  /** Whether the scanner has closed since this opening began. */
+  isClosed: () => boolean;
+  opened: (stream: MediaStream) => void;
+  read: (result: Result | undefined, err: Exception | undefined) => void;
+  started: () => void;
+  failed: (err: unknown) => void;
+}
+
+/** Open the camera and start decoding from it, unless the scanner closes first. */
+async function openCamera(
+  video: HTMLVideoElement,
+  reader: BrowserMultiFormatReader,
+  session: CameraSession,
+) {
+  try {
+    const stream =
+      await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
+    if (session.isClosed()) {
+      stopTracks(stream);
+      return;
+    }
+    session.opened(stream);
+    void reader.decodeFromStream(stream, video, (result, err) => {
+      // The library can deliver a frame after stop(). A closed scanner reports
+      // nothing from it: no book to the page, and no hint timer, which would
+      // outlive the scanner and show its hint on the next camera, even a rear
+      // one, which never clears it.
+      if (!session.isClosed()) session.read(result, err);
+    });
+    session.started();
+  } catch (err: unknown) {
+    if (!session.isClosed()) session.failed(err);
+  }
+}
+
+function useHoldFurtherBackHint(): HoldFurtherBackHint {
+  const [showing, setShowing] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const arm = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(
+      () => setShowing(true),
+      HOLD_FURTHER_BACK_AFTER_MS,
+    );
+  }, []);
+  const withdraw = useCallback(() => {
+    setShowing(false);
+    arm();
+  }, [arm]);
+  const clear = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    setShowing(false);
+  }, []);
+
+  return { showing, arm, withdraw, clear };
+}
+
+/** The camera's light: whether there is one, whether it is on, and the switch. */
+function useTorch(streamRef: RefObject<MediaStream | null>) {
+  const [available, setAvailable] = useState(false);
+  const [on, setOn] = useState(false);
+
+  const offer = useCallback(
+    (track: MediaStreamTrack | undefined) => setAvailable(supportsTorch(track)),
+    [],
+  );
+  const reset = useCallback(() => {
+    setOn(false);
+    setAvailable(false);
+  }, []);
+
+  async function toggle() {
+    const [track] = streamRef.current?.getVideoTracks() ?? [];
+    if (!track) return;
+    const next = !on;
+    try {
+      // Not in the standard MediaTrackConstraintSet, but implemented on the
+      // browsers that have a torch to offer.
+      await track.applyConstraints({
+        advanced: [{ torch: next } as MediaTrackConstraintSet],
+      });
+      setOn(next);
+    } catch {
+      // A camera that reported the capability and then refused it is not worth
+      // an error message: the scan works without light.
+      setAvailable(false);
+    }
+  }
+
+  return { available, on, offer, reset, toggle };
+}
+
+/** The camera for as long as `active` holds, and everything it reports. */
+function useCamera(active: boolean, handlers: ScanHandlers) {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
-  const [hasTorch, setHasTorch] = useState(false);
-  const [torchOn, setTorchOn] = useState(false);
   const [mirrored, setMirrored] = useState(false);
-  const [holdFurtherBack, setHoldFurtherBack] = useState(false);
-  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hint = useHoldFurtherBackHint();
+  const torch = useTorch(streamRef);
 
   // Held in a ref so the effect below does not list them as dependencies.
   // ScanPage passes inline callbacks, and depending on them would tear the
   // camera down and bring it back up on every render.
-  const handlers = useRef({ onDetected, onRejected });
-  handlers.current = { onDetected, onRejected };
+  const latest = useRef(handlers);
+  latest.current = handlers;
 
+  // Every one is stable, and must be: a change of identity in any of them
+  // would rerun the effect below and restart the camera.
+  const { arm: armHint, withdraw: withdrawHint, clear: clearHint } = hint;
+  const { offer: offerTorch, reset: resetTorch } = torch;
   const stop = useCallback(() => {
     readerRef.current?.reset();
     readerRef.current = null;
     // reset() releases the track it opened, but the stream here was opened by
     // this component, so it has to be stopped explicitly or the phone's camera
     // indicator stays lit after leaving the page.
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    stopTracks(streamRef.current);
     streamRef.current = null;
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-    hintTimer.current = null;
+    clearHint();
     setScanning(false);
-    setTorchOn(false);
-    setHasTorch(false);
+    resetTorch();
     setMirrored(false);
-    setHoldFurtherBack(false);
-  }, []);
+  }, [clearHint, resetTorch]);
 
   useEffect(() => {
     if (!active) {
@@ -183,6 +328,7 @@ export default function BarcodeScanner({
     }
 
     let cancelled = false;
+    let facingMember = false;
     const reader = new BrowserMultiFormatReader(
       bookReaderHints(),
       SCAN_INTERVAL_MS,
@@ -190,103 +336,109 @@ export default function BarcodeScanner({
     readerRef.current = reader;
     setError(null);
 
-    /** Start, or restart, the wait before the hold further back hint. */
-    function armHint() {
-      if (hintTimer.current) clearTimeout(hintTimer.current);
-      hintTimer.current = setTimeout(
-        () => setHoldFurtherBack(true),
-        HOLD_FURTHER_BACK_AFTER_MS,
-      );
-    }
-
-    async function start() {
-      const video = videoRef.current;
-      if (!video) return;
-
-      try {
-        const stream =
-          await navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        streamRef.current = stream;
-
-        const [track] = stream.getVideoTracks();
-        setHasTorch(supportsTorch(track));
-
-        // A camera that reports itself rear facing gets no hint timer and no
-        // mirrored preview.
-        const facingMember = !facesAway(track);
-        if (facingMember) {
-          setMirrored(true);
-          armHint();
-        }
-
-        void reader.decodeFromStream(stream, video, (result, err) => {
-          // The library can deliver a frame after stop(). A closed scanner
-          // reports nothing from it: no book to the page, and no hint timer,
-          // which would outlive the scanner and show its hint on the next
-          // camera, even a rear one, which never clears it.
-          if (cancelled) return;
-          if (result && facingMember) {
-            setHoldFurtherBack(false);
+    const video = videoRef.current;
+    if (video) {
+      void openCamera(video, reader, {
+        isClosed: () => cancelled,
+        opened(stream) {
+          streamRef.current = stream;
+          const [track] = stream.getVideoTracks();
+          offerTorch(track);
+          // A camera that reports itself rear facing gets no hint timer and
+          // no mirrored preview.
+          facingMember = !facesAway(track);
+          if (facingMember) {
+            setMirrored(true);
             armHint();
           }
-          if (result) {
-            const text = result.getText();
-            // Report the canonical form, not the raw scan, so an ISBN-10
-            // barcode and its ISBN-13 reprint resolve to the same book.
-            const canonical = readIsbnBarcode(text);
-            if (canonical) {
-              handlers.current.onDetected(canonical);
-            } else {
-              handlers.current.onRejected?.(text);
-            }
-          }
-          // NotFoundException fires continuously while no barcode is in frame.
-          if (err && !(err instanceof NotFoundException)) {
-            console.warn("Scanner error:", err);
-          }
-        });
-        setScanning(true);
-      } catch (err: unknown) {
-        if (cancelled) return;
-        // The camera also needs a secure context: on a plain-HTTP LAN address
-        // this fails no matter what the member taps.
-        setError(
-          err instanceof Error ? err.message : t("scan.cameraUnavailable"),
-        );
-        setScanning(false);
-      }
+        },
+        read: (result, err) =>
+          handleFrame(result, err, facingMember, latest.current, withdrawHint),
+        started: () => setScanning(true),
+        failed(err) {
+          // The camera also needs a secure context: on a plain-HTTP LAN
+          // address this fails no matter what the member taps.
+          setError(
+            err instanceof Error ? err.message : t("scan.cameraUnavailable"),
+          );
+          setScanning(false);
+        },
+      });
     }
-
-    void start();
 
     return () => {
       cancelled = true;
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, stop]);
+  }, [active, stop, armHint, withdrawHint, offerTorch]);
 
-  async function toggleTorch() {
-    const [track] = streamRef.current?.getVideoTracks() ?? [];
-    if (!track) return;
-    const next = !torchOn;
-    try {
-      // Not in the standard MediaTrackConstraintSet, but implemented on the
-      // browsers that have a torch to offer.
-      await track.applyConstraints({
-        advanced: [{ torch: next } as MediaTrackConstraintSet],
-      });
-      setTorchOn(next);
-    } catch {
-      // A camera that reported the capability and then refused it is not worth
-      // an error message: the scan works without light.
-      setHasTorch(false);
-    }
-  }
+  return { videoRef, error, scanning, mirrored, hint, torch };
+}
+
+/** The guide box and the line under it, shown while the camera reads. */
+function Viewfinder({ holdFurtherBack }: { holdFurtherBack: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+      <div className="w-64 h-32 border-2 border-accent-400 rounded-lg relative">
+        <div className="absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 border-accent-400 rounded-tl" />
+        <div className="absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 border-accent-400 rounded-tr" />
+        <div className="absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 border-accent-400 rounded-bl" />
+        <div className="absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 border-accent-400 rounded-br" />
+        <div className="absolute inset-x-0 top-1/2 h-px bg-accent-400 opacity-60 animate-pulse" />
+      </div>
+      <p
+        aria-live="polite"
+        className="absolute bottom-4 inset-x-0 px-4 text-center text-white text-sm font-medium"
+      >
+        {holdFurtherBack ? t("scan.holdFurtherBack") : t("scan.pointAtBarcode")}
+      </p>
+    </div>
+  );
+}
+
+/** What is drawn over the picture while the camera reads: the guide and the light. */
+function ScanningOverlay({
+  hint,
+  torch,
+}: {
+  hint: HoldFurtherBackHint;
+  torch: ReturnType<typeof useTorch>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Viewfinder holdFurtherBack={hint.showing} />
+      {torch.available && (
+        <button
+          type="button"
+          onClick={() => void torch.toggle()}
+          aria-pressed={torch.on}
+          className="absolute top-3 right-3 w-10 h-10 rounded-full bg-black/50 text-white text-lg backdrop-blur-sm hover:bg-black/70 transition-colors"
+        >
+          <Icon name="lamp" className="w-4 h-4" filled={torch.on} />
+          <span className="sr-only">{t("scan.torch")}</span>
+        </button>
+      )}
+    </>
+  );
+}
+
+/** The camera viewfinder. Used only by ScanPage. */
+export default function BarcodeScanner({
+  onDetected,
+  active,
+  onRejected,
+}: BarcodeScannerProps) {
+  const { t } = useTranslation();
+  // Destructured rather than read off one object: the React compiler takes
+  // every field of an object that holds a ref for a ref, and `react/refs` then
+  // reports reading `mirrored` during render.
+  const { videoRef, mirrored, scanning, error, hint, torch } = useCamera(
+    active,
+    { onDetected, onRejected },
+  );
 
   return (
     <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden">
@@ -303,37 +455,7 @@ export default function BarcodeScanner({
         playsInline
       />
 
-      {scanning && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-64 h-32 border-2 border-accent-400 rounded-lg relative">
-            <div className="absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 border-accent-400 rounded-tl" />
-            <div className="absolute top-0 right-0 w-5 h-5 border-t-4 border-r-4 border-accent-400 rounded-tr" />
-            <div className="absolute bottom-0 left-0 w-5 h-5 border-b-4 border-l-4 border-accent-400 rounded-bl" />
-            <div className="absolute bottom-0 right-0 w-5 h-5 border-b-4 border-r-4 border-accent-400 rounded-br" />
-            <div className="absolute inset-x-0 top-1/2 h-px bg-accent-400 opacity-60 animate-pulse" />
-          </div>
-          <p
-            aria-live="polite"
-            className="absolute bottom-4 inset-x-0 px-4 text-center text-white text-sm font-medium"
-          >
-            {holdFurtherBack
-              ? t("scan.holdFurtherBack")
-              : t("scan.pointAtBarcode")}
-          </p>
-        </div>
-      )}
-
-      {scanning && hasTorch && (
-        <button
-          type="button"
-          onClick={() => void toggleTorch()}
-          aria-pressed={torchOn}
-          className="absolute top-3 right-3 w-10 h-10 rounded-full bg-black/50 text-white text-lg backdrop-blur-sm hover:bg-black/70 transition-colors"
-        >
-          <Icon name="lamp" className="w-4 h-4" filled={torchOn} />
-          <span className="sr-only">{t("scan.torch")}</span>
-        </button>
-      )}
+      {scanning && <ScanningOverlay hint={hint} torch={torch} />}
 
       {error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/70">

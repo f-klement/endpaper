@@ -3,8 +3,9 @@ import { useState } from "react";
 import type {
   ImportResultOut,
   MarcPreviewOut,
+  MarcPreviewRow,
 } from "../../../../api/generated/model";
-import { useTranslation } from "../../../../i18n";
+import { type MessageKey, useTranslation } from "../../../../i18n";
 import {
   ConfirmRow,
   FilePicker,
@@ -56,22 +57,9 @@ export default function MarcImport({
   const { t } = useTranslation();
   // Defaulted on, where the CSV importer defaults it off. A reading history is
   // mostly books the household does not own; a catalogue transfer that adds no
-  // records has transferred nothing.
+  // records has transferred nothing. Held here rather than in the preview step,
+  // so a cancelled preview and the next file keep the choice.
   const [createMissing, setCreateMissing] = useState(true);
-
-  // **Every record the import does not add, not one kind of it.** A record
-  // already held is filled in rather than added; one whose ISBN belongs to a
-  // book this account cannot see is refused, one whose ISBN only the trash
-  // holds waits for it, and one two books answer is left alone. Counting only
-  // the first promised records the import then refused, by exactly the number
-  // another member holds privately.
-  const wouldBeAdded = preview
-    ? preview.readable -
-      preview.already_held -
-      (preview.blocked ?? 0) -
-      (preview.in_trash ?? 0) -
-      (preview.ambiguous ?? 0)
-    : 0;
 
   return (
     <div className="space-y-3">
@@ -89,126 +77,183 @@ export default function MarcImport({
       />
 
       {preview && (
-        <>
-          <div className="text-sm text-paper-700 bg-paper-50 border border-paper-200 rounded-xl p-3 space-y-1 dark:text-paper-200 dark:bg-paper-900 dark:border-paper-700">
-            <p>
-              {t("marc.previewTitle", {
-                total: preview.total_records,
-                readable: preview.readable,
-              })}
-            </p>
-            {preview.already_held > 0 && (
-              <p className="text-xs text-paper-600 dark:text-paper-400">
-                {t("marc.alreadyHeld", { count: preview.already_held })}
-              </p>
-            )}
-            {(preview.blocked ?? 0) > 0 && (
-              <p className="text-xs text-paper-600 dark:text-paper-400">
-                {t("marc.blocked", { count: preview.blocked ?? 0 })}
-              </p>
-            )}
-            {(preview.in_trash ?? 0) > 0 && (
-              <p className="text-xs text-paper-600 dark:text-paper-400">
-                {t("marc.inTrash", { count: preview.in_trash ?? 0 })}
-              </p>
-            )}
-            {(preview.ambiguous ?? 0) > 0 && (
-              <p className="text-xs text-paper-600 dark:text-paper-400">
-                {t("marc.ambiguous", { count: preview.ambiguous ?? 0 })}
-              </p>
-            )}
-            {preview.skipped > 0 && (
-              <p className="text-xs text-paper-600 dark:text-paper-400">
-                {t("marc.skipped", { count: preview.skipped })}
-              </p>
-            )}
-            {(preview.rows ?? []).length > 0 && (
-              <ul className="text-xs text-paper-600 mt-1 space-y-0.5 dark:text-paper-400">
-                {(preview.rows ?? []).map((row, index) => (
-                  <li key={`${row.title}-${index}`}>
-                    {row.title}
-                    {row.author ? ` · ${row.author}` : ""}
-                    {(row.classifications ?? []).length > 0
-                      ? ` · ${(row.classifications ?? []).join(", ")}`
-                      : ""}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={createMissing}
-              onChange={(event) => setCreateMissing(event.target.checked)}
-              className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
-            />
-            <span className="text-sm text-paper-700 dark:text-paper-200">
-              {t("marc.createMissing", { count: wouldBeAdded })}
-            </span>
-          </label>
-          {createMissing && (
-            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950 dark:border-amber-900">
-              {t("marc.createMissingHint")}
-            </p>
-          )}
-
-          <ConfirmRow
-            isImporting={isImporting}
-            withheld={
-              createMissing
-                ? wouldBeAdded + preview.already_held === 0
-                : preview.already_held === 0
-            }
-            // The count follows the switch. With it off nothing is created
-            // and only the held records are filled in, so naming the whole
-            // file there promised an import that would not happen.
-            confirmLabel={
-              createMissing
-                ? t("marc.confirm", {
-                    count: wouldBeAdded + preview.already_held,
-                  })
-                : t("marc.confirmMatchedOnly", {
-                    count: preview.already_held,
-                  })
-            }
-            importingLabel={t("marc.importing")}
-            onConfirm={() => onConfirm({ createMissing })}
-            onCancel={onCancel}
-          />
-        </>
+        <PreviewStep
+          preview={preview}
+          createMissing={createMissing}
+          onCreateMissing={setCreateMissing}
+          isImporting={isImporting}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+        />
       )}
 
       <ImportError error={error} />
 
       {result && (
-        <ResultPanel>
-          <p>
-            {t("marc.result", {
-              rowsRead: result.rows_read,
-              matched: result.matched,
-              created: result.created,
-            })}
-          </p>
-          {result.skipped > 0 && (
-            <p className="text-xs text-paper-600 dark:text-paper-400">
-              {t("marc.resultSkipped", { count: result.skipped })}
-            </p>
-          )}
-          <TitleList
-            heading={t("marc.resultInTrash", { count: result.in_trash ?? 0 })}
-            titles={result.in_trash_titles}
-          />
-          <TitleList
-            heading={t("marc.resultAmbiguous", {
-              count: result.ambiguous ?? 0,
-            })}
-            titles={result.ambiguous_titles}
-          />
-          <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
-        </ResultPanel>
+        <MarcResult result={result} onReviewUnconfirmed={onReviewUnconfirmed} />
       )}
     </div>
+  );
+}
+
+/**
+ * **Every record the import does not add, not one kind of it.** A record
+ * already held is filled in rather than added; one whose ISBN belongs to a book
+ * this account cannot see is refused, one whose ISBN only the trash holds waits
+ * for it, and one two books answer is left alone. Counting only the first
+ * promised records the import then refused, by exactly the number another
+ * member holds privately.
+ */
+function wouldBeAddedBy(preview: MarcPreviewOut): number {
+  return (
+    preview.readable -
+    preview.already_held -
+    (preview.blocked ?? 0) -
+    (preview.in_trash ?? 0) -
+    (preview.ambiguous ?? 0)
+  );
+}
+
+/** The counts, the add switch and the confirm row, once a file is read. */
+function PreviewStep({
+  preview,
+  createMissing,
+  onCreateMissing,
+  isImporting,
+  onConfirm,
+  onCancel,
+}: {
+  preview: MarcPreviewOut;
+  createMissing: boolean;
+  onCreateMissing: (createMissing: boolean) => void;
+  isImporting: boolean;
+  onConfirm: MarcImportProps["onConfirm"];
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const wouldBeAdded = wouldBeAddedBy(preview);
+  // The count follows the switch. With it off nothing is created and only the
+  // held records are filled in, so naming the whole file there promised an
+  // import that would not happen.
+  const toImport = createMissing
+    ? wouldBeAdded + preview.already_held
+    : preview.already_held;
+
+  return (
+    <>
+      <PreviewCounts preview={preview} />
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={createMissing}
+          onChange={(event) => onCreateMissing(event.target.checked)}
+          className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
+        />
+        <span className="text-sm text-paper-700 dark:text-paper-200">
+          {t("marc.createMissing", { count: wouldBeAdded })}
+        </span>
+      </label>
+      {createMissing && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950 dark:border-amber-900">
+          {t("marc.createMissingHint")}
+        </p>
+      )}
+
+      <ConfirmRow
+        isImporting={isImporting}
+        withheld={toImport === 0}
+        confirmLabel={t(
+          createMissing ? "marc.confirm" : "marc.confirmMatchedOnly",
+          { count: toImport },
+        )}
+        importingLabel={t("marc.importing")}
+        onConfirm={() => onConfirm({ createMissing })}
+        onCancel={onCancel}
+      />
+    </>
+  );
+}
+
+/** What the file holds, before anything is written. */
+function PreviewCounts({ preview }: { preview: MarcPreviewOut }) {
+  const { t } = useTranslation();
+  const counts: [MessageKey, number][] = [
+    ["marc.alreadyHeld", preview.already_held],
+    ["marc.blocked", preview.blocked ?? 0],
+    ["marc.inTrash", preview.in_trash ?? 0],
+    ["marc.ambiguous", preview.ambiguous ?? 0],
+    ["marc.skipped", preview.skipped],
+  ];
+  const rows = preview.rows ?? [];
+
+  return (
+    <div className="text-sm text-paper-700 bg-paper-50 border border-paper-200 rounded-xl p-3 space-y-1 dark:text-paper-200 dark:bg-paper-900 dark:border-paper-700">
+      <p>
+        {t("marc.previewTitle", {
+          total: preview.total_records,
+          readable: preview.readable,
+        })}
+      </p>
+      {counts
+        .filter(([, count]) => count > 0)
+        .map(([key, count]) => (
+          <p key={key} className="text-xs text-paper-600 dark:text-paper-400">
+            {t(key, { count })}
+          </p>
+        ))}
+      {rows.length > 0 && (
+        <ul className="text-xs text-paper-600 mt-1 space-y-0.5 dark:text-paper-400">
+          {rows.map((row, index) => (
+            <li key={`${row.title}-${index}`}>{describeRow(row)}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** What a record was read as, so a bad field is visible before the write. */
+function describeRow(row: MarcPreviewRow): string {
+  const classifications = row.classifications ?? [];
+  return (
+    row.title +
+    (row.author ? ` · ${row.author}` : "") +
+    (classifications.length > 0 ? ` · ${classifications.join(", ")}` : "")
+  );
+}
+
+function MarcResult({
+  result,
+  onReviewUnconfirmed,
+}: {
+  result: ImportResultOut;
+  onReviewUnconfirmed: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ResultPanel>
+      <p>
+        {t("marc.result", {
+          rowsRead: result.rows_read,
+          matched: result.matched,
+          created: result.created,
+        })}
+      </p>
+      {result.skipped > 0 && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("marc.resultSkipped", { count: result.skipped })}
+        </p>
+      )}
+      <TitleList
+        heading={t("marc.resultInTrash", { count: result.in_trash ?? 0 })}
+        titles={result.in_trash_titles}
+      />
+      <TitleList
+        heading={t("marc.resultAmbiguous", { count: result.ambiguous ?? 0 })}
+        titles={result.ambiguous_titles}
+      />
+      <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
+    </ResultPanel>
   );
 }

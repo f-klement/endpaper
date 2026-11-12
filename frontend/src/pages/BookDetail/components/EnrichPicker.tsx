@@ -56,82 +56,21 @@ export default function EnrichPicker({
         {t("enrich.pickHint")}
       </p>
 
-      {isSearching && <Spinner label={t("enrich.working")} />}
-
-      {error != null && (
-        <p
-          role="alert"
-          className="text-sm text-danger-600 dark:text-danger-300"
-        >
-          {errorText(error, t("common.somethingWentWrong"), t)}
-        </p>
-      )}
-
-      {!isSearching && error == null && candidates.length === 0 && (
-        <p className="text-sm text-paper-600 dark:text-paper-400">
-          {t("enrich.notFound")}
-        </p>
-      )}
+      <SearchState
+        isSearching={isSearching}
+        error={error}
+        isEmpty={candidates.length === 0}
+      />
 
       {candidates.length > 0 && (
         <ul className="space-y-2 max-h-80 overflow-y-auto">
           {candidates.map((match, index) => (
             <li key={`${match.isbn13 ?? match.google_books_id ?? ""}-${index}`}>
-              <button
-                type="button"
-                disabled={isWorking}
-                onClick={() => onChoose(match)}
-                className="w-full flex gap-3 text-left p-2.5 rounded-xl border border-paper-200 hover:border-accent-300 hover:bg-accent-50 disabled:opacity-50 transition-colors dark:border-paper-800 dark:hover:border-accent-700 dark:hover:bg-accent-500/10"
-              >
-                <CoverImage
-                  src={match.cover_url}
-                  alt=""
-                  iconClassName="w-5 h-5"
-                  className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-paper-900 truncate dark:text-paper-100">
-                    {match.title}
-                  </span>
-                  {match.subtitle && (
-                    <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
-                      {match.subtitle}
-                    </span>
-                  )}
-                  <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
-                    {summarise(match)}
-                  </span>
-                  {/* What this row would add, so an obviously thin one can be
-                      skipped without clicking it to find out. */}
-                  <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
-                    {match.page_count
-                      ? t("book.pages", { count: match.page_count })
-                      : ""}
-                    {match.source
-                      ? ` · ${match.source.replace(/\+/g, ", ")}`
-                      : ""}
-                  </span>
-                  <span className="block mt-1 text-xs text-paper-600 dark:text-paper-400">
-                    <span className="font-medium text-paper-700 dark:text-paper-300">
-                      {t("enrich.proposedClassifications")}
-                    </span>
-                    {match.classifications?.length ? (
-                      match.classifications.map((classification) => (
-                        <span
-                          key={`${classification.scheme}-${classification.number}`}
-                          className="block"
-                        >
-                          {classificationText(classification)}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="block">
-                        {t("enrich.noClassifications")}
-                      </span>
-                    )}
-                  </span>
-                </span>
-              </button>
+              <Candidate
+                match={match}
+                isWorking={isWorking}
+                onChoose={onChoose}
+              />
             </li>
           ))}
         </ul>
@@ -143,5 +82,113 @@ export default function EnrichPicker({
         </p>
       )}
     </Modal>
+  );
+}
+
+interface SearchStateProps {
+  isSearching: boolean;
+  error: unknown;
+  isEmpty: boolean;
+}
+
+/** What the search is doing while there is no list to show, or beside one. */
+function SearchState({ isSearching, error, isEmpty }: SearchStateProps) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      {isSearching && <Spinner label={t("enrich.working")} />}
+
+      {error != null && (
+        <p
+          role="alert"
+          className="text-sm text-danger-600 dark:text-danger-300"
+        >
+          {errorText(error, t("common.somethingWentWrong"), t)}
+        </p>
+      )}
+
+      {!isSearching && error == null && isEmpty && (
+        <p className="text-sm text-paper-600 dark:text-paper-400">
+          {t("enrich.notFound")}
+        </p>
+      )}
+    </>
+  );
+}
+
+interface CandidateProps {
+  match: BookMatch;
+  isWorking: boolean;
+  onChoose: (match: BookMatch) => void;
+}
+
+/** One edition as a button: what it is, and what choosing it would add. */
+function Candidate({ match, isWorking, onChoose }: CandidateProps) {
+  const { t } = useTranslation();
+
+  return (
+    <button
+      type="button"
+      disabled={isWorking}
+      onClick={() => onChoose(match)}
+      className="w-full flex gap-3 text-left p-2.5 rounded-xl border border-paper-200 hover:border-accent-300 hover:bg-accent-50 disabled:opacity-50 transition-colors dark:border-paper-800 dark:hover:border-accent-700 dark:hover:bg-accent-500/10"
+    >
+      <CoverImage
+        src={match.cover_url}
+        alt=""
+        iconClassName="w-5 h-5"
+        className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-paper-900 truncate dark:text-paper-100">
+          {match.title}
+        </span>
+        {match.subtitle && (
+          <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
+            {match.subtitle}
+          </span>
+        )}
+        <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
+          {summarise(match)}
+        </span>
+        {/* What this row would add, so an obviously thin one can be
+            skipped without clicking it to find out. */}
+        <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
+          {match.page_count ? t("book.pages", { count: match.page_count }) : ""}
+          {match.source ? ` · ${match.source.replace(/\+/g, ", ")}` : ""}
+        </span>
+        <ProposedClassifications classifications={match.classifications} />
+      </span>
+    </button>
+  );
+}
+
+/** The classification evidence a candidate would post back, or that it has none. */
+function ProposedClassifications({
+  classifications,
+}: {
+  classifications: BookMatch["classifications"];
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <span className="block mt-1 text-xs text-paper-600 dark:text-paper-400">
+      <span className="font-medium text-paper-700 dark:text-paper-300">
+        {t("enrich.proposedClassifications")}
+      </span>
+      {classifications?.length ? (
+        classifications.map((classification) => (
+          <span
+            key={`${classification.scheme}-${classification.number}`}
+            className="block"
+          >
+            {classificationText(classification)}
+          </span>
+        ))
+      ) : (
+        <span className="block">{t("enrich.noClassifications")}</span>
+      )}
+    </span>
   );
 }
