@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.21.3
+
+_2026-11-11_
+
+**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for libxslt.
+
+- CVE-2026-87636 (high) in libxslt
+- CVE-2026-9947 (high) in libxslt
+
+The fix for libxslt is in the image rather than in the source: rebuilding at this tag upgrades the operating system packages, and the image is re-scanned and started before anything is published.
+
 ## v0.21.2
 
 _2026-10-31_
