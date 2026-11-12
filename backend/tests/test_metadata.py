@@ -51,6 +51,7 @@ from hypothesis import strategies as st
 import bibliographic
 import covers
 import credentials
+import deadline
 import decoders
 import fetch
 import google_books
@@ -80,6 +81,7 @@ from schemas import MAX_CLASSIFICATIONS_PER_BOOK
 from schemas.book import BookLookup
 from tests.corpus import application_modules
 from tests.helpers import (
+    VirtualClock,
     silence_catalogues,
     silence_covers,
     silence_open_library,
@@ -3548,9 +3550,9 @@ class TestSearchDeadline:
         `TestSearchingHarder` spies on `_within_deadline` itself, so it records
         the value handed in and any scaling applied inside the function is
         behind its instrument. Measured: a timeout divided by a hundred inside
-        the fan out passes that class, and passes the slow ÖNB test with its
-        rows intact, because a deadline below the call's own cost is hidden
-        behind it. So the value is read here at the only place that consumes it.
+        the fan out passes that class. So the value is read here at the only
+        place that consumes it; the slow ÖNB test's virtual clock sees the
+        same mutant as an early return.
 
         **It reads what reached the wait and never a literal**, which is the
         false refusal half: an arm written against the module constant would
@@ -3579,8 +3581,8 @@ class TestSearchDeadline:
 
         **The residue that leaves.** A second wait added with **no** timeout is
         invisible here, because it never enters the sequence. What it costs is
-        latency, which is the elapsed bound's subject in
-        `TestTheAustrianNationalLibrarySearch` and not this arm's.
+        latency, which the virtual clock's reading in
+        `TestTheAustrianNationalLibrarySearch` holds and this arm does not.
         """
         seen: list[object] = []
         real = asyncio.wait
@@ -5362,218 +5364,71 @@ class TestTheAustrianNationalLibrarySearch:
         assert [row.title for row in rows] == ["The Great Gatsby"]
 
     #: The deadline this test patches in, and the sleep it puts behind one source.
-    #:
-    #: **Neither is a scaling of anything and the ratio between them is chosen here.**
     #: `_DEADLINE` stands in for `metadata.SEARCH_DEADLINE_SECONDS`, which is 4.0; the
     #: sleep stands in for nothing in the application, because no production value says
-    #: how slow a slow source is. The deadline is small so the suite does not pay for it.
-    #: The sleep is set so a deadline that stopped working misses the bound by seconds
-    #: rather than by scheduler noise; it is not the real sleep reduced by the same
-    #: factor. The other constraint is that the deadline is long enough for the rest of
-    #: the roster to finish inside it, and the headroom is **about sixfold**: measured
-    #: 2026-09-29 on builder at four workers over five samples, the fan out runs eight
-    #: tasks and the last of the seven that answer is done **0.0711s to 0.0797s** after
-    #: `asyncio.wait` starts its timer, against `_DEADLINE` of 0.5s. **That is
-    #: builder's headroom and the suite takes whichever node is free**, so it is the
-    #: wider of the two readings available and not a floor.
-    #:
-    #: **The `_DEADLINE / 100` diagonal reads as a hundredfold and cannot support it.**
-    #: With the fan out's timeout divided by a hundred the rows are still right, which
-    #: reads as the fan out finishing inside five milliseconds; the figures above refute
-    #: that, and the mechanism is that nothing in the fan out yields to the event loop
-    #: before about 0.07s, so a 5ms timer cannot fire until every source has already
-    #: answered. Measured on the same tree at a timeout of 0.005s: the slow source's
-    #: handler is still entered at 0.0503s to 0.0576s and all eight tasks still finish.
-    #: **And the row assertion is sensitive to one source**: one of the eight returns
-    #: the record whose title it checks and the rest answer empty, answer 500 or are
-    #: silenced, so it cannot tell whether any of them finished.
-    #:
-    #: **The control figure below is not that number either**, because it times the
-    #: whole call, of which the merge, the ranking and the surrounding work are most.
-    #:
-    #: **The sleep's size is free in wall clock, and that is what refuses lowering it to
-    #: make the suite faster.** It is abandoned rather than awaited whenever the deadline
-    #: works, so the three seconds are spent only by a run that is already red. Shortening
-    #: it buys nothing and moves the detection threshold, which the margin below prices.
-    #:
-    #: **The old numbers made this test nearly unable to fail.** It slept 5 against the
-    #: real 4.0 deadline and asserted `elapsed < 5`. A working deadline returns at about
-    #: 4.0, so there was a second of headroom and no false failure to worry about; the
-    #: defect was the other way round. **A completely broken deadline returns at about
-    #: 5.0, against a bound of 5**, so the test failed only by however much
-    #: `asyncio.sleep(5)` overshoots 5.000, which is scheduler noise. Its whole ability
-    #: to detect the regression it was written for rested on that overshoot being
-    #: positive. That is the recorded shape of a bound that stops guarding without ever
-    #: failing, met from the other side.
-    #:
-    #: It also spent four seconds of real wall clock on every suite run.
+    #: how slow a slow source is. Both run on `VirtualClock`, so neither costs wall time
+    #: and the only constraint between them is that the sleep ends after the deadline.
     _DEADLINE = 0.5
     _SLOWER_THAN_THE_DEADLINE = 3.0
 
-    #: The slack the elapsed bound allows on top of the deadline. **It is an inherited
-    #: constant with a corrected justification, not a new one**, and keeping those two
-    #: apart is the whole reason this block is long.
-    #:
-    #: **The overhead it used to budget for does not land on top of the deadline.** The
-    #: five mocked sources run inside the deadline's own window, so their cost is hidden
-    #: by the wait rather than added to it, and only the merge and the ranking land after
-    #: it. Measured 2026-09-29 on builder at four workers over **75 pairs in three runs**,
-    #: one targeted, one inside a whole backend suite and one re-taken: the same call
-    #: with the slow source answering instantly takes **0.0691s to 0.1079s**, while the
-    #: slow case's elapsed exceeds `_DEADLINE` by **0.0013s to 0.0042s**.
-    #:
-    #: **So the control case was built, measured and refused.** The smallest control
-    #: drawn is sixteen times the largest excess drawn, so subtracting it moves the bound
-    #: by more than an order of magnitude more than the signal it would isolate, and the
-    #: difference is negative at all 75 samples: the subtraction loosens the bound by the
-    #: whole control rather than tightening it.
-    #:
-    #: **That argument is stated on magnitudes because the variance ratio will not carry
-    #: it.** Two seats measured that ratio on this node at this worker count and came out
-    #: ten times apart, sd of the difference 0.0142 against 0.0015, the difference being
-    #: whether the pairs include the process's first search, which is cold. Their excess
-    #: figures agreed within 1.5x. A control case is itself timing, and the quantity it
-    #: would cancel here is smaller than the disagreement between two measurements of the
-    #: instrument.
-    #:
-    #: **1.25 did not move and is not derived from the stall.** It is the leftover of the
-    #: midpoint construction this block used to carry, 1.75 minus `_DEADLINE`. It happens
-    #: to be 2.2x the only recorded stall, the 1.0589s red of 2026-09-18, itself 0.5589s
-    #: past `_DEADLINE` and 133 times the worst excess above. Work that small cannot
-    #: produce that red; a pod losing the CPU for half a second can, and the mechanism is
-    #: recorded rather than assumed. **That red is a pipeline backend job's, which is not
-    #: the pod the figures above were taken in**: this block carries readings from both,
-    #: so each names its own. The pipeline's job pod was quota bound at 2 CPUs and
-    #: throttled in a third to a half of all periods, read from its own cgroup on
-    #: 2026-09-20, so a burst loses up to a full 100ms period at a time and 0.5589s is
-    #: about six such periods. **That is the ceiling and not the average**: the same
-    #: reading's throttled time over its throttled periods is 4.5ms and 7.1ms in the two
-    #: jobs, so the figure needs six consecutive worst cases and the mechanism bounds it
-    #: rather than predicting it. The suite pod is sized per node instead and has not been
-    #: that shape since 2026-08-29, which is why the pod is named rather than implied:
-    #: read as the suite pod, this evidence dates itself three weeks before the red it
-    #: explains. One draw bounds nothing, so the
-    #: number stays where it was rather than being re-derived from it, and lowering it
-    #: on the fixture measurement would buy detection with flakes.
-    #:
-    #: **What that costs is wider than it reads, and it is the second line now rather
-    #: than the only one.** A bound catches an overrun past itself and nothing under
-    #: itself, so this one is green **at least from about 0.01x, and up to 3.49x
-    #: `_DEADLINE`**, not from 1x: elapsed is floored at the call's own cost, the 0.0691s
-    #: to 0.1079s above, which every deadline below that is hidden behind. **At least
-    #: from**, because 0.01x is the one point drawn, `_DEADLINE / 100`: it says the band
-    #: includes 0.01x, not that the band begins there. Nothing below it was drawn.
-    #: The mutant living down there is concrete rather than hypothetical: a timeout
-    #: divided inside `_within_deadline`,
-    #: which in production cuts 4.0s to a fraction of it and drops healthy catalogues.
-    #: Measured at `/ 100`, it passes all three assertions here with the rows intact,
-    #: **and passes `TestSearchingHarder`'s budget assertion too**, because that records
-    #: the argument handed in rather than the timeout used. **It is invisible to this
-    #: bound rather than uncovered**: re-measured with the arms this block now carries,
-    #: the only thing that reddens on it is
-    #: `TestSearchDeadline::test_the_budget_reaches_the_wait_and_not_only_the_call`.
-    #: **Closing the low end was
-    #: tried and collapsed**: a second slow source sitting in the band would have to
-    #: sleep above the stall tail to be safe, which is where the elapsed bound already
-    #: is. Against the production `metadata.SEARCH_DEADLINE_SECONDS` of 4.0 this bound
-    #: is 0.44x.
-    _MARGIN = 1.25
-
-    @pytest.mark.asyncio
-    async def test_a_slow_oenb_does_not_extend_the_shared_deadline(self, monkeypatch):
+    def test_a_slow_oenb_does_not_extend_the_shared_deadline(self, monkeypatch):
         """User story 5. The deadline degrades the results, never the latency.
 
-        **Two arms, and only one of them is a duration.** The slow source records how
-        its own task ended, so a deadline that waits for it is caught by a fact rather
-        than by a clock: the sleep runs to completion and `outcome` reads `answered`,
-        with no clock consulted to say so. **That reading is load independent between
-        two edges and not outside them, and both edges are named below.** A stall before
-        the source is asked empties the list; a stall past
-        `_SLOWER_THAN_THE_DEADLINE` completes the sleep, so the arm reads `answered` for
-        a deadline that never waited. The elapsed figure in the message is what
-        separates either from the thing it imitates, and how often either happens is
-        deliberately not stated.
+        **Two arms, and neither reads the wall clock.** The slow source records how its
+        own task ended, and the search runs on `VirtualClock`, shared with `deadline`,
+        whose time moves only when the loop would otherwise wait. So the clock read at
+        return is the instant the fan out's timer fired, a throttled pod reads the same
+        as an idle one, and the elapsed assertion is an equality rather than a bound
+        with a margin. The wall clock bound it replaced read 3.738s against 1.75s on
+        correct code under load.
 
-        **`entered` is what tells this arm's own target from the environment.** `_crawl`
-        records it as its first statement, so a leak reads `['entered']` where a source
-        that was never asked, or one cancelled before its handler was entered, reads
-        `[]`. Without that first statement the two families differ only in when they
-        return, which is a clock, and not being one is this arm's whole purpose.
-        Measured: the cancellation dropped from
-        `_within_deadline` and the pending set discarded records `['entered']` at
-        0.502s, against `[]` at 0.070s for a roster that never asks the source.
+        **The equality sees both directions.** A deadline that waits for the source
+        reads `_SLOWER_THAN_THE_DEADLINE`; a timeout shortened inside the fan out reads
+        less than `_DEADLINE`, which the wall clock bound could not see, because the
+        call's own cost hid every deadline below it.
+
+        **`entered` is what tells this arm's own target from the configuration.**
+        `_crawl` records it as its first statement, so a leak reads `['entered']` where
+        a source that was never asked reads `[]`. Measured on the wall clock: the
+        cancellation dropped from `_within_deadline` and the pending set discarded
+        records `['entered']`, against `[]` for a roster that never asks the source.
 
         **What the arm holds is that the cancellation was delivered and awaited to the
         end.** The case earning the first half is a leak rather than a latency defect:
-        drop the cancellation and discard the pending set, and every assertion this test
-        carried before this arm existed passes, the rows right and the call returning at
-        the deadline. No clock here can see that.
+        drop the cancellation and discard the pending set, and the rows are right and
+        the call returns at the deadline. No clock sees that.
 
         **`unwound` is the second half, and it is why the fixture's handler yields once
         before re-raising.** One event loop tick in place of the gather is enough for the
         sleep to raise, so a source whose own cleanup awaits is left unfinished against a
         closing transport, which is the leak the gather's comment exists to stop. The
         gather resumes the handler past that yield and `unwound` is appended; one tick
-        does not. Measured with the gather replaced by a single tick: this test fails on
-        `['entered', 'cancelled']`, and reads no clock to do it.
+        does not, and this test fails on `['entered', 'cancelled']`.
 
         **What that second half costs, in both directions.** It pins the depth of the
         unwinding rather than the primitive: `asyncio.wait(pending)` in place of the
-        gather stays green, and so does a pending task cancelled twice, both measured.
-        What it does not survive is a yield between the fan out's cleanup and this
-        assertion, because the leftover task would then be resumed by something other
-        than the gather. There is none today: `_merge_matches` and `_ranked` are both
-        synchronous, `search()` awaits nothing after `_within_deadline` returns, and this
-        test awaits nothing after `search()` returns. **If that changes this arm goes
-        green rather than red**, which is the direction nobody notices. Two of the three
-        places such a yield would go are in `metadata.py` rather than here, so the
-        constraint is written at each of them as well: a reader adding one sees it
-        where they are typing, which this paragraph cannot do.
+        gather stays green, and so does a pending task cancelled twice. What it does not
+        survive is a yield between the fan out's cleanup and the snapshot below, because
+        the leftover task would then be resumed by something other than the gather.
+        There is none today: `_merge_matches` and `_ranked` are both synchronous, and
+        `search()` awaits nothing after `_within_deadline` returns. **If that changes
+        this arm goes green rather than red**, which is the direction nobody notices, so
+        the constraint is written at the gather as well. **The snapshot is taken inside
+        the loop for the same reason**: `asyncio.run` cancels and resumes every task
+        left over when its coroutine returns, so a list read after it would read
+        `unwound` for a task the gather never awaited.
 
-        **An empty `outcome` has two causes now that a leak has its own reading, and the
-        message carries the elapsed time to tell them apart.** The source may never have
-        been asked, which is what moving it into the slow set does, and that returns in
-        milliseconds. **The other is load dependent**: if the process loses the CPU
-        between the wait starting its timer and the request being issued, for longer
-        than `_DEADLINE`, the task is cancelled before the handler is entered, the
-        handler never runs, and the list is empty for a working deadline. A stall of
-        that magnitude is the 1.0589s red recorded above. **How often is deliberately
-        not stated**: every attempt in this repository to bound a blind spot has
-        measured something adjacent and written it down as the bound.
-
-        **The arm is not purely additive, and how much it newly refuses is refused
-        rather than stated.** Before it existed, the elapsed bound passed any run
-        returning inside `_DEADLINE` plus `_MARGIN`, so a run that cancelled the source
-        before its handler was entered was tolerated. That run is red now and the
-        refusal is wanted, because a run that never asked the source never exercised
-        the deadline.
-
-        **The band this used to name was reasoned and is not reproducible.** It said
-        every stall from `_DEADLINE` to about 1.68s had changed verdict. Planted inside
-        it, the mechanism named here is **green**: a 0.7s blocking stall in the fan
-        out's first task holds the loop well past the deadline, and the handler is still
-        entered and the full outcome still recorded, because the mock reaches its side
-        effect before the cancellation is honoured. The only thing measured to produce
-        an empty list is a roster that never asks the source, which is a configuration
-        and not a stall. So the cost is stated as a mechanism and `['entered']` against
-        `[]` in the message is what says which one arrived.
-
-        **The elapsed bound is the user story's other half**, and it is about the caller
-        rather than the source: a deadline is worth nothing if the fan out drops the slow
-        catalogue on time and then spends seconds merging. It is loose on purpose, and
-        `_MARGIN` says what it covers and what it therefore cannot see.
-
-        **Proved to discriminate rather than asserted to**: with the deadline raised
-        above the sleep, this test is the one that fails, and it fails on the
-        cancellation arm rather than on the row assertion.
+        **What the virtual clock cannot see** is time spent on the loop's own thread, so
+        a fan out that drops the slow catalogue on time and then spends seconds merging
+        passes here. `VirtualClock`'s docstring states that cost for every test on it.
         """
+        clock = VirtualClock()
+        monkeypatch.setattr(deadline, "time", clock)
         monkeypatch.setattr(metadata, "SEARCH_DEADLINE_SECONDS", self._DEADLINE)
         outcome: list[str] = []
 
         async def _crawl(request):
             # First statement, so an empty `outcome` means this handler never ran.
-            # Without it a leak and a stall before the request is issued both record
-            # `[]` and the arm cannot tell its own target from the environment.
             outcome.append("entered")
             try:
                 await asyncio.sleep(self._SLOWER_THAN_THE_DEADLINE)
@@ -5588,6 +5443,12 @@ class TestTheAustrianNationalLibrarySearch:
             outcome.append("answered")
             return _xml(OENB_SEARCH)
 
+        async def _search_and_snapshot():
+            # Read before `asyncio.run` tears the loop down: its teardown resumes any
+            # task the fan out left behind, which would append `unwound` for it.
+            rows = await search("great gatsby")
+            return rows, list(outcome), clock.now
+
         with respx.mock(assert_all_called=False) as mock:
             silence_covers(mock)
             silence_other_lookup_catalogues(mock, OENB, K10PLUS, DNB)
@@ -5597,23 +5458,17 @@ class TestTheAustrianNationalLibrarySearch:
             mock.get(url__startswith=OPEN_LIBRARY).mock(return_value=httpx.Response(200, json={"docs": []}))
             mock.get(url__startswith="https://catalogue.bnf.fr").mock(return_value=httpx.Response(500))
             mock.get(url__startswith="http://lx2.loc.gov").mock(return_value=httpx.Response(500))
-            started = asyncio.get_running_loop().time()
-            rows = await search("great gatsby")
-            elapsed = asyncio.get_running_loop().time() - started
+            rows, ended, elapsed = asyncio.run(_search_and_snapshot(), loop_factory=clock.loop)
 
-        assert outcome == ["entered", "cancelled", "unwound"], (
-            f"the slow source ended as {outcome} rather than entered, cancelled and "
-            f"unwound, after {elapsed:.3f}s against a deadline of "
-            f"{self._DEADLINE}s: `answered` is a deadline that waited, or a stall past "
-            f"{self._SLOWER_THAN_THE_DEADLINE}s; `['entered']` is a task left running; "
-            "`['entered', 'cancelled']` is a cancellation delivered but not awaited to "
-            "the end; an empty list is a source that was never asked, or one cancelled "
-            "before its handler was entered, which a stall past the deadline does"
+        assert ended == ["entered", "cancelled", "unwound"], (
+            f"the slow source ended as {ended} rather than entered, cancelled and "
+            f"unwound, after {elapsed}s of virtual time: `answered` is a deadline that "
+            "waited; `['entered']` is a task left running; `['entered', 'cancelled']` is "
+            "a cancellation delivered but not awaited to the end; an empty list is a "
+            "source that was never asked"
         )
-        assert elapsed < self._DEADLINE + self._MARGIN, (
-            f"the search took {elapsed:.3f}s against a deadline of {self._DEADLINE}s "
-            f"and a margin of {self._MARGIN}s; the fan out returned late even though "
-            "the slow source was dropped on time"
+        assert elapsed == pytest.approx(self._DEADLINE), (
+            f"the search returned at {elapsed}s of virtual time against a deadline of {self._DEADLINE}s"
         )
         assert [row.title for row in rows] == ["The Great Gatsby"]
 

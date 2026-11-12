@@ -813,7 +813,7 @@ repeat the argument.
 |  | [The death signal an arm carries is the polite one](decisions.md#the-death-signal-an-arm-carries-is-the-polite-one) | 589 |
 |  | [What a killed suite run leaves is three things, and the third had no owner](decisions.md#what-a-killed-suite-run-leaves-is-three-things-and-the-third-had-no-owner) | 556 |
 |  | [A gate whose hostile input is rejected by an earlier gate has no test](decisions.md#a-gate-whose-hostile-input-is-rejected-by-an-earlier-gate-has-no-test) | 211 |
-|  | [A deadline test turns on a fact, because every clock available to it is wider than the thing it measures](decisions.md#a-deadline-test-turns-on-a-fact-because-every-clock-available-to-it-is-wider-than-the-thing-it-measures) | 545 |
+|  | [A deadline test turns on a fact and a virtual clock, never on the wall clock](decisions.md#a-deadline-test-turns-on-a-fact-and-a-virtual-clock-never-on-the-wall-clock) | 305 |
 |  | [A row count is a second instrument, and the two numbers are read together](decisions.md#a-row-count-is-a-second-instrument-and-the-two-numbers-are-read-together) | 595 |
 |  | [A liveness guard on an instrument reads the magnitude, never the key](decisions.md#a-liveness-guard-on-an-instrument-reads-the-magnitude-never-the-key) | 125 |
 |  | [An instrument's reach is bounded by the container types its walker knows](decisions.md#an-instruments-reach-is-bounded-by-the-container-types-its-walker-knows) | 353 |
@@ -825,7 +825,7 @@ repeat the argument.
 |  | [The commit subject is a publication channel, and the publish fails rather than rewriting it](decisions.md#the-commit-subject-is-a-publication-channel-and-the-publish-fails-rather-than-rewriting-it) | 265 |
 |  | [The outbound commit message is an artefact, so there is one evaluation and nothing to compare](decisions.md#the-outbound-commit-message-is-an-artefact-so-there-is-one-evaluation-and-nothing-to-compare) | 366 |
 |  | [A secret scanner that asks a library inherits the library's blind spots](decisions.md#a-secret-scanner-that-asks-a-library-inherits-the-librarys-blind-spots) | 279 |
-|  | [The sentence wider than its measurement is written by the careful seat, not the careless one](decisions.md#the-sentence-wider-than-its-measurement-is-written-by-the-careful-seat-not-the-careless-one) | 1,118 |
+|  | [The sentence wider than its measurement is written by the careful seat, not the careless one](decisions.md#the-sentence-wider-than-its-measurement-is-written-by-the-careful-seat-not-the-careless-one) | 1,122 |
 |  | [A guard's verdict can be a property of the tree rather than of the guard](decisions.md#a-guards-verdict-can-be-a-property-of-the-tree-rather-than-of-the-guard) | 567 |
 |  | [A role word can be the surname, and a flip manufactures the stop that hides it](decisions.md#a-role-word-can-be-the-surname-and-a-flip-manufactures-the-stop-that-hides-it) | 850 |
 |  | [An instrument's output is a sample until somebody derives the population](decisions.md#an-instruments-output-is-a-sample-until-somebody-derives-the-population) | 1,033 |
@@ -1007,7 +1007,7 @@ repeat the argument.
 |  | [One backend run per handoff](decisions.md#one-backend-run-per-handoff) | 78 |
 |  | [The backend suite keeps `--dist loadfile`, because the profile found nothing to rebalance](decisions.md#the-backend-suite-keeps---dist-loadfile-because-the-profile-found-nothing-to-rebalance) | 156 |
 |  | [A test that restates a constant, a derivation or a type is deleted, and an agreement between two artefacts is kept](decisions.md#a-test-that-restates-a-constant-a-derivation-or-a-type-is-deleted-and-an-agreement-between-two-artefacts-is-kept) | 344 |
-|  | [A fixed wait in a backend test is either a virtual clock or a declared ceiling](decisions.md#a-fixed-wait-in-a-backend-test-is-either-a-virtual-clock-or-a-declared-ceiling) | 227 |
+|  | [A fixed wait in a backend test is either a virtual clock or a declared ceiling](decisions.md#a-fixed-wait-in-a-backend-test-is-either-a-virtual-clock-or-a-declared-ceiling) | 236 |
 |  | [The suite runner's guard cases are serialised, because the node locks are machine wide](decisions.md#the-suite-runners-guard-cases-are-serialised-because-the-node-locks-are-machine-wide) | 73 |
 |  | [A total table over a generated union is the compiler's to check, and its runtime arm is deleted](decisions.md#a-total-table-over-a-generated-union-is-the-compilers-to-check-and-its-runtime-arm-is-deleted) | 273 |
 |  | [A wait in a frontend test advances a fake clock, and a wall clock ceiling is not a wait](decisions.md#a-wait-in-a-frontend-test-advances-a-fake-clock-and-a-wall-clock-ceiling-is-not-a-wait) | 163 |
@@ -1015,4 +1015,5 @@ repeat the argument.
 |  | [test:backend installs with `uv sync --locked`, the other uv jobs with `--frozen`](decisions.md#testbackend-installs-with-uv-sync---locked-the-other-uv-jobs-with---frozen) | 149 |
 |  | [The frontend's tree guards are derived from its imports and globs](decisions.md#the-frontends-tree-guards-are-derived-from-its-imports-and-globs) | 259 |
 |  | [Changed property tests run deep at handoff](decisions.md#changed-property-tests-run-deep-at-handoff) | 134 |
+|  | [A related frontend run is refused without `--isolate`, and a test that passed without the setup fails the run](decisions.md#a-related-frontend-run-is-refused-without---isolate-and-a-test-that-passed-without-the-setup-fails-the-run) | 390 |
 <!-- index: end -->

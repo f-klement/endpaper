@@ -20045,48 +20045,32 @@ input the one before it accepts. It generalises past shell.
 A match against a listing also states whether it is a whole line, because a loose one silently reads
 one run's name inside another's.
 
-## A deadline test turns on a fact, because every clock available to it is wider than the thing it measures
+## A deadline test turns on a fact and a virtual clock, never on the wall clock
 
-`test_a_slow_oenb_does_not_extend_the_shared_deadline` patches a small deadline in, puts a longer
-sleep behind one source, and proved the deadline with a wall clock bound alone: the deadline plus a
-margin sized to cover the rest of the roster, the merge and the ranking. A ticket proposed
-subtracting that overhead with a measured control case instead of budgeting for it.
+`test_a_slow_oenb_does_not_extend_the_shared_deadline` patches a small deadline in and puts a
+longer sleep behind one source. Two arms decide it, and neither reads the wall clock.
 
-**The control case was built, measured and refused, and the ticket's premise with it.** The overhead
-does not land on top of the deadline, because the sources run inside the deadline's own window and
-only the merge and the ranking land after it. Measured 2026-09-29 on `builder` at four workers over
-75 pairs in three runs: the smallest control drawn is sixteen times the largest excess drawn and the
-difference is negative at every sample, so subtracting the control loosens the bound by the whole
-control. The argument is stated on magnitudes on purpose, because two seats measured the variance
-ratio of the same quantity ten times apart on the same node: a control case is itself timing, and
-what it would cancel here is smaller than the disagreement between two measurements of the
-instrument.
+**The slow source records how its own task ended**, and only a cancellation delivered and awaited
+to the end passes. Drop the cancellation and discard the pending set, and the rows are right and
+the call returns at the deadline while this arm reddens; replace the fan out's gather with a single
+event loop tick, and it reddens again on the unwinding. A second arm, in the deadline class, reads
+the budget where `asyncio.wait` consumes it rather than at the call boundary, because a timeout
+scaled inside the fan out passed every arm that recorded it at the call.
 
-**The margin did not move.** It is the leftover of a midpoint construction, it happens to be about
-twice the only recorded stall, and one draw bounds nothing. Lowering it on the fixture measurement
-would buy detection with flakes.
-
-**What ends the class is discrimination that is not a duration.** The slow source records how its own
-task ended, and only a cancellation delivered and awaited to the end passes: drop the cancellation
-and discard the pending set, and every assertion the test carried before still passes with the rows
-right and the call returning at the deadline, while this arm reddens; replace the fan out's gather
-with a single event loop tick, and it reddens again on the unwinding. No clock the test can read sees
-either. A second arm reads the budget where `asyncio.wait` consumes it rather than at the call
-boundary, because a timeout scaled inside the fan out passed every arm that recorded it at the call.
+**The search runs on `VirtualClock`**, so the clock read at return is the instant the wait's timer
+fired, and the elapsed assertion is an equality. The wall clock bound it replaced, the deadline
+plus a 1.25s margin, read 3.738s on correct code under load, and was blind below the call's own
+cost. A control case subtracting that cost was built and refused: what it would cancel was
+smaller than the disagreement between two measurements of it. The equality needs neither.
 
 **An assertion cited as proof of a timing claim is only as sensitive as the narrowest input that can
-move it.** A hundredfold headroom rested on a row assertion that only one source can move, so it
-could not see whether the others had finished; measured directly they finish at 0.0711s to
-0.0797s against a 0.5s deadline, which is about six.
+move it.** A hundredfold headroom once rested on a row assertion that only one source can move, so
+it could not see whether the others had finished.
 
-**Two things about the residue, and the rest is at the site.** The elapsed bound is blind below the
-call's own cost as well as above the margin, so it is a band rather than a floor. And the arm reading
-the task's own ending is not purely additive: it newly reddens on a run that never asked the source,
-which is wanted, because such a run never exercised the deadline. How much more it refuses is refused
-rather than stated, the band first written for that cost having been reasoned rather than measured.
-The measurements, the blind band and both edges of what each arm holds are in the constants' comments
-and the test's docstring in `backend/tests/test_metadata.py`, which is where the standing decision
-puts the evidence behind a stated bound.
+**What the clock gives up** is time spent on the loop's own thread: a fan out that drops the slow
+source on time and then spends seconds merging passes. Time spent blocking the loop's own thread
+does not advance the clock, which `VirtualClock`'s docstring in the backend test helpers states for
+every test on the clock.
 
 ## A row count is a second instrument, and the two numbers are read together
 
@@ -20457,8 +20441,8 @@ sloppiness. The faces it wore:
 |---|---|---|
 | the death signal is the only layer that reaches that row | two outer layers reach it and are slower | *The death signal an arm carries is the uncatchable one* |
 | 40 of 40 runs left going, 0 after | runs left **running**, a wider population than runs leaked | the same entry |
-| a suite pod is quota bound at 2 CPUs, restored as evidence | the pipeline job pod was then, and the suite pod had been resized | *A deadline test turns on a fact, because every clock available to it is wider than the thing it measures* |
-| a hundredfold headroom | about six, once the sources the row assertion cannot move are timed directly | the same entry |
+| a suite pod is quota bound at 2 CPUs, restored as evidence | the pipeline job pod was then, and the suite pod had been resized | the git history of the ÖNB deadline test, which no longer reads the wall clock |
+| a hundredfold headroom | about six, once the sources the row assertion cannot move are timed directly | the same git history, since the test no longer carries the figure |
 | keying on the mapper refutes counting relationship loads | it refutes an **absolute** reading only, and the relative one needs them | *A row count is a second instrument, and the two numbers are read together* |
 | the funnel bounds every directory door | it bounds the LDAP door; the proxy door was bounded before it existed | *The directory username is bounded where the row is written, not by a column constraint* |
 | composing the slice and the clipper costs at most one character | two, once the input family mixes escape widths | below |
@@ -25077,7 +25061,8 @@ Every real time wait went onto a virtual clock where one could hold it. Three sh
 and each has its own answer:
 
 - **An asyncio wait** runs on `tests/helpers.VirtualClock`, shared with `deadline`, and asserts
-  the instant the cut landed. Moved there: the trickled and paced fetch downloads.
+  the instant the cut landed. Moved there: the trickled and paced fetch downloads, and the
+  search's shared deadline under a slow ÖNB.
 - **A subprocess whose budget is measured by its own clock** gets that clock paused until the
   moment under test: the mutation sweep's budget arm loads a `sitecustomize` that holds
   `time.monotonic` still until the blocking arm has started, so startup on a throttled pod can no
@@ -25211,3 +25196,35 @@ pipeline's tag job. It runs third, before `random-order`, and may spend at most
 a branch made false at ten times the examples was first found on the release. The run is unseeded,
 so each handoff draws new examples. The share keeps it from starving `random-order`, and its
 cost is that a branch changing one of the slowest properties gets no thorough verdict.
+
+## A related frontend run is refused without `--isolate`, and a test that passed without the setup fails the run
+
+**What.** `vitest related`, and `--changed`, which vitest resolves as a related run (read from vitest's source), refuse to
+start under `isolate: false` unless `--isolate` is passed; the frontend tree guards mode passes
+it. `tests/setupRan.reporter.ts` fails any run in which a test passed without `tests/setup.ts`
+having run for it, naming each file. The setup also fails a test that leaves a node in
+`document.body` after cleanup, or finds one there before it starts.
+
+**Why the refusal.** Under `isolate: false`, vitest 5.0.5 evaluates the setup once per worker
+and environment in a related run, and once per file in `vitest run`. Measured with one worker:
+22 of 22 files ran the setup under `vitest run`, and one file per environment under `vitest
+related`. Every later file of that environment ran with no `cleanup()`, no storage cleared and
+none of the setup's guards, so DOM state leaked between files. The symptom was a test green alone
+and red in the related subset with "Found multiple elements", and no file leaking anything; the
+full suite was never exposed. `--isolate` gives each file a fresh module registry and so a fresh
+setup. Why vitest does this is inferred from its source rather than proven, and nothing rests on
+that reading.
+
+**Why the setup mark.** Every guard in the setup is silent in exactly the case where the setup
+did not run, because the guard is the setup. The refusal keys on the command, so a vitest change
+that spreads the behaviour to another command would switch off every setup guard with nothing
+said. The setup's first `beforeEach` marks the test's meta, and the reporter reads the mark from
+every test that passed: a passed test ran its `beforeEach` hooks, while a failed one may have
+stopped in a `beforeAll` and is red already, and a skipped one proves nothing. It is a reporter
+because only a reporter sees every file's tests. The refusal stays beside it because it answers
+before the run and names the flag rather than the files.
+
+**What it costs.** A `--reporter` on the command line drops this reporter together with the
+coverage register's. The coverage register's global setup refuses such a run and names both
+reporters to keep, from one list a test holds to the configuration; a run naming the coverage
+register's reporter back alone still drops this one silently.

@@ -201,7 +201,7 @@
     // Each is a rule this tree could pass. None was triaged, deliberately: the
     // wave that adopted oxlint was told not to, because turning a noisy rule on
     // produces findings in files other open tickets rewrite.
-    "unicorn/no-array-sort": "off", // 178
+    "unicorn/no-array-sort": "off", // 168
     "unicorn/consistent-function-scoping": "off", // 137
     "no-shadow": "off", // 29
     "unicorn/prefer-set-has": "off", // 14
