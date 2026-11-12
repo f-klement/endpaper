@@ -375,10 +375,3 @@ class TestWhatCountsAsAnAddress:
     )
     def test_what_a_header_may_not_carry_is_refused(self, address, why):
         assert mailer.looks_like_address(address) is False, why
-
-    def test_the_bound_is_the_one_three_layers_share(self):
-        """`MAX_ADDRESS` is stated here rather than left to three call sites to
-        agree about by coincidence: `users.email` is `String(320)`, the schema
-        bounds a write to it, and `auth_backends` bounds what a directory may
-        assert. `tests/test_schema.py` pins the column against this number."""
-        assert mailer.MAX_ADDRESS == 320

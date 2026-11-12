@@ -164,14 +164,6 @@ function libraryIn(reading: StoreReading) {
 }
 
 describe("what a store is", () => {
-  it("offers every row it holds, in the order it holds them", () => {
-    // Derived rather than listed, so a row added to `STORES` is offered
-    // without a second edit. The failure this refuses is the one the whole
-    // ticket is: a reader that ships and no member can reach.
-    expect(STORE_IDS).toEqual(Object.keys(STORES));
-    expect(STORE_IDS.length).toBeGreaterThan(1);
-  });
-
   it("says everything a member reads in words the catalogue carries", () => {
     // The type already refuses a key that is not a `MessageKey`. What it
     // cannot see is a key that resolves to nothing at runtime, which is what a

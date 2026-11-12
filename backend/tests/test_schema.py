@@ -20,6 +20,7 @@ from types import ModuleType
 from typing import Any, Final
 
 import pytest
+from alembic.script import ScriptDirectory
 from pydantic import BaseModel
 from sqlalchemy import CheckConstraint, String, create_engine, inspect, text
 from sqlalchemy.engine import Connection
@@ -89,10 +90,9 @@ def build_pre_alembic_database() -> None:
     pre-Alembic while already carrying every later column, and the migration
     under test would then be asked to add columns that exist.
     """
-    drop_everything()
     # The BASELINE specifically, not head: this is meant to be the schema as it
     # stood before Alembic, which is exactly what the baseline describes.
-    schema.upgrade_to(schema.BASELINE_REVISION)
+    at_revision(schema.BASELINE_REVISION)
     with engine.connect() as connection:
         connection.execute(text("DROP TABLE alembic_version"))
         connection.commit()
@@ -112,10 +112,36 @@ def build_pre_alembic_database() -> None:
 #: Postgres, where `at_head` runs the chain instead.
 _head: sqlite3.Connection | None = None
 
+#: The database the chain builds up to each revision a case starts from, copied by
+#: `_head_built_once` on its way to head. Empty on Postgres.
+_at: dict[str, sqlite3.Connection] = {}
+
+
+def _revisions_cases_start_from() -> list[str]:
+    """Every `PREVIOUS` and `REVISION` a test class here names, and the baseline,
+    in the order the chain reaches them.
+
+    Read off the classes rather than listed, so a class that adds one is built
+    without a second edit; `at_revision` refuses any other. The chain is linear,
+    so one walk passes through each of them on its way to head.
+    """
+    named = {schema.BASELINE_REVISION}
+    for value in list(globals().values()):
+        if isinstance(value, type) and value.__name__.startswith("Test"):
+            named |= {getattr(value, a) for a in ("PREVIOUS", "REVISION") if hasattr(value, a)}
+    scripts = list(ScriptDirectory.from_config(schema._alembic_config()).walk_revisions())
+    merges = [script.revision for script in scripts if isinstance(script.down_revision, (tuple, list))]
+    assert not merges, f"a merge revision makes the walk to head no longer pass through each: {merges}"
+    chain = [script.revision for script in reversed(scripts)]
+    unknown = named - set(chain)
+    assert not unknown, f"named as a starting point, but no revision of the chain: {sorted(unknown)}"
+    return [rev for rev in chain if rev in named]
+
 
 @pytest.fixture(autouse=True, scope="module")
 def _head_built_once() -> Iterator[None]:
-    """Run the whole chain once in this process and keep a copy of what it built.
+    """Run the whole chain once in this process and keep a copy of what it built,
+    at head and at every revision a case starts from.
 
     **The copy is the migrations' output, not a second description of it**, so
     `at_head` keeps "The suite's database is the migrations'" in
@@ -131,10 +157,17 @@ def _head_built_once() -> Iterator[None]:
     """
     global _head
     drop_everything()
-    schema.upgrade_to_head()
     if engine.dialect.name != "sqlite":
+        schema.upgrade_to_head()
         yield
         return
+    for starting_point in _revisions_cases_start_from():
+        schema.upgrade_to(starting_point)
+        built = sqlite3.connect(":memory:")
+        with _live_file() as live:
+            live.backup(built)
+        _at[starting_point] = built
+    schema.upgrade_to_head()
     copy = sqlite3.connect(":memory:")
     with _live_file() as live:
         live.backup(copy)
@@ -144,6 +177,9 @@ def _head_built_once() -> Iterator[None]:
     finally:
         _head = None
         copy.close()
+        for built in _at.values():
+            built.close()
+        _at.clear()
 
 
 def at_head() -> None:
@@ -169,6 +205,33 @@ def at_head() -> None:
         return
     with _live_file() as live:
         _head.backup(live)
+
+
+def at_revision(revision: str) -> None:
+    """The database the chain builds from nothing up to `revision`, restored
+    the way `at_head` restores head.
+
+    Each class building an older database ran the chain from nothing for every
+    case. The copy is the chain's output in this same process, taken by the
+    module fixture before any case, so a patch inside a case can never be what
+    every later case of that revision restores. **A revision the fixture did
+    not copy is refused rather than built here**, which is where a patch would
+    reach it: name it as the class's `PREVIOUS` or `REVISION`. A case that
+    patches a revision or the runner still runs `drop_everything()` and
+    `schema.upgrade_to()` itself, for `at_head`'s reason.
+    """
+    if engine.dialect.name != "sqlite":
+        drop_everything()
+        schema.upgrade_to(revision)
+        return
+    built = _at.get(revision)
+    if built is None:
+        pytest.fail(
+            f"{revision} was not copied before the cases ran: name it as a test class's PREVIOUS or REVISION",
+            pytrace=False,
+        )
+    with _live_file() as live:
+        built.backup(live)
 
 
 @contextmanager
@@ -325,6 +388,18 @@ class TestTheHeadThisFileRestores:
 
             assert _dump(_driver(other)) == _dump(_head)
 
+    @pytest.mark.sqlite_only(reason="Postgres builds each revision in place, so nothing is copied to refuse")
+    def test_a_revision_no_class_names_is_refused_rather_than_built(self):
+        """Every named revision is copied before the cases run, so the refusal
+        fires for no case today. Without this, building the miss lazily again
+        would pass the suite, and a build inside a case is where a patch reaches
+        the copy every later case restores."""
+        chain = [s.revision for s in ScriptDirectory.from_config(schema._alembic_config()).walk_revisions()]
+        unnamed = next(revision for revision in chain if revision not in _at)
+
+        with pytest.raises(pytest.fail.Exception, match="was not copied before the cases ran"):
+            at_revision(unnamed)
+
 
 class TestAdoptingAPreAlembicDatabase:
     """The migration path for an installation that predates Alembic."""
@@ -471,11 +546,11 @@ class TestHyphenatingTheAgeTags:
     # Spelled with an escape so this file holds no literal en dash of its own.
     OLD_NAME = "Children (0\u20138)"
     NEW_NAME = "Children (0-8)"
+    PREVIOUS = "a7feb2db74ac"
 
     def build_database_with_old_tag_names(self) -> int:
         """A database one revision back, holding a tagged book. Returns the tag id."""
-        drop_everything()
-        schema.upgrade_to("a7feb2db74ac")
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO tags (name, category) VALUES (:name, 'age')"),
@@ -570,8 +645,7 @@ class TestLendingToSomeoneWithoutAnAccount:
     PREVIOUS = "f2b8d6a03c17"
 
     def build_database_with_a_loan(self) -> None:
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
@@ -704,8 +778,7 @@ class TestUpgradingStoredCovers:
     PREVIOUS = "d5c31b7a09fe"
 
     def build_database_with_covers(self) -> None:
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             for title, cover in (
                 ("Insecure", "http://books.google.com/c.jpg"),
@@ -813,8 +886,7 @@ class TestCollectionsAndTheIsbnIndexThatSurvivesThem:
         state the partial index exists to permit and a plain unique index would
         have refused.
         """
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
@@ -938,11 +1010,11 @@ class TestWideningTheClassificationNumber:
     """
 
     HEADING = "United States -- History -- Civil War, 1861-1865 -- Social aspects -- Juvenile literature"
+    PREVIOUS = "e2c74a91b5d8"
 
     def build_database_with_a_heading(self) -> None:
         """A database one revision back, holding a book and a short heading."""
-        drop_everything()
-        schema.upgrade_to("e2c74a91b5d8")
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text(
@@ -1100,8 +1172,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         freed id was 2 while 3 still existed, the next insert took 4, and that
         test passed however the migration behaved.
         """
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
@@ -1231,8 +1302,7 @@ class TestFoldingCollectionNamesOutsideAscii:
         spellings that the old index saw as four names and Python folds to one,
         so the repoint has to take a list of losers rather than a single id.
         """
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             for index, name in enumerate(("ÄÖ", "äÖ", "Äö", "äö"), start=1):
                 connection.execute(text("INSERT INTO collections (name) VALUES (:name)"), {"name": name})
@@ -1499,8 +1569,7 @@ class TestKeyingTheSeededTags:
         Seeded and untouched, seeded and renamed, and one the library invented.
         Returns the ids by name.
         """
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         names = {
             "Computing": "genre",
             "Stories": "type",
@@ -2514,8 +2583,7 @@ class TestAnAddressPerMember:
     PREVIOUS = "c9a5f27b3e41"
 
     def build_database_with_a_member(self) -> None:
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
@@ -2765,8 +2833,7 @@ class TestTheStoredShelfKey:
     ]
 
     def build_database_one_revision_back(self) -> None:
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text(
@@ -3739,8 +3806,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         """
         from alembic import command
 
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
 
         # The independent half: this schema is what the previous revisions
         # installed, so it is evidence about `before` rather than an echo of it.
@@ -3768,8 +3834,7 @@ class TestEveryTextCeilingIsInstalledWithItsByteArm:
         hazard: `QuoteCreate` bounds the Python string, whose `len` counts past a
         NUL and reads 10,002 here.
         """
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         tables = Base.metadata.tables
         with engine.connect() as connection:
             # Through the `Table` objects rather than raw SQL, so the models'
@@ -4082,13 +4147,11 @@ class TestTheGlobRulesThatLearnedAboutNul:
         one is that revision's case to move, which is what `b8f4c1a7e309` did to
         the envelope case at the foot of this class.
         """
-        drop_everything()
-        schema.upgrade_to(TestTheGlobRulesThatLearnedAboutNul.REVISION)
+        at_revision(TestTheGlobRulesThatLearnedAboutNul.REVISION)
 
     @staticmethod
     def _at_previous() -> None:
-        drop_everything()
-        schema.upgrade_to(TestTheGlobRulesThatLearnedAboutNul.PREVIOUS)
+        at_revision(TestTheGlobRulesThatLearnedAboutNul.PREVIOUS)
 
     @staticmethod
     def _server(url: str, key: str = "opds-0123456789abcdef") -> tuple[str, dict[str, str]]:
@@ -4871,8 +4934,7 @@ class TestTheBoundsThisRevisionPutOnBytes:
 
     @staticmethod
     def _at_previous() -> None:
-        drop_everything()
-        schema.upgrade_to(TestTheBoundsThisRevisionPutOnBytes.PREVIOUS)
+        at_revision(TestTheBoundsThisRevisionPutOnBytes.PREVIOUS)
 
     @staticmethod
     def _behind_a_lead_byte(prefix: bytes, total: int) -> bytes:
@@ -6011,8 +6073,7 @@ class TestACustomFieldRecordsWhoDefinedIt:
     def build_database_with_a_filled_field(self) -> None:
         """A library with one definition and one value under it, before the
         column."""
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")
@@ -6129,8 +6190,7 @@ class TestABlankTextColumnIsNull:
     LOOKALIKES: Final = {f"U+{code:04X}": chr(code) for code in (0x200B, 0x3164, 0xFEFF, 0x180E)}
 
     def build_database_with_blanks(self, rows: dict[str, str | None] | None = None) -> None:
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             for title, value in (rows or {**self.BLANK, **self.KEPT}).items():
                 connection.execute(
@@ -6223,8 +6283,7 @@ class TestADeletedBooksIdIsNeverReused:
     def build_database_with_three_books(self) -> None:
         """Three Books, a reading status on the first, and the highest id free
         of children so that deleting it needs no cascade."""
-        drop_everything()
-        schema.upgrade_to(self.PREVIOUS)
+        at_revision(self.PREVIOUS)
         with engine.connect() as connection:
             connection.execute(
                 text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim','x',TRUE)")

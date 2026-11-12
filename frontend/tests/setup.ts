@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
 
 import { forgetPreferences } from "../src/lib/preference";
 import { resetZxingDouble } from "./doubles/zxing";
+import { domLeftBehind } from "./lib/domLeftBehind";
 import { openLedger, uncontrolled } from "./lib/doorLedger";
 import {
   hadDecompressionStream,
@@ -409,7 +410,23 @@ function storageLeftBroken(): string | null {
   return null;
 }
 
-beforeEach(() => {
+//: Where the `afterEach` below records the test it ran for, so the next
+//: test's `beforeEach` can name it. **On the global and not in this module**,
+//: because this module is evaluated again for every file and the test before
+//: may be the last of the previous file.
+const LAST_TEST = Symbol.for("endpaper.setup.lastTest");
+
+beforeEach((context) => {
+  // **The mark `tests/setupRan.reporter.ts` reads**, set before anything here
+  // can throw: a passed test without it ran with none of this file.
+  context.task.meta.setUp = true;
+  // **Next, so the test it blames is the one before this.** What a test left
+  // running after its cleanup lands here; `tests/lib/domLeftBehind.ts` says why.
+  const leftEarlier = domLeftBehind(
+    "before",
+    (globalThis as { [LAST_TEST]?: string })[LAST_TEST],
+  );
+  if (leftEarlier) throw new Error(leftEarlier);
   // **Centrally, so that no file can forget it.** The ZXing double is aliased in
   // for the whole suite, so its spies are reachable from any file that renders a
   // scanner, whether or not that file knows the double exists. Left to each file
@@ -572,9 +589,14 @@ afterAll(() => {
   }
 });
 
-afterEach(() => {
+afterEach((context) => {
+  (globalThis as { [LAST_TEST]?: string })[LAST_TEST] = context.task.fullName;
   // `cleanup()` unmounts React trees, of which a node-environment file has none.
   if (typeof document !== "undefined") cleanup();
+  // **Read straight after cleanup**, the moment anything left in the body is
+  // the test's own and not the testing library's, and thrown at the end, so the
+  // restores below still run for a test that leaked.
+  const leftInBody = domLeftBehind("after");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   // Unconditionally, and the conditional this replaced is worth a sentence
@@ -677,4 +699,6 @@ afterEach(() => {
   // anything that reassigns it afterwards, including a test file's own module
   // scope, stands for the rest of that file unchallenged.
   assertTheZoneIsPinned();
+
+  if (leftInBody) throw new Error(leftInBody);
 });

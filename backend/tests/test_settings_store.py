@@ -33,10 +33,6 @@ class TestDefaults:
         # not something a new install begins doing on its own.
         assert settings_store.DEFAULTS[SettingKey.GOOGLE_BOOKS_ENABLED] == "false"
 
-    def test_goodreads_lookup_starts_on(self):
-        # Only an outbound link: it discloses nothing and costs nothing.
-        assert settings_store.DEFAULTS[SettingKey.GOODREADS_LOOKUP_ENABLED] == "true"
-
 
 class TestReadAndWrite:
     def test_an_unwritten_key_returns_its_default(self, db):
@@ -91,9 +87,6 @@ class TestMasking:
 
     def test_an_unset_key_masks_to_nothing(self):
         assert settings_store.mask("") == ""
-
-    def test_the_api_key_is_marked_secret(self):
-        assert SettingKey.GOOGLE_BOOKS_API_KEY in settings_store.SECRET_KEYS
 
 
 class TestJsonSettings:

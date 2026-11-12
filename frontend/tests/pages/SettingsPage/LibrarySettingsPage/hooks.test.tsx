@@ -848,6 +848,11 @@ describe("picking one store", () => {
  * The bytes it eventually gives are zeros, so the archive fails as
  * `not-an-archive`. What is being asserted is which answer is written, not
  * which answer it is.
+ *
+ * **Released, it crosses a timer before it answers**, as a browser's file read
+ * crosses a task. Without that the continuation is microtasks only, `act`'s own
+ * flush lands it, and `settle` below holds nothing: measured, every arm here
+ * passed with `settle`'s loop removed.
  */
 function heldFile(name: string) {
   let release!: () => void;
@@ -861,6 +866,7 @@ function heldFile(name: string) {
     slice: () => ({
       arrayBuffer: async () => {
         await held;
+        await new Promise((resolve) => setTimeout(resolve, 0));
         return bytes.buffer;
       },
     }),
@@ -871,27 +877,31 @@ function heldFile(name: string) {
 /**
  * Give a released read every chance to write before asserting it did not.
  *
- * **Measured rather than chosen, and the short window lied.** A single
- * `setTimeout(0)` reported an empty card for both arms of the `confirm`
- * mutation below, which reads as the guard being redundant; instrumenting the
- * read showed it had not resumed inside that window at all. So a negative
- * assertion taken on the short window is a test that cannot fail.
+ * **On a clock of its own, advanced rather than waited out.** A held read
+ * lands only once the clock passes its timer (`heldFile`), and the advance
+ * opens with a native turn and takes another after every timer it runs, forty
+ * steps of five milliseconds in all. The window is generous rather than fitted.
+ * The positive control below fails when the advance is removed.
  */
 async function settle() {
-  for (let turn = 0; turn < 40; turn += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    for (let turn = 0; turn < 40; turn += 1) {
+      await vi.advanceTimersByTimeAsync(5);
+    }
+  } finally {
+    vi.useRealTimers();
   }
 }
 
 describe("a read the member has moved on from", () => {
   it("writes a held read once it is released, which is what settle is for", async () => {
-    // **The positive control for `settle`, and the only arm here that fails
-    // when its window is too short.** Every other arm asserts that a released
-    // read did *not* write, and a window the read cannot resume inside
-    // satisfies all of them while testing nothing: measured, cutting `settle`
-    // to one turn left all of them green. This one asserts the write happens,
-    // through the same helper and the same held file, so a settle that stops
-    // being long enough is a failure here rather than silence everywhere.
+    // **The positive control for `settle`.** Every other arm asserts that a
+    // released read did *not* write, and a window the read cannot resume
+    // inside satisfies all of them while testing nothing. This one asserts the
+    // write happens, through the same helper and the same held file, so a
+    // settle that stops advancing the clock past the read's timer is a failure
+    // here rather than silence everywhere.
     const { result } = storeHook();
     const held = heldFile("held.zip");
 
@@ -965,11 +975,14 @@ describe("a read the member has moved on from", () => {
   it("never lands on a card that has been cleared under it", async () => {
     // **The control and the case, same file and same settle.** Without the
     // guard the second read lands exactly as the first one does, and puts a
-    // preview back on a card that had just been cleared. A Takeout that is not
-    // a zip is used because it fails without touching the engine, so what is
-    // being asserted is the write and not a compile finishing in time.
+    // preview back on a card that had just been cleared. A held Takeout
+    // released at once: its bytes are not a zip, so it fails without touching
+    // the engine and what is asserted is the write, not a compile finishing in
+    // time; and its read crosses the timer `settle` advances past.
     const { result } = storeHook();
-    const file = new File(["nonsense"], "takeout.zip");
+    const takeout = heldFile("takeout.zip");
+    takeout.release();
+    const file = takeout.file;
 
     // **The control takes the same `settle()` as the case, and that is what
     // makes the window self checking.** Taken with a `waitFor` it would wait
@@ -982,12 +995,15 @@ describe("a read the member has moved on from", () => {
     });
     expect(result.current.sources.playBooks?.status).toBe("failed");
 
+    // **The pick and its settle share one `act`, as the control's do.** Split
+    // across two, the read could reach its timer between them, on the real
+    // clock that `settle` never advances, and land after the assertion: measured,
+    // the case then passed with the guard removed. In one `act` the fake clock is
+    // installed before the read's first continuation runs.
     await act(async () => {
       result.current.reset();
       result.current.choose("playBooks", file);
       result.current.reset();
-    });
-    await act(async () => {
       await settle();
     });
 

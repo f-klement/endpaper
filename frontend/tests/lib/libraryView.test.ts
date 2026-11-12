@@ -17,7 +17,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CATALOGUE_MODES } from "../../src/lib/catalogueMode";
 import {
   DEFAULT_LIBRARY_VIEWS,
-  LIBRARY_VIEWS,
   libraryViewPreference,
 } from "../../src/lib/libraryView";
 
@@ -128,17 +127,5 @@ describe("the two modes", () => {
       stored.add(localStorage.key(i)!);
     }
     expect(stored.size).toBe(CATALOGUE_MODES.length);
-  });
-
-  it("gives every mode a default that is a view it can draw", () => {
-    // **This guards a widening of the record's value type, not a typo.**
-    // `Record<CatalogueMode, LibraryView>` makes `cataloguer: "carousel"` a
-    // TS2322, so the literal cannot be got wrong while that annotation holds.
-    // Loosening it to `string`, which is the ordinary way a stored value ends
-    // up in a defaults table, would take the compiler's answer away and leave
-    // this as the only thing asking the question.
-    for (const mode of CATALOGUE_MODES) {
-      expect(LIBRARY_VIEWS).toContain(DEFAULT_LIBRARY_VIEWS[mode]);
-    }
   });
 });

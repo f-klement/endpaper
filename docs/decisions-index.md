@@ -1003,4 +1003,16 @@ repeat the argument.
 | SonarQube is read by hand before a release tag, and never gated on | [The error page takes the app's accent as literal values](decisions.md#the-error-page-takes-the-apps-accent-as-literal-values) | 145 |
 | SonarQube is read by hand before a release tag, and never gated on | [A bidirectional control character is refused in every file the suite reads](decisions.md#a-bidirectional-control-character-is-refused-in-every-file-the-suite-reads) | 132 |
 |  | [The local gate runs the backend job's two ruff steps](decisions.md#the-local-gate-runs-the-backend-jobs-two-ruff-steps) | 129 |
+|  | [The gate runs its legs side by side](decisions.md#the-gate-runs-its-legs-side-by-side) | 441 |
+|  | [One backend run per handoff](decisions.md#one-backend-run-per-handoff) | 78 |
+|  | [The backend suite keeps `--dist loadfile`, because the profile found nothing to rebalance](decisions.md#the-backend-suite-keeps---dist-loadfile-because-the-profile-found-nothing-to-rebalance) | 156 |
+|  | [A test that restates a constant, a derivation or a type is deleted, and an agreement between two artefacts is kept](decisions.md#a-test-that-restates-a-constant-a-derivation-or-a-type-is-deleted-and-an-agreement-between-two-artefacts-is-kept) | 344 |
+|  | [A fixed wait in a backend test is either a virtual clock or a declared ceiling](decisions.md#a-fixed-wait-in-a-backend-test-is-either-a-virtual-clock-or-a-declared-ceiling) | 227 |
+|  | [The suite runner's guard cases are serialised, because the node locks are machine wide](decisions.md#the-suite-runners-guard-cases-are-serialised-because-the-node-locks-are-machine-wide) | 73 |
+|  | [A total table over a generated union is the compiler's to check, and its runtime arm is deleted](decisions.md#a-total-table-over-a-generated-union-is-the-compilers-to-check-and-its-runtime-arm-is-deleted) | 273 |
+|  | [A wait in a frontend test advances a fake clock, and a wall clock ceiling is not a wait](decisions.md#a-wait-in-a-frontend-test-advances-a-fake-clock-and-a-wall-clock-ceiling-is-not-a-wait) | 163 |
+|  | [Renovate records the uv and bun sums, with no version on the command](decisions.md#renovate-records-the-uv-and-bun-sums-with-no-version-on-the-command) | 252 |
+|  | [test:backend installs with `uv sync --locked`, the other uv jobs with `--frozen`](decisions.md#testbackend-installs-with-uv-sync---locked-the-other-uv-jobs-with---frozen) | 149 |
+|  | [The frontend's tree guards are derived from its imports and globs](decisions.md#the-frontends-tree-guards-are-derived-from-its-imports-and-globs) | 259 |
+|  | [Changed property tests run deep at handoff](decisions.md#changed-property-tests-run-deep-at-handoff) | 134 |
 <!-- index: end -->

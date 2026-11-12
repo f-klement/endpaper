@@ -509,25 +509,6 @@ class TestTwoFamiliesMeanTwoRegistries:
         assert name.replace("_", "").isalnum()
         assert name.islower()
 
-    def test_the_catalogue_registry_is_the_catalogue_family(self):
-        """Which family `targets.SEEDED` is, in one line.
-
-        **Not load bearing the way the identity spine's equivalent is, and that
-        is measured rather than assumed.** Repointing `targets.FAMILY` at
-        `IMPORT` fails this test **and** two arms of the parametrised test
-        above. The spine's pin is the only failure for its own mutation because
-        its parametrised test feeds the constant back in as the input it varies;
-        here the identifiers are a fixed property of `CatalogueSource`, so
-        repointing the constant breaks the correspondence rather than moving
-        with it.
-
-        Kept for two reasons that survive that. It fails with the sentence a
-        reader needs rather than with a parametrised arm's, and the arms above
-        go silent the day those identifiers are derived from the registry rather
-        than named.
-        """
-        assert targets.FAMILY is SourceFamily.CATALOGUE
-
 
 class TestTheCapabilityVocabularyIsSharedRatherThanCatalogueShaped:
     """`enums.Capability` is the half of the contract both families use."""

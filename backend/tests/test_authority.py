@@ -2876,16 +2876,6 @@ class TestTheEnumAndTheParserDescribeOneSet:
     """A member with nothing to write it and a code with nowhere to store it are
     the two ways this drifts, and both are silent."""
 
-    def test_every_national_scheme_has_a_viaf_code_and_the_reverse(self):
-        assert set(authority._NATIONAL_SOURCES.values()) == {
-            AuthorityScheme.BLBNB,
-            AuthorityScheme.ARBABN,
-            AuthorityScheme.BNE,
-            AuthorityScheme.PTBNP,
-            AuthorityScheme.ICCU,
-            AuthorityScheme.BNCHL,
-        }
-
     def test_the_fallback_reads_the_same_six_the_cluster_does(self):
         """A property with no scheme is a request nothing can store, and a
         scheme with no property is a file the fallback silently loses. Both are
@@ -2893,8 +2883,9 @@ class TestTheEnumAndTheParserDescribeOneSet:
         there.
 
         Written as an equality against `_NATIONAL_SOURCES` rather than against a
-        list typed out again, because the list above is already the one that
-        pins the six by name. Two hand written lists would drift together."""
+        list typed out again, because two hand written lists drift together. The
+        six are pinned by value where they are stored, in
+        `tests/routers/test_books_authors.py`."""
         assert set(authority._NATIONAL_PROPERTIES) == set(authority._NATIONAL_SOURCES.values())
 
     def test_every_property_is_named_once(self):

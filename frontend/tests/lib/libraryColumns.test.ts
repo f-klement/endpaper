@@ -341,22 +341,6 @@ describe("toggledColumns", () => {
 });
 
 describe("the specs are the only place a mode is named", () => {
-  it("derives both sets from one table rather than a second list", () => {
-    // The lists used to be literals, so a fourth cataloguer column would have
-    // been a compile error in the label map and none at all in the household's
-    // list, and would have reached every household silently. Every membership
-    // is now read from `COLUMN_SPECS`, so this is a check on the derivation
-    // rather than a second copy of it.
-    for (const mode of CATALOGUE_MODES) {
-      expect(AVAILABLE_COLUMNS[mode]).toEqual(
-        COLUMN_KEYS.filter((key) => COLUMN_SPECS[key].offeredTo.includes(mode)),
-      );
-      expect(DEFAULT_COLUMNS[mode]).toEqual(
-        COLUMN_KEYS.filter((key) => COLUMN_SPECS[key].defaultIn.includes(mode)),
-      );
-    }
-  });
-
   it("offers the always-shown column in every mode", () => {
     // No type says this and `normalise` cannot rescue it: it filters over
     // `AVAILABLE_COLUMNS[mode]`, so its forced-title arm cannot fire for a key

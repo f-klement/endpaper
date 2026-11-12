@@ -224,12 +224,21 @@ class Directory:
             return
 
     def close(self) -> None:
+        # Closing a listener does not wake a thread blocked in `accept()` on
+        # Linux, and shutting it down does. Without the shutdown a listener
+        # nobody dialled holds every close to the join's whole ceiling.
+        with contextlib.suppress(OSError):
+            self._listener.shutdown(socket.SHUT_RDWR)
         self._listener.close()
         if self._accepted is not None:
             with contextlib.suppress(OSError):
                 self._accepted.shutdown(socket.SHUT_RDWR)
             self._accepted.close()
+        # The timeout is a ceiling, not a wait: a thread still alive after it
+        # means the shutdown stopped waking `accept()`, and without this check
+        # every close would wait the ten seconds out again and stay green.
         self._thread.join(timeout=10)
+        assert not self._thread.is_alive(), "the listener thread outlived its close"
 
 
 @pytest.fixture
@@ -245,8 +254,22 @@ def directory(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[Directory]]:
     monkeypatch.delenv("LDAP_START_TLS", raising=False)
     started: list[Directory] = []
     yield started
-    for each in started:
-        each.close()
+    _close_every(started)
+
+
+def _close_every(started: list[Directory]) -> None:
+    """Close every directory, then report the ones whose thread outlived it.
+
+    Raising at the first would leave each later listener open, on a run that is
+    already failing for that first one.
+    """
+    outlived: list[int] = []
+    for index, each in enumerate(started):
+        try:
+            each.close()
+        except AssertionError:
+            outlived.append(index)
+    assert not outlived, f"the listener threads of directories {outlived} outlived their close"
 
 
 def _serve(
@@ -274,6 +297,28 @@ def _bind() -> bool:
         return bool(connection.bind())
     finally:
         connection.unbind()
+
+
+class _OutlivesItsClose(threading.Thread):
+    """A listener thread that is still alive however long its close waits."""
+
+    def join(self, timeout: float | None = None) -> None:
+        pass
+
+    def is_alive(self) -> bool:
+        return True
+
+
+class TestTheFixtureClosesEveryDirectory:
+    def test_a_thread_outliving_its_close_leaves_no_later_listener_open(self, pki):
+        stuck = Directory(pki.for_this_address, ldaps=False)
+        after = Directory(pki.for_this_address, ldaps=False)
+        stuck._thread = _OutlivesItsClose()
+
+        with pytest.raises(AssertionError, match=r"directories \[0\] outlived"):
+            _close_every([stuck, after])
+
+        assert after._listener.fileno() == -1
 
 
 # ── ldaps ─────────────────────────────────────────────────────────────────────

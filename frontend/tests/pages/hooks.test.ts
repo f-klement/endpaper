@@ -921,6 +921,27 @@ function gets(path: string): number {
   ).length;
 }
 
+/** Room for a chain of notify batches, each one fake millisecond apart. */
+const IN_MOTION_MS = 50;
+
+/**
+ * Let whatever is already in motion land, before asserting that nothing did.
+ *
+ * **On a clock of its own, advanced rather than waited out.**
+ * `advanceTimersByTimeAsync` opens with one native turn and then runs every
+ * timer the work schedules inside the window, the query cache's notify batch
+ * among them, so a write that would land a batch late is seen rather than
+ * missed. Real timers are back before the next `waitFor`, which polls on them.
+ */
+async function landWhatIsInMotion() {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    await vi.advanceTimersByTimeAsync(IN_MOTION_MS);
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
 /** A sweep of a pick holding `Kept.epub`, with `Gone.epub` saved beside it. */
 async function sweptWithOneGone() {
   holding(stored(1, "Kept.epub"), stored(2, "Gone.epub"));
@@ -975,9 +996,7 @@ describe("useFolderSweep", () => {
         ),
       ).toBe(true),
     );
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await act(landWhatIsInMotion);
 
     expect(result.current.swept?.map((one) => one.root)).toEqual(["New"]);
   });
@@ -1048,9 +1067,7 @@ describe("useFolderSweep", () => {
     // A refresh sent before the mark lands can be answered with the list as
     // it was, so the member would see no change.
     await waitFor(() => expect(sweeps()).toHaveLength(2));
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await act(landWhatIsInMotion);
     expect(gets(MISSING)).toBe(2);
     press.release({ body: { seen: [], missing: [2] } });
     await waitFor(() => expect(gets(MISSING)).toBe(3));
@@ -1066,9 +1083,7 @@ describe("useFolderSweep", () => {
     act(() => result.current.markMissing("Books"));
 
     expect(result.current.isMarking).toBe(false);
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await act(landWhatIsInMotion);
     expect(result.current.swept).toEqual([
       expect.objectContaining({ notFound: [], marked: null }),
     ]);

@@ -360,13 +360,24 @@ export default defineConfig({
     // names no reporter, and `globalSetup` below fails any run whose reporters
     // were replaced, so the next flag that does this says so rather than
     // disarming the guard.
-    reporters: ["default", "./tests/coverageRegister.reporter.ts", ...junit()],
+    //
+    // The second guard here, `setupRan.reporter.ts`, fails a run in which a
+    // test passed without `tests/setup.ts`, and goes with the first under the
+    // same flag.
+    reporters: [
+      "default",
+      "./tests/coverageRegister.reporter.ts",
+      "./tests/setupRan.reporter.ts",
+      ...junit(),
+    ],
     // The other half of that, and the half a command line cannot take away.
-    // The second hands the seed guard the configuration this process loaded,
-    // which a worker resolving it again cannot see. The refusal of an
-    // unsanctioned run comes first, so nothing else sets up for it.
+    // The last hands the seed guard the configuration this process loaded,
+    // which a worker resolving it again cannot see. The refusals come first,
+    // of an unsanctioned run and of a related run that would skip
+    // `tests/setup.ts` for most files, so nothing else sets up for either.
     globalSetup: [
       "./tests/sanctionedRun.globalSetup.ts",
+      "./tests/relatedRun.globalSetup.ts",
       "./tests/coverageRegister.globalSetup.ts",
       "./tests/runConfiguration.globalSetup.ts",
     ],

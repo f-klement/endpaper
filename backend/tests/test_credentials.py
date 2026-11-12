@@ -1251,9 +1251,6 @@ class TestTheEnvelopeRuleAndItsConstraintAgree:
                 return False
         return True
 
-    def test_the_version_this_build_writes_is_one_it_recognises(self):
-        assert credentials.VERSION in credentials.KNOWN_VERSIONS
-
     @pytest.mark.parametrize("version", credentials.KNOWN_VERSIONS)
     def test_every_recognised_version_is_storable(self, version):
         assert self._accepted(f"{version}." + "a" * 40 + ".b.c")

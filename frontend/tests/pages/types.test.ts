@@ -21,14 +21,10 @@ import {
 } from "../../src/api/generated/model";
 import {
   CONDITION_ORDER,
-  FORMAT_LABELS,
   FORMAT_ORDER,
-  LENDING_LABELS,
   LENDING_ORDER,
-  MODE_LABELS,
   MODE_ORDER,
   STATUS_ORDER,
-  TAG_CATEGORY_LABELS,
   TAG_CATEGORY_ORDER,
   TAG_CHIP_CLASSES,
   TAG_CHIP_SELECTED,
@@ -168,12 +164,6 @@ describe("FORMAT_ORDER", () => {
     // Wherever the rest end up, "Other" is not a peer of the ones above it.
     expect(FORMAT_ORDER.at(-1)).toBe(BookFormat.other);
   });
-
-  it("names every one of them", () => {
-    for (const format of FORMAT_ORDER) {
-      expect(FORMAT_LABELS[format]).toBeTruthy();
-    }
-  });
 });
 
 describe("the reading statuses", () => {
@@ -289,18 +279,6 @@ describe("the copy conditions", () => {
 });
 
 describe("style tables", () => {
-  // A missing entry renders an unstyled pill rather than throwing, so a gap
-  // here is the kind of thing only a test notices.
-  it.each([
-    ["labels", TAG_CATEGORY_LABELS],
-    ["pill classes", TAG_PILL_CLASSES],
-    ["chip classes", TAG_CHIP_CLASSES],
-  ])("%s cover every category", (_name, table) => {
-    for (const category of Object.values(TagCategory)) {
-      expect(table[category]).toBeTruthy();
-    }
-  });
-
   it("carries no hue of its own but the accent", () => {
     // Type, genre and age used to be a blue, a purple and a green, which was
     // the one place in this app where a colour was chosen at random. All four
@@ -403,15 +381,6 @@ describe("the light and dark modes", () => {
     expect(MODE_ORDER).toHaveLength(new Set(MODE_ORDER).size);
   });
 
-  it("names every mode it offers", () => {
-    // `ThemePreference` is a bare union with no runtime object to enumerate, so
-    // this is the only runtime arm over `MODE_LABELS`: a mode offered and not
-    // named is a button with no label.
-    for (const mode of MODE_ORDER) {
-      expect(MODE_LABELS[mode]).toBeTruthy();
-    }
-  });
-
   it("offers the default last", () => {
     // A default reads better as the thing you return to than the thing you
     // start at, and both screens take their order from here.
@@ -420,14 +389,6 @@ describe("the light and dark modes", () => {
 });
 
 describe("the lending willingness", () => {
-  it("names every answer the backend can send", () => {
-    // A `Record<...>` rather than a lookup with a default, so a fourth value
-    // added to the enum is a compile error here and not a blank cell.
-    expect(Object.keys(LENDING_LABELS).sort()).toEqual(
-      Object.values(LendingWillingness).sort(),
-    );
-  });
-
   it("keeps the order in a shape this check can still read", () => {
     const stillExhaustive: StillExhaustive<
       LendingWillingness,

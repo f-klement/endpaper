@@ -1016,6 +1016,91 @@ function patch(
   return entries.map((row) => (row.key === key ? change(row) : row));
 }
 
+/** The arm of `QueueEvent` whose kind is `K`. */
+type EventOf<K extends QueueEvent["kind"]> = Extract<QueueEvent, { kind: K }>;
+
+/**
+ * What each event makes of the queue.
+ *
+ * **A total table keyed on the union**, `REASON_FOR_FAILURE`'s shape in the
+ * hook: a new `QueueEvent` arm does not compile until it is answered here, and
+ * each arm is handed the event its own key stands for.
+ *
+ * **An arm that branches is a named function below, never an inline arrow.**
+ * The complexity scorer reads a function declaration and an arrow bound to a
+ * `const`, and nothing of an arrow inside an object literal: a ternary written
+ * here would be a branch no complexity figure counts.
+ */
+const AFTER_EVENT: {
+  readonly [K in QueueEvent["kind"]]: (
+    entries: ScannedEntry[],
+    event: EventOf<K>,
+  ) => ScannedEntry[];
+} = {
+  captured: (entries, event) => withBarcode(entries, event.isbn),
+  picked: (entries, event) => withPicked(entries, event.rows),
+  "file-read": (entries, event) =>
+    patch(entries, event.key, (row) => ({
+      ...leaving(row),
+      ...whatTheFileSaid(event.naming, event.said, event.note),
+      reference: event.reference,
+    })),
+  "audio-grouped": afterGrouping,
+  split: afterSplit,
+  "library-read": (entries, event) => {
+    const queued = new Set(entries.map((entry) => entry.key));
+    return [
+      ...entries.filter((entry) => entry.key !== event.pendingKey),
+      ...libraryRows(event.pendingKey, event.books).filter(
+        (row) => !queued.has(row.key),
+      ),
+    ];
+  },
+  "holders-answered": (entries, event) => withHolders(entries, event.held),
+  // **The note and the answer go with the state.** A row being asked about
+  // has no answer and is not standing under its name for a reason it can
+  // still state: leaving either behind renders a list of catalogue records
+  // under the sentence saying the name was kept, and leaves the row counted
+  // as kept while it is being decided again.
+  asked: (entries, event) =>
+    patch(entries, event.key, (row) => ({
+      ...leaving(row),
+      state: "searching",
+    })),
+  // **Over the row as it stands now, not as the asking found it**: a
+  // subject dropped while the lookup was in flight stays dropped.
+  "isbn-answered": (entries, event) =>
+    patch(entries, event.key, (row) => answeredByIsbn(row, event.lookup)),
+  "search-answered": (entries, event) =>
+    patch(entries, event.key, (row) => searchAnswered(row, event.matches)),
+  "not-answered": (entries, event) =>
+    patch(entries, event.key, (row) =>
+      notAnswered(row, event.asked, event.unknown),
+    ),
+  chosen: (entries, event) =>
+    patch(entries, event.key, (row) => matchTaken(row, event.match)),
+  "kept-the-name": (entries, event) =>
+    patch(entries, event.key, (row) => ({
+      ...leaving(row),
+      state: "derived",
+      answered: "records",
+      reason: { kind: "kept-the-name" },
+    })),
+  "record-taken": (entries, event) => patch(entries, event.key, recordTaken),
+  "kept-the-file": (entries, event) => patch(entries, event.key, fileKept),
+  "kept-every-name-for-now": (entries) => entries.map(keptInBulk),
+  "subject-dropped": (entries, event) =>
+    patch(entries, event.key, (row) => withoutSubject(row, event.subject)),
+  removed: (entries, event) =>
+    entries.filter((entry) => entry.key !== event.key),
+  cleared: () => [],
+  "batch-ran": (entries, event) =>
+    afterTheBatch(entries, event.walked, event.failures),
+  "copy-made": (entries, event) => patch(entries, event.key, copyMade),
+  "copy-refused": (entries, event) =>
+    patch(entries, event.key, (row) => copyRefused(row, event.reason)),
+};
+
 /**
  * The queue after `event`.
  *
@@ -1027,211 +1112,212 @@ export function queueAfter(
   entries: ScannedEntry[],
   event: QueueEvent,
 ): ScannedEntry[] {
-  switch (event.kind) {
-    case "captured": {
-      const key = scannedKey(event.isbn);
-      // The camera fires continuously while a barcode is in frame, so the same
-      // book arrives many times a second. Without this the queue fills with
-      // one book.
-      if (entries.some((entry) => entry.key === key)) return entries;
-      return [
-        ...entries,
-        {
-          key,
-          label: event.isbn,
-          isbn: event.isbn,
-          format: "",
-          state: "looking-up",
-          draft: null,
-        },
-      ];
-    }
-    case "picked": {
-      const fresh = notYetQueued(
-        entries,
-        // **Named, not spread.** `Picked` is an open type, so a row built in a
-        // callback or spread from another reaches here carrying fields it does
-        // not name, and a spread would put a `copyOf` or a `heldBy` on a row
-        // still being read.
-        event.rows.map(({ key, label, format, reference, claims }) => ({
-          key,
-          label,
-          format,
-          reference,
-          claims,
-          isbn: "",
-          state: "reading" as const,
-          draft: null,
-        })),
-        (row) => row.claims ?? [row.key],
-      );
-      if (fresh.length === 0) return entries;
-      return [...entries, ...fresh];
-    }
-    case "file-read":
-      return patch(entries, event.key, (row) => ({
-        ...leaving(row),
-        ...whatTheFileSaid(event.naming, event.said, event.note),
-        reference: event.reference,
-      }));
-    case "audio-grouped": {
-      const candidates = event.groups.map((group) =>
-        entryForGroup(group, event.reasons),
-      );
-      // **In the reading row's place, and only if it is still there.** A
-      // member who discarded the queue while this was reading gets an empty
-      // queue rather than rows arriving into the one they just emptied.
-      return entries.flatMap((entry) =>
-        entry.key === event.pendingKey ? candidates : [entry],
-      );
-    }
-    case "split":
-      return entries.flatMap((entry) => {
-        if (entry.key !== event.key || !entry.group) return [entry];
-        if (entry.group.files.length < 2) return [entry];
-        // The reasons the pick read are the row's, so each part gets back what
-        // its own file said: there is nothing left to read them from by now.
-        const reasons = entry.fileReasons ?? new Map<string, ScanReason>();
-        return event
-          .apart(entry.group)
-          .map((group) => entryForGroup(group, reasons));
-      });
-    case "library-read": {
-      const queued = new Set(entries.map((entry) => entry.key));
-      return [
-        ...entries.filter((entry) => entry.key !== event.pendingKey),
-        ...libraryRows(event.pendingKey, event.books).filter(
-          (row) => !queued.has(row.key),
-        ),
-      ];
-    }
-    case "holders-answered":
-      if (event.held.size === 0) return entries;
-      return entries.map((entry) =>
-        event.held.has(entry.key)
-          ? { ...entry, heldBy: event.held.get(entry.key) }
-          : entry,
-      );
-    case "asked":
-      // **The note and the answer go with the state.** A row being asked about
-      // has no answer and is not standing under its name for a reason it can
-      // still state: leaving either behind renders a list of catalogue records
-      // under the sentence saying the name was kept, and leaves the row counted
-      // as kept while it is being decided again.
-      return patch(entries, event.key, (row) => ({
-        ...leaving(row),
-        state: "searching",
-      }));
-    case "isbn-answered":
-      // **Over the row as it stands now, not as the asking found it**: a
-      // subject dropped while the lookup was in flight stays dropped.
-      return patch(entries, event.key, (row) =>
-        answeredByIsbn(row, event.lookup),
-      );
-    case "search-answered":
-      return patch(entries, event.key, (row) =>
-        event.matches.length === 0
-          ? {
-              ...leaving(row),
-              state: "derived",
-              answered: "nothing",
-              reason: { kind: "not-in-catalogues" },
-            }
-          : { ...leaving(row), state: "choosing", matches: event.matches },
-      );
-    case "not-answered":
-      return patch(entries, event.key, (row) =>
-        notAnswered(row, event.asked, event.unknown),
-      );
-    case "chosen":
-      return patch(entries, event.key, (row) => ({
-        ...leaving(row),
-        state: "found",
-        isbn: event.match.isbn13 ?? "",
-        draft: draftFromMatch(event.match),
-        // A member looked at this record and took it, so the identifier is the
-        // catalogue's rather than the name's.
-        //
-        // **It clears nothing today, and that is stated rather than left to be
-        // reasoned from.** A flagged row has a non empty `isbn`, so the paced
-        // run asks the ISBN lookup and never produces the `choosing` state this
-        // event is pressed from, so no flagged row reaches here. Kept because
-        // it is correct and free, and because the path that would produce one
-        // is exactly the remedy `theIsbnWasRead`'s refusal is missing.
-        isbnFromTheName: undefined,
-      }));
-    case "kept-the-name":
-      return patch(entries, event.key, (row) => ({
+  return afterEvent(entries, event.kind, event);
+}
+
+/**
+ * The arm for one event, applied to it.
+ *
+ * **Generic in the kind, for the reason the hook's `reasonFor` gives**:
+ * indexing the table with the union `event.kind` yields a union of arms whose
+ * call takes the intersection of their parameters, which is `never`. With the
+ * kind a type parameter, the table and the event stay correlated and no cast
+ * is needed.
+ */
+function afterEvent<K extends QueueEvent["kind"]>(
+  entries: ScannedEntry[],
+  kind: K,
+  event: EventOf<K>,
+): ScannedEntry[] {
+  return AFTER_EVENT[kind](entries, event);
+}
+
+/** A barcode arrived: a row for it, unless one is already queued. */
+function withBarcode(entries: ScannedEntry[], isbn: string): ScannedEntry[] {
+  const key = scannedKey(isbn);
+  // The camera fires continuously while a barcode is in frame, so the same
+  // book arrives many times a second. Without this the queue fills with
+  // one book.
+  if (entries.some((entry) => entry.key === key)) return entries;
+  return [
+    ...entries,
+    {
+      key,
+      label: isbn,
+      isbn,
+      format: "",
+      state: "looking-up",
+      draft: null,
+    },
+  ];
+}
+
+/** Reading rows for the picked files the queue does not claim yet. */
+function withPicked(
+  entries: ScannedEntry[],
+  rows: readonly Picked[],
+): ScannedEntry[] {
+  const fresh = notYetQueued(
+    entries,
+    // **Named, not spread.** `Picked` is an open type, so a row built in a
+    // callback or spread from another reaches here carrying fields it does
+    // not name, and a spread would put a `copyOf` or a `heldBy` on a row
+    // still being read.
+    rows.map(({ key, label, format, reference, claims }) => ({
+      key,
+      label,
+      format,
+      reference,
+      claims,
+      isbn: "",
+      state: "reading" as const,
+      draft: null,
+    })),
+    (row) => row.claims ?? [row.key],
+  );
+  if (fresh.length === 0) return entries;
+  return [...entries, ...fresh];
+}
+
+/** A pick of audio grouped: its candidates in the reading row's place. */
+function afterGrouping(
+  entries: ScannedEntry[],
+  event: EventOf<"audio-grouped">,
+): ScannedEntry[] {
+  const candidates = event.groups.map((group) =>
+    entryForGroup(group, event.reasons),
+  );
+  // **In the reading row's place, and only if it is still there.** A
+  // member who discarded the queue while this was reading gets an empty
+  // queue rather than rows arriving into the one they just emptied.
+  return entries.flatMap((entry) =>
+    entry.key === event.pendingKey ? candidates : [entry],
+  );
+}
+
+/** One grouped row filed as a row per part, where it has parts to split. */
+function afterSplit(
+  entries: ScannedEntry[],
+  event: EventOf<"split">,
+): ScannedEntry[] {
+  return entries.flatMap((entry) => {
+    if (entry.key !== event.key || !entry.group) return [entry];
+    if (entry.group.files.length < 2) return [entry];
+    // The reasons the pick read are the row's, so each part gets back what
+    // its own file said: there is nothing left to read them from by now.
+    const reasons = entry.fileReasons ?? new Map<string, ScanReason>();
+    return event
+      .apart(entry.group)
+      .map((group) => entryForGroup(group, reasons));
+  });
+}
+
+/** The file holders' answer, on the rows it names. */
+function withHolders(
+  entries: ScannedEntry[],
+  held: ReadonlyMap<string, Held | null>,
+): ScannedEntry[] {
+  if (held.size === 0) return entries;
+  return entries.map((entry) =>
+    held.has(entry.key) ? { ...entry, heldBy: held.get(entry.key) } : entry,
+  );
+}
+
+/** What a title search's answer makes of the row it was asked for. */
+function searchAnswered(row: ScannedEntry, matches: BookMatch[]): ScannedEntry {
+  return matches.length === 0
+    ? {
         ...leaving(row),
         state: "derived",
-        answered: "records",
-        reason: { kind: "kept-the-name" },
-      }));
-    case "record-taken":
-      return patch(entries, event.key, (row) =>
-        row.differentRecord === undefined
-          ? row
-          : {
-              ...leaving(row),
-              state: "found",
-              // Merged now, over the draft as it stands, for the reason
-              // `answeredByIsbn` holds the raw record.
-              draft: enrichedDraft(row.differentRecord, row.draft),
-            },
-      );
-    case "kept-the-file":
-      return patch(entries, event.key, (row) =>
-        row.differentRecord === undefined
-          ? row
-          : {
-              ...row,
-              differentRecord: undefined,
-              reason: { kind: "kept-the-file" },
-            },
-      );
-    case "kept-every-name-for-now":
-      return entries.map((entry) =>
-        isBeingDecided(entry)
-          ? {
-              // The records go with the state rather than being held for an
-              // undo: they are what the catalogue answers again, and holding
-              // them would be a second store of a record with no rule for how
-              // long it lives.
-              ...leaving(entry),
-              state: "derived",
-              answered: "records-for-now",
-              reason: { kind: "kept-for-now" },
-            }
-          : entry,
-      );
-    case "subject-dropped":
-      return patch(entries, event.key, (row) => {
-        if (row.draft === null) return row;
-        // **Filtered by value and not by index**, because the row is rendered
-        // from this same list: an index would be the renderer's and would
-        // remove the wrong subject the moment anything reordered.
-        // `boundCategories` folded the exact repeats out, so one value names
-        // one chip.
-        const kept = row.draft.categories?.filter(
-          (one) => one !== event.subject,
-        );
-        return { ...row, draft: { ...row.draft, categories: kept } };
-      });
-    case "removed":
-      return entries.filter((entry) => entry.key !== event.key);
-    case "cleared":
-      return [];
-    case "batch-ran":
-      return afterTheBatch(entries, event.walked, event.failures);
-    case "copy-made":
-      return patch(entries, event.key, (row) =>
-        row.copyOf === undefined ? row : { ...row, copyOf: undefined },
-      );
-    case "copy-refused":
-      return patch(entries, event.key, (row) =>
-        row.copyOf === undefined ? row : { ...row, reason: event.reason },
-      );
-  }
+        answered: "nothing",
+        reason: { kind: "not-in-catalogues" },
+      }
+    : { ...leaving(row), state: "choosing", matches };
+}
+
+/** A row once the member took one of the records offered for it. */
+function matchTaken(row: ScannedEntry, match: BookMatch): ScannedEntry {
+  return {
+    ...leaving(row),
+    state: "found",
+    isbn: match.isbn13 ?? "",
+    draft: draftFromMatch(match),
+    // A member looked at this record and took it, so the identifier is the
+    // catalogue's rather than the name's.
+    //
+    // **It clears nothing today, and that is stated rather than left to be
+    // reasoned from.** A flagged row has a non empty `isbn`, so the paced
+    // run asks the ISBN lookup and never produces the `choosing` state this
+    // event is pressed from, so no flagged row reaches here. Kept because
+    // it is correct and free, and because the path that would produce one
+    // is exactly the remedy `theIsbnWasRead`'s refusal is missing.
+    isbnFromTheName: undefined,
+  };
+}
+
+/** A row holding a different record, once the member took that record. */
+function recordTaken(row: ScannedEntry): ScannedEntry {
+  return row.differentRecord === undefined
+    ? row
+    : {
+        ...leaving(row),
+        state: "found",
+        // Merged now, over the draft as it stands, for the reason
+        // `answeredByIsbn` holds the raw record.
+        draft: enrichedDraft(row.differentRecord, row.draft),
+      };
+}
+
+/** A row holding a different record, once the member refused that record. */
+function fileKept(row: ScannedEntry): ScannedEntry {
+  return row.differentRecord === undefined
+    ? row
+    : {
+        ...row,
+        differentRecord: undefined,
+        reason: { kind: "kept-the-file" },
+      };
+}
+
+/** A row still being decided, kept under its name in bulk; any other as it is. */
+function keptInBulk(entry: ScannedEntry): ScannedEntry {
+  return isBeingDecided(entry)
+    ? {
+        // The records go with the state rather than being held for an
+        // undo: they are what the catalogue answers again, and holding
+        // them would be a second store of a record with no rule for how
+        // long it lives.
+        ...leaving(entry),
+        state: "derived",
+        answered: "records-for-now",
+        reason: { kind: "kept-for-now" },
+      }
+    : entry;
+}
+
+/** A row with one subject taken off its draft. */
+function withoutSubject(row: ScannedEntry, subject: string): ScannedEntry {
+  if (row.draft === null) return row;
+  // **Filtered by value and not by index**, because the row is rendered
+  // from this same list: an index would be the renderer's and would
+  // remove the wrong subject the moment anything reordered.
+  // `boundCategories` folded the exact repeats out, so one value names
+  // one chip.
+  const kept = row.draft.categories?.filter((one) => one !== subject);
+  return { ...row, draft: { ...row.draft, categories: kept } };
+}
+
+/** A row offering a copy, once the copy exists. */
+function copyMade(row: ScannedEntry): ScannedEntry {
+  return row.copyOf === undefined ? row : { ...row, copyOf: undefined };
+}
+
+/** A row offering a copy, once the copy was refused for `reason`. */
+function copyRefused(
+  row: ScannedEntry,
+  reason: ScanReason | undefined,
+): ScannedEntry {
+  return row.copyOf === undefined ? row : { ...row, reason };
 }
 
 /**

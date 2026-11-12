@@ -5,8 +5,10 @@ loaded by pytest for its fixtures, and importing from it is fragile under the
 importlib import mode this suite uses.
 """
 
+import asyncio
 import datetime as dt
 import re
+import selectors
 import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -831,3 +833,46 @@ def issue_certificate(
         )
     )
     return Issued(certificate_path, key_path)
+
+
+class VirtualClock:
+    """Time that passes only when the event loop would otherwise wait.
+
+    **A bound measured on the wall clock is a bound on the scheduler too.** Under
+    a CPU limit the trickle guard read `1.4995 < 1.4` and
+    `1.8928 < 1.4` on code that was correct. Here every sleep and every
+    `asyncio.timeout` lands at exactly the instant it was scheduled for, so a
+    throttled run and an idle one take the same path.
+
+    The loop it drives has no real I/O to wait on, because respx answers inside
+    the transport. Work handed to a thread may be overtaken by the next timer
+    rather than waited for, so a test that hands one off is not deterministic
+    here and must not use this clock. Time spent blocking the loop's own thread
+    does not advance it either, so a blocking call on the path, which the wall
+    clock bounds this replaced would have caught, is invisible here.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def loop(self) -> asyncio.AbstractEventLoop:
+        clock = self
+
+        class Selector(selectors.DefaultSelector):
+            def select(self, timeout: float | None = None):
+                ready = super().select(0)
+                if ready or timeout == 0:
+                    return ready
+                if timeout is None:
+                    raise RuntimeError("the loop is idle with no timer to advance to")
+                clock.now += timeout
+                return []
+
+        class Loop(asyncio.SelectorEventLoop):
+            def time(self) -> float:
+                return clock.now
+
+        return Loop(Selector())

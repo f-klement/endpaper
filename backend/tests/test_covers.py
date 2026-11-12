@@ -16,7 +16,6 @@ import ast
 import asyncio
 import gzip
 import logging
-import selectors
 from pathlib import Path
 from time import monotonic
 from typing import Final
@@ -42,6 +41,7 @@ from tests.helpers import (
     NOT_AN_IMAGE,
     PNG_BYTES,
     WEBP_BYTES,
+    VirtualClock,
 )
 
 TREE_GUARDS = {
@@ -713,49 +713,6 @@ class _AsyncTrickle(httpx.AsyncByteStream):
             yield self.CHUNK
 
 
-class _VirtualClock:
-    """Time that passes only when the event loop would otherwise wait.
-
-    **A bound measured on the wall clock is a bound on the scheduler too.** Under
-    a CPU limit the trickle guard read `1.4995 < 1.4` and
-    `1.8928 < 1.4` on code that was correct. Here every sleep and every
-    `asyncio.timeout` lands at exactly the instant it was scheduled for, so a
-    throttled run and an idle one take the same path.
-
-    The loop it drives has no real I/O to wait on, because respx answers inside
-    the transport. Work handed to a thread may be overtaken by the next timer
-    rather than waited for, so a test that hands one off is not deterministic
-    here and must not use this clock. Time spent blocking the loop's own thread
-    does not advance it either, so a blocking call on the path, which the wall
-    clock bounds this replaced would have caught, is invisible here.
-    """
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def monotonic(self) -> float:
-        return self.now
-
-    def loop(self) -> asyncio.AbstractEventLoop:
-        clock = self
-
-        class Selector(selectors.DefaultSelector):
-            def select(self, timeout: float | None = None):
-                ready = super().select(0)
-                if ready or timeout == 0:
-                    return ready
-                if timeout is None:
-                    raise RuntimeError("the loop is idle with no timer to advance to")
-                clock.now += timeout
-                return []
-
-        class Loop(asyncio.SelectorEventLoop):
-            def time(self) -> float:
-                return clock.now
-
-        return Loop(Selector())
-
-
 async def _slow_redirect_to_the_dnb(request):
     """A 302 that spends most of a budget arriving, for the two hop guards.
 
@@ -924,11 +881,11 @@ class TestDownloading:
         a hop with no budget reads all six inside `TIMEOUT_SECONDS` and returns
         the image. Only a cut mid read stops at 1.0 with one chunk sent.
 
-        On `_VirtualClock`, shared with `deadline` so the budget and the loop
+        On `VirtualClock`, shared with `deadline` so the budget and the loop
         read one clock. `_download` rather than `download`, which is
         `asyncio.run` on the shipped loop.
         """
-        clock = _VirtualClock()
+        clock = VirtualClock()
         monkeypatch.setattr(deadline, "time", clock)
         body = _AsyncTrickle(interval=0.98, chunks=6)
         with respx.mock(assert_all_called=False) as mock:
@@ -1782,13 +1739,13 @@ async def _check_one(url: str, *, budget: float | None = None) -> bool | None:
 def _check_on_the_clock(
     monkeypatch: pytest.MonkeyPatch, *, budget: float | None = None
 ) -> tuple[bool | None, float]:
-    """`_check_one` on Open Library's URL under `_VirtualClock`, and the instant it returned.
+    """`_check_one` on Open Library's URL under `VirtualClock`, and the instant it returned.
 
     `deadline` reads the same clock, so the budget and the loop's timers agree
     to the instant and a bound is asserted exactly rather than with room for
     the scheduler.
     """
-    clock = _VirtualClock()
+    clock = VirtualClock()
     monkeypatch.setattr(deadline, "time", clock)
     checking = _check_one(covers.open_library_url(ENGLISH), budget=budget)
     verdict = asyncio.run(checking, loop_factory=clock.loop)

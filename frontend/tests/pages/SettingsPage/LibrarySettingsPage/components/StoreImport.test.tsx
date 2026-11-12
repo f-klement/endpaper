@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Locale } from "../../../../../src/api/generated/model";
 import { de, en } from "../../../../../src/i18n";
-import { STORES, STORE_IDS } from "../../../../../src/lib/stores";
+import { STORES, type StoreId } from "../../../../../src/lib/stores";
 import StoreImport from "../../../../../src/pages/SettingsPage/LibrarySettingsPage/components/StoreImport";
 import type {
   StorePreview,
@@ -89,7 +89,11 @@ describe("the card is the registry", () => {
   it("draws a row for every store, and names none of its own", async () => {
     renderCard();
 
-    for (const id of STORE_IDS) {
+    // **Read from `STORES`, not from `STORE_IDS`**, which is what the card
+    // draws from. A `STORE_IDS` written out as a short literal compiles behind
+    // its cast, and a loop over it would skip the store it dropped; read from
+    // the registry, the dropped store is a missing heading here.
+    for (const id of Object.keys(STORES) as StoreId[]) {
       const store = STORES[id];
       expect(
         screen.getByRole("heading", { name: en[store.name] }),

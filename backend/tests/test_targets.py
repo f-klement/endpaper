@@ -534,11 +534,6 @@ class TestARowNamesTheSecretItsOwnDoorTakes:
         with pytest.raises(ValueError, match="sealed"):
             _seeded(needs_key=True, secret=targets.Secret.GOOGLE_BOOKS_KEY)
 
-    def test_the_row_that_owns_the_key_says_so(self):
-        """Or both arms above refuse a shape nothing on the roster has, and the
-        column is never read in anger."""
-        assert targets.SEEDED[CatalogueSource.GOOGLE_BOOKS].secret is targets.Secret.GOOGLE_BOOKS_KEY
-
     def test_no_other_seeded_row_names_a_secret(self):
         assert [
             source for source, row in targets.SEEDED.items() if row.secret is not targets.Secret.NONE

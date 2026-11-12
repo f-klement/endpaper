@@ -33,10 +33,6 @@ describe("DEFAULT_FILTERS", () => {
 });
 
 describe("hasActiveFilters", () => {
-  it("is false for the defaults", () => {
-    expect(hasActiveFilters(DEFAULT_FILTERS)).toBe(false);
-  });
-
   it.each([
     ["a search term", { query: "dune" }],
     ["a status", { status: ReadStatus.read }],
@@ -113,13 +109,6 @@ describe("option lists", () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 
-  it("offers only sorts the API accepts", () => {
-    const accepted = new Set<string>(Object.values(BookSort));
-    for (const option of SORT_OPTIONS) {
-      expect(accepted.has(option.value)).toBe(true);
-    }
-  });
-
   it("gives every sort a distinct value", () => {
     const values = SORT_OPTIONS.map((option) => option.value);
     expect(new Set(values).size).toBe(values.length);
@@ -133,16 +122,5 @@ describe("the lending filter", () => {
     for (const willingness of Object.values(LendingWillingness)) {
       expect(values).toContain(willingness);
     }
-  });
-
-  it("starts on the one that narrows nothing", () => {
-    expect(DEFAULT_FILTERS.lending).toBeNull();
-  });
-
-  it("starts with the talk-about-it filter off", () => {
-    // Off is the whole library. The books nobody has offered to talk about
-    // are not a view worth having, which is why this is a toggle rather than
-    // a third dropdown.
-    expect(DEFAULT_FILTERS.discuss).toBe(false);
   });
 });

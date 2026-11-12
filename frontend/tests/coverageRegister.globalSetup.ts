@@ -45,6 +45,27 @@ export const MARKER = "ENDPAPER_COVERAGE_REGISTER_MARKER";
  */
 export const OWNER = "ENDPAPER_COVERAGE_REGISTER_OWNER";
 
+/**
+ * Every reporter `vite.config.ts` names as a guard, in the order it names them.
+ *
+ * **A `--reporter` on the command line drops them together**, and only the
+ * coverage register's is checked for at teardown. So the refusal names each, or
+ * a reader following its advice names that one back and drops the others with
+ * no word said. `coverageRegister.test.ts` holds this list to the config's.
+ */
+export const GUARD_REPORTERS = [
+  "./tests/coverageRegister.reporter.ts",
+  "./tests/setupRan.reporter.ts",
+];
+
+/** What teardown says when the coverage register reporter did not run. */
+export const NOT_REPORTED =
+  "the coverage register reporter did not run, so tests/COVERAGE.md was " +
+  "checked against nothing. A `--reporter` on the command line replaces " +
+  "the reporters vite.config.ts configures rather than adding to them: " +
+  `name ${GUARD_REPORTERS.join(" and ")} alongside yours, or set the ` +
+  "reporter in the config.";
+
 export function setup(): void {
   process.env[MARKER] = join(
     mkdtempSync(join(tmpdir(), "endpaper-register-run-")),
@@ -64,12 +85,5 @@ export function teardown(): void {
   rmSync(dirname(marker), { recursive: true, force: true });
   delete process.env[MARKER];
   delete process.env[OWNER];
-  if (!reported)
-    throw refusal(
-      "the coverage register reporter did not run, so tests/COVERAGE.md was " +
-        "checked against nothing. A `--reporter` on the command line replaces " +
-        "the reporters vite.config.ts configures rather than adding to them: " +
-        "name ./tests/coverageRegister.reporter.ts alongside yours, or set the " +
-        "reporter in the config.",
-    );
+  if (!reported) throw refusal(NOT_REPORTED);
 }

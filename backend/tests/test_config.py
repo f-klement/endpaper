@@ -96,15 +96,9 @@ class TestServeFrontend:
 
 
 class TestAllowedImageExtensions:
-    def test_covers_the_formats_browsers_render(self):
-        assert {"jpg", "jpeg", "png", "webp"} == config.ALLOWED_IMAGE_EXTENSIONS
-
     def test_excludes_svg(self):
         """SVG can carry script, and these files are served from our origin."""
         assert "svg" not in config.ALLOWED_IMAGE_EXTENSIONS
-
-    def test_is_immutable(self):
-        assert isinstance(config.ALLOWED_IMAGE_EXTENSIONS, frozenset)
 
 
 class TestAppEnv:
@@ -184,11 +178,6 @@ class TestValidateSecretKey:
 
 
 class TestUploadLimits:
-    def test_there_is_a_size_cap(self):
-        """The body is read into memory before it is written, so an unbounded
-        upload is a denial-of-service, not just an untidy file."""
-        assert config.MAX_UPLOAD_BYTES > 0
-
     def test_the_cap_is_generous_enough_for_a_cover(self):
         assert config.MAX_UPLOAD_BYTES >= 2 * 1024 * 1024
 

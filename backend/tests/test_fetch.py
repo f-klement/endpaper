@@ -39,6 +39,7 @@ import httpx
 import pytest
 import respx
 
+import deadline
 import fetch
 import sources
 
@@ -50,6 +51,7 @@ import sources
 # `backend/` for its uv cache.
 from tests.bindings import SourceNames, assignments
 from tests.corpus import application_sources
+from tests.helpers import VirtualClock
 from tests.strategies import SURROGATE_CODECS
 
 TREE_GUARDS = {
@@ -965,13 +967,16 @@ class TestTheDeadlineBoundsTheWholeRequest:
 
         assert not route.called
 
-    @pytest.mark.asyncio
-    async def test_a_slow_trickle_stops_at_the_deadline(self):
+    def test_a_slow_trickle_stops_at_the_deadline(self, monkeypatch):
         """The shape the per-operation timeout cannot see.
 
         Each chunk arrives well inside `TIMEOUT_SECONDS`; the body never ends.
-        Without a deadline this loop returns when the sender feels like it.
+        Without a deadline this loop returns when the sender feels like it. On
+        `VirtualClock`, shared with `deadline`, so the cut is read at the instant
+        it lands rather than against a wall clock bound on the scheduler.
         """
+        clock = VirtualClock()
+        monkeypatch.setattr(deadline, "time", clock)
 
         async def trickle():
             for _ in range(1000):
@@ -980,15 +985,12 @@ class TestTheDeadlineBoundsTheWholeRequest:
 
         with respx.mock:
             respx.get(URL).mock(return_value=httpx.Response(200, stream=trickle()))
-            started = time.monotonic()
             with pytest.raises(fetch.DeadlineExceeded):
-                await fetch.get_once(URL, deadline=time.monotonic() + 0.2)
-            spent = time.monotonic() - started
+                asyncio.run(fetch.get_once(URL, deadline=deadline.in_(0.2)), loop_factory=clock.loop)
 
-        assert spent < 2.0
+        assert clock.now == pytest.approx(0.2)
 
-    @pytest.mark.asyncio
-    async def test_a_chunk_arriving_just_inside_the_budget_does_not_double_it(self):
+    def test_a_chunk_arriving_just_inside_the_budget_does_not_double_it(self, monkeypatch):
         """The overshoot, which the test above was too loose to catch.
 
         Shrinking each read's timeout and testing the clock between chunks
@@ -1001,6 +1003,8 @@ class TestTheDeadlineBoundsTheWholeRequest:
         the old shape took two, the new one at most one, and a slow node only
         delays the first. A bound on the wall time read the client's setup too.
         """
+        clock = VirtualClock()
+        monkeypatch.setattr(deadline, "time", clock)
         budget = 0.4
         sent = 0
 
@@ -1014,9 +1018,10 @@ class TestTheDeadlineBoundsTheWholeRequest:
         with respx.mock:
             respx.get(URL).mock(return_value=httpx.Response(200, stream=paced()))
             with pytest.raises(fetch.DeadlineExceeded):
-                await fetch.get_once(URL, deadline=time.monotonic() + budget)
+                asyncio.run(fetch.get_once(URL, deadline=deadline.in_(budget)), loop_factory=clock.loop)
 
-        assert sent <= 1
+        assert sent == 1
+        assert clock.now == pytest.approx(budget)
 
     @pytest.mark.asyncio
     async def test_the_default_deadline_is_the_timeout(self):

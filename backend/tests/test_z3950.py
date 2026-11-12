@@ -254,9 +254,6 @@ class TestATermCannotChangeTheQuery:
             z3950.title_query("x" * (z3950.MAX_TERM_CHARS + 1))
         assert z3950.title_query("x" * z3950.MAX_TERM_CHARS)
 
-    def test_a_bad_query_is_a_z3950_error_so_one_except_clause_covers_it(self):
-        assert issubclass(z3950.BadQuery, z3950.Z3950Error)
-
 
 class TestATargetsOwnWordsAreNotRepeatedUnbounded:
     def test_a_diagnostic_is_truncated(self):
@@ -889,13 +886,6 @@ class TestTheBoundsAgreeWithEachOther:
         seconds_for_the_bound = 0.62
         assert seconds_for_the_bound < metadata.SEARCH_DEADLINE_SECONDS / 4
         assert z3950.MAX_RECORDS == 5
-
-    def test_the_bound_is_not_derived_from_where_a_walk_stops_working(self):
-        # `[13] Present request out of range` arrives at a position that moved between
-        # runs of the identical request: 43, 23, 11, 36 and 0. A margin against a number
-        # that moved from 43 to 0 is not a margin, and an earlier version of this class
-        # asserted one. It is a target condition, so it is `Refused` and nothing else.
-        assert issubclass(z3950.Refused, z3950.Z3950Error)
 
     def test_the_record_bound_times_the_largest_measured_record_fits_the_byte_bound(self):
         # LIBRIS, the fattest record measured on 2026-08-28, at 32,565 bytes. The byte

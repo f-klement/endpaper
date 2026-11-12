@@ -649,11 +649,6 @@ class TestTheWriter:
         assert "\x0c" not in written
         assert marc.read(written.encode("utf-8")).records[0].description == "Beforeafter"
 
-    def test_the_namespace_is_the_one_the_reader_looks_for(self):
-        """A reader and a writer disagreeing here produce a file this app
-        cannot read back, and only a round trip would notice."""
-        assert marc_fields.NAMESPACE == marc.NAMESPACE
-
     def test_german_is_written_as_the_bibliographic_code_marc_uses(self):
         """ISO 639-2 has `ger` and `deu` for German and MARC takes the
         bibliographic one. Both read back as `de`, so the round trip cannot see

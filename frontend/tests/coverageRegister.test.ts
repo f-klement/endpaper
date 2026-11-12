@@ -26,7 +26,11 @@ import {
   problems,
   rowsOf,
 } from "./coverageRegister";
-import { MARKER } from "./coverageRegister.globalSetup";
+import {
+  GUARD_REPORTERS,
+  MARKER,
+  NOT_REPORTED,
+} from "./coverageRegister.globalSetup";
 import CoverageRegisterReporter from "./coverageRegister.reporter";
 import { isNode, walk } from "./sourceReader";
 
@@ -546,6 +550,19 @@ describe("the guard is wired into the suite it guards", () => {
 
     expect(config).toContain('"./tests/coverageRegister.reporter.ts"');
     expect(config).toContain('"./tests/coverageRegister.globalSetup.ts"');
+  });
+
+  it("names every guard reporter of the config in its refusal", () => {
+    const config = readFileSync(
+      join(import.meta.dirname, "..", "vite.config.ts"),
+      "utf8",
+    );
+    const configured = [
+      ...config.matchAll(/"(\.\/tests\/[^"]+\.reporter\.ts)"/g),
+    ].map((found) => found[1]);
+
+    expect(configured).toEqual(GUARD_REPORTERS);
+    for (const reporter of configured) expect(NOT_REPORTED).toContain(reporter);
   });
 
   it("ran that global setup before this file, so a marker is waiting", () => {

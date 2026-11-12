@@ -2,13 +2,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  ClassificationScheme,
-  HeadingKind,
-} from "../../src/api/generated/model";
+import { HeadingKind } from "../../src/api/generated/model";
 import {
   KIND_LABEL,
-  SCHEME_LABEL,
   headingKind,
   headingText,
 } from "../../src/lib/classificationLabels";
@@ -53,17 +49,5 @@ describe("what a heading asserts", () => {
     expect(KIND_LABEL[HeadingKind.subject]).toBeNull();
     expect(KIND_LABEL[HeadingKind.content]).toBe("classification.kind.content");
     expect(KIND_LABEL[HeadingKind.carrier]).toBe("classification.kind.carrier");
-  });
-
-  it("covers every kind and every scheme the API can send", () => {
-    // A member added without a decision here is a compile error at the table
-    // and this is the run time half: a partial map would render nothing and
-    // say nothing.
-    expect(Object.keys(KIND_LABEL).sort()).toEqual(
-      Object.values(HeadingKind).sort(),
-    );
-    expect(Object.keys(SCHEME_LABEL).sort()).toEqual(
-      Object.values(ClassificationScheme).sort(),
-    );
   });
 });

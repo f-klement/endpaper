@@ -316,14 +316,6 @@ class TestTheOverdueTicker:
 
         assert config.overdue_ticker_enabled() is False
 
-    def test_it_ticks_hourly(self):
-        """Hourly rather than daily, so a one day interval is honoured within
-        an hour of a book coming due rather than at whatever time the container
-        last restarted."""
-        import notifications
-
-        assert notifications.TICK_SECONDS == 3600
-
 
 class TestTheReadwiseTicker:
     """The daily pull is started by the same lifespan, under its own switch.

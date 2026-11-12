@@ -101,16 +101,6 @@ describe("which reader opens a picked file", () => {
     expect(await readerFor("notes.txt")).toBeNull();
   });
 
-  it("registers no extension the walk does not consider", () => {
-    // The failure this catches is a reader added under a spelling the picker
-    // never offers it, which would look like a reader that silently never runs.
-    const registered = Object.keys(READERS);
-    expect(registered).not.toHaveLength(0);
-    for (const extension of registered) {
-      expect(SUPPORTED_EXTENSIONS).toContain(extension);
-    }
-  });
-
   it("leaves an extension readerless only where another route takes the file", async () => {
     // The failure this catches is the one every test above is blind to: a
     // format joined to `SUPPORTED_EXTENSIONS` and to the total

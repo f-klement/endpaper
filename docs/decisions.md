@@ -24978,3 +24978,236 @@ the leg's script against a stub ruff failing each step in turn and expects red, 
 its steps to the pipeline's.
 
 **Still not in the gate**: mypy and the frontend's `bun run lint`, each a separate run.
+
+## The gate runs its legs side by side
+
+The local gate script starts the full backend first and waits until the runner says it holds builder
+(or waits on it). Only then does it start the full frontend, with leave to take a second worker
+node, and wait until that holds a node. The narrower legs (build check, type check, lint, the
+two autopatch selftests) then run one after another on whatever node is free. The CRAP leg
+waits for both suites, and the publish gate comes last.
+
+**Why the waits for a node.** A full suite waits for builder. Started together, the frontend
+could take builder first and the backend would run after it, an arrangement that once cost a
+gate 1706 s. And a narrower leg started beside the frontend could take the frontend's node from
+it.
+
+**Why the frontend may take another node.** A full frontend waits for builder by the owner's
+rule, so without leave it would queue behind the backend and the gate would save only the
+narrower legs. Leave is one environment variable the gate sets, which the suite runner honours
+only for a full frontend run. No backend takes it, and no full
+suite takes the third node with it. A 137 there is retried on builder, as for any run. **This
+changes the node policy the owner set**, for the gate's frontend only, and the owner allowed it
+on condition that it is measured once on a quiet cluster.
+
+**Why the narrower legs run one at a time, not all at once.** With two nodes held by the
+suites, only the third is free; a second concurrent leg would find every node busy and wait for
+builder behind the backend.
+
+**What a refusal does.** No leg starts after it; a leg already running is waited for and its
+verdict reported. The refusals met in practice (a stale generated file) come before a node is
+taken, and nothing starts beside a suite until it holds one, so a refused backend still stops
+the gate with nothing else started. Killing a running leg would cost a 143 in the report for a
+run that may have been green. An interrupt does stop every leg the gate started: a TERM to the
+runner's own pid, which the gate started, so no other run is reached.
+
+**Measured**, builder for both suites each time, because another run held the second node at
+both after gates: the gate before the change took 2283 s, about 1200 s of it waiting on builder
+for other runs; after it, 652 s (red, a frontend property flake) and then 775 s (green). The
+narrower legs ran inside the backend's time.
+
+## One backend run per handoff
+
+A handoff going into the local gate runs the gate alone; `--tree-guards` stays the check while
+implementing and for a handoff that does not run the gate. The handoff checks
+run only in the suite runner's `--tree-guards` mode, so a handoff into the gate takes them
+afterwards from that mode with `--collect-only`, which collects the guards, runs none, and then
+runs the four checks. Run beside the gate, it would take the node
+the gate's narrower legs need.
+
+## The backend suite keeps `--dist loadfile`, because the profile found nothing to rebalance
+
+The suite's file distribution was profiled before changing it. On builder at four workers under
+`--dist loadfile`, the summed setup, call and teardown time per worker was 417 s for the busiest
+against a mean of 400 s, and the slowest file (the local gate's own tests, 198 s) is under half of one
+worker's load. **The critical path is the aggregate, not one file**: `loadfile` already packs the
+files almost evenly, so `loadgroup` could save at most the 17 s between the busiest worker and the
+mean, and would pay for it in module fixtures built again on every worker. `--dist load` was
+also tried, and it exposed a cross worker dependence in the suite runner's guard that `loadfile`
+had hidden (the serialisation entry below).
+
+The wall time is in what the files do rather than where they land: the subprocess heavy guard
+files and the migration chain, which the test diet below went after.
+
+## A test that restates a constant, a derivation or a type is deleted, and an agreement between two artefacts is kept
+
+A census of the backend tests estimated about 30 redundant with mypy and about 110 that mirror
+the code. Read in full, the populations were smaller: 24 tests were deleted, of 117 type
+candidates and 378 mirror candidates.
+
+**What was deleted**, each with the place its behaviour stays pinned:
+
+- a constant asserted against a copy of its own value, where nothing downstream reads the value
+  as a decision (`TICK_SECONDS == 3600`, `MAX_ADDRESS == 320`, a list of seven table names);
+  the overdue ticker's hourly cadence is now pinned by no test, accepted as a mirror;
+- a derivation the code already performs, recomputed in the test (`marc.NAMESPACE` is assigned
+  from `marc_fields.NAMESPACE`; `SHELF_SCHEMES` is built from the rules' flags). This is
+  *A guard that duplicates what it checks cannot be attacked* applied: such a test agrees with
+  the code on every tree, so it can fail only when the derivation is deleted, which a behaviour
+  test also sees;
+- an arm implied by a sibling (a `> 0` beside a `>= 2 MiB`; a base class already in the list the
+  next test walks);
+- a type mypy strict holds (`frozenset` inferred, `Generator[Session]` annotated);
+- one hollow test, whose name claimed the SQLite thread check and whose body did not read it.
+
+**What was kept, and why the estimate overstated the population.** The backend has no
+`everyOneOf`: a dict keyed by an enum is not exhaustive by type, so the `*_ORDER` decision's
+premise does not carry over, and `set(TABLE) == set(Enum)` is the only check there is. An
+`isinstance` inside a behaviour test reads runtime data mypy never sees. A pin whose docstring
+records a mutation only it catches (the identity spine, the edge marks, the formula leads) stays,
+because deleting it leaves that mutation unseen. A security or privacy default restated as a
+literal stays where no behaviour test drives the default.
+
+**The rule this leaves**: delete a test whose expected value is the code's own statement of it;
+keep a test whose two sides are written independently, however constant shaped it looks.
+
+## A fixed wait in a backend test is either a virtual clock or a declared ceiling
+
+Every real time wait went onto a virtual clock where one could hold it. Three shapes were found,
+and each has its own answer:
+
+- **An asyncio wait** runs on `tests/helpers.VirtualClock`, shared with `deadline`, and asserts
+  the instant the cut landed. Moved there: the trickled and paced fetch downloads.
+- **A subprocess whose budget is measured by its own clock** gets that clock paused until the
+  moment under test: the mutation sweep's budget arm loads a `sitecustomize` that holds
+  `time.monotonic` still until the blocking arm has started, so startup on a throttled pod can no
+  longer spend the budget. It failed twice that way.
+- **A process genuinely not stopping** keeps its bound, as a ceiling it should never reach: the
+  LDAP test directory's close waited out its ten second join on a thread blocked in `accept()`,
+  five times a run, and now wakes it with a shutdown and asserts the thread ended, so the ceiling
+  cannot become a silent wait again.
+
+Waits left as they are, and why: a sleep inside a fake task that the deadline cancels is the
+subject, not a wait; work handed to a thread (`z3950`'s association, the cover backfill's pool)
+cannot run on a loop clock, because the clock would advance past it; and a wall clock bound on
+CPU work (`test_authors.py`'s "not quadratic" arms) measures computation, which no clock fakes.
+
+## The suite runner's guard cases are serialised, because the node locks are machine wide
+
+The suite runner names its locks by absolute path, so two xdist workers running its status
+guard's cases at once contended for them; `--dist loadfile` hid it and
+`--dist=load` failed 20 cases. The cases take a lock of the file's own first. The runner now
+takes a lock directory from the environment, refused outside a test, and the cases that set it own their locks;
+**the serialisation can go once every case does**.
+
+## A total table over a generated union is the compiler's to check, and its runtime arm is deleted
+
+`Record<Union, MessageKey>` refuses a missing member (TS2741), and `MessageKey` is `keyof typeof
+en` while `de` is typed `Messages`, so a key that resolves in neither catalogue does not compile.
+The frontend suite carried runtime arms restating both: a key set compared with the generated
+enum's values, a lookup per member asserted truthy, a key asserted present in `en` and `de`.
+**They are deleted**, measured with a planted type check on 2026-11-11: every plant the arms
+were written against was refused by the type check.
+
+**What stays a test is what the type cannot hold**: a duplicate value (two channels sharing a
+label), a sequence, a value inside the type that is still wrong (a fragment beginning in upper
+case), and an invariant between two artefacts the compiler does not join (a column bound against
+the schema, two Tailwind class names that cannot be composed). That is the `*_ORDER` decision
+applied to tables. A comment arguing that such an arm holds "the half a type cannot state" was
+tested rather than believed: narrowing the key union to drop a server value fails at every
+use site that indexes the table with the server's type.
+
+A test replaying the derivation it checks (`STORE_IDS` against `Object.keys(STORES)`, the
+column sets against the filter that builds them) is deleted under *A guard that duplicates
+what it checks cannot be attacked*; the behaviour it stood for stays pinned by the arms that
+assert the sets themselves. For `STORE_IDS` that arm is the card's "draws a row for every
+store", which reads the registry's keys rather than `STORE_IDS`, so a short literal behind the
+cast is a missing row there.
+
+## A wait in a frontend test advances a fake clock, and a wall clock ceiling is not a wait
+
+A fixed real wait before a negative assertion is now `vi.useFakeTimers({ toFake:
+["setTimeout", "clearTimeout"] })` and `advanceTimersByTimeAsync`, with real timers restored
+before the next `waitFor`, which polls on them. The advance opens with the one native turn the
+real wait gave and then runs every timer scheduled inside the window, so the window is never
+narrower than before and costs no wall clock.
+
+**The four wall clock ceilings in the parser sweeps stay** (`lib/pdf.test.ts`, `lib/mobi.test.ts`,
+`lib/opf.test.ts`). They bound CPU work rather than wait on time: a fake clock does not move
+while the parser runs, so the assertion would hold vacuously. Each sits orders of magnitude
+from the failure it catches and none failed in the month before the change. The way to end
+them is the deadline decision's: discrimination that is not a duration, which here needs a
+count of the work done (a comparison counter on the dedupe), and so a seam in `src/`. They stay
+until that seam is built.
+
+## Renovate records the uv and bun sums, with no version on the command
+
+A branch that moves the uv or the bun pin runs the uv or the bun install script
+with `--record` as a post upgrade task (owner's decision, 2026-11-11), so the
+merge request shows the new lines for review instead of being red until a person records them.
+The sums still come only from the release's own checksum file over HTTPS, checked as the
+scripts always checked them; the bot adds no trust of its own.
+
+**The command carries no version.** Each script reads the pin the branch has just written to
+the pipeline file. A templated `{{newVersion}}` would put registry data on a command line, need
+a looser pattern in the self hosted job's allowed list, and in a grouped branch would be the
+first upgrade's version, which may be the Python patch's.
+
+**Every member of the uv group carries the task, the Python patch included.** Under
+`executionMode: branch` Renovate 44 runs only the branch config's task, which is the first
+upgrade's after a sort on file offsets (`generateBranchConfig`), so a member without it could
+drop the record from a branch that moves the pin. A branch carrying the Python patch alone
+then runs the record on an unmoved pin, which is why **`--record` with no version succeeds and
+writes nothing when the pin is recorded for every target**. A named version already recorded,
+or a pin recorded for some targets only, is still refused.
+
+A bun digest update is left out: it moves no version and rides the Docker digests group.
+
+## test:backend installs with `uv sync --locked`, the other uv jobs with `--frozen`
+
+test:backend's sync is `--locked`: it installs uv.lock as written, the lock the Dockerfile's
+`--frozen` installs, and fails first where the lock disagrees with pyproject.toml, which
+`--frozen` never checks. On 2026-11-08 Renovate's schemathesis bump merged with the manifest
+at 4.33.1 and the lock at 4.32.7: its lock step lost a 504 downloading Python, the merge request
+carried a failed `renovate/artifacts` status, and the merge automation, which reads only the
+pipeline, merged it. A check in the pipeline is what reaches it. One job is enough, since it
+runs on every merge request and on main, and it runs before the `suites:proof` exit. A separate
+`uv lock --check` step was tried first and left out: it is a second resolve beside the sync's,
+and it moves the documented commands register (`uv lock` would become a job step). The
+frontend needs no twin: test:frontend's `bun install --frozen-lockfile` already fails on a
+mismatch.
+
+## The frontend's tree guards are derived from its imports and globs
+
+**What.** The suite runner's `frontend --tree-guards` mode runs `vitest related --run` over the files the
+branch changed since its merge base with `main`, plus every test file that reads one of them from
+outside: one whose imports, at any depth, hold an `import.meta.glob` matching a changed or deleted
+path, the oxlint ratchet when a linted module or the linter's config changed, and a test naming a
+changed non module file by basename inside a string literal (a name in a comment takes no test).
+A backend `.py` outside its tests stands for a new module under orval's output target, so a route
+change takes the generated endpoints' test, and a change to the setup chain the configuration
+names runs the whole suite on builder. Each word is printed with its reason.
+A script beside the runner derives the set; the merge base and its refusals are the backend
+mode's own.
+
+**Why.** The frontend's guards were a hand list in a skill page: the walkers calling the population
+helpers, the lint ratchet and the endpoint test. A builder skipped each in turn over several
+waves, and each skip cost a round at the merge. A glob is how every walker reads its tree, so
+reading the globs finds a new walker with no list to update; a test holds the derivation to the
+hand list it replaced.
+
+**What it cannot see**: a test reading a path assembled from pieces, or through `node:fs` with
+neither a glob nor the basename written out, and an import whose specifier is not a literal.
+
+## Changed property tests run deep at handoff
+
+**What.** The handoff checks gain a fourth, `thorough-properties`: the property tests among the
+backend tests a branch changed rerun once under `HYPOTHESIS_PROFILE=thorough`, the profile of the
+pipeline's tag job. It runs third, before `random-order`, and may spend at most
+`THOROUGH_SHARE` of the checks' one budget; where the share stops it, it says `budget reached
+(its share, N s)`. It reports like the others and fails nothing.
+
+**Why.** The suite spends the small profile, and the thorough job runs only on a tag, so a property
+a branch made false at ten times the examples was first found on the release. The run is unseeded,
+so each handoff draws new examples. The share keeps it from starving `random-order`, and its
+cost is that a branch changing one of the slowest properties gets no thorough verdict.

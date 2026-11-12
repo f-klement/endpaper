@@ -79,10 +79,18 @@ describe("CollectionsPage", () => {
     const box = screen.getByLabelText("Name");
     fireEvent.change(box, { target: { value: "   " } });
 
-    await act(async () => {
-      fireEvent.submit(box.closest("form")!);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    // A fake clock advanced past the would be write, rather than a real turn
+    // waited out: it opens with that turn and then runs any timer the submit
+    // schedules, such as the query cache's notify batch.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await act(async () => {
+        fireEvent.submit(box.closest("form")!);
+        await vi.advanceTimersByTimeAsync(50);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(api.lastCall("/api/collections", "POST")).toBeUndefined();
   });

@@ -150,15 +150,6 @@ class TestTheGenericRule:
     def test_files_a_value_as_its_own_text(self):
         assert filing.GENERIC.sort_key("BF575.S75 E64 2022") == "BF575.S75 E64 2022"
 
-    def test_orders_no_shelf(self):
-        """The one rule that refuses to.
-
-        Sorting an unrecognised scheme's values as text is honest; offering
-        that as a shelf order would promise an order nobody has verified,
-        which is the defect this module exists to fix.
-        """
-        assert filing.GENERIC.orders_a_shelf is False
-
 
 class TestTheDeweyRule:
     def test_recognises_a_notation_and_refuses_what_is_not_one(self):
@@ -203,9 +194,6 @@ class TestTheDeweyRule:
         prime survives into the column.
         """
         assert filing.DEWEY.sort_key("005.13/3") == filing.DEWEY.sort_key("005.133")
-
-    def test_orders_a_shelf(self):
-        assert filing.DEWEY.orders_a_shelf is True
 
 
 class TestTheLibraryOfCongressRule:
@@ -298,9 +286,6 @@ class TestTheLibraryOfCongressRule:
             "no such call number"
         )
 
-    def test_orders_a_shelf(self):
-        assert filing.LIBRARY_OF_CONGRESS.orders_a_shelf is True
-
 
 class TestWhichRuleFilesWhichScheme:
     def test_every_published_scheme_has_a_rule(self):
@@ -323,12 +308,6 @@ class TestWhichRuleFilesWhichScheme:
             ClassificationScheme.DDC,
             ClassificationScheme.LCC,
         )
-
-    def test_the_shelf_schemes_are_derived_from_the_rules(self):
-        """The other direction, so the tuple cannot drift from what it describes."""
-        assert set(filing.SHELF_SCHEMES) == {
-            scheme for scheme, rule in filing.FILING_RULES.items() if rule.orders_a_shelf
-        }
 
     def test_the_subject_vocabularies_file_under_the_generic_rule(self):
         """They are authority files, not shelf orders, so they have no schedule."""

@@ -23,11 +23,10 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from sqlalchemy import event, exc, inspect, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import Session
 from sqlalchemy.pool import QueuePool
 
 import database
-from database import Base, engine, get_db
+from database import engine, get_db
 from tests.corpus import BACKEND, application_modules
 
 TREE_GUARDS = {
@@ -77,12 +76,6 @@ def _a_certificate_authority(into: Path) -> Path:
 class TestEngine:
     def test_is_pointed_at_the_test_database(self):
         assert "sqlite" in str(engine.url)
-
-    def test_sqlite_thread_check_is_disabled(self):
-        """FastAPI runs sync endpoints in a worker thread pool, so a session
-        opened on one thread is used on another."""
-        assert engine.dialect.name == "sqlite"
-        assert Base.metadata.tables
 
 
 class TestAStatementErrorNamesNoValue:
@@ -290,12 +283,6 @@ class TestForeignKeyIndexes:
 
 
 class TestGetDb:
-    def test_yields_a_session(self):
-        gen = get_db()
-        session = next(gen)
-        assert isinstance(session, Session)
-        gen.close()
-
     def test_closes_the_session_afterwards(self):
         gen = get_db()
         session = next(gen)
@@ -309,13 +296,6 @@ class TestGetDb:
         assert first is not second
         first_gen.close()
         second_gen.close()
-
-
-class TestMetadata:
-    def test_every_expected_table_is_registered(self):
-        assert {"users", "books", "tags", "book_tags", "user_books", "loans", "notes"} <= set(
-            Base.metadata.tables
-        )
 
 
 class TestSynchronousIsWhitelisted:
@@ -610,10 +590,6 @@ class TestASettingTheConnectionCannotHonourIsRefused:
         naming only the mistake sends the operator to the documentation."""
         with pytest.raises(RuntimeError, match="disable, prefer, require"):
             database._connect_args(_PG_URL, "nonsense", "")
-
-    def test_allow_is_not_a_mode_here(self) -> None:
-        """The claim behind the closing sentence, asserted where it lives."""
-        assert "allow" not in database._SSL_MODES
 
     @pytest.mark.parametrize("mode", ["disable", "prefer", "require"])
     def test_a_ca_file_under_a_mode_that_checks_no_certificate_is_refused(

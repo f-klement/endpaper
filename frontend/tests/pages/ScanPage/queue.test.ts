@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { BookLookup } from "../../../src/api/generated/model";
+import type { AudiobookGroup } from "../../../src/lib/audiobookGroups";
 import type { CalibreBook } from "../../../src/lib/calibre";
 import {
   canBeAskedAgain,
@@ -629,5 +630,132 @@ describe("the queue's figures", () => {
       );
     expect(figuresOf([]).paceMinutes).toBe(1);
     expect(figuresOf(waiting(31)).paceMinutes).toBe(2);
+  });
+});
+
+/** An audiobook candidate of these files, untagged, in one folder. */
+function audioGroup(names: readonly string[]): AudiobookGroup {
+  return {
+    by: "folder",
+    album: null,
+    authors: [],
+    title: null,
+    files: names.map((name) => ({
+      key: `file:${name}`,
+      name,
+      folders: ["Dune"],
+      tags: null,
+      whole: false,
+    })),
+  };
+}
+
+describe("an audiobook split apart", () => {
+  it("files each part as its own row, with what its own file said", () => {
+    const [candidate] = queueAfter(
+      [row({ state: "reading", key: "pending" })],
+      {
+        kind: "audio-grouped",
+        pendingKey: "pending",
+        groups: [audioGroup(["Dune Part One.mp3", "Dune Part Two.mp3"])],
+        reasons: new Map([
+          ["file:Dune Part One.mp3", { kind: "audio", failure: "no-tags" }],
+        ]),
+      },
+    );
+    const parts = queueAfter([candidate!], {
+      kind: "split",
+      key: candidate!.key,
+      apart: (group) =>
+        group.files.map((file) => ({ ...group, files: [file] })),
+    });
+    expect(parts.map((part) => [part.key, part.reason])).toEqual([
+      [
+        groupKey(["file:Dune Part One.mp3"]),
+        { kind: "audio", failure: "no-tags" },
+      ],
+      [groupKey(["file:Dune Part Two.mp3"]), undefined],
+    ]);
+  });
+
+  it("is refused for a row of one file and for a row that is no group", () => {
+    const [single] = queueAfter([row({ state: "reading", key: "pending" })], {
+      kind: "audio-grouped",
+      pendingKey: "pending",
+      groups: [audioGroup(["Dune.m4b"])],
+      reasons: new Map(),
+    });
+    const queue = [single!, row({ state: "found", key: "plain", draft: DUNE })];
+    expect(
+      queueAfter(queue, {
+        kind: "split",
+        key: single!.key,
+        apart: (group) => [group, group],
+      }),
+    ).toEqual(queue);
+    expect(
+      queueAfter(queue, {
+        kind: "split",
+        key: "plain",
+        apart: (group) => [group, group],
+      }),
+    ).toEqual(queue);
+  });
+});
+
+describe("a press arriving after what it answers has gone", () => {
+  const plain = row({ state: "found", draft: DUNE });
+
+  it.each<QueueEvent>([
+    { kind: "record-taken", key: "k" },
+    { kind: "kept-the-file", key: "k" },
+    { kind: "copy-made", key: "k" },
+    { kind: "copy-refused", key: "k", reason: { kind: "unreachable" } },
+  ])("leaves the row as it was: $kind", (event) => {
+    expect(rowAfter(plain, event)).toBe(plain);
+  });
+
+  it("dropping a subject from a row with no draft leaves it as it was", () => {
+    const reading = row({ state: "reading" });
+    expect(
+      rowAfter(reading, { kind: "subject-dropped", key: "k", subject: "Spam" }),
+    ).toBe(reading);
+  });
+});
+
+describe("a copy offer", () => {
+  const offered = row({
+    state: "failed",
+    draft: DUNE,
+    reason: { kind: "held-in-another-format" },
+    copyOf: 9,
+  });
+
+  it("goes once the copy is made", () => {
+    expect(rowAfter(offered, { kind: "copy-made", key: "k" }).copyOf).toBe(
+      undefined,
+    );
+  });
+
+  it("stays when the copy is refused, saying why", () => {
+    const refused = rowAfter(offered, {
+      kind: "copy-refused",
+      key: "k",
+      reason: { kind: "unreachable" },
+    });
+    expect([refused.copyOf, refused.reason]).toEqual([
+      9,
+      { kind: "unreachable" },
+    ]);
+  });
+});
+
+describe("a chosen record", () => {
+  it("with no ISBN 13 leaves the row with no ISBN", () => {
+    const choosing = row({ state: "choosing", draft: DUNE, matches: [] });
+    expect(
+      rowAfter(choosing, { kind: "chosen", key: "k", match: { title: "Dune" } })
+        .isbn,
+    ).toBe("");
   });
 });

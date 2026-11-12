@@ -316,6 +316,36 @@ describe("RapidQueue", () => {
     ).toBe(null);
   });
 
+  it("tells a held record that names nothing by its ISBN, seen and heard alike", () => {
+    renderQueue({
+      entries: [
+        picked(
+          {
+            state: "stated",
+            draft: {
+              isbn: "9780441013593",
+              title: "Dune",
+              suggested_tag_ids: [],
+            },
+            answered: "records",
+            reason: { kind: "record-differs" },
+            differentRecord: { isbn: "9780441013593", title: "" },
+          },
+          "dune.epub",
+        ),
+      ],
+    });
+
+    expect(
+      screen.getByText("The catalogue's record: 9780441013593"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record 9780441013593 for dune.epub",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a record under another title, and offers to use it or keep the file", async () => {
     const props = renderQueue({
       entries: [
@@ -584,6 +614,30 @@ describe("RapidQueue", () => {
     expect(offer).toHaveTextContent("Add as its own copy (Ebook)");
     await userEvent.click(offer);
     expect(queue.onAddAsCopy).toHaveBeenCalledWith("file:dune.epub:10:0");
+  });
+
+  it("offers a copy of a row whose format was not recorded under that word", () => {
+    // A barcode answers nothing about format, so the copy it would make is
+    // named as unrecorded rather than with an empty pair of parentheses.
+    renderQueue({
+      entries: [
+        scanned({
+          isbn: "9780441013593",
+          state: "failed",
+          draft: {
+            isbn: "9780441013593",
+            title: "Dune",
+            suggested_tag_ids: [],
+          },
+          reason: { kind: "held-in-another-format" },
+          copyOf: 77,
+        }),
+      ],
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Add 9780441013593 as its own copy" }),
+    ).toHaveTextContent("Add as its own copy (Not recorded)");
   });
 
   it("holds Add all when nothing in the queue can be added", () => {
@@ -1447,6 +1501,17 @@ describe("RapidQueue and a book taken from its file name", () => {
     expect(
       screen.getByRole("button", {
         name: "Use the record Ursula K. Le Guin (1965) for The Dispossessed.pdf",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("names a record that carries nothing by the file it was offered for", () => {
+    const bare = { ...MATCH, title: null, author: null, year: null };
+    renderQueue({ entries: [offering(bare)] });
+
+    expect(
+      screen.getByRole("button", {
+        name: "Use the record The Dispossessed.pdf for The Dispossessed.pdf",
       }),
     ).toBeInTheDocument();
   });

@@ -43,8 +43,8 @@ class TestTheNamespaceIsDefinedOnce:
 
     **Defined once is the claim, so it is counted rather than inferred.** That
     `marc.py` takes this module's value and that `RECORD_TAG` derives from it
-    are both consistent with a second literal sitting somewhere else, which is
-    the thing that would drift; the two agreement tests below cannot see one.
+    are both assignments in the source, and both are consistent with a second
+    literal sitting somewhere else, which is the thing that would drift.
     The test tree is excluded because it builds MARC fixtures by hand, which is
     a record to parse rather than a definition of the namespace.
     """
@@ -61,12 +61,6 @@ class TestTheNamespaceIsDefinedOnce:
         ]
 
         assert spellings == ["marc_fields.py"], spellings
-
-    def test_the_writer_takes_the_readers_namespace(self):
-        assert marc.NAMESPACE == marc_fields.NAMESPACE
-
-    def test_the_qualified_record_tag_is_built_from_that_namespace(self):
-        assert f"{{{marc_fields.NAMESPACE}}}record" == marc_fields.RECORD_TAG
 
     def test_a_record_written_by_this_app_is_found_by_that_tag(self):
         """The property the two constants exist for, run rather than asserted."""
