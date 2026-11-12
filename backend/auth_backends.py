@@ -17,6 +17,7 @@ it came from.
 import logging
 import re
 import ssl
+from typing import Any, NamedTuple
 
 from fastapi import Request
 from ldap3 import ALL, Connection, Server, Tls
@@ -185,6 +186,170 @@ def _address_was_refused(raw: str | None) -> bool:
     return bool((raw or "").strip()) and _directory_email(raw) is None
 
 
+def _refuses_the_name(username: str, source: AuthMode) -> bool:
+    """Whether `users.username` cannot hold this name, logged where it cannot.
+
+    Both checks stay ahead of the lookup in `upsert_directory_user`, which says
+    why the funnel is where they belong.
+    """
+    if len(username) > USERNAME_MAX:
+        # **Wording that shares no prefix with the proxy door's refusal, on
+        # purpose.** With `source.value` at the front this reads `Refused a
+        # proxy identity`, which is also how the header refusal opens, and an
+        # alert rule or log filter keyed on that would conflate an
+        # unauthenticated header event with a directory attribute one.
+        # `tests/test_auth_backends.py::TestADirectoryNameWiderThanTheColumnIsRefused`
+        # holds the two apart.
+        logger.warning(
+            "Refused a name users.username cannot hold: %d characters against %d, from a %s identity. %s",
+            len(username),
+            USERNAME_MAX,
+            source.value,
+            clipped(username),
+        )
+        return True
+    # **A NUL is a name the column cannot hold either**: Postgres text refuses
+    # one, and it did so at the lookup as a driver error, a 500 where the wide
+    # name above gets a refused sign in.
+    if "\x00" in username:
+        logger.warning(
+            "Refused a name users.username cannot hold: it carries a NUL, from a %s identity. %s",
+            source.value,
+            clipped(username),
+        )
+        return True
+    return False
+
+
+def _admin_after_the_rules(
+    db: Session,
+    user: User | None,
+    username: str,
+    *,
+    is_admin: bool,
+    source: AuthMode,
+) -> bool:
+    """The directory's admin verdict, after the two exceptions
+    `upsert_directory_user` documents: the first account, and no demotion
+    without a configured group.
+
+    `user` is the row after a test account was moved aside, so a library whose
+    only row was that test account still counts as holding one.
+    """
+    if user is None and db.query(User).count() == 0:
+        # Same rule registration uses, for the same reason.
+        logger.warning(
+            "Making %s an admin: it is the first account in this library",
+            clipped(username),
+        )
+        return True
+
+    if user is not None and user.is_admin and not is_admin and not _admin_group_set(source):
+        logger.warning(
+            "Keeping admin rights for %s: no admin group is configured for %s, "
+            "so there is nothing to demote them on",
+            clipped(username),
+            source.value,
+        )
+        return True
+    return is_admin
+
+
+def _create_directory_user(
+    db: Session,
+    username: str,
+    *,
+    is_admin: bool,
+    source: AuthMode,
+    email: str | None,
+) -> User:
+    """The shadow row for an identity nobody has signed in as before.
+
+    **The one `User(...)` site in this module**, behind the name refusal in
+    `upsert_directory_user`. `TestEveryDirectoryDoorWritesThroughOneFunnel`
+    counts it, so a second construction here moves that census.
+    """
+    user = User(
+        username=username,
+        password_hash=None,
+        is_admin=is_admin,
+        auth_source=source.value,
+        email=email,
+    )
+    # A directory authenticated this identity, so this app never held the
+    # credential and has nothing of its own to verify. Stamped rather than
+    # left null, because null is what the account policy refuses a sign in
+    # for, and `app_holds_the_password` and this line have to agree about a
+    # row that is neither of the two directories.
+    record_verification(user, VerificationProvenance.DIRECTORY)
+    db.add(user)
+    # WARNING, not INFO. Creating an account is the most consequential
+    # thing this app does without anybody clicking anything, and under
+    # proxy auth it happens on an ordinary GET. The one record of the
+    # 2026-08-18 incident was an INFO line in a stream nobody reads.
+    logger.warning(
+        "Created account %s from a %s identity, admin=%s",
+        clipped(username),
+        source.value,
+        is_admin,
+    )
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _reapply_directory_assertions(
+    db: Session,
+    user: User,
+    username: str,
+    *,
+    is_admin: bool,
+    source: AuthMode,
+    owns_email: bool,
+    asserted: str | None,
+) -> None:
+    """Bring an existing row in line with what the directory asserts.
+
+    Only writes when something actually changed. Every request in proxy mode
+    reaches this, so an unconditional commit was a write per request against
+    the single SQLite writer, and an audit trail that could never say when
+    anything had genuinely changed.
+    """
+    # The address is compared only where the directory owns it. Dropping
+    # `owns_email` from this clause would make an unconfigured directory assert
+    # None and clear every stored address on the next sign in, which is the
+    # exact shape of the silent demotion `upsert_directory_user` exists to
+    # prevent.
+    email_moved = owns_email and user.email != asserted
+    if user.is_admin == is_admin and user.auth_source == source.value and not email_moved:
+        return
+    if user.is_admin != is_admin:
+        logger.warning(
+            "Admin rights for %s changed to %s by a %s identity",
+            clipped(username),
+            is_admin,
+            source.value,
+        )
+    if email_moved:
+        # The fact, never the address: this goes to a log an operator
+        # reads, and an address is the one part of an envelope worth
+        # keeping out of one. `mailer._deliver` logs a refused recipient
+        # count for the same reason.
+        logger.info(
+            "The %s directory %s the address for %s",
+            source.value,
+            "cleared" if asserted is None else "set",
+            clipped(username),
+        )
+        user.email = asserted
+    user.is_admin = is_admin
+    # An account that predates the switch to a directory keeps its rows and
+    # its history; it simply stops being authenticated locally.
+    user.auth_source = source.value
+    db.commit()
+    db.refresh(user)
+
+
 def upsert_directory_user(
     db: Session,
     username: str,
@@ -289,31 +454,7 @@ def upsert_directory_user(
     # `USERNAME_MAX` rather than a written width, for the reason
     # `_free_username` gives: a literal goes on refusing at the old width after
     # the column moves.
-    if len(username) > USERNAME_MAX:
-        # **Wording that shares no prefix with the proxy door's refusal, on
-        # purpose.** With `source.value` at the front this reads `Refused a
-        # proxy identity`, which is also how the header refusal opens, and an
-        # alert rule or log filter keyed on that would conflate an
-        # unauthenticated header event with a directory attribute one.
-        # `tests/test_auth_backends.py::TestADirectoryNameWiderThanTheColumnIsRefused`
-        # holds the two apart.
-        logger.warning(
-            "Refused a name users.username cannot hold: %d characters against %d, from a %s identity. %s",
-            len(username),
-            USERNAME_MAX,
-            source.value,
-            clipped(username),
-        )
-        return None
-    # **A NUL is a name the column cannot hold either**: Postgres text refuses
-    # one, and it did so at the lookup below as a driver error, a 500 where the
-    # wide name above gets a refused sign in.
-    if "\x00" in username:
-        logger.warning(
-            "Refused a name users.username cannot hold: it carries a NUL, from a %s identity. %s",
-            source.value,
-            clipped(username),
-        )
+    if _refuses_the_name(username, source):
         return None
 
     user = db.query(User).filter(User.username == username).first()
@@ -330,22 +471,7 @@ def upsert_directory_user(
         _move_test_account_aside(db, user, source)
         user = None
 
-    if user is None and db.query(User).count() == 0:
-        # Same rule registration uses, for the same reason.
-        logger.warning(
-            "Making %s an admin: it is the first account in this library",
-            clipped(username),
-        )
-        is_admin = True
-
-    if user is not None and user.is_admin and not is_admin and not _admin_group_set(source):
-        logger.warning(
-            "Keeping admin rights for %s: no admin group is configured for %s, "
-            "so there is nothing to demote them on",
-            clipped(username),
-            source.value,
-        )
-        is_admin = True
+    is_admin = _admin_after_the_rules(db, user, username, is_admin=is_admin, source=source)
 
     # Asked once, before both branches. Where the directory does not own the
     # address, `asserted` stays None and nothing below reads it, which is what
@@ -354,75 +480,11 @@ def upsert_directory_user(
     asserted = _directory_email(email) if owns_email else None
 
     if user is None:
-        user = User(
-            username=username,
-            password_hash=None,
-            is_admin=is_admin,
-            auth_source=source.value,
-            email=asserted,
-        )
-        # A directory authenticated this identity, so this app never held the
-        # credential and has nothing of its own to verify. Stamped rather than
-        # left null, because null is what the account policy refuses a sign in
-        # for, and `app_holds_the_password` and this line have to agree about a
-        # row that is neither of the two directories.
-        record_verification(user, VerificationProvenance.DIRECTORY)
-        db.add(user)
-        # WARNING, not INFO. Creating an account is the most consequential
-        # thing this app does without anybody clicking anything, and under
-        # proxy auth it happens on an ordinary GET. The one record of the
-        # 2026-08-18 incident was an INFO line in a stream nobody reads.
-        logger.warning(
-            "Created account %s from a %s identity, admin=%s",
-            clipped(username),
-            source.value,
-            is_admin,
-        )
-        db.commit()
-        db.refresh(user)
-        return user
+        return _create_directory_user(db, username, is_admin=is_admin, source=source, email=asserted)
 
-    # Only write when something actually changed. Every request in proxy mode
-    # reaches this, so an unconditional commit was a write per request against
-    # the single SQLite writer, and an audit trail that could never say when
-    # anything had genuinely changed.
-    #
-    # The address is compared only where the directory owns it. Dropping
-    # `owns_email` from this clause would make an unconfigured directory assert
-    # None and clear every stored address on the next sign in, which is the
-    # exact shape of the silent demotion the paragraph above exists to prevent.
-    changed = (
-        user.is_admin != is_admin
-        or user.auth_source != source.value
-        or (owns_email and user.email != asserted)
+    _reapply_directory_assertions(
+        db, user, username, is_admin=is_admin, source=source, owns_email=owns_email, asserted=asserted
     )
-    if changed:
-        if user.is_admin != is_admin:
-            logger.warning(
-                "Admin rights for %s changed to %s by a %s identity",
-                clipped(username),
-                is_admin,
-                source.value,
-            )
-        if owns_email and user.email != asserted:
-            # The fact, never the address: this goes to a log an operator
-            # reads, and an address is the one part of an envelope worth
-            # keeping out of one. `mailer._deliver` logs a refused recipient
-            # count for the same reason.
-            logger.info(
-                "The %s directory %s the address for %s",
-                source.value,
-                "cleared" if asserted is None else "set",
-                clipped(username),
-            )
-            user.email = asserted
-        user.is_admin = is_admin
-        # An account that predates the switch to a directory keeps its rows and
-        # its history; it simply stops being authenticated locally.
-        user.auth_source = source.value
-        db.commit()
-        db.refresh(user)
-
     return user
 
 
@@ -556,6 +618,108 @@ def _is_member_of_admin_group(entry: object, groups: list[str]) -> bool:
     return any(wanted_lower == group.strip().lower() for group in groups)
 
 
+class _DirectoryEntry(NamedTuple):
+    """What `authenticate_ldap` keeps of the one entry its search found.
+
+    Read inside the search connection's `with`, like everything else off the
+    entry: the connection is closed after it and an ldap3 entry is not usable
+    then.
+    """
+
+    dn: str
+    #: The directory's spelling of the name, not the one typed, so "Kim" and
+    #: "kim" cannot become two accounts.
+    username: str
+    email: str | None
+    groups: list[str]
+    entry: object
+
+
+def _look_up_and_bind(
+    username: str, password: str, search_filter: str, email_attribute: str
+) -> _DirectoryEntry | None:
+    """Find the member's entry as the service account, then bind as it.
+
+    None for every refusal: a failed service bind, a referral, no entry or
+    several, and a wrong password. `LDAPException` propagates, so the caller's
+    one handler covers the service bind, the search and the re bind alike.
+    """
+    with _connect(ldap_bind_dn(), ldap_bind_password()) as search_connection:
+        if not search_connection.bind():
+            logger.error("LDAP service bind failed: %s", search_connection.result)
+            return None
+
+        # The address attribute is appended only when one is configured,
+        # so the shipped default asks the directory for exactly what it
+        # always asked for. An unconditional `"mail"` here would change the
+        # search every deployment makes on an upgrade nobody opted into.
+        attributes = [ldap_username_attribute(), "memberOf"]
+        if email_attribute:
+            attributes.append(email_attribute)
+
+        search_connection.search(
+            search_base=ldap_user_base_dn(),
+            search_filter=search_filter,
+            attributes=attributes,
+        )
+        found = _the_one_entry(search_connection, username, email_attribute)
+
+    if found is None:
+        return None
+    with _connect(found.dn, password) as user_connection:
+        if not user_connection.bind():
+            return None
+    return found
+
+
+def _the_one_entry(connection: Connection, username: str, email_attribute: str) -> _DirectoryEntry | None:
+    """The single entry a search answered, or None for a referral, none or several."""
+    if connection.result["result"] == RESULT_REFERRAL:
+        # Not followed (`_connect` says why), so the member is not
+        # found. The URLs come from the directory and are logged as the
+        # list's repr, which escapes a newline in one.
+        logger.warning(
+            "LDAP search was answered with a referral, which is not followed: %s. "
+            "Point LDAP_URL at the server holding LDAP_USER_BASE_DN.",
+            connection.result["referrals"],
+        )
+        return None
+    if not connection.entries:
+        # No such member. Deliberately indistinguishable from a wrong
+        # password to whoever is asking.
+        return None
+    if len(connection.entries) > 1:
+        logger.error(
+            "LDAP filter matched %d entries for %s",
+            len(connection.entries),
+            clipped(username),
+        )
+        return None
+
+    entry = connection.entries[0]
+    return _DirectoryEntry(
+        dn=entry.entry_dn,
+        username=str(entry[ldap_username_attribute()].value),
+        email=_entry_email(entry, email_attribute),
+        groups=[str(group) for group in (entry.memberOf.values if "memberOf" in entry else [])],
+        entry=entry,
+    )
+
+
+def _entry_email(entry: Any, email_attribute: str) -> str | None:
+    """The entry's address attribute as a string, or None.
+
+    `.value` is None for a present but empty attribute and a multi-valued one
+    yields the first, both of which `_directory_email` reduces to "the
+    directory named no address".
+    """
+    return (
+        str(entry[email_attribute].value)
+        if email_attribute and email_attribute in entry and entry[email_attribute].value
+        else None
+    )
+
+
 def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
     """Bind against the directory, then mirror the identity locally.
 
@@ -575,17 +739,19 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
     # metacharacters cannot rewrite the query.
     search_filter = ldap_user_filter().format(username=escape_filter_chars(username))
 
-    # **Every log line below that names the value typed at the login screen
-    # passes it through `clipped`, and removing one lets an unauthenticated
-    # caller write a log line of their own.** `username` is the one value in
-    # this function that arrives straight off the wire: `LoginRequest` bounds
+    # **Every log line this function, `_look_up_and_bind` and `_the_one_entry`
+    # emit that names the value typed at the login screen passes it through
+    # `clipped`, and removing one lets an unauthenticated caller write a log
+    # line of their own.** `username` is the one value on this path that
+    # arrives straight off the wire: `LoginRequest` bounds
     # its length and deliberately carries no pattern, so a newline in it
     # reaches here.
     #
-    # **The quantifier is narrow on purpose.** Two log lines below name no
-    # username at all, or name one that did not come off the wire: the service
-    # bind failure logs the directory's result, and the refused address line
-    # logs `resolved_username`, which the directory supplied. That second one
+    # **The quantifier is narrow on purpose.** Two log lines name no username
+    # at all, or name one that did not come off the wire: the service bind
+    # failure in `_look_up_and_bind` logs the directory's result, and the
+    # refused address line below logs `found.username`, which the directory
+    # supplied. That second one
     # is clipped now too, as is every site in `upsert_directory_user`, which
     # both directory doors funnel through and which refuses a name the column
     # cannot hold rather than storing or truncating it.
@@ -617,69 +783,13 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
     # fails if a log line from an auth route starts carrying a control
     # character.
 
+    # Read here rather than where the search is built, because the refused
+    # address line below names it under `%r`, and that exemption is keyed on
+    # this function.
+    email_attribute = ldap_email_attribute()
+
     try:
-        with _connect(ldap_bind_dn(), ldap_bind_password()) as search_connection:
-            if not search_connection.bind():
-                logger.error("LDAP service bind failed: %s", search_connection.result)
-                return None
-
-            # The address attribute is appended only when one is configured,
-            # so the shipped default asks the directory for exactly what it
-            # always asked for. An unconditional `"mail"` here would change the
-            # search every deployment makes on an upgrade nobody opted into.
-            attributes = [ldap_username_attribute(), "memberOf"]
-            email_attribute = ldap_email_attribute()
-            if email_attribute:
-                attributes.append(email_attribute)
-
-            search_connection.search(
-                search_base=ldap_user_base_dn(),
-                search_filter=search_filter,
-                attributes=attributes,
-            )
-            if search_connection.result["result"] == RESULT_REFERRAL:
-                # Not followed (`_connect` says why), so the member is not
-                # found. The URLs come from the directory and are logged as the
-                # list's repr, which escapes a newline in one.
-                logger.warning(
-                    "LDAP search was answered with a referral, which is not followed: %s. "
-                    "Point LDAP_URL at the server holding LDAP_USER_BASE_DN.",
-                    search_connection.result["referrals"],
-                )
-                return None
-            if not search_connection.entries:
-                # No such member. Deliberately indistinguishable from a wrong
-                # password to whoever is asking.
-                return None
-            if len(search_connection.entries) > 1:
-                logger.error(
-                    "LDAP filter matched %d entries for %s",
-                    len(search_connection.entries),
-                    clipped(username),
-                )
-                return None
-
-            entry = search_connection.entries[0]
-            user_dn = entry.entry_dn
-            groups = [str(group) for group in (entry.memberOf.values if "memberOf" in entry else [])]
-            # Trust the directory's spelling of the name, not the one typed, so
-            # "Kim" and "kim" cannot become two accounts.
-            resolved_username = str(entry[ldap_username_attribute()].value)
-            # Read inside the `with`, like everything else off the entry: the
-            # connection is closed below and an ldap3 entry is not usable after
-            # it. `.value` is None for a present but empty attribute and a
-            # multi-valued one yields the first, both of which
-            # `_directory_email` reduces to "the directory named no address".
-            resolved_email = (
-                str(entry[email_attribute].value)
-                if email_attribute and email_attribute in entry and entry[email_attribute].value
-                else None
-            )
-
-        with _connect(user_dn, password) as user_connection:
-            if not user_connection.bind():
-                return None
-
+        found = _look_up_and_bind(username, password, search_filter, email_attribute)
     except LDAPException as failure:
         # Directory unreachable or misconfigured, reported to the caller as an
         # ordinary failed login.
@@ -717,23 +827,26 @@ def authenticate_ldap(db: Session, username: str, password: str) -> User | None:
         logger.error("LDAP authentication failed for %s: %s", clipped(username), clipped(failure))
         return None
 
-    if _address_was_refused(resolved_email):
+    if found is None:
+        return None
+
+    if _address_was_refused(found.email):
         # The same event as the proxy branch and it is logged at the same level.
         # There is no peer: the value came from the directory this deployment
         # configured, so the attribute is what identifies it.
         logger.warning(
             "Refused the %r attribute for %s: %d characters, not an address. The stored address is cleared.",
             email_attribute,
-            clipped(resolved_username),
-            len(resolved_email or ""),
+            clipped(found.username),
+            len(found.email or ""),
         )
 
     return upsert_directory_user(
         db,
-        resolved_username,
-        is_admin=_is_member_of_admin_group(entry, groups),
+        found.username,
+        is_admin=_is_member_of_admin_group(found.entry, found.groups),
         source=AuthMode.LDAP,
-        email=resolved_email,
+        email=found.email,
     )
 
 
@@ -777,6 +890,20 @@ def _peer(request: Request) -> str:
     """
     client = getattr(request, "client", None)
     return getattr(client, "host", None) or "unknown"
+
+
+def _proxy_asserts_admin(request: Request) -> bool:
+    """Whether the groups header names the configured admin group.
+
+    Exact and case-insensitive, never a substring: see
+    `_is_member_of_admin_group` for what a substring match granted. No group
+    configured is never admin.
+    """
+    raw_groups = (request.headers.get(proxy_groups_header()) or "").strip()
+    groups = [group.strip() for group in raw_groups.split(",") if group.strip()]
+
+    wanted = proxy_admin_group()
+    return bool(wanted) and any(group.lower() == wanted.lower() for group in groups)
 
 
 def user_from_proxy_headers(db: Session, request: Request) -> User | None:
@@ -860,11 +987,7 @@ def user_from_proxy_headers(db: Session, request: Request) -> User | None:
         )
         return None
 
-    raw_groups = (request.headers.get(proxy_groups_header()) or "").strip()
-    groups = [group.strip() for group in raw_groups.split(",") if group.strip()]
-
-    wanted = proxy_admin_group()
-    is_admin = bool(wanted) and any(group.lower() == wanted.lower() for group in groups)
+    is_admin = _proxy_asserts_admin(request)
 
     # Read only when a header is configured, for the reason in
     # `config.proxy_email_header`: an upstream that sends nothing must not be

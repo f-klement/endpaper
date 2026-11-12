@@ -79,6 +79,33 @@ describe("the two groups", () => {
     ).toBeInTheDocument();
   });
 
+  it("folds one group away and leaves the other open", async () => {
+    renderPicker();
+    const shelf = screen.getByRole("button", { name: /^Dewey shelf/ });
+
+    await userEvent.click(shelf);
+
+    expect(shelf).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("group", { name: "Dewey shelf" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "Subjects and numbers" }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens a folded group again", async () => {
+    renderPicker();
+    const shelf = screen.getByRole("button", { name: /^Dewey shelf/ });
+
+    await userEvent.click(shelf);
+    await userEvent.click(shelf);
+
+    expect(
+      screen.getByRole("group", { name: "Dewey shelf" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a division with no label as its number alone", () => {
     renderPicker();
 
@@ -122,6 +149,25 @@ describe("picking one", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("marks a chosen heading by its wire spelling, not its number alone", () => {
+    renderPicker({ selectedHeadings: ["lcsh:Stress management"] });
+
+    expect(
+      screen.getByRole("button", { name: /Stress management/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("counts the picks in the group that holds them", () => {
+    renderPicker({ selectedDivisions: ["150"] });
+
+    expect(
+      screen.getByRole("button", { name: /^Dewey shelf\s+1 of 2$/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^Subjects and numbers\s+1$/ }),
+    ).toBeInTheDocument();
   });
 });
 

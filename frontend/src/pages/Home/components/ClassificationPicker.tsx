@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 import { Icon } from "../../../components";
 import { useTranslation } from "../../../i18n";
@@ -41,12 +41,146 @@ export function headingKey(facet: HeadingFacetOut): string {
   return `${facet.scheme}:${facet.number}`;
 }
 
+const NO_FACETS: ClassificationFacets = { headings: [], divisions: [] };
+
 const CHIP =
   "inline-flex items-baseline gap-1.5 text-xs px-2 py-1 rounded-full border transition-colors";
 const CHOSEN = "bg-accent-fill border-accent-fill text-on-accent";
 const UNCHOSEN =
   "border-paper-200 text-paper-600 bg-paper-0 hover:border-accent-300 " +
   "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:border-accent-700";
+
+/**
+ * One collapsible group of chips, headed by its label and how many of its
+ * facets are chosen. The panel id ties the heading button to the group it
+ * folds, so a screen reader can follow `aria-controls`.
+ */
+function FacetGroup({
+  id,
+  label,
+  chosen,
+  count,
+  expanded,
+  onToggle,
+  children,
+}: {
+  id: string;
+  label: MessageKey;
+  chosen: number;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-controls={id}
+        className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-300"
+      >
+        <Icon
+          name="chevron"
+          className={`h-3 w-3 transition-transform duration-150 ${
+            expanded ? "rotate-90" : ""
+          }`}
+        />
+        {t(label)}{" "}
+        <span className="font-normal normal-case text-paper-600 dark:text-paper-400">
+          {chosen > 0
+            ? t("tags.countWithChosen", { count, chosen })
+            : t("tags.count", { count })}
+        </span>
+      </button>
+      {expanded && (
+        <div
+          id={id}
+          role="group"
+          aria-label={t(label)}
+          className="mt-1 flex flex-wrap gap-1.5"
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DivisionChip({
+  facet,
+  selected,
+  onToggle,
+}: {
+  facet: DivisionFacetOut;
+  selected: boolean;
+  onToggle: (division: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={() => onToggle(facet.division)}
+      className={`${CHIP} ${selected ? CHOSEN : UNCHOSEN}`}
+    >
+      <span className="font-medium">{facet.division}</span>
+      {/* This library's own word for the division, absent where the division
+          maps to no tag. The number alone is a real answer there rather than
+          a gap: see `DivisionFacetOut.label` in the backend schema. */}
+      {facet.label && <span>{facet.label}</span>}
+      <span className="opacity-70">{facet.book_count}</span>
+    </button>
+  );
+}
+
+function HeadingChip({
+  facet,
+  selected,
+  onToggle,
+}: {
+  facet: HeadingFacetOut;
+  selected: boolean;
+  onToggle: (heading: string) => void;
+}) {
+  const { t } = useTranslation();
+  const kind = KIND_LABEL[headingKind(facet.kind)];
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      // The same sentence the book page's chip carries, rather than the bare
+      // wire key: `gnd:4203576-4` is a spelling that appears nowhere else in
+      // the interface, and a `title` is unreachable by keyboard and on touch,
+      // so it is the wrong home for the identifier. The identifier's readable
+      // home is the book page, where it is rendered on the face of the chip.
+      title={t("classification.filterBy", { heading: headingText(facet) })}
+      className={`${CHIP} ${selected ? CHOSEN : UNCHOSEN}`}
+      onClick={() => onToggle(headingKey(facet))}
+    >
+      <span className={selected ? "opacity-80" : "opacity-70"}>
+        {t(SCHEME_LABEL[facet.scheme])}
+      </span>
+      {/* The caption where the record carried one, the identifier where it
+          did not. A GND chip showing `facet.number` is a row of digits. */}
+      <span className="font-medium">{headingText(facet)}</span>
+      {kind && (
+        <span className={selected ? "opacity-80" : "opacity-70"}>
+          {t(kind)}
+        </span>
+      )}
+      <span className="opacity-70">{facet.book_count}</span>
+    </button>
+  );
+}
+
+/** The set with `group` added if it was absent and taken out if it was there. */
+function toggled(current: Set<string>, group: string): Set<string> {
+  const next = new Set(current);
+  if (!next.delete(group)) next.add(group);
+  return next;
+}
 
 export default function ClassificationPicker({
   facets,
@@ -61,8 +195,9 @@ export default function ClassificationPicker({
   // the collapse the tag picker needs would only add a click here.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
-  const headings = facets?.headings ?? [];
-  const divisions = facets?.divisions ?? [];
+  // Empty while the request is in flight, which reads the same as a library
+  // with nothing classified: there is nothing to pick either way.
+  const { headings, divisions } = facets ?? NO_FACETS;
 
   if (headings.length === 0 && divisions.length === 0) {
     return (
@@ -73,129 +208,49 @@ export default function ClassificationPicker({
   }
 
   function toggleGroup(group: string) {
-    setCollapsed((current) => {
-      const next = new Set(current);
-      if (!next.delete(group)) next.add(group);
-      return next;
-    });
-  }
-
-  function group(
-    key: string,
-    label: MessageKey,
-    chosen: number,
-    count: number,
-    body: React.ReactNode,
-  ) {
-    const expanded = !collapsed.has(key);
-    return (
-      <div>
-        <button
-          type="button"
-          onClick={() => toggleGroup(key)}
-          aria-expanded={expanded}
-          aria-controls={`${panelId}-${key}`}
-          className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-300"
-        >
-          <Icon
-            name="chevron"
-            className={`h-3 w-3 transition-transform duration-150 ${
-              expanded ? "rotate-90" : ""
-            }`}
-          />
-          {t(label)}{" "}
-          <span className="font-normal normal-case text-paper-600 dark:text-paper-400">
-            {chosen > 0
-              ? t("tags.countWithChosen", { count, chosen })
-              : t("tags.count", { count })}
-          </span>
-        </button>
-        {expanded && (
-          <div
-            id={`${panelId}-${key}`}
-            role="group"
-            aria-label={t(label)}
-            className="mt-1 flex flex-wrap gap-1.5"
-          >
-            {body}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function divisionChip(facet: DivisionFacetOut) {
-    const selected = selectedDivisions.includes(facet.division);
-    return (
-      <button
-        key={facet.division}
-        type="button"
-        aria-pressed={selected}
-        onClick={() => onToggleDivision(facet.division)}
-        className={`${CHIP} ${selected ? CHOSEN : UNCHOSEN}`}
-      >
-        <span className="font-medium">{facet.division}</span>
-        {/* This library's own word for the division, absent where the division
-            maps to no tag. The number alone is a real answer there rather than
-            a gap: see `DivisionFacetOut.label` in the backend schema. */}
-        {facet.label && <span>{facet.label}</span>}
-        <span className="opacity-70">{facet.book_count}</span>
-      </button>
-    );
-  }
-
-  function headingChip(facet: HeadingFacetOut) {
-    const key = headingKey(facet);
-    const selected = selectedHeadings.includes(key);
-    const kind = KIND_LABEL[headingKind(facet.kind)];
-    return (
-      <button
-        key={key}
-        type="button"
-        aria-pressed={selected}
-        // The same sentence the book page's chip carries, rather than the bare
-        // wire key: `gnd:4203576-4` is a spelling that appears nowhere else in
-        // the interface, and a `title` is unreachable by keyboard and on touch,
-        // so it is the wrong home for the identifier. The identifier's readable
-        // home is the book page, where it is rendered on the face of the chip.
-        title={t("classification.filterBy", { heading: headingText(facet) })}
-        className={`${CHIP} ${selected ? CHOSEN : UNCHOSEN}`}
-        onClick={() => onToggleHeading(key)}
-      >
-        <span className={selected ? "opacity-80" : "opacity-70"}>
-          {t(SCHEME_LABEL[facet.scheme])}
-        </span>
-        {/* The caption where the record carried one, the identifier where it
-            did not. A GND chip showing `facet.number` is a row of digits. */}
-        <span className="font-medium">{headingText(facet)}</span>
-        {kind && (
-          <span className={selected ? "opacity-80" : "opacity-70"}>
-            {t(kind)}
-          </span>
-        )}
-        <span className="opacity-70">{facet.book_count}</span>
-      </button>
-    );
+    setCollapsed((current) => toggled(current, group));
   }
 
   return (
     <div className="space-y-2.5">
-      {divisions.length > 0 &&
-        group(
-          "divisions",
-          "classification.divisions",
-          selectedDivisions.length,
-          divisions.length,
-          divisions.map(divisionChip),
-        )}
-      {headings.length > 0 &&
-        group(
-          "headings",
-          "classification.headings",
-          selectedHeadings.length,
-          headings.length,
-          headings.map(headingChip),
-        )}
+      {divisions.length > 0 && (
+        <FacetGroup
+          id={`${panelId}-divisions`}
+          label="classification.divisions"
+          chosen={selectedDivisions.length}
+          count={divisions.length}
+          expanded={!collapsed.has("divisions")}
+          onToggle={() => toggleGroup("divisions")}
+        >
+          {divisions.map((facet) => (
+            <DivisionChip
+              key={facet.division}
+              facet={facet}
+              selected={selectedDivisions.includes(facet.division)}
+              onToggle={onToggleDivision}
+            />
+          ))}
+        </FacetGroup>
+      )}
+      {headings.length > 0 && (
+        <FacetGroup
+          id={`${panelId}-headings`}
+          label="classification.headings"
+          chosen={selectedHeadings.length}
+          count={headings.length}
+          expanded={!collapsed.has("headings")}
+          onToggle={() => toggleGroup("headings")}
+        >
+          {headings.map((facet) => (
+            <HeadingChip
+              key={headingKey(facet)}
+              facet={facet}
+              selected={selectedHeadings.includes(headingKey(facet))}
+              onToggle={onToggleHeading}
+            />
+          ))}
+        </FacetGroup>
+      )}
     </div>
   );
 }

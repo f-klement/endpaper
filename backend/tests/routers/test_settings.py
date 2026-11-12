@@ -965,6 +965,13 @@ class TestTheEnvironmentWinsOverTheStoredValue:
         assert response.status_code == 409
         assert "MAIL_SERVER" in response.json()["detail"]
 
+    def test_a_pinned_sender_switch_refuses_an_edit_and_names_the_variable(self, client, admin, monkeypatch):
+        monkeypatch.setenv("MAIL_USE_TLS", "false")
+        response = client.put("/api/settings", json={"mail_use_tls": True}, headers=admin["headers"])
+
+        assert response.status_code == 409
+        assert "MAIL_USE_TLS" in response.json()["detail"]
+
     def test_a_pinned_secret_is_reported_as_pinned_and_never_shown(self, client, admin, monkeypatch):
         monkeypatch.setenv("MAIL_PASSWORD", "from-the-deployment")
         body = client.get("/api/settings", headers=admin["headers"])

@@ -25228,3 +25228,33 @@ before the run and names the flag rather than the files.
 coverage register's. The coverage register's global setup refuses such a run and names both
 reporters to keep, from one list a test holds to the configuration; a run naming the coverage
 register's reporter back alone still drops this one silently.
+
+## Resident growth on the smallest CI worker past the suite pod's spare is accepted (2026-11-12)
+
+**The suite pod asks 250m CPU on the smallest worker, and the room it fits in is measured
+once, not read live.** Growth in that worker's resident pods, or a job that raises its own
+CPU request, can make the pod Pending again with every test green. That is accepted: on a
+timed out readiness wait the runner prints the pod's PodScheduled reason (such as
+"Insufficient cpu"), so a recurrence names its cause in the run's own log.
+
+Measured 2026-11-12, about 20:50Z, with `kubectl describe node` and, as a second route,
+`kubectl get pods -A` filtered to the node and summed per pod:
+
+| what | CPU request |
+|---|---|
+| allocatable | 2000m |
+| resident pods (the security agents, DNS, metrics and storage drivers; the rest ask 0) | 560m |
+| one GitLab runner job pod at the runner's default `cpu_request` | 1000m |
+| the suite pod | 250m |
+| total | 1810m, so 190m spare |
+
+What eats the 190m: a resident that is not a DaemonSet's pod (coredns is a Deployment's),
+two transient k3s helm install Jobs at 100m each beside a job pod (one fits), or a job
+asking 1191m to 1440m through the runner's request overwrite, which allows up to 2 cores.
+The runner's sizing guard holds the figures as constants and cannot see any of these, since
+their sources live outside this repository.
+
+**The alternative not taken**: hand an unschedulable pod back with exit 75 so the run waits
+for another node. It is about 65 lines in the runner's signal handling plus a poll loop in
+place of `kubectl wait`, more than one sitting. If the printed reason shows this recurring,
+that handback is the move.

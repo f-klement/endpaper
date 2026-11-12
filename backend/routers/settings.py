@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
 
@@ -19,6 +20,7 @@ from models import User
 from refusals import refuses
 from schemas import (
     CatalogueSourceOut,
+    CatalogueSourcePreference,
     CredentialKeyOut,
     FeatureFlagsOut,
     LoginImageOut,
@@ -344,24 +346,15 @@ def get_sender_health(
     return [SenderHealth(**entry) for entry in notifications.health(db, now)]
 
 
-@router.put("", response_model=SettingsOut)
-def update_settings(
-    payload: SettingsUpdate,
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> SettingsOut:
-    """Apply a partial update.
+def _flag(value: bool) -> str:
+    """How a switch is stored: the two words `settings_store` reads back."""
+    return "true" if value else "false"
 
-    Only fields actually present are written. That is what lets the admin form
-    submit without the API key: the browser never received the real value, so
-    sending the field back would blank it.
-    """
+
+def _write_lookup_settings(db: DbSession, payload: SettingsUpdate) -> None:
+    """The Google Books switch and key, and the Goodreads switch, in that order."""
     if payload.google_books_enabled is not None:
-        _store(
-            db,
-            SettingKey.GOOGLE_BOOKS_ENABLED,
-            "true" if payload.google_books_enabled else "false",
-        )
+        _store(db, SettingKey.GOOGLE_BOOKS_ENABLED, _flag(payload.google_books_enabled))
 
     if payload.google_books_api_key is not None:
         if config.google_books_api_key_from_env():
@@ -377,21 +370,16 @@ def update_settings(
         _store(db, SettingKey.GOOGLE_BOOKS_API_KEY, payload.google_books_api_key.strip())
 
     if payload.goodreads_lookup_enabled is not None:
-        _store(
-            db,
-            SettingKey.GOODREADS_LOOKUP_ENABLED,
-            "true" if payload.goodreads_lookup_enabled else "false",
-        )
+        _store(db, SettingKey.GOODREADS_LOOKUP_ENABLED, _flag(payload.goodreads_lookup_enabled))
 
+
+def _write_reminder_settings(db: DbSession, payload: SettingsUpdate) -> None:
+    """The locale, the webhook and the reminder interval: each its own rule."""
     if payload.default_locale is not None:
         _store(db, SettingKey.DEFAULT_LOCALE, payload.default_locale.value)
 
     if payload.overdue_webhook_enabled is not None:
-        _store(
-            db,
-            SettingKey.OVERDUE_WEBHOOK_ENABLED,
-            "true" if payload.overdue_webhook_enabled else "false",
-        )
+        _store(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, _flag(payload.overdue_webhook_enabled))
 
     if payload.overdue_webhook_url is not None:
         # Already scheme-checked by `SettingsUpdate.http_or_https`, which
@@ -408,59 +396,94 @@ def update_settings(
         # `sender_for` answers None and no health record is dropped.
         _store(db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days))
 
-    for field, key in _SENDER_TEXT.items():
+
+def _write_table[T](
+    db: DbSession,
+    payload: SettingsUpdate,
+    table: dict[str, SettingKey],
+    encode: Callable[[T], str],
+    *,
+    refuse_pinned: bool,
+) -> None:
+    """Write every field of one write table the payload carries, in table order.
+
+    **The pinned check runs per field, before that field's write**, as it did
+    when each table had its loop inline: a 409 on the second field still
+    leaves the first written, and moving the check ahead of the loop would
+    change which rows a refused request leaves behind.
+    """
+    for field, key in table.items():
         value = getattr(payload, field)
         if value is None:
             continue
-        _refuse_if_pinned(key)
-        # An empty string is a deliberate clear, like the Google key and the
-        # webhook secret. `None` never reaches here.
-        _store(db, key, value.strip())
+        if refuse_pinned:
+            _refuse_if_pinned(key)
+        _store(db, key, encode(value))
 
-    if payload.catalogue_sources is not None:
-        # Merged against what is stored rather than taken whole: a payload that
-        # names one source must not be read as switching the other eight on. See
-        # `sources.from_wire`.
-        _store(
-            db,
-            SettingKey.CATALOGUE_SOURCES,
-            sources.serialise(
-                sources.from_wire(
-                    [sources.Preference(entry.source, entry.enabled) for entry in payload.catalogue_sources],
-                    settings_store.stored_catalogue_sources(db),
-                )
-            ),
-        )
 
-    for field, key in _STORED_BOOL.items():
-        value = getattr(payload, field)
-        if value is None:
-            continue
-        _store(db, key, "true" if value else "false")
+def _write_catalogue_sources(db: DbSession, wire: list[CatalogueSourcePreference]) -> None:
+    """Merged against what is stored rather than taken whole: a payload that
+    names one source must not be read as switching the other eight on. See
+    `sources.from_wire`."""
+    _store(
+        db,
+        SettingKey.CATALOGUE_SOURCES,
+        sources.serialise(
+            sources.from_wire(
+                [sources.Preference(entry.source, entry.enabled) for entry in wire],
+                settings_store.stored_catalogue_sources(db),
+            )
+        ),
+    )
 
-    for field, key in _SENDER_BOOL.items():
-        value = getattr(payload, field)
-        if value is None:
-            continue
-        _refuse_if_pinned(key)
-        _store(db, key, "true" if value else "false")
 
-    # **Every write that can change which catalogues are asked drops the lookup
-    # cache**, and there are three rather than one: the provider list, and the
-    # two Google Books rows that `settings_store.ready_sources` reads. Clearing
-    # on only the first was the shape of the defect it was meant to fix, since
-    # switching Google off through its own card takes it out of the plan at once
-    # while the records it had already supplied stayed served for another day.
-    #
-    # Decided from the payload rather than from what changed, because a write
-    # storing the same value still means somebody looked at that switch, and a
-    # needless cache drop costs one re-fetch where a missed one costs a stale
-    # answer nobody can explain.
-    if (
+def _asks_other_catalogues(payload: SettingsUpdate) -> bool:
+    """Whether this write can change which catalogues are asked.
+
+    **Every write that can drops the lookup cache**, and there are three rather
+    than one: the provider list, and the two Google Books rows that
+    `settings_store.ready_sources` reads. Clearing on only the first was the
+    shape of the defect it was meant to fix, since switching Google off through
+    its own card takes it out of the plan at once while the records it had
+    already supplied stayed served for another day.
+
+    Decided from the payload rather than from what changed, because a write
+    storing the same value still means somebody looked at that switch, and a
+    needless cache drop costs one re-fetch where a missed one costs a stale
+    answer nobody can explain.
+    """
+    return (
         payload.catalogue_sources is not None
         or payload.google_books_enabled is not None
         or payload.google_books_api_key is not None
-    ):
+    )
+
+
+@router.put("", response_model=SettingsOut)
+def update_settings(
+    payload: SettingsUpdate,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> SettingsOut:
+    """Apply a partial update.
+
+    Only fields actually present are written. That is what lets the admin form
+    submit without the API key: the browser never received the real value, so
+    sending the field back would blank it.
+    """
+    _write_lookup_settings(db, payload)
+    _write_reminder_settings(db, payload)
+    # An empty string is a deliberate clear, like the Google key and the
+    # webhook secret. `None` never reaches here.
+    _write_table(db, payload, _SENDER_TEXT, str.strip, refuse_pinned=True)
+
+    if payload.catalogue_sources is not None:
+        _write_catalogue_sources(db, payload.catalogue_sources)
+
+    _write_table(db, payload, _STORED_BOOL, _flag, refuse_pinned=False)
+    _write_table(db, payload, _SENDER_BOOL, _flag, refuse_pinned=True)
+
+    if _asks_other_catalogues(payload):
         metadata.clear_cache()
 
     return _read_settings(db)

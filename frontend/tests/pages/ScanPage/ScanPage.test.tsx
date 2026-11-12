@@ -898,6 +898,164 @@ describe("ScanPage", () => {
     });
   });
 
+  describe("the card a lookup draws", () => {
+    // Each arm pins one part of the card a split moved into its own helper:
+    // a render reaching those lines counts them covered whether or not
+    // anything reads them.
+
+    it("prints the publisher and the year on one line", async () => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      expect(
+        await screen.findByText("Chilton \u00b7 1965"),
+      ).toBeInTheDocument();
+    });
+
+    it("prints the ISBN that was looked up", async () => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      expect(
+        await screen.findByText("ISBN: 9780441013593"),
+      ).toBeInTheDocument();
+    });
+
+    it("prints the subtitle under the title", async () => {
+      api.on("/api/books/lookup", {
+        body: { ...LOOKUP, subtitle: "The First Book" },
+      });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      expect(await screen.findByText("The First Book")).toBeInTheDocument();
+    });
+
+    it("leaves the tag heading out while the library has no tags", async () => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      await screen.findByText("by Frank Herbert");
+      expect(screen.queryByText(en["library.tags"])).not.toBeInTheDocument();
+    });
+
+    it("shows no count while no tag is chosen", async () => {
+      api.on("/api/books/tags", { body: makeTagSet() });
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      await screen.findByLabelText("New tag");
+      expect(screen.queryByText(/\(\d+ selected\)/)).not.toBeInTheDocument();
+    });
+
+    it("counts a typed tag name as chosen", async () => {
+      // A typed name is held as a name until the book exists, not as an id,
+      // and a count of the ids alone read as the typing having been lost.
+      api.on("/api/books/tags", { body: makeTagSet() });
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      const user = await scan();
+      await user.type(await screen.findByLabelText("New tag"), "Loft finds");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      expect(screen.getByText("(1 selected)")).toBeInTheDocument();
+    });
+
+    it("offers to replace the catalogue's cover", async () => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await scan();
+
+      expect(
+        await screen.findByLabelText("Replace cover photo (optional)"),
+      ).toBeInTheDocument();
+    });
+
+    it("names the cover file once one is chosen", async () => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      const user = await scan();
+      await user.upload(
+        await screen.findByLabelText("Replace cover photo (optional)"),
+        new File(["cover"], "my-cover.jpg", { type: "image/jpeg" }),
+      );
+
+      expect(screen.getByText("my-cover.jpg")).toBeInTheDocument();
+    });
+
+    it("says what went wrong in its own words when the server gave none", async () => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+      api.on("/api/books/scan", { status: 500, statusText: "", body: {} });
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      const user = await scan();
+      await user.click(
+        await screen.findByRole("button", { name: "Add to Library" }),
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        en["scan.couldNotAdd"],
+      );
+    });
+
+    describe("a 409 naming a book already here", () => {
+      beforeEach(() => {
+        api.on("/api/books/lookup", { body: LOOKUP });
+        api.on("/api/books/scan", {
+          status: 409,
+          body: {
+            detail: {
+              message: "Book with this ISBN already in catalog",
+              book_id: 42,
+            },
+          },
+        });
+      });
+
+      it("files the scan as another copy of it on the press", async () => {
+        api.on("/api/books/42/copies", { body: makeBook({ id: 99 }) }, "POST");
+        renderWithProviders(<ScanPage accountId={ME} />);
+
+        const user = await scan();
+        await user.click(
+          await screen.findByRole("button", { name: "Add to Library" }),
+        );
+        await user.click(
+          await screen.findByRole("button", { name: "Add another copy" }),
+        );
+
+        await waitFor(() =>
+          expect(api.lastCall("/api/books/42/copies", "POST")).toBeDefined(),
+        );
+      });
+
+      it("says before the press what a copy takes from that book", async () => {
+        renderWithProviders(<ScanPage accountId={ME} />);
+
+        const user = await scan();
+        await user.click(
+          await screen.findByRole("button", { name: "Add to Library" }),
+        );
+
+        expect(
+          await screen.findByText(en["copies.fromScanHint"]),
+        ).toBeInTheDocument();
+      });
+    });
+  });
+
   it("Cancel returns to the scanner", async () => {
     api.on("/api/books/lookup", { body: LOOKUP });
     renderWithProviders(<ScanPage accountId={ME} />);

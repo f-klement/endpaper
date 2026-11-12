@@ -488,7 +488,11 @@ class Lexer {
     if (this.byte() === 0x28) return this.literalString();
     if (this.byte() === 0x2f) return { kind: "name", value: this.name() };
     if (this.take("[")) return this.array(depth);
+    return this.atom();
+  }
 
+  /** One run of regular characters as a value: keyword, number or reference. */
+  private atom(): PdfValue {
     const start = this.at;
     const token = this.token();
     if (token === "") {
@@ -637,16 +641,7 @@ class Lexer {
     this.at += 1;
     const simple = SIMPLE_ESCAPES.get(escaped);
     if (simple !== undefined) return simple;
-    if (escaped >= 0x30 && escaped <= 0x37) {
-      let code = escaped - 0x30;
-      for (let digit = 0; digit < 2; digit += 1) {
-        const next = this.byte();
-        if (next < 0x30 || next > 0x37) break;
-        code = code * 8 + (next - 0x30);
-        this.at += 1;
-      }
-      return code & 0xff;
-    }
+    if (escaped >= 0x30 && escaped <= 0x37) return this.octal(escaped);
     if (escaped === 0x0d) {
       // A backslash before a line break is a continuation and adds nothing.
       if (this.byte() === 0x0a) this.at += 1;
@@ -658,6 +653,21 @@ class Lexer {
       throw new PdfError("damaged", "string ended inside an escape");
     }
     return escaped;
+  }
+
+  /**
+   * An octal escape whose first digit is already consumed: up to two more
+   * digits, and the code taken modulo 256, as the format says.
+   */
+  private octal(first: number): number {
+    let code = first - 0x30;
+    for (let digit = 0; digit < 2; digit += 1) {
+      const next = this.byte();
+      if (next < 0x30 || next > 0x37) break;
+      code = code * 8 + (next - 0x30);
+      this.at += 1;
+    }
+    return code & 0xff;
   }
 }
 
@@ -711,20 +721,30 @@ const utf8 = new TextDecoder("utf-8");
  * `tests/houseRules.test.ts` holds the rule for the whole of `src`.
  */
 function decodeText(bytes: Uint8Array): string {
-  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
-    try {
+  return unicodeText(bytes) ?? docEncodingText(bytes);
+}
+
+/**
+ * The string as UTF-16 when a byte order mark opens it, or `null` when none
+ * does or this runtime has no decoder for the one it names.
+ */
+function unicodeText(bytes: Uint8Array): string | null {
+  if (bytes.length < 2) return null;
+  try {
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) {
       return new TextDecoder("utf-16be").decode(bytes.subarray(2));
-    } catch {
-      /* falls through to PDFDocEncoding */
     }
-  }
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
-    try {
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
       return new TextDecoder("utf-16le").decode(bytes.subarray(2));
-    } catch {
-      /* falls through to PDFDocEncoding */
     }
+  } catch {
+    /* falls through to PDFDocEncoding */
   }
+  return null;
+}
+
+/** The string as PDFDocEncoding, the encoding when no mark opens it. */
+function docEncodingText(bytes: Uint8Array): string {
   let out = "";
   for (const byte of bytes) {
     out +=
@@ -894,76 +914,119 @@ async function inflate(raw: Uint8Array, budget: Budget): Promise<Uint8Array> {
   if (typeof DecompressionStream === "undefined") {
     throw new PdfError("no-inflate", "this browser cannot inflate");
   }
-  for (const format of ["deflate", "deflate-raw"] as const) {
-    let stream: DecompressionStream;
-    try {
-      stream = new DecompressionStream(format);
-    } catch {
-      continue;
-    }
-    const copy = new Uint8Array(raw);
-    const source = new ReadableStream<Uint8Array<ArrayBuffer>>({
-      start(controller) {
-        controller.enqueue(copy);
-        controller.close();
-      },
-    });
-    const reader = source.pipeThrough(stream).getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    let broke = false;
-    for (;;) {
-      let done: boolean;
-      let value: Uint8Array | undefined;
-      try {
-        ({ done, value } = await reader.read());
-      } catch {
-        // Not a deflate stream under this format, or one that stops halfway.
-        broke = true;
-        break;
-      }
-      if (done || value === undefined) break;
-      total += value.length;
-      if (total > MAX_INFLATED_BYTES) {
-        // **Cancelled rather than drained.** The bound is on what is held, so
-        // reading the rest to find out how big it was would defeat it.
-        release(reader);
-        throw new PdfError("damaged", "a stream inflates past the limit");
-      }
-      try {
-        // **Charged as it arrives, against the same total the reads spend.**
-        // Charging nothing is what let a 1,562,153 byte file inflate
-        // 1,593,843,488, which the constant's docstring carries and this line
-        // was measured against.
-        //
-        // **That this does more than charging once per stream is stated
-        // rather than tested.** Both review seats proposed charging once,
-        // independently and in two different places, and both mutations pass
-        // every test in `pdf.test.ts`. Against either, this abandons a stream
-        // at the byte the budget runs out rather than holding it whole. Against
-        // a charge on `inflate`'s return value it also pays for a stream that
-        // emits bytes and then breaks, which that form never sees and a charge
-        // after the loop still does.
-        budget.charge(value.length);
-      } catch (error) {
-        release(reader);
-        throw error;
-      }
-      chunks.push(value);
-    }
-    if (broke) {
-      release(reader);
-      continue;
-    }
-    const out = new Uint8Array(total);
-    let at = 0;
-    for (const chunk of chunks) {
-      out.set(chunk, at);
-      at += chunk.length;
-    }
-    return out;
+  const out =
+    (await inflateAs("deflate", raw, budget)) ??
+    (await inflateAs("deflate-raw", raw, budget));
+  if (out === null) {
+    throw new PdfError(
+      "damaged",
+      "a stream is not deflate under either header",
+    );
   }
-  throw new PdfError("damaged", "a stream is not deflate under either header");
+  return out;
+}
+
+/**
+ * One attempt of `inflate`'s two, or `null` when this runtime has no such
+ * format or the bytes are not a stream under it.
+ */
+async function inflateAs(
+  format: CompressionFormat,
+  raw: Uint8Array,
+  budget: Budget,
+): Promise<Uint8Array | null> {
+  const reader = openInflater(format, raw);
+  if (reader === null) return null;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    let done: boolean;
+    let value: Uint8Array | undefined;
+    try {
+      ({ done, value } = await reader.read());
+    } catch {
+      // Not a deflate stream under this format, or one that stops halfway.
+      release(reader);
+      return null;
+    }
+    if (done || value === undefined) return concatenate(chunks);
+    total += value.length;
+    admit(reader, total, value.length, budget);
+    chunks.push(value);
+  }
+}
+
+/**
+ * A reader over `raw` inflated as `format`, or `null` when this runtime has
+ * no inflater for it.
+ */
+function openInflater(
+  format: CompressionFormat,
+  raw: Uint8Array,
+): ReadableStreamDefaultReader<Uint8Array> | null {
+  let stream: DecompressionStream;
+  try {
+    stream = new DecompressionStream(format);
+  } catch {
+    return null;
+  }
+  const copy = new Uint8Array(raw);
+  const source = new ReadableStream<Uint8Array<ArrayBuffer>>({
+    start(controller) {
+      controller.enqueue(copy);
+      controller.close();
+    },
+  });
+  return source.pipeThrough(stream).getReader();
+}
+
+/**
+ * Bound and charge one chunk before it is kept, letting go of the inflater
+ * when either refuses it. `total` already counts the chunk; `size` is its own.
+ */
+function admit(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  total: number,
+  size: number,
+  budget: Budget,
+): void {
+  if (total > MAX_INFLATED_BYTES) {
+    // **Cancelled rather than drained.** The bound is on what is held, so
+    // reading the rest to find out how big it was would defeat it.
+    release(reader);
+    throw new PdfError("damaged", "a stream inflates past the limit");
+  }
+  try {
+    // **Charged as it arrives, against the same total the reads spend.**
+    // Charging nothing is what let a 1,562,153 byte file inflate
+    // 1,593,843,488, which the constant's docstring carries and this line
+    // was measured against.
+    //
+    // **That this does more than charging once per stream is stated
+    // rather than tested.** Both review seats proposed charging once,
+    // independently and in two different places, and both mutations pass
+    // every test in `pdf.test.ts`. Against either, this abandons a stream
+    // at the byte the budget runs out rather than holding it whole. Against
+    // a charge on `inflate`'s return value it also pays for a stream that
+    // emits bytes and then breaks, which that form never sees and a charge
+    // after the loop still does.
+    budget.charge(size);
+  } catch (error) {
+    release(reader);
+    throw error;
+  }
+}
+
+function concatenate(chunks: readonly Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const chunk of chunks) total += chunk.length;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.length;
+  }
+  return out;
 }
 
 /**
@@ -1007,37 +1070,56 @@ function unpredict(data: Uint8Array, columns: number): Uint8Array {
   const previous = new Uint8Array(columns);
   for (let row = 0; row < rows; row += 1) {
     const at = row * (columns + 1);
-    const filter = data[at]!;
     const current = data.subarray(at + 1, at + 1 + columns);
     const decoded = out.subarray(row * columns, row * columns + columns);
-    for (let index = 0; index < columns; index += 1) {
-      const left = index > 0 ? decoded[index - 1]! : 0;
-      const up = previous[index]!;
-      const upLeft = index > 0 ? previous[index - 1]! : 0;
-      const byte = current[index]!;
-      switch (filter) {
-        case 0:
-          decoded[index] = byte;
-          break;
-        case 1:
-          decoded[index] = (byte + left) & 0xff;
-          break;
-        case 2:
-          decoded[index] = (byte + up) & 0xff;
-          break;
-        case 3:
-          decoded[index] = (byte + ((left + up) >> 1)) & 0xff;
-          break;
-        case 4:
-          decoded[index] = (byte + paeth(left, up, upLeft)) & 0xff;
-          break;
-        default:
-          throw new PdfError("damaged", `unknown row filter ${filter}`);
-      }
-    }
+    unpredictRow(data[at]!, current, previous, decoded);
     previous.set(decoded);
   }
   return out;
+}
+
+/** One row of `unpredict`, written into `decoded` against the row above it. */
+function unpredictRow(
+  filter: number,
+  current: Uint8Array,
+  previous: Uint8Array,
+  decoded: Uint8Array,
+): void {
+  for (let index = 0; index < decoded.length; index += 1) {
+    const left = index > 0 ? decoded[index - 1]! : 0;
+    const upLeft = index > 0 ? previous[index - 1]! : 0;
+    decoded[index] = unfilter(
+      filter,
+      current[index]!,
+      left,
+      previous[index]!,
+      upLeft,
+    );
+  }
+}
+
+/** One byte through PNG row filter `filter`, given its three neighbours. */
+function unfilter(
+  filter: number,
+  byte: number,
+  left: number,
+  up: number,
+  upLeft: number,
+): number {
+  switch (filter) {
+    case 0:
+      return byte;
+    case 1:
+      return (byte + left) & 0xff;
+    case 2:
+      return (byte + up) & 0xff;
+    case 3:
+      return (byte + ((left + up) >> 1)) & 0xff;
+    case 4:
+      return (byte + paeth(left, up, upLeft)) & 0xff;
+    default:
+      throw new PdfError("damaged", `unknown row filter ${filter}`);
+  }
 }
 
 /**
@@ -1071,6 +1153,71 @@ function objectHeader(lexer: Lexer): number | null {
 }
 
 /**
+ * Where a stream's bytes start in the window, past the `stream` keyword and
+ * its line break, or `null` when the keyword is not at `after`.
+ */
+function streamStart(window: Uint8Array, after: number): number | null {
+  const lexer = new Lexer(window, after);
+  lexer.skip();
+  if (!lexer.take("stream")) return null;
+  // The keyword is followed by CRLF or LF, and by nothing else.
+  if (lexer.take("\r\n")) {
+    /* consumed */
+  } else if (!lexer.take("\n")) {
+    throw new PdfError("damaged", "a stream keyword with no line break");
+  }
+  return lexer.at;
+}
+
+/**
+ * A resolved `/Length` when it can be believed: a whole number, no more than
+ * one stream may claim, and ending inside the file. `null` otherwise.
+ */
+function believableLength(
+  length: PdfValue,
+  from: number,
+  size: number,
+): number | null {
+  return typeof length === "number" &&
+    Number.isInteger(length) &&
+    length >= 0 &&
+    length <= MAX_STREAM_BYTES &&
+    from + length <= size
+    ? length
+    : null;
+}
+
+/**
+ * A classic table's subsection header, its first object number and its
+ * count, or `null` when either is not a number. `numeric` is what refuses an
+ * empty token, for the reason `Document.classicTable` states.
+ */
+function subsectionHeader(lexer: Lexer): readonly [number, number] | null {
+  const first = numeric(lexer);
+  lexer.skip();
+  const count = numeric(lexer);
+  if (first === null || count === null) return null;
+  return [first, count];
+}
+
+/**
+ * One classic table entry, consumed, answering its offset when it is in use
+ * and `null` when it is free or its offset is not a number.
+ */
+function classicEntry(lexer: Lexer): number | null {
+  lexer.skip();
+  const offset = numeric(lexer);
+  lexer.skip();
+  lexer.token(); // the generation, which the entry is not looked up by
+  lexer.skip();
+  const used = lexer.take("n");
+  if (!used && !lexer.take("f")) {
+    throw new PdfError("damaged", "a cross reference entry with no kind");
+  }
+  return used ? offset : null;
+}
+
+/**
  * A cross reference stream's `/W`, the byte width of each of a row's three
  * fields, or `null` for one that describes no row this reader can read: not an
  * array of three, or holding a width that is not a whole number from 0 to 8.
@@ -1101,6 +1248,19 @@ function indexRuns(dictionary: PdfDict): number[] {
   }
   const size = dictionary.entries.get("Size");
   return [0, typeof size === "number" ? size : 0];
+}
+
+/**
+ * Whether one `/Index` run is worth reading: `false` for a member that was not
+ * a whole number, which ends the reading, and a throw for a run no real file
+ * declares, since `/Index` is a parsed array a file can put anything in.
+ */
+function streamRunIsReal(first: number, count: number): boolean {
+  if (!Number.isInteger(first) || !Number.isInteger(count)) return false;
+  if (first < 0 || count < 0 || count > MAX_XREF_ENTRIES) {
+    throw new PdfError("damaged", "a cross reference run of no real size");
+  }
+  return true;
 }
 
 /**
@@ -1148,14 +1308,9 @@ class Document {
 
   /** Walk the `/Prev` chain from `startxref`, newest section first. */
   async load(): Promise<void> {
-    const tail = await this.source.read(
-      Math.max(0, this.source.size - TAIL_BYTES),
-      TAIL_BYTES,
-    );
-    const start = lastStartxref(
-      tail,
-      Math.max(0, this.source.size - TAIL_BYTES),
-    );
+    const base = Math.max(0, this.source.size - TAIL_BYTES);
+    const tail = await this.source.read(base, TAIL_BYTES);
+    const start = lastStartxref(tail, base);
     if (start === null) throw new PdfError("not-a-pdf", "no startxref");
 
     const seen = new Set<number>();
@@ -1164,20 +1319,7 @@ class Document {
       seen.add(at);
       const section: PdfDict | null = await this.section(at);
       if (section === null) break;
-      for (const [key, value] of section.entries) {
-        if (!this.trailer.has(key)) this.trailer.set(key, value);
-      }
-      // **A hybrid file's `/XRefStm` is followed before `/Prev`**, because it
-      // holds the entries the classic table beside it deliberately omits: a
-      // reader that skipped it would find the table's own objects and none of
-      // the ones in object streams.
-      const hybrid = section.entries.get("XRefStm");
-      if (typeof hybrid === "number" && !seen.has(hybrid)) {
-        seen.add(hybrid);
-        await this.section(hybrid);
-      }
-      const previous = section.entries.get("Prev");
-      at = typeof previous === "number" ? previous : null;
+      at = await this.absorb(section, seen);
     }
     if (this.xref.size === 0) {
       throw new PdfError(
@@ -1185,6 +1327,30 @@ class Document {
         "no cross reference this reader can read",
       );
     }
+  }
+
+  /**
+   * Take one section's trailer keys and its hybrid stream, answering the
+   * offset its `/Prev` names, or `null` where it names none.
+   */
+  private async absorb(
+    section: PdfDict,
+    seen: Set<number>,
+  ): Promise<number | null> {
+    for (const [key, value] of section.entries) {
+      if (!this.trailer.has(key)) this.trailer.set(key, value);
+    }
+    // **A hybrid file's `/XRefStm` is followed before `/Prev`**, because it
+    // holds the entries the classic table beside it deliberately omits: a
+    // reader that skipped it would find the table's own objects and none of
+    // the ones in object streams.
+    const hybrid = section.entries.get("XRefStm");
+    if (typeof hybrid === "number" && !seen.has(hybrid)) {
+      seen.add(hybrid);
+      await this.section(hybrid);
+    }
+    const previous = section.entries.get("Prev");
+    return typeof previous === "number" ? previous : null;
   }
 
   /**
@@ -1243,33 +1409,28 @@ class Document {
       // A `null` rather than a throw: a table that ends where a subsection
       // header should be is a truncated file and not a hostile one. The
       // docstring above carries the rest.
-      const first = numeric(lexer);
-      lexer.skip();
-      const count = numeric(lexer);
-      if (first === null || count === null) return null;
-      // No check for a negative here and one in `crossReferenceStream`, which
-      // is not an oversight either way: `numeric` matches digits only, so a
-      // negative cannot arrive here, while a cross reference stream's `/Index`
-      // is a parsed array and a file can put anything in it.
-      if (count > MAX_XREF_ENTRIES) {
-        throw new PdfError("damaged", "a cross reference run of no real size");
-      }
-      for (let index = 0; index < count; index += 1) {
-        lexer.skip();
-        const offset = numeric(lexer);
-        lexer.skip();
-        lexer.token(); // the generation, which the entry is not looked up by
-        lexer.skip();
-        const used = lexer.take("n");
-        if (!used && !lexer.take("f")) {
-          throw new PdfError("damaged", "a cross reference entry with no kind");
-        }
-        if (used && offset !== null && offset > 0) {
-          this.remember(first + index, { in: "file", at: offset });
-        }
-      }
+      const header = subsectionHeader(lexer);
+      if (header === null) return null;
+      this.classicRun(lexer, header[0], header[1]);
       if (lexer.at === before) {
         throw new PdfError("damaged", "a cross reference run consumed nothing");
+      }
+    }
+  }
+
+  /** One subsection's `count` entries, numbered from `first`. */
+  private classicRun(lexer: Lexer, first: number, count: number): void {
+    // No check for a negative here and one in `streamRunIsReal`, which
+    // is not an oversight either way: `numeric` matches digits only, so a
+    // negative cannot arrive here, while a cross reference stream's `/Index`
+    // is a parsed array and a file can put anything in it.
+    if (count > MAX_XREF_ENTRIES) {
+      throw new PdfError("damaged", "a cross reference run of no real size");
+    }
+    for (let index = 0; index < count; index += 1) {
+      const offset = classicEntry(lexer);
+      if (offset !== null && offset > 0) {
+        this.remember(first + index, { in: "file", at: offset });
       }
     }
   }
@@ -1302,32 +1463,54 @@ class Document {
     for (let pair = 0; pair + 1 < index.length; pair += 2) {
       const first = index[pair]!;
       const count = index[pair + 1]!;
-      if (!Number.isInteger(first) || !Number.isInteger(count)) break;
-      if (first < 0 || count < 0 || count > MAX_XREF_ENTRIES) {
-        throw new PdfError("damaged", "a cross reference run of no real size");
-      }
-      for (let step = 0; step < count; step += 1) {
-        // **A bound and an answer both.** Past the end every field reads `NaN`,
-        // which remembers nothing, so without this a run is walked to the count
-        // it promises. And a last record cut inside its last field still has a
-        // whole type and offset, and would be remembered from bytes the stream
-        // does not hold.
-        if (cursor + record > data.length) break;
-        const type = readField(data, cursor, w[0]);
-        const second = readField(data, cursor + w[0], w[1]);
-        const third = readField(data, cursor + w[0] + w[1], w[2]);
-        cursor += record;
-        // A zero width first field means the type is 1, which the format says.
-        const kind = w[0] === 0 ? 1 : type;
-        const num = first + step;
-        if (kind === 1 && second > 0) {
-          this.remember(num, { in: "file", at: second });
-        } else if (kind === 2) {
-          this.remember(num, { in: "stream", stream: second, index: third });
-        }
-      }
+      if (!streamRunIsReal(first, count)) break;
+      cursor = this.streamRun(data, w, first, count, cursor);
     }
     return dictionary;
+  }
+
+  /**
+   * One `/Index` run of a cross reference stream, read from `cursor`,
+   * answering where the next run starts.
+   */
+  private streamRun(
+    data: Uint8Array,
+    w: readonly [number, number, number],
+    first: number,
+    count: number,
+    cursor: number,
+  ): number {
+    const record = w[0] + w[1] + w[2];
+    let at = cursor;
+    for (let step = 0; step < count; step += 1) {
+      // **A bound and an answer both.** Past the end every field reads `NaN`,
+      // which remembers nothing, so without this a run is walked to the count
+      // it promises. And a last record cut inside its last field still has a
+      // whole type and offset, and would be remembered from bytes the stream
+      // does not hold.
+      if (at + record > data.length) break;
+      const type = readField(data, at, w[0]);
+      const second = readField(data, at + w[0], w[1]);
+      const third = readField(data, at + w[0] + w[1], w[2]);
+      at += record;
+      // A zero width first field means the type is 1, which the format says.
+      this.rememberRow(first + step, w[0] === 0 ? 1 : type, second, third);
+    }
+    return at;
+  }
+
+  /** One cross reference stream row: in the file, in a stream, or free. */
+  private rememberRow(
+    num: number,
+    kind: number,
+    second: number,
+    third: number,
+  ): void {
+    if (kind === 1 && second > 0) {
+      this.remember(num, { in: "file", at: second });
+    } else if (kind === 2) {
+      this.remember(num, { in: "stream", stream: second, index: third });
+    }
   }
 
   private remember(num: number, entry: Entry): void {
@@ -1351,41 +1534,9 @@ class Document {
     after: number,
     window: Uint8Array,
   ): Promise<Uint8Array | null> {
-    const lexer = new Lexer(window, after);
-    lexer.skip();
-    if (!lexer.take("stream")) return null;
-    // The keyword is followed by CRLF or LF, and by nothing else.
-    if (lexer.take("\r\n")) {
-      /* consumed */
-    } else if (!lexer.take("\n")) {
-      throw new PdfError("damaged", "a stream keyword with no line break");
-    }
-    const from = at + lexer.at;
-
-    const length = await this.resolve(dictionary.entries.get("Length"));
-    let raw: Uint8Array;
-    if (
-      typeof length === "number" &&
-      Number.isInteger(length) &&
-      length >= 0 &&
-      length <= MAX_STREAM_BYTES &&
-      from + length <= this.source.size
-    ) {
-      raw =
-        from + length <= at + window.length
-          ? window.subarray(lexer.at, lexer.at + length)
-          : await this.source.read(from, length);
-    } else {
-      // **A declared length that is absent, a reference this reader has not
-      // resolved yet, or a lie is not fatal**: the format's own recovery is to
-      // read to `endstream`. **0 of the 123 reach it**, so this arm has a test
-      // behind it and no file; what it stops is a wrong `/Length` costing the
-      // whole document rather than one stream.
-      const search = await this.source.read(from, MAX_STREAM_BYTES);
-      const end = indexOfAscii(search, "endstream");
-      if (end < 0) throw new PdfError("damaged", "a stream with no end");
-      raw = search.subarray(0, end);
-    }
+    const start = streamStart(window, after);
+    if (start === null) return null;
+    const raw = await this.rawStream(at, dictionary, start, window);
 
     const names = filterNames(dictionary.entries.get("Filter"));
     if (names.length === 0) return raw;
@@ -1397,6 +1548,42 @@ class Document {
     const inflated = await inflate(raw, this.source);
     const columns = await this.predictorColumns(dictionary);
     return columns === null ? inflated : unpredict(inflated, columns);
+  }
+
+  /**
+   * A stream's bytes as stored, before any filter: `/Length` of them from
+   * `start` in the window, when that length is believable.
+   */
+  private async rawStream(
+    at: number,
+    dictionary: PdfDict,
+    start: number,
+    window: Uint8Array,
+  ): Promise<Uint8Array> {
+    const from = at + start;
+    const length = believableLength(
+      await this.resolve(dictionary.entries.get("Length")),
+      from,
+      this.source.size,
+    );
+    if (length === null) return await this.toEndstream(from);
+    return from + length <= at + window.length
+      ? window.subarray(start, start + length)
+      : await this.source.read(from, length);
+  }
+
+  /**
+   * **A declared length that is absent, a reference this reader has not
+   * resolved yet, or a lie is not fatal**: the format's own recovery is to
+   * read to `endstream`. **0 of the 123 reach it**, so this arm has a test
+   * behind it and no file; what it stops is a wrong `/Length` costing the
+   * whole document rather than one stream.
+   */
+  private async toEndstream(from: number): Promise<Uint8Array> {
+    const search = await this.source.read(from, MAX_STREAM_BYTES);
+    const end = indexOfAscii(search, "endstream");
+    if (end < 0) throw new PdfError("damaged", "a stream with no end");
+    return search.subarray(0, end);
   }
 
   /**
@@ -1480,28 +1667,52 @@ class Document {
     // another on the page's thread, so seconds per file is the cost.
     const contents = new Map<number, PdfValue>();
     this.streams.set(num, contents);
+    await this.fillObjectStream(entry.at, contents);
+    return contents;
+  }
 
-    const window = await this.source.read(entry.at, OBJECT_WINDOW_BYTES);
+  /** Read the object stream at `at` into `contents`, already cached. */
+  private async fillObjectStream(
+    at: number,
+    contents: Map<number, PdfValue>,
+  ): Promise<void> {
+    const window = await this.source.read(at, OBJECT_WINDOW_BYTES);
     const header = new Lexer(window);
-    if (objectHeader(header) === null) return contents;
+    if (objectHeader(header) === null) return;
     const dictionary = header.object();
-    if (!isDict(dictionary)) return contents;
+    if (!isDict(dictionary)) return;
 
-    const data = await this.streamBytes(
-      entry.at,
-      dictionary,
-      header.at,
-      window,
-    );
-    if (data === null) return contents;
+    const data = await this.streamBytes(at, dictionary, header.at, window);
+    if (data === null) return;
 
+    const size = await this.objectStreamSize(dictionary);
+    if (size === null) return;
+    this.members(data, size.count, size.first, contents);
+  }
+
+  /**
+   * An object stream's `/N` and `/First`, or `null` when either is not a
+   * number, and a throw for a count or an offset no real file declares.
+   */
+  private async objectStreamSize(
+    dictionary: PdfDict,
+  ): Promise<{ readonly count: number; readonly first: number } | null> {
     const count = await this.resolve(dictionary.entries.get("N"));
     const first = await this.resolve(dictionary.entries.get("First"));
-    if (typeof count !== "number" || typeof first !== "number") return contents;
+    if (typeof count !== "number" || typeof first !== "number") return null;
     if (count < 0 || count > MAX_OBJSTM_OBJECTS || first < 0) {
       throw new PdfError("damaged", "an object stream of no real size");
     }
+    return { count, first };
+  }
 
+  /** Parse an object stream's `count` members into `contents`, charged. */
+  private members(
+    data: Uint8Array,
+    count: number,
+    first: number,
+    contents: Map<number, PdfValue>,
+  ): void {
     const pairs = new Lexer(data);
     for (let index = 0; index < count; index += 1) {
       pairs.skip();
@@ -1541,7 +1752,6 @@ class Document {
       // it is a bound that can never fire.
       this.source.charge(consumed);
     }
-    return contents;
   }
 
   async trailerValue(key: string): Promise<PdfValue> {
@@ -1664,14 +1874,36 @@ interface XmpRecord {
 const RDF_OPEN = /<([A-Za-z_][\w.-]*:)?RDF[\s>]/;
 
 function readXmp(packet: string): XmpRecord | null {
+  const xml = rdfOf(packet);
+  if (xml === null) return null;
+  const root = parseRdf(xml);
+  if (root === null) return null;
+  const first = (local: string): string | null =>
+    dcValues(root, local)[0] ?? null;
+  return {
+    title: first("title"),
+    creators: dcValues(root, "creator"),
+    identifiers: dcValues(root, "identifier"),
+    publisher: first("publisher"),
+    language: first("language"),
+    date: first("date"),
+    description: first("description"),
+  };
+}
+
+/** The packet cut to its RDF root element, or `null` when it holds none. */
+function rdfOf(packet: string): string | null {
   const open = RDF_OPEN.exec(packet);
   if (open === null) return null;
   const prefix = open[1] ?? "";
   const closing = `</${prefix}RDF>`;
   const end = packet.lastIndexOf(closing);
   if (end < open.index) return null;
-  const xml = packet.slice(open.index, end + closing.length);
+  return packet.slice(open.index, end + closing.length);
+}
 
+/** The RDF root element of `xml`, or `null` when it does not parse to one. */
+function parseRdf(xml: string): Element | null {
   // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
   // does not choose may throw where the specification answers `parsererror`.
   // The DOM's own, spelled through the parser: `Document` in this module is
@@ -1684,42 +1916,28 @@ function readXmp(packet: string): XmpRecord | null {
   }
   const root = document.documentElement;
   if (!root || root.localName !== "RDF") return null;
+  return root;
+}
 
-  /** Every value under the first `dc:` element of this name, in order. */
-  function values(local: string): string[] {
-    const found = root!.getElementsByTagNameNS(
-      "http://purl.org/dc/elements/1.1/",
-      local,
-    );
-    const element = found[0];
-    if (element === undefined) return [];
-    const items = element.getElementsByTagNameNS(
-      "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
-      "li",
-    );
-    const raw =
-      items.length > 0
-        ? Array.from(items, (item) => item.textContent ?? "")
-        : [element.textContent ?? ""];
-    return raw
-      .map((value) => clean(value))
-      .filter((value): value is string => value !== null);
-  }
-
-  const [publisher] = values("publisher");
-  const [language] = values("language");
-  const [date] = values("date");
-  const [description] = values("description");
-  const [title] = values("title");
-  return {
-    title: title ?? null,
-    creators: values("creator"),
-    identifiers: values("identifier"),
-    publisher: publisher ?? null,
-    language: language ?? null,
-    date: date ?? null,
-    description: description ?? null,
-  };
+/** Every value under the first `dc:` element of this name, in order. */
+function dcValues(root: Element, local: string): string[] {
+  const found = root.getElementsByTagNameNS(
+    "http://purl.org/dc/elements/1.1/",
+    local,
+  );
+  const element = found[0];
+  if (element === undefined) return [];
+  const items = element.getElementsByTagNameNS(
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "li",
+  );
+  const raw =
+    items.length > 0
+      ? Array.from(items, (item) => item.textContent ?? "")
+      : [element.textContent ?? ""];
+  return raw
+    .map((value) => clean(value))
+    .filter((value): value is string => value !== null);
 }
 
 // --- the fields -------------------------------------------------------------
@@ -1746,8 +1964,7 @@ function readYear(candidate: string | null): number | null {
  * Measured 3 of 123, and 2 of those 3 are DOIs rather than ISBNs, which is why
  * `parseIsbn` decides which of them is an ISBN rather than the field's name.
  */
-function readIdentifiers(xmp: XmpRecord | null): FileIdentifier[] {
-  if (xmp === null) return [];
+function readIdentifiers(xmp: XmpRecord): FileIdentifier[] {
   return xmp.identifiers.map((value) => ({
     scheme: parseIsbn(value) === null ? null : "ISBN",
     value,
@@ -1776,10 +1993,10 @@ function readIdentifiers(xmp: XmpRecord | null): FileIdentifier[] {
  * XMP's `dc:creator` is already a sequence of separate names, so nothing has
  * to be split there either.
  */
-function readAuthors(author: string | null, xmp: XmpRecord | null): string[] {
+function readAuthors(author: string | null, xmp: XmpRecord): string[] {
   const kept = usableAuthor(author);
   if (kept !== null) return [kept];
-  return (xmp?.creators ?? [])
+  return xmp.creators
     .map((value) => usableAuthor(clean(value)))
     .filter((value): value is string => value !== null);
 }
@@ -1796,81 +2013,7 @@ function readAuthors(author: string | null, xmp: XmpRecord | null): string[] {
  */
 export async function readPdf(file: Blob): Promise<PdfReading> {
   try {
-    const source = new Source(file);
-    const head = await source.read(0, 8);
-    // **The header is checked before anything else is believed**, so a file of
-    // another kind that a member picked is refused before an offset inside it
-    // has been read. `%PDF-` and not `%PDF-1.`, because PDF 2.0 exists.
-    if (indexOfAscii(head, "%PDF-") !== 0) {
-      return { ok: false, failure: "not-a-pdf" };
-    }
-
-    const document = new Document(source);
-    await document.load();
-
-    // **Before any string is decoded.** Under encryption every string in the
-    // file is ciphertext, and decoding one would put noise in front of a member
-    // as though it were a title.
-    if (await document.encrypted()) {
-      return { ok: false, failure: "protected" };
-    }
-
-    const info = await document.trailerValue("Info");
-    const dictionary = isDict(info) ? info : null;
-    async function field(name: string): Promise<string | null> {
-      const value = await document.resolve(dictionary?.entries.get(name));
-      if (typeof value !== "object" || value === null) return null;
-      if (value.kind !== "string") return null;
-      return clean(decodeText(value.value));
-    }
-
-    // The packet's bytes come back through the same path every other stream
-    // takes, so its bound is `MAX_INFLATED_BYTES` and not a second one here.
-    const root = await document.trailerValue("Root");
-    const packet = isDict(root) ? await document.metadataBytes(root) : null;
-    const xmp = packet === null ? null : readXmp(utf8.decode(packet));
-
-    const title =
-      usableTitle(await field("Title")) ?? usableTitle(xmp?.title ?? null);
-    const description = (await field("Subject")) ?? xmp?.description ?? null;
-    const author = await field("Author");
-    const authors = readAuthors(author, xmp);
-
-    return {
-      ok: true,
-      metadata: {
-        title,
-        // No field in either block means a subtitle, and no separator in a
-        // title is reliably one: `Practical Guide to: Oracle SQL` is a whole
-        // title with a colon in it.
-        subtitle: null,
-        authors,
-        // `/Author` is one string and may name several people; XMP's
-        // `dc:creator` is a sequence. `readAuthors` takes the first that has
-        // a name, so the list is separated exactly when `/Author` had none.
-        authorsSeparated: usableAuthor(author) === null,
-        // **The one reader of the five that states no subject, and the
-        // exclusion is worth keeping exact.** `/Subject` is this format's
-        // description and is read as one six lines above; a reader taking
-        // "every format states a subject" literally would file the blurb
-        // twice, once as prose and once as a heading. `/Keywords` is the key
-        // that would be a candidate and is prose too, which
-        // `readIdentifiers` already records: whether a PDF's keywords are
-        // subjects is a decision about that field and not about this one.
-        categories: [],
-        identifiers: readIdentifiers(xmp),
-        isbn: firstIsbn(xmp),
-        publisher: xmp?.publisher ?? null,
-        year: readYear(xmp?.date ?? null),
-        language: xmp?.language ?? null,
-        description,
-        // Neither block has a field for either, so these are absent by the
-        // format rather than unread here. A book whose series matters arrives
-        // from the catalogue lookup or from the member.
-        seriesName: null,
-        seriesIndex: null,
-      },
-    };
+    return await readDocument(new Source(file));
   } catch (error) {
     // **Only this class**, so a defect in the reader stays a defect: the scan
     // page catches anything else and still reaches the filename path, and a
@@ -1882,8 +2025,114 @@ export async function readPdf(file: Blob): Promise<PdfReading> {
   }
 }
 
-function firstIsbn(xmp: XmpRecord | null): string | null {
-  for (const value of xmp?.identifiers ?? []) {
+/** `readPdf` short of its catch: a `PdfError` a file raises escapes here. */
+async function readDocument(source: Source): Promise<PdfReading> {
+  const head = await source.read(0, 8);
+  // **The header is checked before anything else is believed**, so a file of
+  // another kind that a member picked is refused before an offset inside it
+  // has been read. `%PDF-` and not `%PDF-1.`, because PDF 2.0 exists.
+  if (indexOfAscii(head, "%PDF-") !== 0) {
+    return { ok: false, failure: "not-a-pdf" };
+  }
+
+  const document = new Document(source);
+  await document.load();
+
+  // **Before any string is decoded.** Under encryption every string in the
+  // file is ciphertext, and decoding one would put noise in front of a member
+  // as though it were a title.
+  if (await document.encrypted()) {
+    return { ok: false, failure: "protected" };
+  }
+  return { ok: true, metadata: await readMetadata(document) };
+}
+
+/** The six fields, from the information dictionary and the XMP packet. */
+async function readMetadata(document: Document): Promise<FileMetadata> {
+  const info = await document.trailerValue("Info");
+  const dictionary = isDict(info) ? info : null;
+  const xmp = await readPacket(document);
+
+  const title =
+    usableTitle(await infoText(document, dictionary, "Title")) ??
+    usableTitle(xmp.title);
+  const description =
+    (await infoText(document, dictionary, "Subject")) ?? xmp.description;
+  const author = await infoText(document, dictionary, "Author");
+
+  return {
+    title,
+    // No field in either block means a subtitle, and no separator in a
+    // title is reliably one: `Practical Guide to: Oracle SQL` is a whole
+    // title with a colon in it.
+    subtitle: null,
+    authors: readAuthors(author, xmp),
+    // `/Author` is one string and may name several people; XMP's
+    // `dc:creator` is a sequence. `readAuthors` takes the first that has
+    // a name, so the list is separated exactly when `/Author` had none.
+    authorsSeparated: usableAuthor(author) === null,
+    // **The one reader of the five that states no subject, and the
+    // exclusion is worth keeping exact.** `/Subject` is this format's
+    // description and is read as one above; a reader taking "every format
+    // states a subject" literally would file the blurb twice, once as
+    // prose and once as a heading. `/Keywords` is the key that would be a
+    // candidate and is prose too, which `readIdentifiers` already records:
+    // whether a PDF's keywords are subjects is a decision about that field
+    // and not about this one.
+    categories: [],
+    identifiers: readIdentifiers(xmp),
+    isbn: firstIsbn(xmp),
+    publisher: xmp.publisher,
+    year: readYear(xmp.date),
+    language: xmp.language,
+    description,
+    // Neither block has a field for either, so these are absent by the
+    // format rather than unread here. A book whose series matters arrives
+    // from the catalogue lookup or from the member.
+    seriesName: null,
+    seriesIndex: null,
+  };
+}
+
+/** One text field of the information dictionary, decoded, or `null`. */
+async function infoText(
+  document: Document,
+  dictionary: PdfDict | null,
+  name: string,
+): Promise<string | null> {
+  const value = await document.resolve(dictionary?.entries.get(name));
+  if (typeof value !== "object" || value === null) return null;
+  if (value.kind !== "string") return null;
+  return clean(decodeText(value.value));
+}
+
+/** What a file carries no XMP packet for: every field absent. */
+const NO_XMP: XmpRecord = {
+  title: null,
+  creators: [],
+  identifiers: [],
+  publisher: null,
+  language: null,
+  date: null,
+  description: null,
+};
+
+/**
+ * The catalogue's XMP packet, read, or `NO_XMP` when there is none to read.
+ *
+ * The packet's bytes come back through the same path every other stream
+ * takes, so its bound is `MAX_INFLATED_BYTES` and not a second one here.
+ */
+async function readPacket(document: Document): Promise<XmpRecord> {
+  const root = await document.trailerValue("Root");
+  if (!isDict(root)) return NO_XMP;
+  const packet = await document.metadataBytes(root);
+  if (packet === null) return NO_XMP;
+  return readXmp(utf8.decode(packet)) ?? NO_XMP;
+}
+
+function firstIsbn(xmp: XmpRecord): string | null {
+  for (const value of xmp.identifiers) {
     const isbn = parseIsbn(value);
     if (isbn !== null) return isbn;
   }

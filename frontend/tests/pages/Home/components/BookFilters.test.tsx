@@ -134,6 +134,95 @@ describe("the collection filter", () => {
   });
 });
 
+describe("the location filter", () => {
+  it("is absent while the library names no location", () => {
+    renderFilters();
+
+    expect(screen.queryByLabelText("Where it is")).not.toBeInTheDocument();
+  });
+
+  it("offers each location with its count", () => {
+    renderFilters({ locations: [{ name: "Attic", book_count: 5 }] });
+
+    expect(
+      screen.getByRole("option", { name: "Attic (5)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reports a chosen location by its name", async () => {
+    const props = renderFilters({
+      locations: [{ name: "Attic", book_count: 5 }],
+    });
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Where it is"),
+      "Attic",
+    );
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ location: "Attic" });
+  });
+
+  it("can clear a location the list no longer names", async () => {
+    const props = renderFilters({
+      filters: { ...DEFAULT_FILTERS, location: "Attic" },
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText("Where it is"), "");
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ location: null });
+  });
+});
+
+describe("the copy filters", () => {
+  it("reports a chosen format", async () => {
+    const props = renderFilters();
+
+    await userEvent.selectOptions(screen.getByLabelText("Format"), "ebook");
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ format: "ebook" });
+  });
+
+  it("reports any format as null rather than an empty string", async () => {
+    const props = renderFilters({
+      filters: { ...DEFAULT_FILTERS, format: "ebook" },
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText("Format"), "");
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ format: null });
+  });
+
+  it("reports a chosen lending answer", async () => {
+    const props = renderFilters();
+
+    await userEvent.selectOptions(screen.getByLabelText("Lending"), "happy");
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ lending: "happy" });
+  });
+
+  it("reports any lending answer as null rather than an empty string", async () => {
+    const props = renderFilters({
+      filters: { ...DEFAULT_FILTERS, lending: "happy" },
+    });
+
+    await userEvent.selectOptions(screen.getByLabelText("Lending"), "");
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ lending: null });
+  });
+
+  it("turns the discuss toggle off again once it is on", async () => {
+    const props = renderFilters({
+      filters: { ...DEFAULT_FILTERS, discuss: true },
+    });
+    const toggle = screen.getByRole("button", { name: "Talk about it" });
+
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(toggle);
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ discuss: false });
+  });
+});
+
 describe("the author chip", () => {
   it("is absent until a link filtered by one", () => {
     renderFilters();
@@ -234,6 +323,47 @@ describe("the classification panel", () => {
   });
 });
 
+describe("the status and ownership strips", () => {
+  it("reports a status pill as a status", async () => {
+    const props = renderFilters();
+
+    await userEvent.click(screen.getByRole("button", { name: "Reading" }));
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ status: "reading" });
+  });
+
+  it("reports a chosen sort", async () => {
+    const props = renderFilters();
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Sort books"),
+      "author",
+    );
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ sort: "author" });
+  });
+
+  it("reports an ownership pill as an ownership", async () => {
+    const props = renderFilters();
+    const strip = screen.getByRole("group", { name: "Ownership" });
+
+    await userEvent.click(
+      within(strip).getByRole("button", { name: "On the shelf" }),
+    );
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ ownership: "owned" });
+  });
+
+  it("presses the ownership pill that is on", () => {
+    renderFilters({ filters: { ...DEFAULT_FILTERS, ownership: "owned" } });
+    const strip = screen.getByRole("group", { name: "Ownership" });
+
+    expect(
+      within(strip).getByRole("button", { name: "On the shelf" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
 describe("the view group", () => {
   it("offers every view while the mode is known", () => {
     renderFilters();
@@ -241,6 +371,14 @@ describe("the view group", () => {
     for (const name of ["Covers", "List", "Table"]) {
       expect(screen.getByRole("button", { name })).toBeEnabled();
     }
+  });
+
+  it("sets the view a pressed button names", async () => {
+    const props = renderFilters();
+
+    await userEvent.click(screen.getByRole("button", { name: "Table" }));
+
+    expect(props.view.set).toHaveBeenCalledWith("table");
   });
 
   it("disables the group until the mode is known", async () => {

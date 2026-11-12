@@ -134,126 +134,27 @@ export default function LookupResult({
 
       <div className="p-5">
         {draft.notFound ? (
-          <>
-            <p className="text-paper-600 text-sm mb-3 dark:text-paper-400">
-              {t(
-                enteredByHand ? "scan.unansweredManual" : "scan.notFoundManual",
-                {
-                  isbn: draft.isbn,
-                },
-              )}
-            </p>
-            <label
-              htmlFor="manual-title"
-              className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-            >
-              {t("scan.titleRequired")}
-            </label>
-            <input
-              id="manual-title"
-              type="text"
-              value={draft.title}
-              onChange={(event) =>
-                onChange({ draft: { ...draft, title: event.target.value } })
-              }
-              className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm mb-2 dark:border-paper-700"
-              placeholder={t("scan.titlePlaceholder")}
-            />
-            <label
-              htmlFor="manual-author"
-              className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-            >
-              {t("scan.authorField")}
-            </label>
-            <input
-              id="manual-author"
-              type="text"
-              value={draft.author ?? ""}
-              onChange={(event) =>
-                // A cleared box is no author, which the column holds as null:
-                // `""` would be a second spelling of the same absence.
-                onChange({
-                  draft: { ...draft, author: event.target.value || null },
-                })
-              }
-              className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
-              placeholder={t("scan.authorPlaceholder")}
-            />
-          </>
+          <ManualEntry
+            draft={draft}
+            enteredByHand={enteredByHand}
+            onChange={onChange}
+          />
         ) : (
-          <>
-            <h2 className="text-lg font-bold leading-tight">{draft.title}</h2>
-            {draft.subtitle && (
-              <p className="text-paper-600 text-sm mt-0.5 dark:text-paper-300">
-                {draft.subtitle}
-              </p>
-            )}
-            {draft.author && (
-              <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
-                {t("book.by", { author: draft.author })}
-              </p>
-            )}
-            {draft.publisher && (
-              <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
-                {draft.publisher}
-                {draft.year ? ` · ${draft.year}` : ""}
-              </p>
-            )}
-            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
-              {t("book.isbn", { isbn: draft.isbn })}
-            </p>
-          </>
+          <CatalogueSummary draft={draft} />
         )}
 
         <AlreadyHeldNotice draft={draft} refused={error != null} />
 
-        {tags.length > 0 && (
-          <div className="mt-4">
-            <p className="text-sm font-medium text-paper-700 mb-2 dark:text-paper-200">
-              {t("library.tags")}
-              {tagIds.length + tagNames.length > 0 && (
-                <span className="ml-1.5 text-xs text-paper-600 dark:text-paper-400">
-                  {/* Both, because a typed name is as selected as a chip is
-                      and counting only the ids read as the typing having
-                      been lost. */}
-                  {t("scan.tagsSelected", {
-                    count: tagIds.length + tagNames.length,
-                  })}
-                </span>
-              )}
-            </p>
-            <TagPicker
-              tags={tags}
-              selectedIds={tagIds}
-              onToggle={onToggleTag}
-              onCreate={onCreateTag}
-              pending={{ names: tagNames, onForget: onForgetTagName }}
-            />
-          </div>
-        )}
+        <TagSection
+          tags={tags}
+          tagIds={tagIds}
+          tagNames={tagNames}
+          onToggleTag={onToggleTag}
+          onCreateTag={onCreateTag}
+          onForgetTagName={onForgetTagName}
+        />
 
-        <div className="mt-4">
-          <label
-            htmlFor="cover-file"
-            className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-          >
-            {draft.cover_url ? t("scan.replaceCover") : t("scan.addCover")}
-          </label>
-          <input
-            id="cover-file"
-            type="file"
-            accept="image/*"
-            onChange={(event) =>
-              onChange({ coverFile: event.target.files?.[0] ?? null })
-            }
-            className="block w-full text-sm text-paper-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-accent-50 file:text-accent-700 hover:file:bg-accent-100 dark:text-paper-400"
-          />
-          {coverFile && (
-            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
-              {coverFile.name}
-            </p>
-          )}
-        </div>
+        <CoverField draft={draft} coverFile={coverFile} onChange={onChange} />
 
         <div className="mt-4">
           <LocationField
@@ -296,62 +197,11 @@ export default function LookupResult({
           </span>
         </label>
 
-        {error != null && (
-          <div className="mt-3 space-y-2">
-            {/* The trash refusal names no Book, so without its own sentence
-                the server's English is all the member reads, and nothing
-                says where the Book they could put back is. */}
-            {refusedForTheTrash(error) ? (
-              <>
-                <ErrorState error={t("scan.inTrash")} />
-                <div>
-                  <Link
-                    to="/trash"
-                    className="text-sm font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
-                  >
-                    {t("trash.open")}
-                  </Link>
-                </div>
-              </>
-            ) : (
-              <ErrorState error={error} fallback={t("scan.couldNotAdd")} />
-            )}
-            {/* The second pass through a bookcase is mostly books already on
-                the shelf, so this is a common outcome rather than an edge one.
-                Without the link the reader is holding the book with nothing to
-                press, and has to go and find it to check it is the same
-                edition. */}
-            {error instanceof ApiError && error.bookId != null && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <Link
-                  to={`/book/${error.bookId}`}
-                  className="text-sm font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
-                >
-                  {t("scan.openTheOneWeHave")}
-                </Link>
-                {/* Second, and deliberately not the primary action. The
-                    overwhelmingly common reason for this 409 is a second pass
-                    through the same bookcase, so the mis-scan keeps the first
-                    position and a real second copy costs one more press. */}
-                <button
-                  onClick={onAddCopy}
-                  disabled={isAddingCopy}
-                  className="text-sm font-medium text-paper-700 underline hover:no-underline disabled:text-paper-600 dark:text-paper-200"
-                >
-                  {isAddingCopy ? t("copies.adding") : t("copies.add")}
-                </button>
-                {/* Said before the press, not discovered after it. The tags
-                    picked on this draft and any cover uploaded to it are not
-                    carried over: a copy takes both from the book already here,
-                    which is the one thing about this action that would
-                    otherwise look like it lost work. */}
-                <p className="basis-full text-xs text-paper-600 dark:text-paper-300">
-                  {t("copies.fromScanHint")}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
+        <AddRefusal
+          error={error}
+          onAddCopy={onAddCopy}
+          isAddingCopy={isAddingCopy}
+        />
 
         <div className="flex gap-2 mt-5">
           <button
@@ -369,6 +219,234 @@ export default function LookupResult({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The title and author boxes, shown when no catalogue knew the ISBN. */
+function ManualEntry({
+  draft,
+  enteredByHand,
+  onChange,
+}: {
+  draft: BookDraft;
+  enteredByHand: boolean;
+  onChange: LookupResultProps["onChange"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <p className="text-paper-600 text-sm mb-3 dark:text-paper-400">
+        {t(enteredByHand ? "scan.unansweredManual" : "scan.notFoundManual", {
+          isbn: draft.isbn,
+        })}
+      </p>
+      <label
+        htmlFor="manual-title"
+        className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+      >
+        {t("scan.titleRequired")}
+      </label>
+      <input
+        id="manual-title"
+        type="text"
+        value={draft.title}
+        onChange={(event) =>
+          onChange({ draft: { ...draft, title: event.target.value } })
+        }
+        className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm mb-2 dark:border-paper-700"
+        placeholder={t("scan.titlePlaceholder")}
+      />
+      <label
+        htmlFor="manual-author"
+        className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+      >
+        {t("scan.authorField")}
+      </label>
+      <input
+        id="manual-author"
+        type="text"
+        value={draft.author ?? ""}
+        onChange={(event) =>
+          // A cleared box is no author, which the column holds as null:
+          // `""` would be a second spelling of the same absence.
+          onChange({
+            draft: { ...draft, author: event.target.value || null },
+          })
+        }
+        className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
+        placeholder={t("scan.authorPlaceholder")}
+      />
+    </>
+  );
+}
+
+/** The read only summary of what a catalogue answered. */
+function CatalogueSummary({ draft }: { draft: BookDraft }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <h2 className="text-lg font-bold leading-tight">{draft.title}</h2>
+      {draft.subtitle && (
+        <p className="text-paper-600 text-sm mt-0.5 dark:text-paper-300">
+          {draft.subtitle}
+        </p>
+      )}
+      {draft.author && (
+        <p className="text-paper-600 text-sm mt-1 dark:text-paper-400">
+          {t("book.by", { author: draft.author })}
+        </p>
+      )}
+      {draft.publisher && (
+        <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
+          {draft.publisher}
+          {draft.year ? ` · ${draft.year}` : ""}
+        </p>
+      )}
+      <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
+        {t("book.isbn", { isbn: draft.isbn })}
+      </p>
+    </>
+  );
+}
+
+/** The tag picker, absent until the library has a tag to offer. */
+function TagSection({
+  tags,
+  tagIds,
+  tagNames,
+  onToggleTag,
+  onCreateTag,
+  onForgetTagName,
+}: Pick<
+  LookupResultProps,
+  "tags" | "onToggleTag" | "onCreateTag" | "onForgetTagName"
+> &
+  Pick<PendingBook, "tagIds" | "tagNames">) {
+  const { t } = useTranslation();
+  if (tags.length === 0) return null;
+  // Both, because a typed name is as selected as a chip is and counting only
+  // the ids read as the typing having been lost.
+  const selected = tagIds.length + tagNames.length;
+  return (
+    <div className="mt-4">
+      <p className="text-sm font-medium text-paper-700 mb-2 dark:text-paper-200">
+        {t("library.tags")}
+        {selected > 0 && (
+          <span className="ml-1.5 text-xs text-paper-600 dark:text-paper-400">
+            {t("scan.tagsSelected", { count: selected })}
+          </span>
+        )}
+      </p>
+      <TagPicker
+        tags={tags}
+        selectedIds={tagIds}
+        onToggle={onToggleTag}
+        onCreate={onCreateTag}
+        pending={{ names: tagNames, onForget: onForgetTagName }}
+      />
+    </div>
+  );
+}
+
+/** The file input that adds a cover, or replaces the catalogue's. */
+function CoverField({
+  draft,
+  coverFile,
+  onChange,
+}: {
+  draft: BookDraft;
+  coverFile: PendingBook["coverFile"];
+  onChange: LookupResultProps["onChange"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-4">
+      <label
+        htmlFor="cover-file"
+        className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+      >
+        {draft.cover_url ? t("scan.replaceCover") : t("scan.addCover")}
+      </label>
+      <input
+        id="cover-file"
+        type="file"
+        accept="image/*"
+        onChange={(event) =>
+          onChange({ coverFile: event.target.files?.[0] ?? null })
+        }
+        className="block w-full text-sm text-paper-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-accent-50 file:text-accent-700 hover:file:bg-accent-100 dark:text-paper-400"
+      />
+      {coverFile && (
+        <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
+          {coverFile.name}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Why the add was refused, and what the member can do about it. */
+function AddRefusal({
+  error,
+  onAddCopy,
+  isAddingCopy,
+}: Pick<LookupResultProps, "error" | "onAddCopy" | "isAddingCopy">) {
+  const { t } = useTranslation();
+  if (error == null) return null;
+  return (
+    <div className="mt-3 space-y-2">
+      {/* The trash refusal names no Book, so without its own sentence the
+          server's English is all the member reads, and nothing says where the
+          Book they could put back is. */}
+      {refusedForTheTrash(error) ? (
+        <>
+          <ErrorState error={t("scan.inTrash")} />
+          <div>
+            <Link
+              to="/trash"
+              className="text-sm font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+            >
+              {t("trash.open")}
+            </Link>
+          </div>
+        </>
+      ) : (
+        <ErrorState error={error} fallback={t("scan.couldNotAdd")} />
+      )}
+      {/* The second pass through a bookcase is mostly books already on the
+          shelf, so this is a common outcome rather than an edge one. Without
+          the link the reader is holding the book with nothing to press, and
+          has to go and find it to check it is the same edition. */}
+      {error instanceof ApiError && error.bookId != null && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Link
+            to={`/book/${error.bookId}`}
+            className="text-sm font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+          >
+            {t("scan.openTheOneWeHave")}
+          </Link>
+          {/* Second, and deliberately not the primary action. The
+              overwhelmingly common reason for this 409 is a second pass
+              through the same bookcase, so the mis-scan keeps the first
+              position and a real second copy costs one more press. */}
+          <button
+            onClick={onAddCopy}
+            disabled={isAddingCopy}
+            className="text-sm font-medium text-paper-700 underline hover:no-underline disabled:text-paper-600 dark:text-paper-200"
+          >
+            {isAddingCopy ? t("copies.adding") : t("copies.add")}
+          </button>
+          {/* Said before the press, not discovered after it. The tags picked
+              on this draft and any cover uploaded to it are not carried over:
+              a copy takes both from the book already here, which is the one
+              thing about this action that would otherwise look like it lost
+              work. */}
+          <p className="basis-full text-xs text-paper-600 dark:text-paper-300">
+            {t("copies.fromScanHint")}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

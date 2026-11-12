@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 
 import type { LoanOut } from "../../api/generated/model";
-import { useTranslation } from "../../i18n";
+import { useTranslation, type Translate } from "../../i18n";
 import { numericDate } from "../../lib/date";
 import { loanState, overdueText } from "../../lib/loanState";
 import { Button } from "../../components";
@@ -66,28 +66,9 @@ export default function LoanRow({
   // of `loanState` together, so no two of the places below can disagree about
   // the same row.
   const { isOpen, returnedOn } = loanState(loan);
-  // Defaulted because the field is optional in the generated type: it carries
-  // a server side default, so orval emits it as `number | undefined` and
-  // TypeScript will not let it be compared without this. `overdueText` does
-  // the same for `days_overdue`.
-  //
-  // **Not because of `serialisation.loan_summary`**, which was the reason
-  // written here first and is a real omission on a payload this component
-  // never sees: `active_loan` is rendered by the book detail page, and every
-  // loan reaching `LoanRow` comes from the loans list or the overdue page,
-  // where both fields are filled. Zero renders nothing either way.
-  const daysOut = loan.days_out ?? 0;
 
   return (
-    <div
-      className={`card p-4 ${
-        !isOpen
-          ? "opacity-60"
-          : loan.is_overdue
-            ? "border-l-4 border-danger-500 dark:border-danger-500"
-            : "border-amber-200 dark:border-amber-900/70"
-      }`}
-    >
+    <div className={`card p-4 ${frameClass(isOpen, loan.is_overdue)}`}>
       <div className="flex gap-3">
         <Link to={`/book/${loan.book_id}`} className="shrink-0">
           <CoverImage
@@ -98,67 +79,12 @@ export default function LoanRow({
         </Link>
 
         <div className="flex-1 min-w-0">
-          <Link to={`/book/${loan.book_id}`}>
-            <h3 className="font-semibold text-sm leading-tight line-clamp-1 hover:text-accent-700 dark:hover:text-accent-300">
-              {loan.book?.title}
-            </h3>
-          </Link>
-          {loan.book?.author && (
-            <p className="text-xs text-paper-600 truncate dark:text-paper-400">
-              {loan.book.author}
-            </p>
-          )}
+          <BookHeading loan={loan} />
           <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
-            {/* Two whole phrases, not one with the borrower swapped in: German
-                does not keep the English word order, and a borrower with no
-                account here is worth saying rather than leaving to look like a
-                member nobody recognises.
-
-                Branching on the name rather than on `loaned_to`, which is a
-                relationship and is only populated when the caller joined it.
-                The name is the column the database constraint governs. */}
-            {loan.loaned_to_name
-              ? t("loans.loanedToExternalBy", {
-                  name: loan.loaned_to_name,
-                  by: loan.loaned_by?.username ?? "",
-                })
-              : t("loans.loanedToBy", {
-                  to: loan.loaned_to?.username ?? "",
-                  by: loan.loaned_by?.username ?? "",
-                })}
+            {borrowerLine(loan, t)}
           </p>
-          {loan.is_overdue && (
-            <span className="inline-block mt-1 text-xs font-medium text-danger-700 bg-danger-100 border border-danger-100 px-2 py-0.5 rounded-full dark:bg-danger-700 dark:border-danger-700 dark:text-danger-100">
-              {overdueText(loan, locale, t)}
-            </span>
-          )}
-          {/* `isOpen` rather than the column: a deadline on a book already
-              back is history, and whether it is back is `lib/loanState.ts`'s
-              answer for every branch on this card. */}
-          {!loan.is_overdue && loan.due_at && isOpen && (
-            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
-              {t("loans.dueOn", {
-                date: numericDate(loan.due_at, locale),
-              })}
-            </p>
-          )}
-          {/* Every open loan, deadline or not. Most lending here has none, so
-              a row that said only "overdue" or nothing at all left the common
-              case with no answer to the question the page is for.
-
-              Hidden on a returned loan, which reports the date it came back
-              instead, and hidden at zero: a book lent this morning would
-              otherwise read "Out for 0 days" beside today's date one line
-              below. Zero is also what a loan read off a book payload carries,
-              because `loan_summary` fills nothing dated, so the same guard
-              keeps a defaulted field from rendering as a measurement. */}
-          {isOpen && daysOut > 0 && (
-            <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
-              {t(daysOut === 1 ? "loans.outForOne" : "loans.outFor", {
-                days: daysOut,
-              })}
-            </p>
-          )}
+          <Deadline loan={loan} isOpen={isOpen} />
+          <TimeOut loan={loan} isOpen={isOpen} />
           <p className="text-xs text-paper-600 dark:text-paper-400">
             {numericDate(loan.loaned_at, locale)}
             {/* The date out of `lib/loanState.ts`, which is also what the rest
@@ -189,5 +115,99 @@ export default function LoanRow({
         </Button>
       )}
     </div>
+  );
+}
+
+/** The card's frame: faded once back, outlined in danger while overdue. */
+function frameClass(isOpen: boolean, isOverdue: boolean | undefined): string {
+  if (!isOpen) return "opacity-60";
+  return isOverdue
+    ? "border-l-4 border-danger-500 dark:border-danger-500"
+    : "border-amber-200 dark:border-amber-900/70";
+}
+
+function BookHeading({ loan }: { loan: LoanOut }) {
+  return (
+    <>
+      <Link to={`/book/${loan.book_id}`}>
+        <h3 className="font-semibold text-sm leading-tight line-clamp-1 hover:text-accent-700 dark:hover:text-accent-300">
+          {loan.book?.title}
+        </h3>
+      </Link>
+      {loan.book?.author && (
+        <p className="text-xs text-paper-600 truncate dark:text-paper-400">
+          {loan.book.author}
+        </p>
+      )}
+    </>
+  );
+}
+
+/**
+ * Two whole phrases, not one with the borrower swapped in: German does not
+ * keep the English word order, and a borrower with no account here is worth
+ * saying rather than leaving to look like a member nobody recognises.
+ *
+ * Branching on the name rather than on `loaned_to`, which is a relationship
+ * and is only populated when the caller joined it. The name is the column the
+ * database constraint governs.
+ */
+function borrowerLine(loan: LoanOut, t: Translate): string {
+  const by = loan.loaned_by?.username ?? "";
+  return loan.loaned_to_name
+    ? t("loans.loanedToExternalBy", { name: loan.loaned_to_name, by })
+    : t("loans.loanedToBy", { to: loan.loaned_to?.username ?? "", by });
+}
+
+/** The overdue badge, or the deadline still ahead of an open loan. */
+function Deadline({ loan, isOpen }: { loan: LoanOut; isOpen: boolean }) {
+  const { t, locale } = useTranslation();
+  if (loan.is_overdue) {
+    return (
+      <span className="inline-block mt-1 text-xs font-medium text-danger-700 bg-danger-100 border border-danger-100 px-2 py-0.5 rounded-full dark:bg-danger-700 dark:border-danger-700 dark:text-danger-100">
+        {overdueText(loan, locale, t)}
+      </span>
+    );
+  }
+  // `isOpen` rather than the column: a deadline on a book already back is
+  // history, and whether it is back is `lib/loanState.ts`'s answer for every
+  // branch on this card.
+  if (!loan.due_at || !isOpen) return null;
+  return (
+    <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
+      {t("loans.dueOn", { date: numericDate(loan.due_at, locale) })}
+    </p>
+  );
+}
+
+/**
+ * Every open loan, deadline or not. Most lending here has none, so a row that
+ * said only "overdue" or nothing at all left the common case with no answer
+ * to the question the page is for.
+ *
+ * Hidden on a returned loan, which reports the date it came back instead, and
+ * hidden at zero: a book lent this morning would otherwise read "Out for 0
+ * days" beside today's date one line below. Zero is also what a loan read off
+ * a book payload carries, because `loan_summary` fills nothing dated, so the
+ * same guard keeps a defaulted field from rendering as a measurement.
+ */
+function TimeOut({ loan, isOpen }: { loan: LoanOut; isOpen: boolean }) {
+  const { t } = useTranslation();
+  // Defaulted because the field is optional in the generated type: it carries
+  // a server side default, so orval emits it as `number | undefined` and
+  // TypeScript will not let it be compared without this. `overdueText` does
+  // the same for `days_overdue`.
+  //
+  // **Not because of `serialisation.loan_summary`**, which was the reason
+  // written here first and is a real omission on a payload this component
+  // never sees: `active_loan` is rendered by the book detail page, and every
+  // loan reaching `LoanRow` comes from the loans list or the overdue page,
+  // where both fields are filled. Zero renders nothing either way.
+  const daysOut = loan.days_out ?? 0;
+  if (!isOpen || daysOut <= 0) return null;
+  return (
+    <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">
+      {t(daysOut === 1 ? "loans.outForOne" : "loans.outFor", { days: daysOut })}
+    </p>
   );
 }

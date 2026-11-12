@@ -1016,4 +1016,5 @@ repeat the argument.
 |  | [The frontend's tree guards are derived from its imports and globs](decisions.md#the-frontends-tree-guards-are-derived-from-its-imports-and-globs) | 259 |
 |  | [Changed property tests run deep at handoff](decisions.md#changed-property-tests-run-deep-at-handoff) | 134 |
 |  | [A related frontend run is refused without `--isolate`, and a test that passed without the setup fails the run](decisions.md#a-related-frontend-run-is-refused-without---isolate-and-a-test-that-passed-without-the-setup-fails-the-run) | 390 |
+|  | [Resident growth on the smallest CI worker past the suite pod's spare is accepted (2026-11-12)](decisions.md#resident-growth-on-the-smallest-ci-worker-past-the-suite-pods-spare-is-accepted-2026-11-12) | 287 |
 <!-- index: end -->

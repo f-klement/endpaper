@@ -395,27 +395,36 @@ export function useBookActions(
     // failure is shown next to its own button rather than at the page top.
     isRefreshing: refresh.isPending,
     refreshError: refresh.error,
-    error:
-      status.error ??
-      privacy.error ??
-      addTag.error ??
+    error: firstError(
+      status.error,
+      privacy.error,
+      addTag.error,
       // Surfaced where the create's was not: it used to be swallowed by the
       // chain that followed it, and the one refusal this door has is the tag
       // ceiling, which is about this book and worth saying.
-      createTag.error ??
-      removeTag.error ??
-      removeIdentifier.error ??
-      removeOnlineLink.error ??
-      deleteTag.error ??
-      cover.error ??
-      ownership.error ??
-      collection.error ??
-      createCollection.error ??
-      rating.error ??
-      discuss.error ??
-      details.error ??
+      createTag.error,
+      removeTag.error,
+      removeIdentifier.error,
+      removeOnlineLink.error,
+      deleteTag.error,
+      cover.error,
+      ownership.error,
+      collection.error,
+      createCollection.error,
+      rating.error,
+      discuss.error,
+      details.error,
       remove.error,
+    ),
   };
+}
+
+/**
+ * The first of `errors` that is set, in the order given, which is the order of
+ * precedence on the page; the last one when none is, as a chain of `??` gives.
+ */
+function firstError(...errors: [unknown, ...unknown[]]): unknown {
+  return errors.reduce((found, error) => found ?? error);
 }
 
 export interface UseBookNotesResult {

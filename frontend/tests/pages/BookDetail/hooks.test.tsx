@@ -2,8 +2,9 @@
  * Tests for src/pages/BookDetail/hooks.ts.
  *
  * The API hooks on this page are covered through the page itself, in
- * BookDetail.test.tsx, apart from a race between two rows, which a page test
- * would spend most of its lines opening editors to reach. What else is only
+ * BookDetail.test.tsx, apart from a race between two rows and the confirms
+ * guarding the action hook's removals, which a page test would spend most of
+ * its lines opening editors to reach. What else is only
  * testable here is the interaction between a book's own defaults and what a
  * reader has said, which is three states and is invisible to any test that
  * checks the default alone.
@@ -12,16 +13,17 @@
 import { act, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { BookOut } from "../../../src/api/generated/model";
+import { type BookOut, ReadStatus } from "../../../src/api/generated/model";
 import {
   hasAbout,
   sectionDefaults,
+  useBookActions,
   useBookNotes,
   useBookSections,
   type BookSection,
 } from "../../../src/pages/BookDetail/hooks";
 import { writeSectionChoice } from "../../../src/lib/sectionState";
-import { makeBook, makeLoan, resetIds } from "../../factories";
+import { makeBook, makeLoan, makeTag, resetIds } from "../../factories";
 import { whileStorageRefuses } from "../../storageRefusal";
 import { heldOpen, mockApi, renderHookWithProviders } from "../../utils";
 
@@ -31,6 +33,13 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+// A mutation reaches fetch a few promise turns after `mutate`, so "nothing
+// was sent" is only true once a task boundary has passed.
+const settled = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 
 describe("sectionDefaults", () => {
   it("opens what a reader came for", () => {
@@ -261,5 +270,96 @@ describe("useBookNotes", () => {
     await waitFor(() =>
       expect(result.current.error).toMatchObject({ message: "Note not found" }),
     );
+  });
+});
+
+describe("useBookActions", () => {
+  it("removes an online link once the member confirms, naming it by its label", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const api = mockApi();
+    api.on("/api/books/1/online-links/7", { status: 204 }, "DELETE");
+    const { result } = renderHookWithProviders(() =>
+      useBookActions(1, () => {}),
+    );
+
+    act(() =>
+      result.current.removeOnlineLink({
+        id: 7,
+        label: "Open Library",
+        url: "https://openlibrary.org/works/OL1W",
+      }),
+    );
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("Open Library"),
+    );
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/1/online-links/7", "DELETE"),
+      ).toBeDefined(),
+    );
+  });
+
+  it("asks about an unlabelled link by its address, and removes nothing when declined", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const api = mockApi();
+    const { result } = renderHookWithProviders(() =>
+      useBookActions(1, () => {}),
+    );
+
+    act(() =>
+      result.current.removeOnlineLink({
+        id: 7,
+        label: null,
+        url: "https://openlibrary.org/works/OL1W",
+      }),
+    );
+
+    await settled();
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("https://openlibrary.org/works/OL1W"),
+    );
+    expect(api.calls).toHaveLength(0);
+  });
+
+  it("reports a status failure over a privacy one, though the status failed last", async () => {
+    const api = mockApi();
+    const status = heldOpen();
+    api.on("/api/books/1/status", status.respond);
+    api.on("/api/books/1/privacy", {
+      status: 409,
+      body: { detail: "Privacy refused" },
+    });
+    const { result } = renderHookWithProviders(() =>
+      useBookActions(1, () => {}),
+    );
+
+    act(() => result.current.setStatus(ReadStatus.read));
+    act(() => result.current.setPrivacy(true));
+    await waitFor(() =>
+      expect(result.current.error).toMatchObject({
+        message: "Privacy refused",
+      }),
+    );
+    status.release({ status: 409, body: { detail: "Status refused" } });
+
+    await waitFor(() =>
+      expect(result.current.error).toMatchObject({ message: "Status refused" }),
+    );
+  });
+
+  it("deletes no tag when the member declines", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const api = mockApi();
+    const { result } = renderHookWithProviders(() =>
+      useBookActions(1, () => {}),
+    );
+
+    act(() => result.current.deleteTag(makeTag({ id: 4 })));
+    await settled();
+
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(api.calls).toHaveLength(0);
   });
 });

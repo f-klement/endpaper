@@ -53,6 +53,12 @@ describe("LoanRow", () => {
     expect(screen.getByText("Piranesi")).toBeInTheDocument();
     expect(screen.getByText(/borrower/)).toBeInTheDocument();
   });
+
+  it("names the author under the title", () => {
+    row({ book: makeBook({ title: "Piranesi", author: "Susanna Clarke" }) });
+
+    expect(screen.getByText("Susanna Clarke")).toBeInTheDocument();
+  });
 });
 
 describe("an overdue row is marked twice, and neither mark is colour alone", () => {
@@ -94,8 +100,10 @@ describe("an overdue row is marked twice, and neither mark is colour alone", () 
   it("drops the mark once the book is back, however late it was", () => {
     // A returned loan is closed. Keeping it flagged would put a permanent red
     // edge on the history.
+    // Still flagged, as a book that came back late is: the frame reads the
+    // return before the flag.
     const { container } = row({
-      is_overdue: false,
+      is_overdue: true,
       returned_at: "2026-02-20T12:00:00Z",
     });
 
@@ -145,6 +153,21 @@ describe("whether the book is back is read once", () => {
     });
 
     expect(screen.getByText(/^Due /)).toBeInTheDocument();
+  });
+
+  it("dates the deadline line by the deadline, not the lending", () => {
+    row({
+      is_overdue: false,
+      loaned_at: "2026-02-01T12:00:00Z",
+      due_at: endOfDay("2026-03-05"),
+      returned_at: null,
+    });
+
+    expect(
+      screen.getByText(
+        `Due ${new Date(endOfDay("2026-03-05")).toLocaleDateString("en")}`,
+      ),
+    ).toBeInTheDocument();
   });
 
   it("dims the card and drops the return button once the book is back", () => {

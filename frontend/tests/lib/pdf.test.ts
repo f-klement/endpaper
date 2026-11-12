@@ -187,6 +187,18 @@ describe("the text a string carries", () => {
     expect(verdict(reading)).toBe("read: Das Buch");
   });
 
+  it("reads a UTF-16 string by its little endian byte order mark", async () => {
+    const bytes = concat("<< /Title <FFFE44006100730020004200750063006800> >>");
+    const reading = await read(
+      classicPdf(
+        [object(1, bytes), object(2, "<< /Type /Catalog >>")],
+        "/Info 1 0 R /Root 2 0 R",
+      ),
+    );
+
+    expect(verdict(reading)).toBe("read: Das Buch");
+  });
+
   it("falls back for a runtime that has no utf-16be", async () => {
     // Why the construction sits inside `decodeText` is `decodeText`'s own
     // docstring. What this asserts is the half of it that is observable here:
@@ -1039,6 +1051,23 @@ describe("where a stream's bytes begin and end", () => {
     expect(verdict(await read(bytes))).toBe("damaged");
   });
 
+  it.each(["-5", "2.5"])(
+    "recovers a stream whose /Length is %s, which no stream can be",
+    async (length) => {
+      // Believed, either length reads a slice of the stream that is empty or
+      // two bytes long, and the packet in it is lost rather than the file.
+      const bytes = withMetadataObject(
+        concat(
+          `<< /Type /Metadata /Length ${length} >>\nstream\n`,
+          latin(xmpPacket({ language: "fr" })),
+          "\nendstream",
+        ),
+      );
+
+      expect(language(await read(bytes))).toBe("read: fr");
+    },
+  );
+
   it("reads a stream longer than the window its header was read through", async () => {
     // The object's dictionary is parsed out of a 64 kB window and the stream's
     // own bytes are fetched against `/Length` when they run past it. The
@@ -1303,6 +1332,42 @@ describe("a number the file supplied that does not agree with the file", () => {
       expect(verdict(await read(broken))).toBe("not-a-pdf");
     }
   });
+
+  it("refuses a cross reference entry that is neither in use nor free", async () => {
+    // Read as free instead, the entry leaves its letter behind, the table
+    // stops on it, and the file is answered as not a PDF rather than broken.
+    const bytes = rewritten(
+      classicPdf(
+        [object(1, "<< /Title (A) >>"), object(2, "<< /Type /Catalog >>")],
+        "/Info 1 0 R /Root 2 0 R",
+      ),
+      /(\n\d{10} 00000) n /,
+      "$1 x ",
+    );
+
+    expect(verdict(await read(bytes))).toBe("damaged");
+  });
+
+  it.each(["/N 8193 /First 4", "/N 1 /First -1"])(
+    "refuses an object stream declaring %s, a size no real file has",
+    async (size) => {
+      // Padded to the declaration's own length, so every offset holds.
+      // Without the refusal, `/N 8193` still reads the title and `/First -1`
+      // loses it, so only the refusal answers `damaged` for both.
+      const declared = "/Type /ObjStm /N 1 /First 4";
+      const bytes = rewritten(
+        await streamPdf(
+          [object(1, "<< /Title (A) >>"), object(2, "<< /Type /Catalog >>")],
+          "/Info 1 0 R /Root 2 0 R",
+          { packed: [[1]] },
+        ),
+        declared,
+        size.padEnd(declared.length),
+      );
+
+      expect(verdict(await read(bytes))).toBe("damaged");
+    },
+  );
 
   it("refuses a predictor with more columns than there are bytes", async () => {
     // `/Columns` is a number the file chose and `new Uint8Array(columns)`
