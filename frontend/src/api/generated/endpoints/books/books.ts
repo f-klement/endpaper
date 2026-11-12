@@ -228,6 +228,7 @@ export type ListBooksInfiniteQueryResult = NonNullable<
 >;
 export type ListBooksInfiniteQueryError = Refusal | HTTPValidationError;
 
+/** @summary List Books */
 export function useListBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listBooks>>,
@@ -261,6 +262,7 @@ export function useListBooksInfinite<
 ): DefinedUseInfiniteQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary List Books */
 export function useListBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listBooks>>,
@@ -294,6 +296,7 @@ export function useListBooksInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary List Books */
 export function useListBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listBooks>>,
@@ -318,10 +321,7 @@ export function useListBooksInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @summary List Books
- */
-
+/** @summary List Books */
 export function useListBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listBooks>>,
@@ -390,6 +390,7 @@ export type ListBooksQueryResult = NonNullable<
 >;
 export type ListBooksQueryError = Refusal | HTTPValidationError;
 
+/** @summary List Books */
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -413,6 +414,7 @@ export function useListBooks<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary List Books */
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -436,6 +438,7 @@ export function useListBooks<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary List Books */
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -451,10 +454,7 @@ export function useListBooks<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @summary List Books
- */
-
+/** @summary List Books */
 export function useListBooks<
   TData = Awaited<ReturnType<typeof listBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -570,9 +570,7 @@ export type AddBookMutationBody = BookCreate;
 export type AddBookMutationError = Refusal | HTTPValidationError;
 export type AddBookMutationVariables = { data: BookCreate };
 
-/**
- * @summary Add Book
- */
+/** @summary Add Book */
 export const useAddBook = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -666,6 +664,15 @@ export type AlreadyHeldQueryResult = NonNullable<
 >;
 export type AlreadyHeldQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Whether the member already has the record they are about to save.
+ *
+ * Asked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:
+ * a Book held where they cannot see it answers as nothing here, though the
+ * save itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a
+ * title is compared as it would be stored.
+ * @summary Already Held
+ */
 export function useAlreadyHeld<
   TData = Awaited<ReturnType<typeof alreadyHeld>>,
   TError = Refusal | HTTPValidationError,
@@ -689,6 +696,15 @@ export function useAlreadyHeld<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether the member already has the record they are about to save.
+ *
+ * Asked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:
+ * a Book held where they cannot see it answers as nothing here, though the
+ * save itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a
+ * title is compared as it would be stored.
+ * @summary Already Held
+ */
 export function useAlreadyHeld<
   TData = Awaited<ReturnType<typeof alreadyHeld>>,
   TError = Refusal | HTTPValidationError,
@@ -712,6 +728,15 @@ export function useAlreadyHeld<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether the member already has the record they are about to save.
+ *
+ * Asked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:
+ * a Book held where they cannot see it answers as nothing here, though the
+ * save itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a
+ * title is compared as it would be stored.
+ * @summary Already Held
+ */
 export function useAlreadyHeld<
   TData = Awaited<ReturnType<typeof alreadyHeld>>,
   TError = Refusal | HTTPValidationError,
@@ -728,9 +753,14 @@ export function useAlreadyHeld<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Whether the member already has the record they are about to save.
+ *
+ * Asked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:
+ * a Book held where they cannot see it answers as nothing here, though the
+ * save itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a
+ * title is compared as it would be stored.
  * @summary Already Held
  */
-
 export function useAlreadyHeld<
   TData = Awaited<ReturnType<typeof alreadyHeld>>,
   TError = Refusal | HTTPValidationError,
@@ -813,6 +843,17 @@ export type ListAuthorsQueryResult = NonNullable<
 >;
 export type ListAuthorsQueryError = Refusal;
 
+/**
+ * Everybody credited on the shelf, with what the shelf knows about them.
+ *
+ * Unpaginated, like `/series` and `/locations`. The page it backs is a browse
+ * of the whole catalogue and filters in the browser, so paging it would trade
+ * a list nobody scrolls for a request per keystroke. One entry per name, each
+ * a name, a count and the spellings behind it, which is a smaller payload per
+ * row than `/duplicates` already returns unpaginated with a whole `BookOut`
+ * per book.
+ * @summary List Authors
+ */
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
   TError = Refusal,
@@ -835,6 +876,17 @@ export function useListAuthors<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Everybody credited on the shelf, with what the shelf knows about them.
+ *
+ * Unpaginated, like `/series` and `/locations`. The page it backs is a browse
+ * of the whole catalogue and filters in the browser, so paging it would trade
+ * a list nobody scrolls for a request per keystroke. One entry per name, each
+ * a name, a count and the spellings behind it, which is a smaller payload per
+ * row than `/duplicates` already returns unpaginated with a whole `BookOut`
+ * per book.
+ * @summary List Authors
+ */
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
   TError = Refusal,
@@ -857,6 +909,17 @@ export function useListAuthors<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Everybody credited on the shelf, with what the shelf knows about them.
+ *
+ * Unpaginated, like `/series` and `/locations`. The page it backs is a browse
+ * of the whole catalogue and filters in the browser, so paging it would trade
+ * a list nobody scrolls for a request per keystroke. One entry per name, each
+ * a name, a count and the spellings behind it, which is a smaller payload per
+ * row than `/duplicates` already returns unpaginated with a whole `BookOut`
+ * per book.
+ * @summary List Authors
+ */
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
   TError = Refusal,
@@ -872,9 +935,16 @@ export function useListAuthors<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Everybody credited on the shelf, with what the shelf knows about them.
+ *
+ * Unpaginated, like `/series` and `/locations`. The page it backs is a browse
+ * of the whole catalogue and filters in the browser, so paging it would trade
+ * a list nobody scrolls for a request per keystroke. One entry per name, each
+ * a name, a count and the spellings behind it, which is a smaller payload per
+ * row than `/duplicates` already returns unpaginated with a whole `BookOut`
+ * per book.
  * @summary List Authors
  */
-
 export function useListAuthors<
   TData = Awaited<ReturnType<typeof listAuthors>>,
   TError = Refusal,
@@ -982,6 +1052,24 @@ export type UnmergeAuthorMutationError = Refusal | HTTPValidationError;
 export type UnmergeAuthorMutationVariables = { aliasId: number };
 
 /**
+ * Undo one merge. The spelling becomes its own author again.
+ *
+ * This is why merging is allowed to guess. Nothing was rewritten, so removing
+ * the row restores exactly the state before it was written, and the books
+ * were never involved.
+ *
+ * A row whose spelling is on no book this caller can see is **404**, and the
+ * reason is authority rather than secrecy: undo what you can see the effect
+ * of. The page offers this beside the spelling it folded, so a row with no
+ * such spelling on your shelf has no button here and no meaning here either.
+ *
+ * That leaves an **orphan** alias, whose spelling is on nobody's shelf because
+ * the book was deleted, unreachable and undeletable. Accepted: it maps a name
+ * nothing is credited with, so it changes no view, and it starts working again
+ * by itself if an import re-creates that spelling, which is the property the
+ * whole design is for.
+ *
+ * How that is carried out is `authorship.Authorship.unmerge`.
  * @summary Unmerge Author
  */
 export const useUnmergeAuthor = <
@@ -1108,6 +1196,42 @@ export type AuthorAuthorityQueryResult = NonNullable<
 >;
 export type AuthorAuthorityQueryError = Refusal | HTTPValidationError;
 
+/**
+ * What the authority files say about this author.
+ *
+ * **Two routes, and which one ran is on every row as `certain`.** Where a
+ * catalogue record for one of this author's Books already asserted a GND
+ * number, that number is a key: it resolves to exactly one record, and the
+ * spelling on it is the suggestion this feature exists to offer. Where it did
+ * not, the author's name is put to a name search, and a name is not a key.
+ * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ *
+ * **`q` steers that search and forces it.** Without it the query is the
+ * author's own display name, which is exactly wrong when the shelf spells
+ * somebody in a form the GND does not use: the search then answers with the
+ * wrong people and there is no way to retype it. This is the one shape
+ * decision worth making before a client exists, because a client built
+ * against the narrower version would have to change to gain it.
+ *
+ * **Nothing here writes, on either route.** A suggestion is offered and may be
+ * overruled, which was settled on 2026-08-24: suggest the authority's spelling
+ * and let it be overwritten, while storing the reference either way. Taking a
+ * suggested spelling is `POST /authors/merge`, which already accepts a name
+ * typed by hand. Confirming an identifier from a name search is
+ * `POST /authors/identifiers`, which records that a person chose it.
+ *
+ * **Nothing here is stored either**, and most of it has no column to be
+ * stored in. The dates and the one line description are there so somebody can
+ * tell two same named people apart while they decide.
+ * `docs/featurelist.md` refuses author biographies and portraits, and this is
+ * the identity half of that line rather than an exception to it.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is.
+ * 503 where the authority file could not be reached: nothing in this feature
+ * is blocked by it, so the client can offer "try again" rather than an error
+ * page.
+ * @summary Author Authority
+ */
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
   TError = Refusal | HTTPValidationError,
@@ -1135,6 +1259,42 @@ export function useAuthorAuthority<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What the authority files say about this author.
+ *
+ * **Two routes, and which one ran is on every row as `certain`.** Where a
+ * catalogue record for one of this author's Books already asserted a GND
+ * number, that number is a key: it resolves to exactly one record, and the
+ * spelling on it is the suggestion this feature exists to offer. Where it did
+ * not, the author's name is put to a name search, and a name is not a key.
+ * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ *
+ * **`q` steers that search and forces it.** Without it the query is the
+ * author's own display name, which is exactly wrong when the shelf spells
+ * somebody in a form the GND does not use: the search then answers with the
+ * wrong people and there is no way to retype it. This is the one shape
+ * decision worth making before a client exists, because a client built
+ * against the narrower version would have to change to gain it.
+ *
+ * **Nothing here writes, on either route.** A suggestion is offered and may be
+ * overruled, which was settled on 2026-08-24: suggest the authority's spelling
+ * and let it be overwritten, while storing the reference either way. Taking a
+ * suggested spelling is `POST /authors/merge`, which already accepts a name
+ * typed by hand. Confirming an identifier from a name search is
+ * `POST /authors/identifiers`, which records that a person chose it.
+ *
+ * **Nothing here is stored either**, and most of it has no column to be
+ * stored in. The dates and the one line description are there so somebody can
+ * tell two same named people apart while they decide.
+ * `docs/featurelist.md` refuses author biographies and portraits, and this is
+ * the identity half of that line rather than an exception to it.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is.
+ * 503 where the authority file could not be reached: nothing in this feature
+ * is blocked by it, so the client can offer "try again" rather than an error
+ * page.
+ * @summary Author Authority
+ */
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
   TError = Refusal | HTTPValidationError,
@@ -1162,6 +1322,42 @@ export function useAuthorAuthority<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What the authority files say about this author.
+ *
+ * **Two routes, and which one ran is on every row as `certain`.** Where a
+ * catalogue record for one of this author's Books already asserted a GND
+ * number, that number is a key: it resolves to exactly one record, and the
+ * spelling on it is the suggestion this feature exists to offer. Where it did
+ * not, the author's name is put to a name search, and a name is not a key.
+ * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ *
+ * **`q` steers that search and forces it.** Without it the query is the
+ * author's own display name, which is exactly wrong when the shelf spells
+ * somebody in a form the GND does not use: the search then answers with the
+ * wrong people and there is no way to retype it. This is the one shape
+ * decision worth making before a client exists, because a client built
+ * against the narrower version would have to change to gain it.
+ *
+ * **Nothing here writes, on either route.** A suggestion is offered and may be
+ * overruled, which was settled on 2026-08-24: suggest the authority's spelling
+ * and let it be overwritten, while storing the reference either way. Taking a
+ * suggested spelling is `POST /authors/merge`, which already accepts a name
+ * typed by hand. Confirming an identifier from a name search is
+ * `POST /authors/identifiers`, which records that a person chose it.
+ *
+ * **Nothing here is stored either**, and most of it has no column to be
+ * stored in. The dates and the one line description are there so somebody can
+ * tell two same named people apart while they decide.
+ * `docs/featurelist.md` refuses author biographies and portraits, and this is
+ * the identity half of that line rather than an exception to it.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is.
+ * 503 where the authority file could not be reached: nothing in this feature
+ * is blocked by it, so the client can offer "try again" rather than an error
+ * page.
+ * @summary Author Authority
+ */
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
   TError = Refusal | HTTPValidationError,
@@ -1182,9 +1378,41 @@ export function useAuthorAuthority<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * What the authority files say about this author.
+ *
+ * **Two routes, and which one ran is on every row as `certain`.** Where a
+ * catalogue record for one of this author's Books already asserted a GND
+ * number, that number is a key: it resolves to exactly one record, and the
+ * spelling on it is the suggestion this feature exists to offer. Where it did
+ * not, the author's name is put to a name search, and a name is not a key.
+ * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ *
+ * **`q` steers that search and forces it.** Without it the query is the
+ * author's own display name, which is exactly wrong when the shelf spells
+ * somebody in a form the GND does not use: the search then answers with the
+ * wrong people and there is no way to retype it. This is the one shape
+ * decision worth making before a client exists, because a client built
+ * against the narrower version would have to change to gain it.
+ *
+ * **Nothing here writes, on either route.** A suggestion is offered and may be
+ * overruled, which was settled on 2026-08-24: suggest the authority's spelling
+ * and let it be overwritten, while storing the reference either way. Taking a
+ * suggested spelling is `POST /authors/merge`, which already accepts a name
+ * typed by hand. Confirming an identifier from a name search is
+ * `POST /authors/identifiers`, which records that a person chose it.
+ *
+ * **Nothing here is stored either**, and most of it has no column to be
+ * stored in. The dates and the one line description are there so somebody can
+ * tell two same named people apart while they decide.
+ * `docs/featurelist.md` refuses author biographies and portraits, and this is
+ * the identity half of that line rather than an exception to it.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is.
+ * 503 where the authority file could not be reached: nothing in this feature
+ * is blocked by it, so the client can offer "try again" rather than an error
+ * page.
  * @summary Author Authority
  */
-
 export function useAuthorAuthority<
   TData = Awaited<ReturnType<typeof authorAuthority>>,
   TError = Refusal | HTTPValidationError,
@@ -1328,6 +1556,24 @@ export type ConfirmAuthorIdentifierMutationVariables = {
 };
 
 /**
+ * Confirm that a candidate authority identifier is this author's.
+ *
+ * **This endpoint exists because a name is not a key.** An identifier belongs
+ * to a person, and only a member can say that this spelling is that person.
+ *
+ * **409, not 422, where the spelling already carries a different value**: the
+ * request is well formed and the state refuses it.
+ *
+ * **Confirming a GND number stores the cross references that came with it**,
+ * and the six national numbers, which cost the extra requests. A confirmation
+ * is up to eight outbound calls, which is why it is a deliberate action rather
+ * than something a lookup does on the way past.
+ *
+ * **Only for `gnd`**, the one scheme this app can resolve.
+ *
+ * **A cross reference colliding with a stored value is reported, not raised.**
+ * The confirmation is already committed, so failing here would report a write
+ * that happened as one that did not.
  * @summary Confirm Author Identifier
  */
 export const useConfirmAuthorIdentifier = <
@@ -1433,6 +1679,18 @@ export type ForgetAuthorIdentifierMutationError = Refusal | HTTPValidationError;
 export type ForgetAuthorIdentifierMutationVariables = { identifierId: number };
 
 /**
+ * Remove a wrong identifier. A later import may write it again.
+ *
+ * **The only correction there is**, and it is deliberately destructive rather
+ * than an edit: an upstream cluster can be wrong, and a fact that cannot be
+ * corrected is a trap. What is refused is retyping it to a different value,
+ * because that is the operation that turns somebody's guess into something
+ * that reads like a national library's assertion.
+ *
+ * A row whose spelling is on no book this caller can see is **404**, for the
+ * reason `unmerge_author` gives: authority rather than secrecy.
+ *
+ * How that is carried out is `authorship.Authorship.forget_identifier`.
  * @summary Forget Author Identifier
  */
 export const useForgetAuthorIdentifier = <
@@ -1572,6 +1830,27 @@ export type MergeAuthorsMutationError = Refusal | HTTPValidationError;
 export type MergeAuthorsMutationVariables = { data: AuthorMergeRequest };
 
 /**
+ * Say that these spellings are one person.
+ *
+ * **Nothing in `books` is written.** Every named author keeps its credit line
+ * exactly as printed, and what changes is one row per spelling saying who
+ * that spelling means. Deleting the row undoes it, and a later import that
+ * re-creates the spelling is folded by the row that is already there.
+ *
+ * Any member, like creating and renaming a collection, and for the same
+ * reason: it is reversible, and a shelf only an admin can tidy is one nobody
+ * tidies. Unlike deleting a collection, which is admin only because it
+ * strips a label off every book with no undo.
+ *
+ * An author nobody can see is **404, not 403**, exactly as a private book is:
+ * a 403 would confirm that somebody owns a book by that name.
+ *
+ * A `keep_name` that no book carries is allowed and is the point: "Le Guin,
+ * Ursula K." splits into two people, neither spelled correctly, and the
+ * repair is a name typed by hand. One that is itself already folded into
+ * somebody resolves to that somebody, so the mapping stays one lookup deep.
+ *
+ * How that is carried out is `authorship.Authorship.merge`.
  * @summary Merge Authors
  */
 export const useMergeAuthors = <
@@ -1708,6 +1987,24 @@ export type MergeAuthorsBatchMutationVariables = {
 };
 
 /**
+ * Fold several groups at once, or none of them.
+ *
+ * **What the caller confirmed, not what a matcher proposed.** The groups are
+ * applied as sent, which is what makes `GET /authors/suggestions` a review rather
+ * than a decoration. Each group folds its spellings into one of its own names;
+ * a name none of them has is the single merge's job, because a batch that
+ * could invent a name could also fold away the name another group in the same
+ * request is keeping.
+ *
+ * **All of it or none of it.** Every group is checked before any row is
+ * written, so a refusal leaves the library exactly as it was and there is no
+ * half applied state for anybody to reconstruct. Nothing in `books` is
+ * written by any of it, and deleting the rows undoes it one group at a time.
+ *
+ * An author nobody can see is **404**, exactly as it is for one merge. A group
+ * that would repoint an alias row somebody already wrote is **409**: a merge
+ * a person made is an assertion and a rule's grouping is a guess, so the
+ * assertion wins and the batch is refused rather than applied over it.
  * @summary Merge Authors Batch
  */
 export const useMergeAuthorsBatch = <
@@ -1834,6 +2131,30 @@ export type ListAuthorSuggestionsQueryResult = NonNullable<
 >;
 export type ListAuthorSuggestionsQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Names that are probably one person, and what folding them would keep.
+ *
+ * A suggestion and never a verdict: it is offered because accepting one
+ * writes an alias row and deleting that row puts the shelf back exactly as it
+ * was. `reasons` records which rule produced each group so a reader can tell a
+ * near-certainty from a guess before pressing anything.
+ *
+ * `matcher` names the strategy. `default` is every rule. `exact` keeps only
+ * the rules that group on an equal value, a shared authority record or one
+ * name that is another with the spaces moved, and drops the two that compare
+ * names in pairs. A matcher can only ever take rules away, so no strategy
+ * proposes a group `default` does not.
+ *
+ * **`keep_name` is what `POST /authors/merge/batch` would fold each group
+ * into**, so this list is the review a batch is confirmed against rather than
+ * a summary of one. Null means the group is held back: applying it would
+ * repoint an alias row somebody already wrote, and a merge somebody made
+ * outranks a rule's guess. Nothing says whose row it was, which is not this
+ * caller's to know.
+ *
+ * Nothing here writes.
+ * @summary List Author Suggestions
+ */
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
   TError = Refusal | HTTPValidationError,
@@ -1861,6 +2182,30 @@ export function useListAuthorSuggestions<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Names that are probably one person, and what folding them would keep.
+ *
+ * A suggestion and never a verdict: it is offered because accepting one
+ * writes an alias row and deleting that row puts the shelf back exactly as it
+ * was. `reasons` records which rule produced each group so a reader can tell a
+ * near-certainty from a guess before pressing anything.
+ *
+ * `matcher` names the strategy. `default` is every rule. `exact` keeps only
+ * the rules that group on an equal value, a shared authority record or one
+ * name that is another with the spaces moved, and drops the two that compare
+ * names in pairs. A matcher can only ever take rules away, so no strategy
+ * proposes a group `default` does not.
+ *
+ * **`keep_name` is what `POST /authors/merge/batch` would fold each group
+ * into**, so this list is the review a batch is confirmed against rather than
+ * a summary of one. Null means the group is held back: applying it would
+ * repoint an alias row somebody already wrote, and a merge somebody made
+ * outranks a rule's guess. Nothing says whose row it was, which is not this
+ * caller's to know.
+ *
+ * Nothing here writes.
+ * @summary List Author Suggestions
+ */
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
   TError = Refusal | HTTPValidationError,
@@ -1888,6 +2233,30 @@ export function useListAuthorSuggestions<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Names that are probably one person, and what folding them would keep.
+ *
+ * A suggestion and never a verdict: it is offered because accepting one
+ * writes an alias row and deleting that row puts the shelf back exactly as it
+ * was. `reasons` records which rule produced each group so a reader can tell a
+ * near-certainty from a guess before pressing anything.
+ *
+ * `matcher` names the strategy. `default` is every rule. `exact` keeps only
+ * the rules that group on an equal value, a shared authority record or one
+ * name that is another with the spaces moved, and drops the two that compare
+ * names in pairs. A matcher can only ever take rules away, so no strategy
+ * proposes a group `default` does not.
+ *
+ * **`keep_name` is what `POST /authors/merge/batch` would fold each group
+ * into**, so this list is the review a batch is confirmed against rather than
+ * a summary of one. Null means the group is held back: applying it would
+ * repoint an alias row somebody already wrote, and a merge somebody made
+ * outranks a rule's guess. Nothing says whose row it was, which is not this
+ * caller's to know.
+ *
+ * Nothing here writes.
+ * @summary List Author Suggestions
+ */
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
   TError = Refusal | HTTPValidationError,
@@ -1908,9 +2277,29 @@ export function useListAuthorSuggestions<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Names that are probably one person, and what folding them would keep.
+ *
+ * A suggestion and never a verdict: it is offered because accepting one
+ * writes an alias row and deleting that row puts the shelf back exactly as it
+ * was. `reasons` records which rule produced each group so a reader can tell a
+ * near-certainty from a guess before pressing anything.
+ *
+ * `matcher` names the strategy. `default` is every rule. `exact` keeps only
+ * the rules that group on an equal value, a shared authority record or one
+ * name that is another with the spaces moved, and drops the two that compare
+ * names in pairs. A matcher can only ever take rules away, so no strategy
+ * proposes a group `default` does not.
+ *
+ * **`keep_name` is what `POST /authors/merge/batch` would fold each group
+ * into**, so this list is the review a batch is confirmed against rather than
+ * a summary of one. Null means the group is held back: applying it would
+ * repoint an alias row somebody already wrote, and a merge somebody made
+ * outranks a rule's guess. Nothing says whose row it was, which is not this
+ * caller's to know.
+ *
+ * Nothing here writes.
  * @summary List Author Suggestions
  */
-
 export function useListAuthorSuggestions<
   TData = Awaited<ReturnType<typeof listAuthorSuggestions>>,
   TError = Refusal | HTTPValidationError,
@@ -2017,6 +2406,17 @@ export type AuthorWikipediaQueryResult = NonNullable<
 >;
 export type AuthorWikipediaQueryError = Refusal | HTTPValidationError;
 
+/**
+ * An outward Wikipedia link per author, in the reader's language.
+ *
+ * **Declared before `/authors/{...}` would be**, because FastAPI matches in
+ * declaration order and the literal path has to win.
+ *
+ * **At most ten requests**, and **the same limiter as the authority lookups on
+ * purpose**: it is the same host budget, so two counters would let a caller
+ * spend it twice.
+ * @summary Author Wikipedia
+ */
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
   TError = Refusal | HTTPValidationError,
@@ -2044,6 +2444,17 @@ export function useAuthorWikipedia<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * An outward Wikipedia link per author, in the reader's language.
+ *
+ * **Declared before `/authors/{...}` would be**, because FastAPI matches in
+ * declaration order and the literal path has to win.
+ *
+ * **At most ten requests**, and **the same limiter as the authority lookups on
+ * purpose**: it is the same host budget, so two counters would let a caller
+ * spend it twice.
+ * @summary Author Wikipedia
+ */
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
   TError = Refusal | HTTPValidationError,
@@ -2071,6 +2482,17 @@ export function useAuthorWikipedia<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * An outward Wikipedia link per author, in the reader's language.
+ *
+ * **Declared before `/authors/{...}` would be**, because FastAPI matches in
+ * declaration order and the literal path has to win.
+ *
+ * **At most ten requests**, and **the same limiter as the authority lookups on
+ * purpose**: it is the same host budget, so two counters would let a caller
+ * spend it twice.
+ * @summary Author Wikipedia
+ */
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
   TError = Refusal | HTTPValidationError,
@@ -2091,9 +2513,16 @@ export function useAuthorWikipedia<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * An outward Wikipedia link per author, in the reader's language.
+ *
+ * **Declared before `/authors/{...}` would be**, because FastAPI matches in
+ * declaration order and the literal path has to win.
+ *
+ * **At most ten requests**, and **the same limiter as the authority lookups on
+ * purpose**: it is the same host budget, so two counters would let a caller
+ * spend it twice.
  * @summary Author Wikipedia
  */
-
 export function useAuthorWikipedia<
   TData = Awaited<ReturnType<typeof authorWikipedia>>,
   TError = Refusal | HTTPValidationError,
@@ -2227,6 +2656,19 @@ export type BulkActionMutationError = Refusal | HTTPValidationError;
 export type BulkActionMutationVariables = { data: BulkRequest };
 
 /**
+ * Apply one verb to a selection of books.
+ *
+ * One endpoint rather than one per verb, because every verb shares the same
+ * three steps: resolve the ids the caller may actually touch, apply, and
+ * report updated/unchanged/skipped. A route per verb would be a copy of the
+ * permission walk per verb, and the next one added would be the one that
+ * forgot it.
+ *
+ * A separate `/bulk/ownership` used to sit beside this with the same body,
+ * the same permission walk and an identical result shape. It was removed
+ * rather than carried into the first tagged release: two endpoints for one
+ * action is two places for the next change to have to land, and dropping one
+ * after a release is a breaking change rather than a tidy-up.
  * @summary Bulk Action
  */
 export const useBulkAction = <
@@ -2319,6 +2761,24 @@ export type ListClassificationsQueryResult = NonNullable<
 >;
 export type ListClassificationsQueryError = Refusal;
 
+/**
+ * Every heading in the library and every Dewey division, each with a count.
+ *
+ * The source for the classification filter panel, and the counterpart of
+ * `/tags` and `/locations`. Ordered here so the response is deterministic:
+ * headings by scheme then number, divisions by number, both ascending, which
+ * for Dewey is shelf order and for a subject vocabulary is at least stable.
+ * The order a reader sees is the client's, as it is for tags.
+ *
+ * **The counting is the shelf's**, and this handler deliberately holds none of
+ * it. A row in `classifications` carries no member, so nothing about it says
+ * who may see it, and a facet list built here with a bare query would publish
+ * the subject headings of other people's private reading without returning a
+ * single Book. `Shelf.classification_facets` applies the viewer's predicate by
+ * construction, and `tests/test_shelf.py` names this exact disclosure as the
+ * reason its fourth pass exists.
+ * @summary List Classifications
+ */
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
   TError = Refusal,
@@ -2345,6 +2805,24 @@ export function useListClassifications<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every heading in the library and every Dewey division, each with a count.
+ *
+ * The source for the classification filter panel, and the counterpart of
+ * `/tags` and `/locations`. Ordered here so the response is deterministic:
+ * headings by scheme then number, divisions by number, both ascending, which
+ * for Dewey is shelf order and for a subject vocabulary is at least stable.
+ * The order a reader sees is the client's, as it is for tags.
+ *
+ * **The counting is the shelf's**, and this handler deliberately holds none of
+ * it. A row in `classifications` carries no member, so nothing about it says
+ * who may see it, and a facet list built here with a bare query would publish
+ * the subject headings of other people's private reading without returning a
+ * single Book. `Shelf.classification_facets` applies the viewer's predicate by
+ * construction, and `tests/test_shelf.py` names this exact disclosure as the
+ * reason its fourth pass exists.
+ * @summary List Classifications
+ */
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
   TError = Refusal,
@@ -2371,6 +2849,24 @@ export function useListClassifications<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every heading in the library and every Dewey division, each with a count.
+ *
+ * The source for the classification filter panel, and the counterpart of
+ * `/tags` and `/locations`. Ordered here so the response is deterministic:
+ * headings by scheme then number, divisions by number, both ascending, which
+ * for Dewey is shelf order and for a subject vocabulary is at least stable.
+ * The order a reader sees is the client's, as it is for tags.
+ *
+ * **The counting is the shelf's**, and this handler deliberately holds none of
+ * it. A row in `classifications` carries no member, so nothing about it says
+ * who may see it, and a facet list built here with a bare query would publish
+ * the subject headings of other people's private reading without returning a
+ * single Book. `Shelf.classification_facets` applies the viewer's predicate by
+ * construction, and `tests/test_shelf.py` names this exact disclosure as the
+ * reason its fourth pass exists.
+ * @summary List Classifications
+ */
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
   TError = Refusal,
@@ -2390,9 +2886,23 @@ export function useListClassifications<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every heading in the library and every Dewey division, each with a count.
+ *
+ * The source for the classification filter panel, and the counterpart of
+ * `/tags` and `/locations`. Ordered here so the response is deterministic:
+ * headings by scheme then number, divisions by number, both ascending, which
+ * for Dewey is shelf order and for a subject vocabulary is at least stable.
+ * The order a reader sees is the client's, as it is for tags.
+ *
+ * **The counting is the shelf's**, and this handler deliberately holds none of
+ * it. A row in `classifications` carries no member, so nothing about it says
+ * who may see it, and a facet list built here with a bare query would publish
+ * the subject headings of other people's private reading without returning a
+ * single Book. `Shelf.classification_facets` applies the viewer's predicate by
+ * construction, and `tests/test_shelf.py` names this exact disclosure as the
+ * reason its fourth pass exists.
  * @summary List Classifications
  */
-
 export function useListClassifications<
   TData = Awaited<ReturnType<typeof listClassifications>>,
   TError = Refusal,
@@ -2545,6 +3055,53 @@ export type BackfillCoversMutationError = Refusal | HTTPValidationError;
 export type BackfillCoversMutationVariables = { params?: BackfillCoversParams };
 
 /**
+ * Fetch and store the covers of books that are missing one.
+ *
+ * This is what repairs a library that already exists. Storing covers on the
+ * way in only helps books added afterwards, and the books that need it most
+ * are the thousands that arrived through a CSV import, which never resolved a
+ * cover at all.
+ *
+ * **Scoped to the books the caller can see**, like every other query here. An
+ * admin-only backfill would be worse, not better: `visible_to` has no admin
+ * bypass, so an admin running it could never repair another member's private
+ * books, and those books would have no way to be repaired at all. Each member
+ * repairs their own shelf instead, and the privacy rule is not bent to make an
+ * operator action work.
+ *
+ * Targets every book with **no cover file behind its id**, which is the set
+ * that needs one: a book that never had a cover, a book whose `cover_url`
+ * points at a third party (that is what rots, a file on this volume is not),
+ * and a book whose column claims a local cover the directory does not have.
+ * The last case is why this reads the directory rather than the column: they
+ * can drift, files being the one thing a database row does not carry with it.
+ *
+ * **`after_id` is a cursor, and it is what lets this finish.** Without it the
+ * batch is the first hundred candidates by id, and a book that cannot be fixed
+ * stays a candidate, so it sits at the front of every subsequent run for ever.
+ * Measured across ten ISBNs, only eight resolved to an image, so roughly a
+ * fifth of any batch is permanently unfixable and accumulates; a pod with no
+ * egress produces the same shape on the first run. With the cursor each run
+ * starts past what the last one tried, and `next_after_id` comes back as 0
+ * once the end is reached, so pressing again starts over and re-tries the ones
+ * that failed, which may since have become fixable.
+ *
+ * **Bounded in wall clock as well as in books**, so a slow or blackholing image
+ * service leaves the batch short rather than holding the request open. A short
+ * run answers with whatever resolved, counts only the books it has an outcome
+ * for, and moves the cursor over exactly those, so pressing again resumes at the
+ * first book this one did not reach. The reply does not distinguish a short run
+ * from a complete one and does not need to: press again while `remaining` is
+ * above zero.
+ *
+ * **Each book is bounded too.** A cover is a candidate check and then a
+ * download, each of which may follow redirects, and with no budget every hop of
+ * both got a timeout of its own, so one unlucky book could spend what the whole
+ * run was meant to. Past its budget a book keeps the remote URL, is counted
+ * `unreachable`, and is a candidate again on the next pass through the library.
+ *
+ * Idempotent either way: a book with a file behind it is never a candidate, so
+ * a second pass over the same range examines nothing it fixed.
  * @summary Backfill Covers
  */
 export const useBackfillCovers = <
@@ -2654,6 +3211,45 @@ export type ListCustomFieldsQueryResult = NonNullable<
 >;
 export type ListCustomFieldsQueryError = Refusal;
 
+/**
+ * Every field this library may tell you about, in the order it defined them.
+ *
+ * **Not every field it keeps.** A field is listed when a book you can see
+ * holds a value in it, when a book in your trash does, or when no book at all
+ * does. A field whose every value sits on books you cannot see is absent, and
+ * naming it by id is a 404. `fields.Fields` holds the three arms and what
+ * they cost.
+ *
+ * **No usage count**, unlike `GET /api/books/tags`. A count of the books
+ * carrying a field is a disclosure: it is drawn from books the caller may not
+ * see, so it would have to be scoped to the viewer, and a viewer scoped
+ * number in a confirmation dialog would then understate what deleting the
+ * field is about to destroy. Neither number is worth having, so the
+ * confirmation says "every book" instead. `docs/security.md` records it.
+ *
+ * **Each row says whether you may rename it.** Every field reaching this list
+ * is addressable to you by construction, since `listable` and `addressable`
+ * ask the same predicate, so what `renamable` adds is the author arm and the
+ * admin one. `schemas/custom_field.CustomFieldOut` records why that is a
+ * boolean rather than the author's member id.
+ *
+ * **On this list a false `renamable` is a fact about another Member**, and it
+ * is a disclosure rather than a convenience. The other two causes cannot
+ * reach here, since every listed row is addressable and an admin is never
+ * refused the author arm, so for a Member who is not an admin the flag reads
+ * exactly "somebody else defined this". Learning that used to take a rename
+ * request and its 403; it is now on every page load.
+ *
+ * **No application log records any of it, and the access log this project's
+ * own serving command produces records every request, so what the change
+ * removes is the one line that was distinctive.** A refusal on a path normal
+ * use never produces, carrying the field id, becomes the request every
+ * settings page load makes. Observability is therefore **not** unchanged, and
+ * a sentence saying nothing is logged reads as though it were. Nothing here
+ * claims anything about what a deployment's ingress keeps, which a published
+ * file cannot know. `docs/security.md` carries the row.
+ * @summary List Custom Fields
+ */
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
   TError = Refusal,
@@ -2680,6 +3276,45 @@ export function useListCustomFields<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every field this library may tell you about, in the order it defined them.
+ *
+ * **Not every field it keeps.** A field is listed when a book you can see
+ * holds a value in it, when a book in your trash does, or when no book at all
+ * does. A field whose every value sits on books you cannot see is absent, and
+ * naming it by id is a 404. `fields.Fields` holds the three arms and what
+ * they cost.
+ *
+ * **No usage count**, unlike `GET /api/books/tags`. A count of the books
+ * carrying a field is a disclosure: it is drawn from books the caller may not
+ * see, so it would have to be scoped to the viewer, and a viewer scoped
+ * number in a confirmation dialog would then understate what deleting the
+ * field is about to destroy. Neither number is worth having, so the
+ * confirmation says "every book" instead. `docs/security.md` records it.
+ *
+ * **Each row says whether you may rename it.** Every field reaching this list
+ * is addressable to you by construction, since `listable` and `addressable`
+ * ask the same predicate, so what `renamable` adds is the author arm and the
+ * admin one. `schemas/custom_field.CustomFieldOut` records why that is a
+ * boolean rather than the author's member id.
+ *
+ * **On this list a false `renamable` is a fact about another Member**, and it
+ * is a disclosure rather than a convenience. The other two causes cannot
+ * reach here, since every listed row is addressable and an admin is never
+ * refused the author arm, so for a Member who is not an admin the flag reads
+ * exactly "somebody else defined this". Learning that used to take a rename
+ * request and its 403; it is now on every page load.
+ *
+ * **No application log records any of it, and the access log this project's
+ * own serving command produces records every request, so what the change
+ * removes is the one line that was distinctive.** A refusal on a path normal
+ * use never produces, carrying the field id, becomes the request every
+ * settings page load makes. Observability is therefore **not** unchanged, and
+ * a sentence saying nothing is logged reads as though it were. Nothing here
+ * claims anything about what a deployment's ingress keeps, which a published
+ * file cannot know. `docs/security.md` carries the row.
+ * @summary List Custom Fields
+ */
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
   TError = Refusal,
@@ -2706,6 +3341,45 @@ export function useListCustomFields<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every field this library may tell you about, in the order it defined them.
+ *
+ * **Not every field it keeps.** A field is listed when a book you can see
+ * holds a value in it, when a book in your trash does, or when no book at all
+ * does. A field whose every value sits on books you cannot see is absent, and
+ * naming it by id is a 404. `fields.Fields` holds the three arms and what
+ * they cost.
+ *
+ * **No usage count**, unlike `GET /api/books/tags`. A count of the books
+ * carrying a field is a disclosure: it is drawn from books the caller may not
+ * see, so it would have to be scoped to the viewer, and a viewer scoped
+ * number in a confirmation dialog would then understate what deleting the
+ * field is about to destroy. Neither number is worth having, so the
+ * confirmation says "every book" instead. `docs/security.md` records it.
+ *
+ * **Each row says whether you may rename it.** Every field reaching this list
+ * is addressable to you by construction, since `listable` and `addressable`
+ * ask the same predicate, so what `renamable` adds is the author arm and the
+ * admin one. `schemas/custom_field.CustomFieldOut` records why that is a
+ * boolean rather than the author's member id.
+ *
+ * **On this list a false `renamable` is a fact about another Member**, and it
+ * is a disclosure rather than a convenience. The other two causes cannot
+ * reach here, since every listed row is addressable and an admin is never
+ * refused the author arm, so for a Member who is not an admin the flag reads
+ * exactly "somebody else defined this". Learning that used to take a rename
+ * request and its 403; it is now on every page load.
+ *
+ * **No application log records any of it, and the access log this project's
+ * own serving command produces records every request, so what the change
+ * removes is the one line that was distinctive.** A refusal on a path normal
+ * use never produces, carrying the field id, becomes the request every
+ * settings page load makes. Observability is therefore **not** unchanged, and
+ * a sentence saying nothing is logged reads as though it were. Nothing here
+ * claims anything about what a deployment's ingress keeps, which a published
+ * file cannot know. `docs/security.md` carries the row.
+ * @summary List Custom Fields
+ */
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
   TError = Refusal,
@@ -2725,9 +3399,44 @@ export function useListCustomFields<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every field this library may tell you about, in the order it defined them.
+ *
+ * **Not every field it keeps.** A field is listed when a book you can see
+ * holds a value in it, when a book in your trash does, or when no book at all
+ * does. A field whose every value sits on books you cannot see is absent, and
+ * naming it by id is a 404. `fields.Fields` holds the three arms and what
+ * they cost.
+ *
+ * **No usage count**, unlike `GET /api/books/tags`. A count of the books
+ * carrying a field is a disclosure: it is drawn from books the caller may not
+ * see, so it would have to be scoped to the viewer, and a viewer scoped
+ * number in a confirmation dialog would then understate what deleting the
+ * field is about to destroy. Neither number is worth having, so the
+ * confirmation says "every book" instead. `docs/security.md` records it.
+ *
+ * **Each row says whether you may rename it.** Every field reaching this list
+ * is addressable to you by construction, since `listable` and `addressable`
+ * ask the same predicate, so what `renamable` adds is the author arm and the
+ * admin one. `schemas/custom_field.CustomFieldOut` records why that is a
+ * boolean rather than the author's member id.
+ *
+ * **On this list a false `renamable` is a fact about another Member**, and it
+ * is a disclosure rather than a convenience. The other two causes cannot
+ * reach here, since every listed row is addressable and an admin is never
+ * refused the author arm, so for a Member who is not an admin the flag reads
+ * exactly "somebody else defined this". Learning that used to take a rename
+ * request and its 403; it is now on every page load.
+ *
+ * **No application log records any of it, and the access log this project's
+ * own serving command produces records every request, so what the change
+ * removes is the one line that was distinctive.** A refusal on a path normal
+ * use never produces, carrying the field id, becomes the request every
+ * settings page load makes. Observability is therefore **not** unchanged, and
+ * a sentence saying nothing is logged reads as though it were. Nothing here
+ * claims anything about what a deployment's ingress keeps, which a published
+ * file cannot know. `docs/security.md` carries the row.
  * @summary List Custom Fields
  */
-
 export function useListCustomFields<
   TData = Awaited<ReturnType<typeof listCustomFields>>,
   TError = Refusal,
@@ -2898,6 +3607,56 @@ export type DefineCustomFieldMutationError = Refusal | HTTPValidationError;
 export type DefineCustomFieldMutationVariables = { data: CustomFieldCreate };
 
 /**
+ * Define a field for the whole library.
+ *
+ * Any member, like `create_tag` and for the same reason: public books are a
+ * shared shelf that anyone may curate, and a vocabulary only an admin can
+ * extend is a vocabulary nobody uses. Defining one is additive and changes no
+ * book.
+ *
+ * A name that already exists, in any capitalisation, returns that field
+ * rather than a 409: somebody typing a name that is already there wants that
+ * field. Past `MAX_CUSTOM_FIELDS` it refuses with 409.
+ *
+ * **The caller is recorded as the definer**, and that is what makes two
+ * other things work: the field stays on their own settings page whatever
+ * carries it, and they may rename it. `fields.Fields` holds both. The
+ * collision above takes no authorship: a second member typing an existing
+ * name gets the row and not a stake in it.
+ *
+ * **So `renamable` on the answer is not always true**, and the collision is
+ * the case that makes it worth computing rather than asserting: a member who
+ * retypes somebody else's name is handed that row and may not rename it, and
+ * a member who retypes the name of a field hidden from them is handed a row
+ * they cannot address at all. Both are the open door
+ * `fields.Fields` records under "uniqueness is whole table of necessity";
+ * this reports them rather than closing them.
+ *
+ * **For an admin those two causes do not collide, and that is a disclosure
+ * rather than a symmetry.** The sentence above reads as though the collision
+ * kept both quiet, and it does keep them quiet for everybody else. The admin
+ * arm means the author half never refuses, so a false `renamable` tells an
+ * admin exactly one thing: a field by that name exists and every value in it
+ * sits on Books they cannot see. One request and no write, where the same
+ * conclusion used to take a define and then a rename.
+ *
+ * **And nothing bounds the guessing**: no rate limiter on this route, no
+ * counter anywhere, so a dictionary of candidate names can be walked at one
+ * request each. That is what makes it enumeration rather than one bit about
+ * a name the caller already had.
+ *
+ * **No application log records any of it, and the access log this project's
+ * own serving command produces records every request, so what the change
+ * removes is the one line that was distinctive.** A distinctive refusal
+ * becomes a request indistinguishable from a legitimate define. Nothing here
+ * claims anything about what a deployment's ingress keeps.
+ * `docs/security.md` carries the row.
+ *
+ * **Where the `Fields` is constructed is not load bearing**, which is worth
+ * saying because it reads as though it were. Autoflush puts the pending row
+ * in the table before any arm reads it, and the arm for a definition no Book
+ * carries admits it either way, so warming every cache before the commit
+ * answers the same. Driven both ways; nothing reds.
  * @summary Define Custom Field
  */
 export const useDefineCustomField = <
@@ -3009,6 +3768,27 @@ export type DeleteCustomFieldMutationError = Refusal | HTTPValidationError;
 export type DeleteCustomFieldMutationVariables = { fieldId: number };
 
 /**
+ * Remove a field, and its value on every book.
+ *
+ * **Admin only, and deliberately asymmetric with defining one**, which is the
+ * same split `delete_tag` makes. Defining a field is additive and reversible
+ * by deleting it. Deleting one destroys, in one request and with no undo,
+ * something every member of the house typed by hand, on books the caller
+ * cannot necessarily see. The row records who **defined** it, which is who
+ * may rename it, and that is not an owner of the content under it: the
+ * values were typed by everybody, so there is still nobody to ask.
+ *
+ * It is the sharper case of the two: deleting a tag takes a label off a book,
+ * and deleting a field takes the **content** a member wrote.
+ *
+ * **The one door taking a field id that is not scoped to the caller**, and
+ * deliberately: gating it would leave a field whose every value sits on books
+ * the admin cannot see undeletable for good. `_any_custom_field` carries the
+ * rest.
+ *
+ * 204, like `delete_tag`, and the number of values removed goes to the log
+ * rather than to the caller. See `list_custom_fields` for why no count is
+ * published.
  * @summary Delete Custom Field
  */
 export const useDeleteCustomField = <
@@ -3168,6 +3948,45 @@ export type RenameCustomFieldMutationVariables = {
 };
 
 /**
+ * Rename a field. Every value under it is kept.
+ *
+ * That is the schema rather than this handler: values reference the
+ * definition by id, so nothing about them mentions the name. `custom_fields.rename`
+ * records why renaming onto an existing name is refused instead of merged.
+ *
+ * **404 for a field you may not be told about**, which is the answer an
+ * absent id already gives: see `fields.Fields.addressable`.
+ *
+ * **403 for a field somebody else defined**, and the two refusals are
+ * different on purpose. The 404 withholds that a row exists; by the time
+ * this one can fire, `addressable` has already said it does, so saying
+ * whose it is adds nothing the caller did not have. `fields.Fields.renamable`
+ * holds the rule, including why a field with no author is renamable by
+ * anybody: that is every field defined before the column existed, and a
+ * refusal there would have taken the verb away from an entire existing
+ * vocabulary on the morning of the upgrade.
+ *
+ * **An admin may rename any field they can address**, for the reason the
+ * delete below is admin only: a Library wide vocabulary with a ceiling of 25
+ * needs somebody who can repair a name whose author is unreachable.
+ *
+ * **It is not the same exemption, and calling it that overstates it.** The
+ * delete is deliberately ungated, so it reaches a field whose every value
+ * sits on Books the admin cannot see; this is gated on `addressable` like
+ * every other id door here. So for a field hidden from every admin, the only
+ * verb left is the delete, which destroys every value under the row. The
+ * valve for a Member who has defined the whole vocabulary is therefore
+ * repair where the field is visible and destruction where it is not.
+ *
+ * **Logged, like the delete beside it.** The log line predates the author
+ * column and is not replaced by it: the column says who may rename, and the
+ * line says who did, which for an admin rename is a different person.
+ *
+ * **The two refusals here are the whole of what `CustomFieldOut.renamable`
+ * publishes**, and the client draws its control from that rather than
+ * deriving one. A client that has gone stale still reaches them, which is
+ * why the refusal is worded for a reader: hiding a control is advice and
+ * this is the guarantee.
  * @summary Rename Custom Field
  */
 export const useRenameCustomField = <
@@ -3284,6 +4103,18 @@ export type ListDigitalReferencesUnderRootQueryError =
   | Refusal
   | HTTPValidationError;
 
+/**
+ * Every reference the caller can see under one root, for a sweep of it.
+ *
+ * A re-picked folder knows which files it holds and nothing about which it
+ * used to: that is this listing. The client compares the two and answers
+ * through `POST /digital-references/sweep`.
+ *
+ * **Scoped by the Shelf, as the missing listing is and for its reason**: a
+ * reference carries no Member of its own. Paginated, oldest first, so a
+ * client walking the pages meets each row once.
+ * @summary List Digital References Under Root
+ */
 export function useListDigitalReferencesUnderRoot<
   TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
   TError = Refusal | HTTPValidationError,
@@ -3311,6 +4142,18 @@ export function useListDigitalReferencesUnderRoot<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every reference the caller can see under one root, for a sweep of it.
+ *
+ * A re-picked folder knows which files it holds and nothing about which it
+ * used to: that is this listing. The client compares the two and answers
+ * through `POST /digital-references/sweep`.
+ *
+ * **Scoped by the Shelf, as the missing listing is and for its reason**: a
+ * reference carries no Member of its own. Paginated, oldest first, so a
+ * client walking the pages meets each row once.
+ * @summary List Digital References Under Root
+ */
 export function useListDigitalReferencesUnderRoot<
   TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
   TError = Refusal | HTTPValidationError,
@@ -3338,6 +4181,18 @@ export function useListDigitalReferencesUnderRoot<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every reference the caller can see under one root, for a sweep of it.
+ *
+ * A re-picked folder knows which files it holds and nothing about which it
+ * used to: that is this listing. The client compares the two and answers
+ * through `POST /digital-references/sweep`.
+ *
+ * **Scoped by the Shelf, as the missing listing is and for its reason**: a
+ * reference carries no Member of its own. Paginated, oldest first, so a
+ * client walking the pages meets each row once.
+ * @summary List Digital References Under Root
+ */
 export function useListDigitalReferencesUnderRoot<
   TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
   TError = Refusal | HTTPValidationError,
@@ -3358,9 +4213,17 @@ export function useListDigitalReferencesUnderRoot<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every reference the caller can see under one root, for a sweep of it.
+ *
+ * A re-picked folder knows which files it holds and nothing about which it
+ * used to: that is this listing. The client compares the two and answers
+ * through `POST /digital-references/sweep`.
+ *
+ * **Scoped by the Shelf, as the missing listing is and for its reason**: a
+ * reference carries no Member of its own. Paginated, oldest first, so a
+ * client walking the pages meets each row once.
  * @summary List Digital References Under Root
  */
-
 export function useListDigitalReferencesUnderRoot<
   TData = Awaited<ReturnType<typeof listDigitalReferencesUnderRoot>>,
   TError = Refusal | HTTPValidationError,
@@ -3528,6 +4391,61 @@ export type ListMissingDigitalReferencesQueryError =
   | Refusal
   | HTTPValidationError;
 
+/**
+ * Every file the caller can see that a client looked for and did not find.
+ *
+ * The reader for `missing_since`. Without it the flag is answerable only one
+ * book at a time, so finding every flagged file is one request per book across
+ * the whole catalogue, and almost every book holds none.
+ *
+ * **Scoped by the Shelf and by nothing else, which is the table's own rule
+ * rather than a choice made here**: a reference is an ordinary field on a Book
+ * and carries no Member of its own, so its visibility is the Book's entirely.
+ * `models.DigitalReference` says that at the column, and it is why there is no
+ * `added_by_user_id` to scope by.
+ *
+ * **A narrower scope was written first and removed, and the reason is worth
+ * keeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to
+ * give a member their own references and nobody else's. It cannot: any member
+ * who may read a Book may report a file on it, so the row's reporter is not
+ * the Book's adder and is recorded nowhere. That arm hid a member's own misses
+ * on Books somebody else added, which is the ordinary household case and the
+ * feature's main one, while still showing another member's paths on Books the
+ * caller added. A filter whose key is not the thing its reason names is not a
+ * narrowing, and "my own references" needs a reporter column on the table,
+ * which is a migration and not this route.
+ *
+ * **So say plainly what a row discloses**, since nothing here prevents it: a
+ * reference is `root_label` plus `relative_path`, an unverified path on
+ * somebody's machine, and the flag adds that a client could not reach it. This
+ * listing hands the caller every such row on the shelf they can see in one
+ * request, where reading them per book is one request each. It is the same
+ * disclosure at a different price, because a Book the caller cannot see is not
+ * on this shelf and its references are unreachable here as they are anywhere
+ * else.
+ *
+ * Rows are references, not books, and that is the decision this route makes
+ * rather than discovers. The flag is per location: a book at three paths with
+ * one gone is not a missing book, and a listing of books cannot say which of
+ * the three to go and look at. "Which of my books have gone missing" is read
+ * off the book column here; the reverse needs a request per book, which is the
+ * cost this route exists to remove.
+ *
+ * Newest miss first. A miss reported minutes ago is the one whose cause a
+ * member can still name (a drive unplugged, a folder moved this morning), and
+ * a client sweeping a directory posts its misses in one burst, so the burst
+ * arrives as a block rather than scattered down the tail. **Tied on the id**,
+ * because that burst shares one `CURRENT_TIMESTAMP` value: without the
+ * tiebreak two pages of one burst can repeat a row and drop another.
+ *
+ * Trashed books are absent, and that falls out of `Shelf.seen_by` rather than
+ * being a clause here.
+ *
+ * The total counts references, like the rows: a member with one book at three
+ * missing locations has three. It is scoped for the reason the quotes listing
+ * scopes its own, since an unscoped total announces how many rows are hidden.
+ * @summary List Missing Digital References
+ */
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -3555,6 +4473,61 @@ export function useListMissingDigitalReferences<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every file the caller can see that a client looked for and did not find.
+ *
+ * The reader for `missing_since`. Without it the flag is answerable only one
+ * book at a time, so finding every flagged file is one request per book across
+ * the whole catalogue, and almost every book holds none.
+ *
+ * **Scoped by the Shelf and by nothing else, which is the table's own rule
+ * rather than a choice made here**: a reference is an ordinary field on a Book
+ * and carries no Member of its own, so its visibility is the Book's entirely.
+ * `models.DigitalReference` says that at the column, and it is why there is no
+ * `added_by_user_id` to scope by.
+ *
+ * **A narrower scope was written first and removed, and the reason is worth
+ * keeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to
+ * give a member their own references and nobody else's. It cannot: any member
+ * who may read a Book may report a file on it, so the row's reporter is not
+ * the Book's adder and is recorded nowhere. That arm hid a member's own misses
+ * on Books somebody else added, which is the ordinary household case and the
+ * feature's main one, while still showing another member's paths on Books the
+ * caller added. A filter whose key is not the thing its reason names is not a
+ * narrowing, and "my own references" needs a reporter column on the table,
+ * which is a migration and not this route.
+ *
+ * **So say plainly what a row discloses**, since nothing here prevents it: a
+ * reference is `root_label` plus `relative_path`, an unverified path on
+ * somebody's machine, and the flag adds that a client could not reach it. This
+ * listing hands the caller every such row on the shelf they can see in one
+ * request, where reading them per book is one request each. It is the same
+ * disclosure at a different price, because a Book the caller cannot see is not
+ * on this shelf and its references are unreachable here as they are anywhere
+ * else.
+ *
+ * Rows are references, not books, and that is the decision this route makes
+ * rather than discovers. The flag is per location: a book at three paths with
+ * one gone is not a missing book, and a listing of books cannot say which of
+ * the three to go and look at. "Which of my books have gone missing" is read
+ * off the book column here; the reverse needs a request per book, which is the
+ * cost this route exists to remove.
+ *
+ * Newest miss first. A miss reported minutes ago is the one whose cause a
+ * member can still name (a drive unplugged, a folder moved this morning), and
+ * a client sweeping a directory posts its misses in one burst, so the burst
+ * arrives as a block rather than scattered down the tail. **Tied on the id**,
+ * because that burst shares one `CURRENT_TIMESTAMP` value: without the
+ * tiebreak two pages of one burst can repeat a row and drop another.
+ *
+ * Trashed books are absent, and that falls out of `Shelf.seen_by` rather than
+ * being a clause here.
+ *
+ * The total counts references, like the rows: a member with one book at three
+ * missing locations has three. It is scoped for the reason the quotes listing
+ * scopes its own, since an unscoped total announces how many rows are hidden.
+ * @summary List Missing Digital References
+ */
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -3582,6 +4555,61 @@ export function useListMissingDigitalReferences<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every file the caller can see that a client looked for and did not find.
+ *
+ * The reader for `missing_since`. Without it the flag is answerable only one
+ * book at a time, so finding every flagged file is one request per book across
+ * the whole catalogue, and almost every book holds none.
+ *
+ * **Scoped by the Shelf and by nothing else, which is the table's own rule
+ * rather than a choice made here**: a reference is an ordinary field on a Book
+ * and carries no Member of its own, so its visibility is the Book's entirely.
+ * `models.DigitalReference` says that at the column, and it is why there is no
+ * `added_by_user_id` to scope by.
+ *
+ * **A narrower scope was written first and removed, and the reason is worth
+ * keeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to
+ * give a member their own references and nobody else's. It cannot: any member
+ * who may read a Book may report a file on it, so the row's reporter is not
+ * the Book's adder and is recorded nowhere. That arm hid a member's own misses
+ * on Books somebody else added, which is the ordinary household case and the
+ * feature's main one, while still showing another member's paths on Books the
+ * caller added. A filter whose key is not the thing its reason names is not a
+ * narrowing, and "my own references" needs a reporter column on the table,
+ * which is a migration and not this route.
+ *
+ * **So say plainly what a row discloses**, since nothing here prevents it: a
+ * reference is `root_label` plus `relative_path`, an unverified path on
+ * somebody's machine, and the flag adds that a client could not reach it. This
+ * listing hands the caller every such row on the shelf they can see in one
+ * request, where reading them per book is one request each. It is the same
+ * disclosure at a different price, because a Book the caller cannot see is not
+ * on this shelf and its references are unreachable here as they are anywhere
+ * else.
+ *
+ * Rows are references, not books, and that is the decision this route makes
+ * rather than discovers. The flag is per location: a book at three paths with
+ * one gone is not a missing book, and a listing of books cannot say which of
+ * the three to go and look at. "Which of my books have gone missing" is read
+ * off the book column here; the reverse needs a request per book, which is the
+ * cost this route exists to remove.
+ *
+ * Newest miss first. A miss reported minutes ago is the one whose cause a
+ * member can still name (a drive unplugged, a folder moved this morning), and
+ * a client sweeping a directory posts its misses in one burst, so the burst
+ * arrives as a block rather than scattered down the tail. **Tied on the id**,
+ * because that burst shares one `CURRENT_TIMESTAMP` value: without the
+ * tiebreak two pages of one burst can repeat a row and drop another.
+ *
+ * Trashed books are absent, and that falls out of `Shelf.seen_by` rather than
+ * being a clause here.
+ *
+ * The total counts references, like the rows: a member with one book at three
+ * missing locations has three. It is scoped for the reason the quotes listing
+ * scopes its own, since an unscoped total announces how many rows are hidden.
+ * @summary List Missing Digital References
+ */
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -3602,9 +4630,60 @@ export function useListMissingDigitalReferences<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every file the caller can see that a client looked for and did not find.
+ *
+ * The reader for `missing_since`. Without it the flag is answerable only one
+ * book at a time, so finding every flagged file is one request per book across
+ * the whole catalogue, and almost every book holds none.
+ *
+ * **Scoped by the Shelf and by nothing else, which is the table's own rule
+ * rather than a choice made here**: a reference is an ordinary field on a Book
+ * and carries no Member of its own, so its visibility is the Book's entirely.
+ * `models.DigitalReference` says that at the column, and it is why there is no
+ * `added_by_user_id` to scope by.
+ *
+ * **A narrower scope was written first and removed, and the reason is worth
+ * keeping.** The arm was `Book.added_by_user_id == current_user.id`, meant to
+ * give a member their own references and nobody else's. It cannot: any member
+ * who may read a Book may report a file on it, so the row's reporter is not
+ * the Book's adder and is recorded nowhere. That arm hid a member's own misses
+ * on Books somebody else added, which is the ordinary household case and the
+ * feature's main one, while still showing another member's paths on Books the
+ * caller added. A filter whose key is not the thing its reason names is not a
+ * narrowing, and "my own references" needs a reporter column on the table,
+ * which is a migration and not this route.
+ *
+ * **So say plainly what a row discloses**, since nothing here prevents it: a
+ * reference is `root_label` plus `relative_path`, an unverified path on
+ * somebody's machine, and the flag adds that a client could not reach it. This
+ * listing hands the caller every such row on the shelf they can see in one
+ * request, where reading them per book is one request each. It is the same
+ * disclosure at a different price, because a Book the caller cannot see is not
+ * on this shelf and its references are unreachable here as they are anywhere
+ * else.
+ *
+ * Rows are references, not books, and that is the decision this route makes
+ * rather than discovers. The flag is per location: a book at three paths with
+ * one gone is not a missing book, and a listing of books cannot say which of
+ * the three to go and look at. "Which of my books have gone missing" is read
+ * off the book column here; the reverse needs a request per book, which is the
+ * cost this route exists to remove.
+ *
+ * Newest miss first. A miss reported minutes ago is the one whose cause a
+ * member can still name (a drive unplugged, a folder moved this morning), and
+ * a client sweeping a directory posts its misses in one burst, so the burst
+ * arrives as a block rather than scattered down the tail. **Tied on the id**,
+ * because that burst shares one `CURRENT_TIMESTAMP` value: without the
+ * tiebreak two pages of one burst can repeat a row and drop another.
+ *
+ * Trashed books are absent, and that falls out of `Shelf.seen_by` rather than
+ * being a clause here.
+ *
+ * The total counts references, like the rows: a member with one book at three
+ * missing locations has three. It is scoped for the reason the quotes listing
+ * scopes its own, since an unscoped total announces how many rows are hidden.
  * @summary List Missing Digital References
  */
-
 export function useListMissingDigitalReferences<
   TData = Awaited<ReturnType<typeof listMissingDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -3752,6 +4831,29 @@ export type SweepDigitalReferencesMutationError = Refusal | HTTPValidationError;
 export type SweepDigitalReferencesMutationVariables = { data: SweepIn };
 
 /**
+ * Record what a re-picked folder found: each sighting, and each miss.
+ *
+ * The two per reference routes in one request. A miss is the per reference
+ * flag's rule unchanged: `missing_since` set once, the row never deleted. A
+ * sighting is the per reference report's rule: it clears `missing_since`,
+ * confirms the row, and fills in a fingerprint the row is missing without
+ * ever replacing a different one. A sweep of a few hundred files is then a
+ * request or two rather than a request a file.
+ *
+ * **The client sends sightings at the pick and misses only on a press**,
+ * because a root is only a folder name: one member's pick of their own
+ * "Calibre Library" would otherwise flag every file another member saved
+ * from theirs.
+ *
+ * **Who may flag a reference is who may write its Book**, the rule
+ * `dependencies.book_for_write` states for the per reference routes. That
+ * rule is every Book on the caller's shelf, so the rows are resolved through
+ * `Shelf.seen_by`: a reference on another member's private Book is not
+ * reached, and answers exactly as an id that does not exist.
+ *
+ * **Only references under `root_label` are written.** A sweep is one
+ * folder's account of itself, and a file under another root is not one it
+ * looked for.
  * @summary Sweep Digital References
  */
 export const useSweepDigitalReferences = <
@@ -3855,6 +4957,36 @@ export type ListDuplicatesQueryResult = NonNullable<
 >;
 export type ListDuplicatesQueryError = Refusal;
 
+/**
+ * Books that look like the same work under different ids.
+ *
+ * Matched on normalised title plus author, NOT on ISBN. An accidental exact
+ * repeat is already refused by `uq_books_isbn_single_copy`, so the case left
+ * to catch is the one it cannot see: a hardback and a paperback are the same
+ * book and two legitimately different ISBNs.
+ *
+ * **A deliberate copy is not a duplicate, and this is where the two are told
+ * apart.** Two paperbacks of one title are two rows sharing a `copy_group`
+ * and would otherwise be the strongest match this endpoint can produce: same
+ * title, same author, same everything. Offering them for merge would invite
+ * somebody to destroy a book they own, so each group is collapsed to one row
+ * before the grouping runs. What survives is what the collapse could not
+ * explain, which is exactly the accidental case.
+ *
+ * Grouping happens in Python rather than SQL because the normalisation
+ * (casefold, strip punctuation, drop a leading article) is not something
+ * SQLite can express, and the catalogue is small enough that scanning it is
+ * cheaper than maintaining a normalised column.
+ *
+ * **The scan is unpaginated and the answer is capped, which are two
+ * different statements.** Every request reads one row per visible Book,
+ * because a page of the catalogue cannot be grouped on its own: a pair split
+ * across two pages is two singletons. What the cap cuts is the finished
+ * grouping, never the population it ran over, so a group is never split by
+ * it and the answer never depends on a grouping computed in an earlier
+ * request. The work is unbounded; the answer is not.
+ * @summary List Duplicates
+ */
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
   TError = Refusal,
@@ -3877,6 +5009,36 @@ export function useListDuplicates<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Books that look like the same work under different ids.
+ *
+ * Matched on normalised title plus author, NOT on ISBN. An accidental exact
+ * repeat is already refused by `uq_books_isbn_single_copy`, so the case left
+ * to catch is the one it cannot see: a hardback and a paperback are the same
+ * book and two legitimately different ISBNs.
+ *
+ * **A deliberate copy is not a duplicate, and this is where the two are told
+ * apart.** Two paperbacks of one title are two rows sharing a `copy_group`
+ * and would otherwise be the strongest match this endpoint can produce: same
+ * title, same author, same everything. Offering them for merge would invite
+ * somebody to destroy a book they own, so each group is collapsed to one row
+ * before the grouping runs. What survives is what the collapse could not
+ * explain, which is exactly the accidental case.
+ *
+ * Grouping happens in Python rather than SQL because the normalisation
+ * (casefold, strip punctuation, drop a leading article) is not something
+ * SQLite can express, and the catalogue is small enough that scanning it is
+ * cheaper than maintaining a normalised column.
+ *
+ * **The scan is unpaginated and the answer is capped, which are two
+ * different statements.** Every request reads one row per visible Book,
+ * because a page of the catalogue cannot be grouped on its own: a pair split
+ * across two pages is two singletons. What the cap cuts is the finished
+ * grouping, never the population it ran over, so a group is never split by
+ * it and the answer never depends on a grouping computed in an earlier
+ * request. The work is unbounded; the answer is not.
+ * @summary List Duplicates
+ */
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
   TError = Refusal,
@@ -3899,6 +5061,36 @@ export function useListDuplicates<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Books that look like the same work under different ids.
+ *
+ * Matched on normalised title plus author, NOT on ISBN. An accidental exact
+ * repeat is already refused by `uq_books_isbn_single_copy`, so the case left
+ * to catch is the one it cannot see: a hardback and a paperback are the same
+ * book and two legitimately different ISBNs.
+ *
+ * **A deliberate copy is not a duplicate, and this is where the two are told
+ * apart.** Two paperbacks of one title are two rows sharing a `copy_group`
+ * and would otherwise be the strongest match this endpoint can produce: same
+ * title, same author, same everything. Offering them for merge would invite
+ * somebody to destroy a book they own, so each group is collapsed to one row
+ * before the grouping runs. What survives is what the collapse could not
+ * explain, which is exactly the accidental case.
+ *
+ * Grouping happens in Python rather than SQL because the normalisation
+ * (casefold, strip punctuation, drop a leading article) is not something
+ * SQLite can express, and the catalogue is small enough that scanning it is
+ * cheaper than maintaining a normalised column.
+ *
+ * **The scan is unpaginated and the answer is capped, which are two
+ * different statements.** Every request reads one row per visible Book,
+ * because a page of the catalogue cannot be grouped on its own: a pair split
+ * across two pages is two singletons. What the cap cuts is the finished
+ * grouping, never the population it ran over, so a group is never split by
+ * it and the answer never depends on a grouping computed in an earlier
+ * request. The work is unbounded; the answer is not.
+ * @summary List Duplicates
+ */
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
   TError = Refusal,
@@ -3914,9 +5106,35 @@ export function useListDuplicates<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Books that look like the same work under different ids.
+ *
+ * Matched on normalised title plus author, NOT on ISBN. An accidental exact
+ * repeat is already refused by `uq_books_isbn_single_copy`, so the case left
+ * to catch is the one it cannot see: a hardback and a paperback are the same
+ * book and two legitimately different ISBNs.
+ *
+ * **A deliberate copy is not a duplicate, and this is where the two are told
+ * apart.** Two paperbacks of one title are two rows sharing a `copy_group`
+ * and would otherwise be the strongest match this endpoint can produce: same
+ * title, same author, same everything. Offering them for merge would invite
+ * somebody to destroy a book they own, so each group is collapsed to one row
+ * before the grouping runs. What survives is what the collapse could not
+ * explain, which is exactly the accidental case.
+ *
+ * Grouping happens in Python rather than SQL because the normalisation
+ * (casefold, strip punctuation, drop a leading article) is not something
+ * SQLite can express, and the catalogue is small enough that scanning it is
+ * cheaper than maintaining a normalised column.
+ *
+ * **The scan is unpaginated and the answer is capped, which are two
+ * different statements.** Every request reads one row per visible Book,
+ * because a page of the catalogue cannot be grouped on its own: a pair split
+ * across two pages is two singletons. What the cap cuts is the finished
+ * grouping, never the population it ran over, so a group is never split by
+ * it and the answer never depends on a grouping computed in an earlier
+ * request. The work is unbounded; the answer is not.
  * @summary List Duplicates
  */
-
 export function useListDuplicates<
   TData = Awaited<ReturnType<typeof listDuplicates>>,
   TError = Refusal,
@@ -4039,6 +5257,42 @@ export type ExportBooksQueryResult = NonNullable<
 >;
 export type ExportBooksQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The shelf this member can see, as a file.
+ *
+ * **CSV is `text/csv`, plain text is `text/plain`, HTML is `text/html` and
+ * MARCXML is `application/marcxml+xml`.** All are declared for the 200
+ * because the document has no way to say which of them `?format=` selects.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`. It is not declared here because this document declares a
+ * refusal only where it declares one for every operation that can answer
+ * it: a 401, a 403 or a 404, derived in `refusals.py` from what each route
+ * runs, and nothing else. So declaring a 429 here alone would make this
+ * refusal look deliberate and every other operation's look accidental, which
+ * is a decision about the whole error surface rather than about this route.
+ * `docs/decisions.md` records that reasoning, having refused the same move
+ * once already, and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this
+ * paragraph rests on rather than a reader's memory of it. The mechanism behind
+ * the refusal is shared by every route in `ratelimit.py`, so what would make
+ * declaring it honest is declaring it at all of them. The counter is not:
+ * this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
+ *
+ * **MARCXML needs library mode and the other three do not.** A CSV export is a
+ * household reading its own shelf in a spreadsheet. A MARC record is a
+ * catalogue record handed to another institution, which is what library mode
+ * is for, and offering it everywhere would put a format nobody in a household
+ * can use in front of everybody. Enforced here rather than by hiding the menu
+ * entry: disabling a control in the browser is advice to one client, which is
+ * the sentence `routers/public.py` already states about the public catalogue.
+ *
+ * **403, not 404.** The route exists and the member may call it; the format
+ * is switched off. That is the same answer registration gives when it is
+ * closed, and there is nothing to conceal: `GET /api/settings/features`
+ * already tells any caller whether library mode is on.
+ * @summary Export Books
+ */
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -4062,6 +5316,42 @@ export function useExportBooks<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The shelf this member can see, as a file.
+ *
+ * **CSV is `text/csv`, plain text is `text/plain`, HTML is `text/html` and
+ * MARCXML is `application/marcxml+xml`.** All are declared for the 200
+ * because the document has no way to say which of them `?format=` selects.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`. It is not declared here because this document declares a
+ * refusal only where it declares one for every operation that can answer
+ * it: a 401, a 403 or a 404, derived in `refusals.py` from what each route
+ * runs, and nothing else. So declaring a 429 here alone would make this
+ * refusal look deliberate and every other operation's look accidental, which
+ * is a decision about the whole error surface rather than about this route.
+ * `docs/decisions.md` records that reasoning, having refused the same move
+ * once already, and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this
+ * paragraph rests on rather than a reader's memory of it. The mechanism behind
+ * the refusal is shared by every route in `ratelimit.py`, so what would make
+ * declaring it honest is declaring it at all of them. The counter is not:
+ * this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
+ *
+ * **MARCXML needs library mode and the other three do not.** A CSV export is a
+ * household reading its own shelf in a spreadsheet. A MARC record is a
+ * catalogue record handed to another institution, which is what library mode
+ * is for, and offering it everywhere would put a format nobody in a household
+ * can use in front of everybody. Enforced here rather than by hiding the menu
+ * entry: disabling a control in the browser is advice to one client, which is
+ * the sentence `routers/public.py` already states about the public catalogue.
+ *
+ * **403, not 404.** The route exists and the member may call it; the format
+ * is switched off. That is the same answer registration gives when it is
+ * closed, and there is nothing to conceal: `GET /api/settings/features`
+ * already tells any caller whether library mode is on.
+ * @summary Export Books
+ */
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -4085,6 +5375,42 @@ export function useExportBooks<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The shelf this member can see, as a file.
+ *
+ * **CSV is `text/csv`, plain text is `text/plain`, HTML is `text/html` and
+ * MARCXML is `application/marcxml+xml`.** All are declared for the 200
+ * because the document has no way to say which of them `?format=` selects.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`. It is not declared here because this document declares a
+ * refusal only where it declares one for every operation that can answer
+ * it: a 401, a 403 or a 404, derived in `refusals.py` from what each route
+ * runs, and nothing else. So declaring a 429 here alone would make this
+ * refusal look deliberate and every other operation's look accidental, which
+ * is a decision about the whole error surface rather than about this route.
+ * `docs/decisions.md` records that reasoning, having refused the same move
+ * once already, and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this
+ * paragraph rests on rather than a reader's memory of it. The mechanism behind
+ * the refusal is shared by every route in `ratelimit.py`, so what would make
+ * declaring it honest is declaring it at all of them. The counter is not:
+ * this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
+ *
+ * **MARCXML needs library mode and the other three do not.** A CSV export is a
+ * household reading its own shelf in a spreadsheet. A MARC record is a
+ * catalogue record handed to another institution, which is what library mode
+ * is for, and offering it everywhere would put a format nobody in a household
+ * can use in front of everybody. Enforced here rather than by hiding the menu
+ * entry: disabling a control in the browser is advice to one client, which is
+ * the sentence `routers/public.py` already states about the public catalogue.
+ *
+ * **403, not 404.** The route exists and the member may call it; the format
+ * is switched off. That is the same answer registration gives when it is
+ * closed, and there is nothing to conceal: `GET /api/settings/features`
+ * already tells any caller whether library mode is on.
+ * @summary Export Books
+ */
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -4101,9 +5427,41 @@ export function useExportBooks<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The shelf this member can see, as a file.
+ *
+ * **CSV is `text/csv`, plain text is `text/plain`, HTML is `text/html` and
+ * MARCXML is `application/marcxml+xml`.** All are declared for the 200
+ * because the document has no way to say which of them `?format=` selects.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`. It is not declared here because this document declares a
+ * refusal only where it declares one for every operation that can answer
+ * it: a 401, a 403 or a 404, derived in `refusals.py` from what each route
+ * runs, and nothing else. So declaring a 429 here alone would make this
+ * refusal look deliberate and every other operation's look accidental, which
+ * is a decision about the whole error surface rather than about this route.
+ * `docs/decisions.md` records that reasoning, having refused the same move
+ * once already, and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` is what this
+ * paragraph rests on rather than a reader's memory of it. The mechanism behind
+ * the refusal is shared by every route in `ratelimit.py`, so what would make
+ * declaring it honest is declaring it at all of them. The counter is not:
+ * this route has its own, for the reason `ratelimit.EXPORT_LIMIT` gives.
+ *
+ * **MARCXML needs library mode and the other three do not.** A CSV export is a
+ * household reading its own shelf in a spreadsheet. A MARC record is a
+ * catalogue record handed to another institution, which is what library mode
+ * is for, and offering it everywhere would put a format nobody in a household
+ * can use in front of everybody. Enforced here rather than by hiding the menu
+ * entry: disabling a control in the browser is advice to one client, which is
+ * the sentence `routers/public.py` already states about the public catalogue.
+ *
+ * **403, not 404.** The route exists and the member may call it; the format
+ * is switched off. That is the same answer registration gives when it is
+ * closed, and there is nothing to conceal: `GET /api/settings/features`
+ * already tells any caller whether library mode is on.
  * @summary Export Books
  */
-
 export function useExportBooks<
   TData = Awaited<ReturnType<typeof exportBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -4239,6 +5597,25 @@ export type FindFileHoldersMutationError = Refusal | HTTPValidationError;
 export type FindFileHoldersMutationVariables = { data: HoldersIn };
 
 /**
+ * Which Books the caller can see already hold each of these files.
+ *
+ * One answer per file, in the order asked. A file is named by its location,
+ * by KOReader's partial MD5, or both, and a reference matching **either** is a
+ * holder: a location is what a folder pick knows for certain, and a digest is
+ * what survives the file being moved and is all a KOReader device sends.
+ *
+ * **Scoped by the Shelf, so a Book the caller cannot see answers exactly as no
+ * Book does**: an empty list, never a refusal that would confirm it exists.
+ * Trashed Books are absent for the same reason.
+ *
+ * **A read, sent as a POST** because the question is a list of up to
+ * `MAX_FILES_PER_LOOKUP` paths, each up to a path's length, which no query
+ * string carries.
+ *
+ * One statement for the whole list, and the location is matched in Python on
+ * the rows it returns. The statement narrows on the path alone, because a
+ * path and a root can only be paired in SQL by row value comparisons whose
+ * spelling differs between the two engines; the root is then compared here.
  * @summary Find File Holders
  */
 export const useFindFileHolders = <
@@ -4395,6 +5772,51 @@ export type BackfillFromIdentifiersMutationVariables = {
 };
 
 /**
+ * Fill in books that carry a store's own identifier and no ISBN.
+ *
+ * **This is what a Google Play Books import needs, and nothing else supplies
+ * it.** That export carries a Google Books volume id for every book and no
+ * ISBN anywhere, so a book arrives with a title, an author and an exact key,
+ * and the only enrichment available to it was a search by that title. One
+ * volume id resolves to one record, with no ranking and no guess.
+ *
+ * **Amazon is deliberately absent.** Amazon publishes no catalogue API, so
+ * there is no request an ASIN could become. A book carrying only an ASIN is
+ * not a candidate here and is not reported as one.
+ *
+ * **Candidates are books with no ISBN, no Google volume already recorded, and
+ * a Google Books identifier.** No ISBN, because an ISBN
+ * is an exact key the free catalogues answer to, and spending a metered
+ * request on one would be the bill for nothing that
+ * `sources.Plan.lookup_together` refuses. No volume recorded, because that
+ * column is what this writes, so a book it has filled in stops being a
+ * candidate and this is safe to run twice.
+ *
+ * It fills gaps and nothing a Member must choose: categories and the series
+ * stay empty here, as they do for `POST /{id}/enrich`, because nobody picked
+ * this record. `POST /{id}/enrich` records the volume id the same way when
+ * that id is what found the record.
+ *
+ * **Scoped to the books the caller can see**, like the cover backfill and for
+ * that route's stated reason: `visible_to` has no admin bypass, so each member
+ * repairs their own shelf rather than the privacy rule being bent to make an
+ * operator action work.
+ *
+ * **Refuses with 409 when this library does not ask Google Books**, rather
+ * than examining nothing and reporting a clean run. The cause is a switch and
+ * a key in Settings, and the reply names both.
+ *
+ * Batched and resumable. `next_after_id` carries on past what this run
+ * examined, and comes back as 0 at the end of the library so pressing again
+ * starts over and re-tries whatever has since become resolvable.
+ *
+ * **Bounded in wall clock as well as in books**, so a slow or busy Google
+ * leaves the batch short rather than holding the request open. A short run
+ * answers with whatever resolved, counts only the books it has an outcome for,
+ * and moves the cursor over exactly those, so pressing again resumes at the
+ * first book this one did not reach. The reply does not distinguish a short run
+ * from a complete one and does not need to: press again while `remaining` is
+ * above zero.
  * @summary Backfill From Identifiers
  */
 export const useBackfillFromIdentifiers = <
@@ -4475,6 +5897,13 @@ export type ListLocationsQueryResult = NonNullable<
 >;
 export type ListLocationsQueryError = Refusal;
 
+/**
+ * The distinct shelf locations in use, most-populated first.
+ *
+ * Doubles as the autocomplete source for the location field. Free text with
+ * no suggestions turns into six spellings of "living room" within a week.
+ * @summary List Locations
+ */
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
   TError = Refusal,
@@ -4497,6 +5926,13 @@ export function useListLocations<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The distinct shelf locations in use, most-populated first.
+ *
+ * Doubles as the autocomplete source for the location field. Free text with
+ * no suggestions turns into six spellings of "living room" within a week.
+ * @summary List Locations
+ */
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
   TError = Refusal,
@@ -4519,6 +5955,13 @@ export function useListLocations<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The distinct shelf locations in use, most-populated first.
+ *
+ * Doubles as the autocomplete source for the location field. Free text with
+ * no suggestions turns into six spellings of "living room" within a week.
+ * @summary List Locations
+ */
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
   TError = Refusal,
@@ -4534,9 +5977,12 @@ export function useListLocations<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The distinct shelf locations in use, most-populated first.
+ *
+ * Doubles as the autocomplete source for the location field. Free text with
+ * no suggestions turns into six spellings of "living room" within a week.
  * @summary List Locations
  */
-
 export function useListLocations<
   TData = Awaited<ReturnType<typeof listLocations>>,
   TError = Refusal,
@@ -4626,6 +6072,7 @@ export type LookupIsbnQueryResult = NonNullable<
 >;
 export type LookupIsbnQueryError = Refusal | HTTPValidationError;
 
+/** @summary Lookup Isbn */
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
   TError = Refusal | HTTPValidationError,
@@ -4649,6 +6096,7 @@ export function useLookupIsbn<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Lookup Isbn */
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
   TError = Refusal | HTTPValidationError,
@@ -4672,6 +6120,7 @@ export function useLookupIsbn<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Lookup Isbn */
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
   TError = Refusal | HTTPValidationError,
@@ -4687,10 +6136,7 @@ export function useLookupIsbn<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @summary Lookup Isbn
- */
-
+/** @summary Lookup Isbn */
 export function useLookupIsbn<
   TData = Awaited<ReturnType<typeof lookupIsbn>>,
   TError = Refusal | HTTPValidationError,
@@ -4822,6 +6268,21 @@ export type MergeBooksMutationError = Refusal | HTTPValidationError;
 export type MergeBooksMutationVariables = { data: MergeRequest };
 
 /**
+ * Fold several catalogue entries into one.
+ *
+ * The survivor absorbs anything the others have and it lacks: a cover, an
+ * ISBN, a page count. It never overwrites a value it already holds, on the
+ * same principle as enrichment, since the kept row is the one a person chose.
+ *
+ * Tags, notes, quotes, highlights, loans and reading statuses are repointed rather than
+ * dropped. A status collision (both rows read by the same person) keeps the
+ * one on the survivor, because deleting somebody's reading history to
+ * satisfy a unique index is not an acceptable way to resolve it.
+ *
+ * A merge deletes its losers, so each one must be a Book the caller added,
+ * unless the caller is an admin; one that is not refuses the whole merge
+ * with 409, before anything moves. The survivor may be anybody's: it loses
+ * nothing, since it never overwrites a value it holds.
  * @summary Merge Books
  */
 export const useMergeBooks = <
@@ -4937,6 +6398,35 @@ export type ListQuotesQueryResult = NonNullable<
 >;
 export type ListQuotesQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Every passage the caller may see, from every book.
+ *
+ * Declared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches
+ * in declaration order, so the reverse would make this a request for the book
+ * with id "quotes".
+ *
+ * **This is a book query wearing a different hat**, so both halves of it are
+ * rooted at the shelf and joined outward to `quotes`. Without that a quote
+ * from somebody else's private book would be listed here with its title and
+ * cover, which discloses the book, the passage and that the member owns it,
+ * in one 200. The count is scoped for the same reason: an unfiltered total
+ * announces how many are hidden.
+ *
+ * The count used to be spelled `count(Book.id)` rather than `count(Quote.id)`
+ * so that the AST guard could see it was a book query at all. That guard is
+ * gone and the spelling now carries no such weight, but it is left alone
+ * because the two are identical over an inner join on a primary key and
+ * changing it would be a diff with no reader.
+ *
+ * Newest first. A book's own quotes come back in reading order because a book
+ * has one; a list spanning the shelf does not, and the interesting end of it
+ * is the one somebody just added.
+ *
+ * Joined to the book rather than fetching one per row: a hundred quotes over
+ * ninety books is ninety extra statements, which is the N+1 `_books_to_out`
+ * exists to avoid.
+ * @summary List Quotes
+ */
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -4960,6 +6450,35 @@ export function useListQuotes<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every passage the caller may see, from every book.
+ *
+ * Declared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches
+ * in declaration order, so the reverse would make this a request for the book
+ * with id "quotes".
+ *
+ * **This is a book query wearing a different hat**, so both halves of it are
+ * rooted at the shelf and joined outward to `quotes`. Without that a quote
+ * from somebody else's private book would be listed here with its title and
+ * cover, which discloses the book, the passage and that the member owns it,
+ * in one 200. The count is scoped for the same reason: an unfiltered total
+ * announces how many are hidden.
+ *
+ * The count used to be spelled `count(Book.id)` rather than `count(Quote.id)`
+ * so that the AST guard could see it was a book query at all. That guard is
+ * gone and the spelling now carries no such weight, but it is left alone
+ * because the two are identical over an inner join on a primary key and
+ * changing it would be a diff with no reader.
+ *
+ * Newest first. A book's own quotes come back in reading order because a book
+ * has one; a list spanning the shelf does not, and the interesting end of it
+ * is the one somebody just added.
+ *
+ * Joined to the book rather than fetching one per row: a hundred quotes over
+ * ninety books is ninety extra statements, which is the N+1 `_books_to_out`
+ * exists to avoid.
+ * @summary List Quotes
+ */
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -4983,6 +6502,35 @@ export function useListQuotes<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every passage the caller may see, from every book.
+ *
+ * Declared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches
+ * in declaration order, so the reverse would make this a request for the book
+ * with id "quotes".
+ *
+ * **This is a book query wearing a different hat**, so both halves of it are
+ * rooted at the shelf and joined outward to `quotes`. Without that a quote
+ * from somebody else's private book would be listed here with its title and
+ * cover, which discloses the book, the passage and that the member owns it,
+ * in one 200. The count is scoped for the same reason: an unfiltered total
+ * announces how many are hidden.
+ *
+ * The count used to be spelled `count(Book.id)` rather than `count(Quote.id)`
+ * so that the AST guard could see it was a book query at all. That guard is
+ * gone and the spelling now carries no such weight, but it is left alone
+ * because the two are identical over an inner join on a primary key and
+ * changing it would be a diff with no reader.
+ *
+ * Newest first. A book's own quotes come back in reading order because a book
+ * has one; a list spanning the shelf does not, and the interesting end of it
+ * is the one somebody just added.
+ *
+ * Joined to the book rather than fetching one per row: a hundred quotes over
+ * ninety books is ninety extra statements, which is the N+1 `_books_to_out`
+ * exists to avoid.
+ * @summary List Quotes
+ */
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -4999,9 +6547,34 @@ export function useListQuotes<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every passage the caller may see, from every book.
+ *
+ * Declared before `/{book_id}`, like `/trash` and `/export`: FastAPI matches
+ * in declaration order, so the reverse would make this a request for the book
+ * with id "quotes".
+ *
+ * **This is a book query wearing a different hat**, so both halves of it are
+ * rooted at the shelf and joined outward to `quotes`. Without that a quote
+ * from somebody else's private book would be listed here with its title and
+ * cover, which discloses the book, the passage and that the member owns it,
+ * in one 200. The count is scoped for the same reason: an unfiltered total
+ * announces how many are hidden.
+ *
+ * The count used to be spelled `count(Book.id)` rather than `count(Quote.id)`
+ * so that the AST guard could see it was a book query at all. That guard is
+ * gone and the spelling now carries no such weight, but it is left alone
+ * because the two are identical over an inner join on a primary key and
+ * changing it would be a diff with no reader.
+ *
+ * Newest first. A book's own quotes come back in reading order because a book
+ * has one; a list spanning the shelf does not, and the interesting end of it
+ * is the one somebody just added.
+ *
+ * Joined to the book rather than fetching one per row: a hundred quotes over
+ * ninety books is ninety extra statements, which is the N+1 `_books_to_out`
+ * exists to avoid.
  * @summary List Quotes
  */
-
 export function useListQuotes<
   TData = Awaited<ReturnType<typeof listQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -5120,6 +6693,8 @@ export type ScanAddMutationError = Refusal | HTTPValidationError;
 export type ScanAddMutationVariables = { data: BookCreate };
 
 /**
+ * Confirm-add after an ISBN lookup. Same as POST /api/books, named for the
+ * scan flow so the client's intent is visible in logs and metrics.
  * @summary Scan Add
  */
 export const useScanAdd = <
@@ -5233,6 +6808,33 @@ export type SearchBooksQueryResult = NonNullable<
 >;
 export type SearchBooksQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Free-text search, for adding a book nobody can scan.
+ *
+ * The barcode path covers a book that is physically to hand. This covers the
+ * rest: a book with no barcode, a damaged one, one printed before ISBNs
+ * existed, or one being added from a list rather than from the shelf. The
+ * caller picks a result and the client prefills the form from it, so nothing
+ * is written until a person confirms.
+ *
+ * **No API key is required.** This used to be Google Books only and was
+ * hidden entirely from a library that had not configured one, which left
+ * them with no way at all to add a book by title. Open Library answers
+ * without a key; Google is merged in on top when one is set, for the blurb
+ * and the categories its search index carries and Open Library's does not.
+ *
+ * Two segments (`/google/search`) used to guard against this being confused
+ * with `/{book_id}`; a single one is safe for the same reason `/export` is,
+ * which is that it is declared first.
+ *
+ * **`harder` also asks the catalogues the ordinary deadline cannot wait for.**
+ * It is a request rather than an instruction: the server runs the ordinary
+ * search when this library has no such catalogue enabled, and when the one
+ * long fan out allowed at a time is already in flight. `asked` and `unasked`
+ * on the response say what actually happened, so a client never has to infer
+ * it from what it sent.
+ * @summary Search Books
+ */
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -5256,6 +6858,33 @@ export function useSearchBooks<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Free-text search, for adding a book nobody can scan.
+ *
+ * The barcode path covers a book that is physically to hand. This covers the
+ * rest: a book with no barcode, a damaged one, one printed before ISBNs
+ * existed, or one being added from a list rather than from the shelf. The
+ * caller picks a result and the client prefills the form from it, so nothing
+ * is written until a person confirms.
+ *
+ * **No API key is required.** This used to be Google Books only and was
+ * hidden entirely from a library that had not configured one, which left
+ * them with no way at all to add a book by title. Open Library answers
+ * without a key; Google is merged in on top when one is set, for the blurb
+ * and the categories its search index carries and Open Library's does not.
+ *
+ * Two segments (`/google/search`) used to guard against this being confused
+ * with `/{book_id}`; a single one is safe for the same reason `/export` is,
+ * which is that it is declared first.
+ *
+ * **`harder` also asks the catalogues the ordinary deadline cannot wait for.**
+ * It is a request rather than an instruction: the server runs the ordinary
+ * search when this library has no such catalogue enabled, and when the one
+ * long fan out allowed at a time is already in flight. `asked` and `unasked`
+ * on the response say what actually happened, so a client never has to infer
+ * it from what it sent.
+ * @summary Search Books
+ */
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -5279,6 +6908,33 @@ export function useSearchBooks<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Free-text search, for adding a book nobody can scan.
+ *
+ * The barcode path covers a book that is physically to hand. This covers the
+ * rest: a book with no barcode, a damaged one, one printed before ISBNs
+ * existed, or one being added from a list rather than from the shelf. The
+ * caller picks a result and the client prefills the form from it, so nothing
+ * is written until a person confirms.
+ *
+ * **No API key is required.** This used to be Google Books only and was
+ * hidden entirely from a library that had not configured one, which left
+ * them with no way at all to add a book by title. Open Library answers
+ * without a key; Google is merged in on top when one is set, for the blurb
+ * and the categories its search index carries and Open Library's does not.
+ *
+ * Two segments (`/google/search`) used to guard against this being confused
+ * with `/{book_id}`; a single one is safe for the same reason `/export` is,
+ * which is that it is declared first.
+ *
+ * **`harder` also asks the catalogues the ordinary deadline cannot wait for.**
+ * It is a request rather than an instruction: the server runs the ordinary
+ * search when this library has no such catalogue enabled, and when the one
+ * long fan out allowed at a time is already in flight. `asked` and `unasked`
+ * on the response say what actually happened, so a client never has to infer
+ * it from what it sent.
+ * @summary Search Books
+ */
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -5295,9 +6951,32 @@ export function useSearchBooks<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Free-text search, for adding a book nobody can scan.
+ *
+ * The barcode path covers a book that is physically to hand. This covers the
+ * rest: a book with no barcode, a damaged one, one printed before ISBNs
+ * existed, or one being added from a list rather than from the shelf. The
+ * caller picks a result and the client prefills the form from it, so nothing
+ * is written until a person confirms.
+ *
+ * **No API key is required.** This used to be Google Books only and was
+ * hidden entirely from a library that had not configured one, which left
+ * them with no way at all to add a book by title. Open Library answers
+ * without a key; Google is merged in on top when one is set, for the blurb
+ * and the categories its search index carries and Open Library's does not.
+ *
+ * Two segments (`/google/search`) used to guard against this being confused
+ * with `/{book_id}`; a single one is safe for the same reason `/export` is,
+ * which is that it is declared first.
+ *
+ * **`harder` also asks the catalogues the ordinary deadline cannot wait for.**
+ * It is a request rather than an instruction: the server runs the ordinary
+ * search when this library has no such catalogue enabled, and when the one
+ * long fan out allowed at a time is already in flight. `asked` and `unasked`
+ * on the response say what actually happened, so a client never has to infer
+ * it from what it sent.
  * @summary Search Books
  */
-
 export function useSearchBooks<
   TData = Awaited<ReturnType<typeof searchBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -5377,6 +7056,14 @@ export type ListSeriesQueryResult = NonNullable<
 >;
 export type ListSeriesQueryError = Refusal;
 
+/**
+ * Every series on the shelf, with the gaps in it.
+ *
+ * "Which ones are we missing" is the question a series view exists to answer,
+ * and it is answered here rather than in the client so the whole catalogue is
+ * considered rather than the current page.
+ * @summary List Series
+ */
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
   TError = Refusal,
@@ -5399,6 +7086,14 @@ export function useListSeries<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every series on the shelf, with the gaps in it.
+ *
+ * "Which ones are we missing" is the question a series view exists to answer,
+ * and it is answered here rather than in the client so the whole catalogue is
+ * considered rather than the current page.
+ * @summary List Series
+ */
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
   TError = Refusal,
@@ -5421,6 +7116,14 @@ export function useListSeries<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every series on the shelf, with the gaps in it.
+ *
+ * "Which ones are we missing" is the question a series view exists to answer,
+ * and it is answered here rather than in the client so the whole catalogue is
+ * considered rather than the current page.
+ * @summary List Series
+ */
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
   TError = Refusal,
@@ -5436,9 +7139,13 @@ export function useListSeries<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every series on the shelf, with the gaps in it.
+ *
+ * "Which ones are we missing" is the question a series view exists to answer,
+ * and it is answered here rather than in the client so the whole catalogue is
+ * considered rather than the current page.
  * @summary List Series
  */
-
 export function useListSeries<
   TData = Awaited<ReturnType<typeof listSeries>>,
   TError = Refusal,
@@ -5532,6 +7239,29 @@ export type ListTagsQueryResult = NonNullable<
 >;
 export type ListTagsQueryError = Refusal;
 
+/**
+ * The curated vocabulary plus the invented tags this member can already see.
+ *
+ * **Not every tag the library holds.** A tag carries no member of its own, so
+ * what decides who may be told it exists is the books carrying it: this
+ * answers with the seeded vocabulary, which is published in the source, plus
+ * every tag on a book the caller can see. An invented tag whose only books
+ * are other people's private ones is absent, because listing it would publish
+ * a name somebody typed against a book this caller may not read.
+ *
+ * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
+ * in the frontend), because that is a presentation decision and it needs the
+ * same order in three places. This orders by name within the group so the
+ * response is deterministic. The order a reader sees is the client's too:
+ * `frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL
+ * fold moves `Ä`.
+ *
+ * `book_count` is one grouped query for the whole list rather than one per
+ * tag: this is fetched on nearly every page, so an N+1 here is an N+1
+ * everywhere. It is the same query the row filter reads, so the number and
+ * the presence of the row cannot disagree.
+ * @summary List Tags
+ */
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
   TError = Refusal,
@@ -5554,6 +7284,29 @@ export function useListTags<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The curated vocabulary plus the invented tags this member can already see.
+ *
+ * **Not every tag the library holds.** A tag carries no member of its own, so
+ * what decides who may be told it exists is the books carrying it: this
+ * answers with the seeded vocabulary, which is published in the source, plus
+ * every tag on a book the caller can see. An invented tag whose only books
+ * are other people's private ones is absent, because listing it would publish
+ * a name somebody typed against a book this caller may not read.
+ *
+ * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
+ * in the frontend), because that is a presentation decision and it needs the
+ * same order in three places. This orders by name within the group so the
+ * response is deterministic. The order a reader sees is the client's too:
+ * `frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL
+ * fold moves `Ä`.
+ *
+ * `book_count` is one grouped query for the whole list rather than one per
+ * tag: this is fetched on nearly every page, so an N+1 here is an N+1
+ * everywhere. It is the same query the row filter reads, so the number and
+ * the presence of the row cannot disagree.
+ * @summary List Tags
+ */
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
   TError = Refusal,
@@ -5576,6 +7329,29 @@ export function useListTags<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The curated vocabulary plus the invented tags this member can already see.
+ *
+ * **Not every tag the library holds.** A tag carries no member of its own, so
+ * what decides who may be told it exists is the books carrying it: this
+ * answers with the seeded vocabulary, which is published in the source, plus
+ * every tag on a book the caller can see. An invented tag whose only books
+ * are other people's private ones is absent, because listing it would publish
+ * a name somebody typed against a book this caller may not read.
+ *
+ * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
+ * in the frontend), because that is a presentation decision and it needs the
+ * same order in three places. This orders by name within the group so the
+ * response is deterministic. The order a reader sees is the client's too:
+ * `frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL
+ * fold moves `Ä`.
+ *
+ * `book_count` is one grouped query for the whole list rather than one per
+ * tag: this is fetched on nearly every page, so an N+1 here is an N+1
+ * everywhere. It is the same query the row filter reads, so the number and
+ * the presence of the row cannot disagree.
+ * @summary List Tags
+ */
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
   TError = Refusal,
@@ -5591,9 +7367,28 @@ export function useListTags<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The curated vocabulary plus the invented tags this member can already see.
+ *
+ * **Not every tag the library holds.** A tag carries no member of its own, so
+ * what decides who may be told it exists is the books carrying it: this
+ * answers with the seeded vocabulary, which is published in the source, plus
+ * every tag on a book the caller can see. An invented tag whose only books
+ * are other people's private ones is absent, because listing it would publish
+ * a name somebody typed against a book this caller may not read.
+ *
+ * The **client** decides the order the groups appear in (`TAG_CATEGORY_ORDER`
+ * in the frontend), because that is a presentation decision and it needs the
+ * same order in three places. This orders by name within the group so the
+ * response is deterministic. The order a reader sees is the client's too:
+ * `frontend/src/lib/nameOrder.ts` re-sorts with a collator, because no SQL
+ * fold moves `Ä`.
+ *
+ * `book_count` is one grouped query for the whole list rather than one per
+ * tag: this is fetched on nearly every page, so an N+1 here is an N+1
+ * everywhere. It is the same query the row filter reads, so the number and
+ * the presence of the row cannot disagree.
  * @summary List Tags
  */
-
 export function useListTags<
   TData = Awaited<ReturnType<typeof listTags>>,
   TError = Refusal,
@@ -5726,6 +7521,23 @@ export type CreateTagMutationError = Refusal | HTTPValidationError;
 export type CreateTagMutationVariables = { data: TagCreate };
 
 /**
+ * Invent a tag.
+ *
+ * Any member, not just an admin. Public books are a shared shelf that anyone
+ * may curate, and a vocabulary only an admin can extend is a vocabulary
+ * nobody uses.
+ *
+ * Matched case-insensitively against what already exists, so "Cookbooks" and
+ * "cookbooks" cannot both appear. A collision returns the existing tag rather
+ * than a 409: somebody typing a name that is already there wants that tag,
+ * and an error would send them to find it by hand.
+ *
+ * **A tag invented here is not in `GET /api/books/tags` until a book the
+ * caller can see carries it**, which is that route's rule and not an
+ * omission: a tag on no book is a name and nothing else, and publishing it to
+ * the whole library is the disclosure this route's two step use was part of.
+ * Putting it on a book is what makes it part of the vocabulary, and the
+ * clients do that in the same gesture.
  * @summary Create Tag
  */
 export const useCreateTag = <
@@ -5830,6 +7642,21 @@ export type DeleteTagMutationError = Refusal | HTTPValidationError;
 export type DeleteTagMutationVariables = { tagId: number };
 
 /**
+ * Remove a tag the library invented, and take it off every book.
+ *
+ * **Admin only, and deliberately asymmetric with creating one.** Creating a
+ * tag is additive and reversible by deleting it, so it is open to everyone.
+ * Deleting one is neither: it strips the tag from every book in the house at
+ * once, there is no undo for it as there is for a deleted book, and `Tag`
+ * records nobody as its author. One member should not be able to quietly
+ * unpick the shared vocabulary.
+ *
+ * A seeded tag is refused rather than deleted. `seed_tags()` runs at every
+ * boot and would put it straight back, so the delete would appear to work
+ * and then quietly undo itself at the next restart.
+ *
+ * Declared before `/{book_id}`: two segments, but the ordering is what keeps
+ * that true if either path is later reshaped.
  * @summary Delete Tag
  */
 export const useDeleteTag = <
@@ -5923,6 +7750,14 @@ export type EmptyTrashMutationResult = NonNullable<
 export type EmptyTrashMutationError = Refusal;
 
 /**
+ * Delete for good every Book in the caller's trash that `_purgeable_by`
+ * lets them destroy.
+ *
+ * The rest of the listing is left where it is and not counted. Filtered in
+ * Python rather than SQL so the rule has one spelling: the trash is small,
+ * and `_purge` loads every row it deletes anyway. There is no automatic
+ * expiry: this app has no scheduler, and a sweep at startup would delete on
+ * restart timing rather than on any schedule anybody chose.
  * @summary Empty Trash
  */
 export const useEmptyTrash = <TError = Refusal, TContext = unknown>(
@@ -6017,6 +7852,17 @@ export type ListTrashQueryResult = NonNullable<
 >;
 export type ListTrashQueryError = Refusal | HTTPValidationError;
 
+/**
+ * What this member has deleted and could still put back.
+ *
+ * Declared before `/{book_id}`, like `/export`: FastAPI matches in
+ * declaration order, so the reverse would make this a request for the book
+ * with id "trash".
+ *
+ * Most recently deleted first. The trash is read to find something just lost,
+ * not to browse a history.
+ * @summary List Trash
+ */
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
   TError = Refusal | HTTPValidationError,
@@ -6040,6 +7886,17 @@ export function useListTrash<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What this member has deleted and could still put back.
+ *
+ * Declared before `/{book_id}`, like `/export`: FastAPI matches in
+ * declaration order, so the reverse would make this a request for the book
+ * with id "trash".
+ *
+ * Most recently deleted first. The trash is read to find something just lost,
+ * not to browse a history.
+ * @summary List Trash
+ */
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
   TError = Refusal | HTTPValidationError,
@@ -6063,6 +7920,17 @@ export function useListTrash<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What this member has deleted and could still put back.
+ *
+ * Declared before `/{book_id}`, like `/export`: FastAPI matches in
+ * declaration order, so the reverse would make this a request for the book
+ * with id "trash".
+ *
+ * Most recently deleted first. The trash is read to find something just lost,
+ * not to browse a history.
+ * @summary List Trash
+ */
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
   TError = Refusal | HTTPValidationError,
@@ -6079,9 +7947,16 @@ export function useListTrash<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * What this member has deleted and could still put back.
+ *
+ * Declared before `/{book_id}`, like `/export`: FastAPI matches in
+ * declaration order, so the reverse would make this a request for the book
+ * with id "trash".
+ *
+ * Most recently deleted first. The trash is read to find something just lost,
+ * not to browse a history.
  * @summary List Trash
  */
-
 export function useListTrash<
   TData = Awaited<ReturnType<typeof listTrash>>,
   TError = Refusal | HTTPValidationError,
@@ -6181,6 +8056,15 @@ export type DeleteBookMutationError = Refusal | HTTPValidationError;
 export type DeleteBookMutationVariables = { bookId: number };
 
 /**
+ * Move a book to the trash. Reversible with `POST /{id}/restore`.
+ *
+ * The row stays and `deleted_at` is stamped. A delete is one tap away from
+ * every book, it is the only action here that repeating does not undo, and a
+ * catalogue is somebody's hours of typing. Reviews of the competition make
+ * the same complaint about all of them: the app does not say what was
+ * deleted and offers no way to put it back.
+ *
+ * The status code is unchanged at 204, so nothing calling this has to know.
  * @summary Delete Book
  */
 export const useDeleteBook = <
@@ -6261,6 +8145,7 @@ export type GetBookQueryResult = NonNullable<
 >;
 export type GetBookQueryError = Refusal | HTTPValidationError;
 
+/** @summary Get Book */
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
   TError = Refusal | HTTPValidationError,
@@ -6284,6 +8169,7 @@ export function useGetBook<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Get Book */
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
   TError = Refusal | HTTPValidationError,
@@ -6307,6 +8193,7 @@ export function useGetBook<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Get Book */
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
   TError = Refusal | HTTPValidationError,
@@ -6322,10 +8209,7 @@ export function useGetBook<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @summary Get Book
- */
-
+/** @summary Get Book */
 export function useGetBook<
   TData = Awaited<ReturnType<typeof getBook>>,
   TError = Refusal | HTTPValidationError,
@@ -6463,6 +8347,22 @@ export type UpdateBookDetailsMutationVariables = {
 };
 
 /**
+ * Correct the catalogue entry by hand.
+ *
+ * `exclude_unset` is what makes a partial update partial: an absent field is
+ * left alone and an explicit null clears where the column allows one. Without
+ * it every unsent field would arrive as None and wipe the record, which is the
+ * classic PATCH bug. A null for a column the database will not leave empty is
+ * refused by `BookDetailsUpdate` before it reaches here, because it used to
+ * reach the flush and answer 500.
+ *
+ * **`categories` clears on an empty list rather than on a null**, because its
+ * request shape is a list and its column is one joined string. This is the
+ * only route that removes a subject: the create route writes them, the
+ * catalogue gap fill and the merge's absorb add them, and an overwriting
+ * enrich cannot empty the column because the merge skips an empty incoming
+ * value. Before this the only removal was deleting the book, and the column
+ * is served to readers with no account.
  * @summary Update Book Details
  */
 export const useUpdateBookDetails = <
@@ -6553,6 +8453,12 @@ export type ListAccessRequestsQueryResult = NonNullable<
 >;
 export type ListAccessRequestsQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The requests for access to this copy that the caller is party to.
+ *
+ * Those the caller holds and those the caller made, oldest first.
+ * @summary List Access Requests
+ */
 export function useListAccessRequests<
   TData = Awaited<ReturnType<typeof listAccessRequests>>,
   TError = Refusal | HTTPValidationError,
@@ -6580,6 +8486,12 @@ export function useListAccessRequests<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The requests for access to this copy that the caller is party to.
+ *
+ * Those the caller holds and those the caller made, oldest first.
+ * @summary List Access Requests
+ */
 export function useListAccessRequests<
   TData = Awaited<ReturnType<typeof listAccessRequests>>,
   TError = Refusal | HTTPValidationError,
@@ -6607,6 +8519,12 @@ export function useListAccessRequests<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The requests for access to this copy that the caller is party to.
+ *
+ * Those the caller holds and those the caller made, oldest first.
+ * @summary List Access Requests
+ */
 export function useListAccessRequests<
   TData = Awaited<ReturnType<typeof listAccessRequests>>,
   TError = Refusal | HTTPValidationError,
@@ -6627,9 +8545,11 @@ export function useListAccessRequests<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The requests for access to this copy that the caller is party to.
+ *
+ * Those the caller holds and those the caller made, oldest first.
  * @summary List Access Requests
  */
-
 export function useListAccessRequests<
   TData = Awaited<ReturnType<typeof listAccessRequests>>,
   TError = Refusal | HTTPValidationError,
@@ -6732,6 +8652,14 @@ export type RequestAccessMutationError = Refusal | HTTPValidationError;
 export type RequestAccessMutationVariables = { bookId: number };
 
 /**
+ * Ask the holder of a digital copy for access to it.
+ *
+ * The holder is the member who added the book, recorded now and never
+ * changed. Refused with `no_holder` and stored nowhere when that is the
+ * caller or nobody: a request nobody can answer is not a request.
+ *
+ * A grant records that access was given and shares no file: Endpaper holds
+ * none, so the copy itself changes hands outside the app.
  * @summary Request Access
  */
 export const useRequestAccess = <
@@ -6857,6 +8785,10 @@ export type DecideAccessMutationVariables = {
 };
 
 /**
+ * The holder grants or declines a waiting request. Nothing expires and
+ * nothing is returned, so a decision is final.
+ *
+ * 404 for a request the caller is not party to; 403 for its requester.
  * @summary Decide Access
  */
 export const useDecideAccess = <
@@ -6986,6 +8918,16 @@ export type SetCollectionMutationVariables = {
 };
 
 /**
+ * File this book into a collection, or take it out of one.
+ *
+ * `BookForWrite`, not `BookForOwner`. A collection is shelving, and a public
+ * book is a shared shelf that any member may curate, exactly like its tags
+ * and its location. Privacy is the one thing reserved to the owner, and this
+ * is deliberately not that: filing a book changes nothing about who can see
+ * it.
+ *
+ * **Per book row, so per copy.** Filing one paperback does not file the
+ * other, which is the point of two rows: see `models.Book.collection_id`.
  * @summary Set Collection
  */
 export const useSetCollection = <
@@ -7077,6 +9019,18 @@ export type ListCopiesQueryResult = NonNullable<
 >;
 export type ListCopiesQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Every copy of this title the caller may see, this one included.
+ *
+ * A one-element list for almost every book in the catalogue, and that is the
+ * honest answer rather than an empty one: the book in hand is a copy, it is
+ * just the only one.
+ *
+ * Ordered by id, which is the order they were added. There is no first copy
+ * in the data model and this does not invent one; it is the order that stays
+ * the same between two reads.
+ * @summary List Copies
+ */
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
   TError = Refusal | HTTPValidationError,
@@ -7100,6 +9054,18 @@ export function useListCopies<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every copy of this title the caller may see, this one included.
+ *
+ * A one-element list for almost every book in the catalogue, and that is the
+ * honest answer rather than an empty one: the book in hand is a copy, it is
+ * just the only one.
+ *
+ * Ordered by id, which is the order they were added. There is no first copy
+ * in the data model and this does not invent one; it is the order that stays
+ * the same between two reads.
+ * @summary List Copies
+ */
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
   TError = Refusal | HTTPValidationError,
@@ -7123,6 +9089,18 @@ export function useListCopies<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every copy of this title the caller may see, this one included.
+ *
+ * A one-element list for almost every book in the catalogue, and that is the
+ * honest answer rather than an empty one: the book in hand is a copy, it is
+ * just the only one.
+ *
+ * Ordered by id, which is the order they were added. There is no first copy
+ * in the data model and this does not invent one; it is the order that stays
+ * the same between two reads.
+ * @summary List Copies
+ */
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
   TError = Refusal | HTTPValidationError,
@@ -7139,9 +9117,17 @@ export function useListCopies<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every copy of this title the caller may see, this one included.
+ *
+ * A one-element list for almost every book in the catalogue, and that is the
+ * honest answer rather than an empty one: the book in hand is a copy, it is
+ * just the only one.
+ *
+ * Ordered by id, which is the order they were added. There is no first copy
+ * in the data model and this does not invent one; it is the order that stays
+ * the same between two reads.
  * @summary List Copies
  */
-
 export function useListCopies<
   TData = Awaited<ReturnType<typeof listCopies>>,
   TError = Refusal | HTTPValidationError,
@@ -7276,6 +9262,23 @@ export type AddCopyMutationError = Refusal | HTTPValidationError;
 export type AddCopyMutationVariables = { bookId: number; data: CopyCreate };
 
 /**
+ * Record that the library holds another copy of this book.
+ *
+ * The deliberate half of the ISBN collision. Scanning a book already on the
+ * shelf answers 409 exactly as it always has, because the overwhelmingly
+ * common reason for it is a second pass through the same bookcase; this
+ * endpoint is the other reason, and it is reached by pressing something that
+ * says so rather than by the app guessing.
+ *
+ * **`is_private` is inherited, never chosen here.** A copy of a private book
+ * that came back public would disclose the book. The caller added the copy,
+ * so they are its owner and `PATCH /{id}/privacy` can change it afterwards.
+ *
+ * **Reading state is not copied.** Status, rating, progress, notes, quotes
+ * and loans all belong to a person and an object, and the new object is one
+ * nobody has read yet. Tags are copied: they describe the work, and
+ * re-picking six of them for a second paperback is exactly the friction this
+ * feature exists to remove.
  * @summary Add Copy
  */
 export const useAddCopy = <
@@ -7372,9 +9375,7 @@ export type UploadCoverMutationVariables = {
   data: BodyUploadCover;
 };
 
-/**
- * @summary Upload Cover
- */
+/** @summary Upload Cover */
 export const useUploadCover = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -7465,6 +9466,15 @@ export type GetCustomFieldsQueryResult = NonNullable<
 >;
 export type GetCustomFieldsQueryError = Refusal | HTTPValidationError;
 
+/**
+ * What this book holds in the library's own fields.
+ *
+ * Only the fields it has something in: a book with no value for a field is
+ * absent from this list rather than present and empty, because clearing a
+ * value deletes the row. Ask `GET /api/books/custom-fields` for the ones that
+ * could be filled in.
+ * @summary Get Custom Fields
+ */
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
   TError = Refusal | HTTPValidationError,
@@ -7492,6 +9502,15 @@ export function useGetCustomFields<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What this book holds in the library's own fields.
+ *
+ * Only the fields it has something in: a book with no value for a field is
+ * absent from this list rather than present and empty, because clearing a
+ * value deletes the row. Ask `GET /api/books/custom-fields` for the ones that
+ * could be filled in.
+ * @summary Get Custom Fields
+ */
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
   TError = Refusal | HTTPValidationError,
@@ -7519,6 +9538,15 @@ export function useGetCustomFields<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What this book holds in the library's own fields.
+ *
+ * Only the fields it has something in: a book with no value for a field is
+ * absent from this list rather than present and empty, because clearing a
+ * value deletes the row. Ask `GET /api/books/custom-fields` for the ones that
+ * could be filled in.
+ * @summary Get Custom Fields
+ */
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
   TError = Refusal | HTTPValidationError,
@@ -7539,9 +9567,14 @@ export function useGetCustomFields<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * What this book holds in the library's own fields.
+ *
+ * Only the fields it has something in: a book with no value for a field is
+ * absent from this list rather than present and empty, because clearing a
+ * value deletes the row. Ask `GET /api/books/custom-fields` for the ones that
+ * could be filled in.
  * @summary Get Custom Fields
  */
-
 export function useGetCustomFields<
   TData = Awaited<ReturnType<typeof getCustomFields>>,
   TError = Refusal | HTTPValidationError,
@@ -7688,6 +9721,23 @@ export type SetCustomFieldMutationVariables = {
 };
 
 /**
+ * Fill in a field on this book, or clear it with an empty value.
+ *
+ * One verb for both, because emptying the box and saving is what a person
+ * does and a client should not have to decide which of two verbs that means.
+ *
+ * Returns the book's whole list rather than the one value, so a client that
+ * has just written one is holding the same thing `GET` would give it.
+ *
+ * **404 for a field you may not be told about**, and this is the door that
+ * makes the scoped list worth having: the response carries `name` on every
+ * entry, so an ungated write would be a name oracle over a small integer id
+ * space, reachable on a book of your own. See `fields.Fields.addressable`.
+ *
+ * 400 when the field holds a link and the value is not one: an address with
+ * no scheme, a `javascript:` or `data:` URL, or a host that is missing. See
+ * `custom_fields.link_target` for the whole list and why it is re-checked on
+ * every read as well as here.
  * @summary Set Custom Field
  */
 export const useSetCustomField = <
@@ -7788,6 +9838,18 @@ export type ListDigitalReferencesQueryResult = NonNullable<
 >;
 export type ListDigitalReferencesQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Where this book's files have been reported to be.
+ *
+ * **Served here rather than on `BookOut`**, like notes and quotes and unlike
+ * tags. A listing of 25 books would otherwise selectin-load this relationship
+ * onto every row to render something no listing shows, which is the N+1
+ * `_books_to_out` exists to avoid.
+ *
+ * Nothing in the response has been verified by this server. `confirmed_at` is
+ * when it was last **told** the file was there.
+ * @summary List Digital References
+ */
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -7815,6 +9877,18 @@ export function useListDigitalReferences<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Where this book's files have been reported to be.
+ *
+ * **Served here rather than on `BookOut`**, like notes and quotes and unlike
+ * tags. A listing of 25 books would otherwise selectin-load this relationship
+ * onto every row to render something no listing shows, which is the N+1
+ * `_books_to_out` exists to avoid.
+ *
+ * Nothing in the response has been verified by this server. `confirmed_at` is
+ * when it was last **told** the file was there.
+ * @summary List Digital References
+ */
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -7842,6 +9916,18 @@ export function useListDigitalReferences<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Where this book's files have been reported to be.
+ *
+ * **Served here rather than on `BookOut`**, like notes and quotes and unlike
+ * tags. A listing of 25 books would otherwise selectin-load this relationship
+ * onto every row to render something no listing shows, which is the N+1
+ * `_books_to_out` exists to avoid.
+ *
+ * Nothing in the response has been verified by this server. `confirmed_at` is
+ * when it was last **told** the file was there.
+ * @summary List Digital References
+ */
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -7862,9 +9948,17 @@ export function useListDigitalReferences<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Where this book's files have been reported to be.
+ *
+ * **Served here rather than on `BookOut`**, like notes and quotes and unlike
+ * tags. A listing of 25 books would otherwise selectin-load this relationship
+ * onto every row to render something no listing shows, which is the N+1
+ * `_books_to_out` exists to avoid.
+ *
+ * Nothing in the response has been verified by this server. `confirmed_at` is
+ * when it was last **told** the file was there.
  * @summary List Digital References
  */
-
 export function useListDigitalReferences<
   TData = Awaited<ReturnType<typeof listDigitalReferences>>,
   TError = Refusal | HTTPValidationError,
@@ -8032,6 +10126,45 @@ export type ReportDigitalReferenceMutationVariables = {
 };
 
 /**
+ * A client reporting that it found this book's file at this location.
+ *
+ * **Idempotent on the location, and that is the design rather than a
+ * convenience.** A reference is identified by where the file is, so the same
+ * report twice is one reference: re-importing a folder somebody imported last
+ * month refreshes those rows instead of doubling them, which at the scale this
+ * runs at (a directory pick is hundreds of files in one gesture) is the
+ * difference between a feature and a mess.
+ *
+ * **200 rather than 201** for the same reason: the route is not a create. What
+ * happened to a given location is answerable by reading the list back, and a
+ * status that varied would be one more thing for a client committing 300
+ * files to branch on.
+ *
+ * **A report fills in what the row is missing and never replaces a different
+ * fingerprint**, the rule a folder sweep and a merge keep too. Size,
+ * modification time and digest are written together, and only where every
+ * half already stored is the same as the one sent: a root is only a folder
+ * name, so two members' folders can share it and a path beneath it, and a
+ * replacing report would put one member's file's fingerprint on the other's.
+ * **`root_confirmed` only rises**: a bare filename report does not undo a
+ * directory pick's corroboration.
+ *
+ * **A sighting clears `missing_since`.** Something has now looked and found
+ * it, which is the only evidence that ever contradicts a miss.
+ *
+ * **A new location another Book the caller can see already holds is refused
+ * with 409 `file_held_elsewhere`**, naming that Book in `book_id`, so a
+ * location belongs to one Book among those a member can see. A Book the
+ * caller cannot see answers as no Book, since a refusal would confirm
+ * somebody privately holds that exact file. A location two Books held before
+ * this rule is left as it is, and either may still re-confirm it.
+ *
+ * The per book ceiling is counted here rather than trusted to the payload,
+ * which bounds one request and not the total: past
+ * `MAX_DIGITAL_REFERENCES_PER_BOOK` a new location is refused with 409
+ * `reference_ceiling`. The count follows the insert, under a lock a merge onto
+ * the Book takes too. It binds a **new** location only, so a book already at
+ * the ceiling can still re-confirm what it holds.
  * @summary Report Digital Reference
  */
 export const useReportDigitalReference = <
@@ -8138,6 +10271,12 @@ export type ForgetDigitalReferenceMutationVariables = {
 };
 
 /**
+ * Forget a reference, because a Member said to.
+ *
+ * The one way a row leaves this table short of the book being purged. It is
+ * deliberately not what a missing report does: a person deciding the file is
+ * gone and a browser that could not see it are different statements, and only
+ * the first is evidence.
  * @summary Forget Digital Reference
  */
 export const useForgetDigitalReference = <
@@ -8256,6 +10395,19 @@ export type ReportDigitalReferenceMissingMutationVariables = {
 };
 
 /**
+ * A client reporting that it looked and the file was not there.
+ *
+ * **The row is flagged and never deleted**, and that refusal is the whole
+ * route. A phone that cannot reach the NAS reports every file on the NAS
+ * missing and is telling the truth about what it can see; acting on it would
+ * let one browser with a drive unplugged erase the household's record of where
+ * its library is. The flag is for a person to read.
+ *
+ * **The timestamp does not move on a second report**, because the column
+ * records when this was *first* said. A client re-checking hourly would
+ * otherwise keep resetting the age of the problem to nothing.
+ *
+ * Reversed by an ordinary sighting: something looked and found it.
  * @summary Report Digital Reference Missing
  */
 export const useReportDigitalReferenceMissing = <
@@ -8390,6 +10542,18 @@ export type SetDiscussMutationVariables = {
 };
 
 /**
+ * Offer to talk about this book, or withdraw the offer.
+ *
+ * Read access, like status and rating: it is the caller's own flag on a book
+ * they can see, and it changes nothing about the book itself.
+ *
+ * Unlike those two it is **read by everybody**, which is the point. It says
+ * nothing about whether the caller has read the book; `my_status` stays
+ * private.
+ *
+ * Creates the `user_books` row when there is none, exactly as the status and
+ * rating paths do: absence of a row means unread, not the absence of a
+ * member.
  * @summary Set Discuss
  */
 export const useSetDiscuss = <
@@ -8526,6 +10690,37 @@ export type EnrichBookMutationVariables = {
 };
 
 /**
+ * Fill in the fields a book is missing, from every catalogue available.
+ *
+ * Matched by ISBN when there is one, which runs the full merged chain; then by
+ * the book's own Google Books volume id, where it carries one and the library
+ * asks Google Books; and by title and author otherwise, which runs the ranked
+ * search. **Exact keys first, and the store identifier is an exact key**: a
+ * book imported from Google Play Books carries a volume id and no ISBN, so
+ * without that middle step it is matched by its title, which is the weakest
+ * instrument here. **Which
+ * catalogues either of those asks is the library's own provider list**, set
+ * in Settings: the roster holds ten lookup sources that answer an ISBN and
+ * eight search sources that answer a title, the leading pair is asked together
+ * and the rest one at a time, and a source switched off is not asked on either
+ * path. Google Books answers only when its own section is on and a key is in
+ * force, so a library missing either asks one fewer on each path.
+ *
+ * **No API key is required.** This was Google-only and refused outright
+ * without a key, which made it useless for exactly the books the German and
+ * French catalogues were added for: a 978-3 ISBN that Google does not carry
+ * would report "no key" rather than the full record the DNB was holding.
+ *
+ * Only empty scalar fields are filled unless `overwrite` is set: enrichment
+ * adds what is missing, it does not overrule what somebody typed.
+ *
+ * **It writes what a refresh writes, less the title.**
+ * Categories, the series, the Google Books volume id and Classifications
+ * need a selected candidate through `enrich/apply`: this record was chosen by
+ * no Member. The volume id says which volume this book is, and a wrong one
+ * silently drops the book out of the identifier backfill. The one exception
+ * is a record found by the book's own volume id and carrying that id, which
+ * records it, as the identifier backfill does.
  * @summary Enrich Book
  */
 export const useEnrichBook = <
@@ -8678,6 +10873,22 @@ export type ApplyEnrichmentMutationVariables = {
 };
 
 /**
+ * Fill this book in from an edition the member picked.
+ *
+ * Separate from `POST /enrich`, which chooses for them. This exists because
+ * choosing automatically is wrong often enough to matter: a paperback and its
+ * hardback are different page counts and different covers, and a search will
+ * happily return the wrong printing of the right book. Nothing is written
+ * until somebody has looked at the candidates and said which one it is.
+ *
+ * The merge rule is the same either way, and it is the server's rather than
+ * the client's: only empty fields are filled unless `overwrite` is set, so a
+ * publisher somebody typed in by hand is never quietly replaced.
+ *
+ * Selecting the row also confirms its categories, series, Google Books
+ * volume id and Classifications. Automatic enrichment and refresh do not have
+ * that confirmation, so they write none of them, but for the volume id a
+ * lookup by the book's own id found and that carries it.
  * @summary Apply Enrichment
  */
 export const useApplyEnrichment = <
@@ -8776,6 +10987,19 @@ export type EnrichmentCandidatesQueryResult = NonNullable<
 >;
 export type EnrichmentCandidatesQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Other editions of this book, so the right one can be chosen.
+ *
+ * Useful when the automatic match picks a different printing: the page count
+ * and cover of a paperback and its hardback are not the same.
+ *
+ * **Two routes, and `metadata.candidates` holds the rule between them.** Open
+ * Library's work cluster answers this exactly, when it has the book; the
+ * search across every catalogue answers it approximately, for everything
+ * else, and is ranked so a German edition of a German book is not buried
+ * under whatever Google happened to return first.
+ * @summary Enrichment Candidates
+ */
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
   TError = Refusal | HTTPValidationError,
@@ -8803,6 +11027,19 @@ export function useEnrichmentCandidates<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Other editions of this book, so the right one can be chosen.
+ *
+ * Useful when the automatic match picks a different printing: the page count
+ * and cover of a paperback and its hardback are not the same.
+ *
+ * **Two routes, and `metadata.candidates` holds the rule between them.** Open
+ * Library's work cluster answers this exactly, when it has the book; the
+ * search across every catalogue answers it approximately, for everything
+ * else, and is ranked so a German edition of a German book is not buried
+ * under whatever Google happened to return first.
+ * @summary Enrichment Candidates
+ */
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
   TError = Refusal | HTTPValidationError,
@@ -8830,6 +11067,19 @@ export function useEnrichmentCandidates<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Other editions of this book, so the right one can be chosen.
+ *
+ * Useful when the automatic match picks a different printing: the page count
+ * and cover of a paperback and its hardback are not the same.
+ *
+ * **Two routes, and `metadata.candidates` holds the rule between them.** Open
+ * Library's work cluster answers this exactly, when it has the book; the
+ * search across every catalogue answers it approximately, for everything
+ * else, and is ranked so a German edition of a German book is not buried
+ * under whatever Google happened to return first.
+ * @summary Enrichment Candidates
+ */
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
   TError = Refusal | HTTPValidationError,
@@ -8850,9 +11100,18 @@ export function useEnrichmentCandidates<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Other editions of this book, so the right one can be chosen.
+ *
+ * Useful when the automatic match picks a different printing: the page count
+ * and cover of a paperback and its hardback are not the same.
+ *
+ * **Two routes, and `metadata.candidates` holds the rule between them.** Open
+ * Library's work cluster answers this exactly, when it has the book; the
+ * search across every catalogue answers it approximately, for everything
+ * else, and is ranked so a German edition of a German book is not buried
+ * under whatever Google happened to return first.
  * @summary Enrichment Candidates
  */
-
 export function useEnrichmentCandidates<
   TData = Awaited<ReturnType<typeof enrichmentCandidates>>,
   TError = Refusal | HTTPValidationError,
@@ -8942,6 +11201,11 @@ export type GetHighlightsQueryResult = NonNullable<
 >;
 export type GetHighlightsQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The highlights on this book the caller may read: their own, and the ones
+ * other members shared. In the device's page order, then as they were made.
+ * @summary Get Highlights
+ */
 export function useGetHighlights<
   TData = Awaited<ReturnType<typeof getHighlights>>,
   TError = Refusal | HTTPValidationError,
@@ -8965,6 +11229,11 @@ export function useGetHighlights<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The highlights on this book the caller may read: their own, and the ones
+ * other members shared. In the device's page order, then as they were made.
+ * @summary Get Highlights
+ */
 export function useGetHighlights<
   TData = Awaited<ReturnType<typeof getHighlights>>,
   TError = Refusal | HTTPValidationError,
@@ -8988,6 +11257,11 @@ export function useGetHighlights<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The highlights on this book the caller may read: their own, and the ones
+ * other members shared. In the device's page order, then as they were made.
+ * @summary Get Highlights
+ */
 export function useGetHighlights<
   TData = Awaited<ReturnType<typeof getHighlights>>,
   TError = Refusal | HTTPValidationError,
@@ -9004,9 +11278,10 @@ export function useGetHighlights<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The highlights on this book the caller may read: their own, and the ones
+ * other members shared. In the device's page order, then as they were made.
  * @summary Get Highlights
  */
-
 export function useGetHighlights<
   TData = Awaited<ReturnType<typeof getHighlights>>,
   TError = Refusal | HTTPValidationError,
@@ -9145,6 +11420,18 @@ export type ImportKoreaderHighlightsMutationVariables = {
 };
 
 /**
+ * Write one KOReader sidecar's highlights onto this book, as the caller's.
+ *
+ * Repeatable: a highlight already imported is updated rather than doubled,
+ * and one the caller deleted here stays deleted. Its sharing is left as the
+ * member set it while it stays on this book; one the import moves here from
+ * another book is private again. `koreader_highlights` says how a KOReader
+ * highlight is identified and what an import never does.
+ *
+ * **409 `not_held` unless this book holds a file carrying the sidecar's
+ * fingerprint**, so a sidecar lands only on a Book its fingerprint matched
+ * and never on one a client guessed. Read off the Book's own references,
+ * which `BookForRead` has already scoped.
  * @summary Import Koreader Highlights
  */
 export const useImportKoreaderHighlights = <
@@ -9247,6 +11534,12 @@ export type DeleteHighlightMutationVariables = {
 };
 
 /**
+ * Delete one of the caller's own highlights, and keep it deleted: a later
+ * KOReader import or Readwise pull still carrying the mark leaves it out.
+ *
+ * **404 for any highlight the caller did not write**, shared with them or
+ * not, and for one on another book. No admin arm, for the reason sharing has
+ * none: the marks are their author's alone.
  * @summary Delete Highlight
  */
 export const useDeleteHighlight = <
@@ -9382,6 +11675,13 @@ export type SetHighlightSharingMutationVariables = {
 };
 
 /**
+ * Share one of the caller's highlights with whoever can see the book, or
+ * withdraw it.
+ *
+ * **409 `too_long_to_share` for a passage past `QUOTE_TEXT_MAX`**, the
+ * ceiling a passage shown to the shelf already has. Storage takes longer
+ * marks so an import refuses none; showing one is the act that ceiling binds.
+ * Withdrawing is never refused.
  * @summary Set Highlight Sharing
  */
 export const useSetHighlightSharing = <
@@ -9508,6 +11808,32 @@ export type ForgetBookIdentifierMutationVariables = {
 };
 
 /**
+ * Remove a wrong identifier. Importing again does not put it back.
+ *
+ * **The only correction there is**, and it is deliberately destructive rather
+ * than an edit. `models.BookIdentifier` carries the reasoning and
+ * `forget_author_identifier` is where this app first made the trade: a store
+ * or a reader can be wrong, a fact that cannot be corrected is a trap rather
+ * than an invariant, and what stays refused is retyping a row to a different
+ * value, because that is the operation that turns a guess into something
+ * reading as a catalogue's assertion.
+ *
+ * **Unlike the author route, nothing re-asserts this one**, and the summary
+ * line says exactly that much because a client generates its own prose from
+ * it. An author's identifier is written again by the next catalogue record
+ * the server fetches. `add_identifiers` is reached only from `_create_book`,
+ * which both adding routes share and which always builds a new Book, so what
+ * re-importing the store file could offer is a Book rather than the row.
+ *
+ * **Whether it offers one at all is conditional, and `models.BookIdentifier`
+ * is where the condition lives.** Not restated here: a second copy of the
+ * condition is a second thing to keep true.
+ *
+ * **Whoever may write the book**, which is the rule for its tags, its cover
+ * and its digital references and is not a softer one here: the row carries no
+ * Member of its own, so its permission is the book's entirely. A book the
+ * caller cannot see is **404**, identical to one that is not there, and so is
+ * an identifier belonging to a different book.
  * @summary Forget Book Identifier
  */
 export const useForgetBookIdentifier = <
@@ -9599,6 +11925,17 @@ export type GetNotesQueryResult = NonNullable<
 >;
 export type GetNotesQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The notes on this book that the caller may read: the shared ones, and
+ * their own private ones.
+ *
+ * Two predicates, and neither is redundant. `BookForRead` answers 404 for a
+ * book the caller may not see, without which the notes on a private book were
+ * readable by anyone who guessed its id. `note_visible_to` then decides which
+ * notes on a book they can see; `models.Note` says why authorship is not that
+ * answer.
+ * @summary Get Notes
+ */
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
   TError = Refusal | HTTPValidationError,
@@ -9622,6 +11959,17 @@ export function useGetNotes<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The notes on this book that the caller may read: the shared ones, and
+ * their own private ones.
+ *
+ * Two predicates, and neither is redundant. `BookForRead` answers 404 for a
+ * book the caller may not see, without which the notes on a private book were
+ * readable by anyone who guessed its id. `note_visible_to` then decides which
+ * notes on a book they can see; `models.Note` says why authorship is not that
+ * answer.
+ * @summary Get Notes
+ */
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
   TError = Refusal | HTTPValidationError,
@@ -9645,6 +11993,17 @@ export function useGetNotes<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The notes on this book that the caller may read: the shared ones, and
+ * their own private ones.
+ *
+ * Two predicates, and neither is redundant. `BookForRead` answers 404 for a
+ * book the caller may not see, without which the notes on a private book were
+ * readable by anyone who guessed its id. `note_visible_to` then decides which
+ * notes on a book they can see; `models.Note` says why authorship is not that
+ * answer.
+ * @summary Get Notes
+ */
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
   TError = Refusal | HTTPValidationError,
@@ -9661,9 +12020,16 @@ export function useGetNotes<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The notes on this book that the caller may read: the shared ones, and
+ * their own private ones.
+ *
+ * Two predicates, and neither is redundant. `BookForRead` answers 404 for a
+ * book the caller may not see, without which the notes on a private book were
+ * readable by anyone who guessed its id. `note_visible_to` then decides which
+ * notes on a book they can see; `models.Note` says why authorship is not that
+ * answer.
  * @summary Get Notes
  */
-
 export function useGetNotes<
   TData = Awaited<ReturnType<typeof getNotes>>,
   TError = Refusal | HTTPValidationError,
@@ -9780,9 +12146,7 @@ export type AddNoteMutationBody = NoteCreate;
 export type AddNoteMutationError = Refusal | HTTPValidationError;
 export type AddNoteMutationVariables = { bookId: number; data: NoteCreate };
 
-/**
- * @summary Add Note
- */
+/** @summary Add Note */
 export const useAddNote = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -9870,9 +12234,7 @@ export type DeleteNoteMutationResult = NonNullable<
 export type DeleteNoteMutationError = Refusal | HTTPValidationError;
 export type DeleteNoteMutationVariables = { bookId: number; noteId: number };
 
-/**
- * @summary Delete Note
- */
+/** @summary Delete Note */
 export const useDeleteNote = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -9991,9 +12353,7 @@ export type EditNoteMutationVariables = {
   data: NoteCreate;
 };
 
-/**
- * @summary Edit Note
- */
+/** @summary Edit Note */
 export const useEditNote = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -10097,6 +12457,17 @@ export type ForgetOnlineLinkMutationVariables = {
 };
 
 /**
+ * Remove a wrong or unwanted catalogue link from a book.
+ *
+ * The only correction there is, `forget_book_identifier`'s trade: any member
+ * who may import a MARC file can add links to a book they may see, so one who
+ * may write the book can take one off. Importing the record again puts it
+ * back. Whoever may write the book; a book the caller cannot see is 404, and
+ * so is a link belonging to a different book.
+ *
+ * **Looked up in the book's own links**, one load of at most eight rows,
+ * rather than by a query on the link id, so the pairing with this book is the
+ * collection itself.
  * @summary Forget Online Link
  */
 export const useForgetOnlineLink = <
@@ -10215,9 +12586,7 @@ export type SetOwnershipMutationVariables = {
   data: OwnershipUpdate;
 };
 
-/**
- * @summary Set Ownership
- */
+/** @summary Set Ownership */
 export const useSetOwnership = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -10311,6 +12680,12 @@ export type PurgeBookMutationError = Refusal | HTTPValidationError;
 export type PurgeBookMutationVariables = { bookId: number };
 
 /**
+ * Delete one trashed book for good, if `_purgeable_by` lets the caller.
+ *
+ * A Book it refuses is in the caller's trash view, so it answers 409 rather
+ * than 404, as the add door answers the same Book, and stays in the trash,
+ * where it can still be put back. Not `book_for_owner`'s 403, whose admin
+ * exception this rule does not have.
  * @summary Purge Book
  */
 export const usePurgeBook = <
@@ -10429,9 +12804,7 @@ export type SetPrivacyMutationVariables = {
   data: PrivacyUpdate;
 };
 
-/**
- * @summary Set Privacy
- */
+/** @summary Set Privacy */
 export const useSetPrivacy = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -10517,6 +12890,14 @@ export type ListProgressQueryResult = NonNullable<
 >;
 export type ListProgressQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The caller's own recorded positions, newest first.
+ *
+ * Never anybody else's, even on a public book. Two members reading the same
+ * copy is the ordinary case here, and the log is a diary rather than a shelf
+ * fact.
+ * @summary List Progress
+ */
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
   TError = Refusal | HTTPValidationError,
@@ -10540,6 +12921,14 @@ export function useListProgress<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's own recorded positions, newest first.
+ *
+ * Never anybody else's, even on a public book. Two members reading the same
+ * copy is the ordinary case here, and the log is a diary rather than a shelf
+ * fact.
+ * @summary List Progress
+ */
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
   TError = Refusal | HTTPValidationError,
@@ -10563,6 +12952,14 @@ export function useListProgress<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's own recorded positions, newest first.
+ *
+ * Never anybody else's, even on a public book. Two members reading the same
+ * copy is the ordinary case here, and the log is a diary rather than a shelf
+ * fact.
+ * @summary List Progress
+ */
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
   TError = Refusal | HTTPValidationError,
@@ -10579,9 +12976,13 @@ export function useListProgress<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The caller's own recorded positions, newest first.
+ *
+ * Never anybody else's, even on a public book. Two members reading the same
+ * copy is the ordinary case here, and the log is a diary rather than a shelf
+ * fact.
  * @summary List Progress
  */
-
 export function useListProgress<
   TData = Awaited<ReturnType<typeof listProgress>>,
   TError = Refusal | HTTPValidationError,
@@ -10714,6 +13115,18 @@ export type AddProgressMutationVariables = {
 };
 
 /**
+ * Record where the caller has got to.
+ *
+ * Saying where you are in a book is the same claim the READING button makes,
+ * arrived at from the other direction, so it promotes an unstarted book
+ * rather than leaving a member with a page number and a status of "unread".
+ * The promotion itself goes through `Reading.begin`, which owns that rule
+ * and the date stamping under it; duplicating them here is how the two would
+ * drift.
+ *
+ * **It never sets READ, whatever the page number.** `page_count` comes from a
+ * metadata provider and is off by one often enough that the last page is not
+ * a reliable finish signal, and finishing already has an explicit control.
  * @summary Add Progress
  */
 export const useAddProgress = <
@@ -10817,6 +13230,16 @@ export type DeleteProgressMutationVariables = {
 };
 
 /**
+ * Remove one of the caller's own entries. A mistyped page is the case.
+ *
+ * The rule for a row under a Book is in `docs/data-model.md`, under the
+ * privacy rule. Somebody else's entry is 404 rather than 403, because every
+ * reader of a progress entry filters on the caller, so its existence is
+ * itself private.
+ *
+ * The status is left alone. Deleting the only entry does not put the book
+ * back to unread: somebody pressed READING, or this endpoint did on their
+ * behalf, and removing a mistyped page number is not a claim about that.
  * @summary Delete Progress
  */
 export const useDeleteProgress = <
@@ -10903,6 +13326,15 @@ export type GetQuotesQueryResult = NonNullable<
 >;
 export type GetQuotesQueryError = Refusal | HTTPValidationError;
 
+/**
+ * Requires read access to the book, and nothing else.
+ *
+ * `BookForRead` is the whole privacy check here: it answers 404 for a book
+ * the caller may not see, so there is no path to the quotes on one. A quote
+ * carries no per-row visibility of its own, unlike a note, so there is no
+ * second predicate to apply.
+ * @summary Get Quotes
+ */
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -10926,6 +13358,15 @@ export function useGetQuotes<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Requires read access to the book, and nothing else.
+ *
+ * `BookForRead` is the whole privacy check here: it answers 404 for a book
+ * the caller may not see, so there is no path to the quotes on one. A quote
+ * carries no per-row visibility of its own, unlike a note, so there is no
+ * second predicate to apply.
+ * @summary Get Quotes
+ */
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -10949,6 +13390,15 @@ export function useGetQuotes<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Requires read access to the book, and nothing else.
+ *
+ * `BookForRead` is the whole privacy check here: it answers 404 for a book
+ * the caller may not see, so there is no path to the quotes on one. A quote
+ * carries no per-row visibility of its own, unlike a note, so there is no
+ * second predicate to apply.
+ * @summary Get Quotes
+ */
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -10965,9 +13415,14 @@ export function useGetQuotes<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Requires read access to the book, and nothing else.
+ *
+ * `BookForRead` is the whole privacy check here: it answers 404 for a book
+ * the caller may not see, so there is no path to the quotes on one. A quote
+ * carries no per-row visibility of its own, unlike a note, so there is no
+ * second predicate to apply.
  * @summary Get Quotes
  */
-
 export function useGetQuotes<
   TData = Awaited<ReturnType<typeof getQuotes>>,
   TError = Refusal | HTTPValidationError,
@@ -11084,9 +13539,7 @@ export type AddQuoteMutationBody = QuoteCreate;
 export type AddQuoteMutationError = Refusal | HTTPValidationError;
 export type AddQuoteMutationVariables = { bookId: number; data: QuoteCreate };
 
-/**
- * @summary Add Quote
- */
+/** @summary Add Quote */
 export const useAddQuote = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -11174,9 +13627,7 @@ export type DeleteQuoteMutationResult = NonNullable<
 export type DeleteQuoteMutationError = Refusal | HTTPValidationError;
 export type DeleteQuoteMutationVariables = { bookId: number; quoteId: number };
 
-/**
- * @summary Delete Quote
- */
+/** @summary Delete Quote */
 export const useDeleteQuote = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -11295,9 +13746,7 @@ export type EditQuoteMutationVariables = {
   data: QuoteCreate;
 };
 
-/**
- * @summary Edit Quote
- */
+/** @summary Edit Quote */
 export const useEditQuote = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -11421,6 +13870,12 @@ export type SetRatingMutationVariables = {
 };
 
 /**
+ * Rate a book, or clear the rating with a null.
+ *
+ * Read access, like status, and for the same reason: a rating is one person's
+ * opinion and changes nothing for anyone else. It deliberately does not touch
+ * the reading dates, because rating a book is not a claim about having
+ * finished it just now.
  * @summary Set Rating
  */
 export const useSetRating = <
@@ -11509,9 +13964,7 @@ export type RefreshMetadataMutationResult = NonNullable<
 export type RefreshMetadataMutationError = Refusal | HTTPValidationError;
 export type RefreshMetadataMutationVariables = { bookId: number };
 
-/**
- * @summary Refresh Metadata
- */
+/** @summary Refresh Metadata */
 export const useRefreshMetadata = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -11605,6 +14058,12 @@ export type RestoreBookMutationError = Refusal | HTTPValidationError;
 export type RestoreBookMutationVariables = { bookId: number };
 
 /**
+ * Put a trashed book back on the shelf.
+ *
+ * Everything comes back with it: tags, notes, quotes, loans and every
+ * member's reading status, because none of it ever left. That is the
+ * difference between this and re-adding the book by hand, and it is the whole
+ * point.
  * @summary Restore Book
  */
 export const useRestoreBook = <
@@ -11726,6 +14185,8 @@ export type UpdateStatusMutationVariables = {
 };
 
 /**
+ * Set the caller's own reading status. Read access is enough: a status is
+ * personal to the member setting it and changes nothing for anyone else.
  * @summary Update Status
  */
 export const useUpdateStatus = <
@@ -11866,6 +14327,26 @@ export type AddBookTagByNameMutationVariables = {
 };
 
 /**
+ * Put a tag with this name on this book, inventing it if it is new.
+ *
+ * One request where typing a name used to be two, and the two were a
+ * different question each: inventing a tag hands back an id, and attaching
+ * that id is asked of somebody who might have guessed it. Typing a name is
+ * neither. Somebody typing a tag name while looking at a book means "this
+ * book is that", so this is the one gesture and the one answer.
+ *
+ * **The book as it stands, always, and never a 409, a 201 or a 404 for the
+ * name.** A status that told a minted name from a matched one would answer
+ * "does this name already exist" in the status line, which is the question
+ * a member may not have answered about a tag they cannot see. A name that
+ * is not this member's to use is left off the book, in the same shape as a
+ * name that is: `tags.Naming` decides it and carries what that does and does
+ * not close.
+ *
+ * Refused only for what the caller can already see: a name that is not a
+ * name, by `TagCreate`, and a book already carrying
+ * `MAX_TAGS_PER_BOOK` tags, with the sentence and the reasoning of the
+ * attach by id route beside this one.
  * @summary Add Book Tag By Name
  */
 export const useAddBookTagByName = <
@@ -11955,9 +14436,7 @@ export type RemoveBookTagMutationResult = NonNullable<
 export type RemoveBookTagMutationError = Refusal | HTTPValidationError;
 export type RemoveBookTagMutationVariables = { bookId: number; tagId: number };
 
-/**
- * @summary Remove Book Tag
- */
+/** @summary Remove Book Tag */
 export const useRemoveBookTag = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -12045,9 +14524,7 @@ export type AddBookTagMutationResult = NonNullable<
 export type AddBookTagMutationError = Refusal | HTTPValidationError;
 export type AddBookTagMutationVariables = { bookId: number; tagId: number };
 
-/**
- * @summary Add Book Tag
- */
+/** @summary Add Book Tag */
 export const useAddBookTag = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,

@@ -166,6 +166,30 @@ export type ListPublicBooksInfiniteQueryResult = NonNullable<
 >;
 export type ListPublicBooksInfiniteQueryError = Refusal | HTTPValidationError;
 
+/**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
+ * @summary Search the published catalogue
+ */
 export function useListPublicBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listPublicBooks>>,
@@ -199,6 +223,30 @@ export function useListPublicBooksInfinite<
 ): DefinedUseInfiniteQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
+ * @summary Search the published catalogue
+ */
 export function useListPublicBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listPublicBooks>>,
@@ -232,6 +280,30 @@ export function useListPublicBooksInfinite<
 ): UseInfiniteQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
+ * @summary Search the published catalogue
+ */
 export function useListPublicBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listPublicBooks>>,
@@ -257,9 +329,29 @@ export function useListPublicBooksInfinite<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
  * @summary Search the published catalogue
  */
-
 export function useListPublicBooksInfinite<
   TData = InfiniteData<
     Awaited<ReturnType<typeof listPublicBooks>>,
@@ -332,6 +424,30 @@ export type ListPublicBooksQueryResult = NonNullable<
 >;
 export type ListPublicBooksQueryError = Refusal | HTTPValidationError;
 
+/**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
+ * @summary Search the published catalogue
+ */
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -359,6 +475,30 @@ export function useListPublicBooks<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
+ * @summary Search the published catalogue
+ */
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -386,6 +526,30 @@ export function useListPublicBooks<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
+ * @summary Search the published catalogue
+ */
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -406,9 +570,29 @@ export function useListPublicBooks<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * One page of the published catalogue.
+ *
+ * **The filters here are a subset of the signed in listing's, and the ones
+ * left out are left out by construction rather than by omission.** `status`,
+ * `unrated` and `discuss`, and `ownership` and `lending`, are all facts about
+ * a member or about the household's relationship to the object. The first
+ * three would raise on this shelf anyway, because it has no viewer to read
+ * them against; the last two are columns this payload does not carry, and a
+ * filter over a column nobody can see is a way to read that column one query
+ * at a time.
+ *
+ * `collection_id` is **not** accepted, although it was in the first draft on
+ * the argument that a library wants to link to one shelf. It was cut: the ids
+ * are consecutive, so the filter is enumerable, and what it enumerates is the
+ * household's own grouping of its shelves, which `PublicBookOut` withholds. A
+ * public way to link to one shelf wants a published name to link by.
+ *
+ * **`sort` is `PublicBookSort`, a subset**, for the same reason the filters
+ * are a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and
+ * a sort over a withheld column hands back the whole ordering of that column
+ * in one request. See `schemas/public.py`.
  * @summary Search the published catalogue
  */
-
 export function useListPublicBooks<
   TData = Awaited<ReturnType<typeof listPublicBooks>>,
   TError = Refusal | HTTPValidationError,
@@ -507,6 +691,20 @@ export type GetPublicBookQueryResult = NonNullable<
 >;
 export type GetPublicBookQueryError = Refusal | HTTPValidationError;
 
+/**
+ * One record, or 404.
+ *
+ * **404 for every reason**, and that is the house rule rather than laziness:
+ * a Book that does not exist, one somebody trashed, and one a member marked
+ * Private are all the same answer, because a 403 on the third would confirm
+ * the id exists and let a stranger count through the catalogue to learn how
+ * many private books this library holds.
+ *
+ * `dependencies.book_for_read` is the signed in counterpart and cannot be
+ * reused: it depends on `get_current_user`, so it 401s before it ever reaches
+ * a Book. This is the same shape written against the shelf that has no viewer.
+ * @summary One record from the published catalogue
+ */
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
   TError = Refusal | HTTPValidationError,
@@ -530,6 +728,20 @@ export function useGetPublicBook<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * One record, or 404.
+ *
+ * **404 for every reason**, and that is the house rule rather than laziness:
+ * a Book that does not exist, one somebody trashed, and one a member marked
+ * Private are all the same answer, because a 403 on the third would confirm
+ * the id exists and let a stranger count through the catalogue to learn how
+ * many private books this library holds.
+ *
+ * `dependencies.book_for_read` is the signed in counterpart and cannot be
+ * reused: it depends on `get_current_user`, so it 401s before it ever reaches
+ * a Book. This is the same shape written against the shelf that has no viewer.
+ * @summary One record from the published catalogue
+ */
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
   TError = Refusal | HTTPValidationError,
@@ -553,6 +765,20 @@ export function useGetPublicBook<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * One record, or 404.
+ *
+ * **404 for every reason**, and that is the house rule rather than laziness:
+ * a Book that does not exist, one somebody trashed, and one a member marked
+ * Private are all the same answer, because a 403 on the third would confirm
+ * the id exists and let a stranger count through the catalogue to learn how
+ * many private books this library holds.
+ *
+ * `dependencies.book_for_read` is the signed in counterpart and cannot be
+ * reused: it depends on `get_current_user`, so it 401s before it ever reaches
+ * a Book. This is the same shape written against the shelf that has no viewer.
+ * @summary One record from the published catalogue
+ */
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
   TError = Refusal | HTTPValidationError,
@@ -569,9 +795,19 @@ export function useGetPublicBook<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * One record, or 404.
+ *
+ * **404 for every reason**, and that is the house rule rather than laziness:
+ * a Book that does not exist, one somebody trashed, and one a member marked
+ * Private are all the same answer, because a 403 on the third would confirm
+ * the id exists and let a stranger count through the catalogue to learn how
+ * many private books this library holds.
+ *
+ * `dependencies.book_for_read` is the signed in counterpart and cannot be
+ * reused: it depends on `get_current_user`, so it 401s before it ever reaches
+ * a Book. This is the same shape written against the shelf that has no viewer.
  * @summary One record from the published catalogue
  */
-
 export function useGetPublicBook<
   TData = Awaited<ReturnType<typeof getPublicBook>>,
   TError = Refusal | HTTPValidationError,

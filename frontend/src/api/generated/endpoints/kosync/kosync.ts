@@ -101,6 +101,10 @@ export type GetKosyncAccountQueryResult = NonNullable<
 >;
 export type GetKosyncAccountQueryError = Refusal;
 
+/**
+ * Whether the caller has a sync password, and the username a device uses.
+ * @summary Get Kosync Account
+ */
 export function useGetKosyncAccount<
   TData = Awaited<ReturnType<typeof getKosyncAccount>>,
   TError = Refusal,
@@ -127,6 +131,10 @@ export function useGetKosyncAccount<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether the caller has a sync password, and the username a device uses.
+ * @summary Get Kosync Account
+ */
 export function useGetKosyncAccount<
   TData = Awaited<ReturnType<typeof getKosyncAccount>>,
   TError = Refusal,
@@ -153,6 +161,10 @@ export function useGetKosyncAccount<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether the caller has a sync password, and the username a device uses.
+ * @summary Get Kosync Account
+ */
 export function useGetKosyncAccount<
   TData = Awaited<ReturnType<typeof getKosyncAccount>>,
   TError = Refusal,
@@ -172,9 +184,9 @@ export function useGetKosyncAccount<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Whether the caller has a sync password, and the username a device uses.
  * @summary Get Kosync Account
  */
-
 export function useGetKosyncAccount<
   TData = Awaited<ReturnType<typeof getKosyncAccount>>,
   TError = Refusal,
@@ -266,6 +278,7 @@ export type RevokeKosyncPasswordMutationResult = NonNullable<
 export type RevokeKosyncPasswordMutationError = Refusal;
 
 /**
+ * Sign every device out. What they already pushed stays.
  * @summary Revoke Kosync Password
  */
 export const useRevokeKosyncPassword = <TError = Refusal, TContext = unknown>(
@@ -356,6 +369,10 @@ export type MintKosyncPasswordMutationResult = NonNullable<
 export type MintKosyncPasswordMutationError = Refusal;
 
 /**
+ * A new sync password, shown in this answer and never again.
+ *
+ * Replaces any the caller had, so every device signed in with the old one is
+ * refused from its next call.
  * @summary Mint Kosync Password
  */
 export const useMintKosyncPassword = <TError = Refusal, TContext = unknown>(
@@ -445,6 +462,10 @@ export type ListKosyncDocumentsQueryResult = NonNullable<
 >;
 export type ListKosyncDocumentsQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The caller's documents linked to one Book they can see.
+ * @summary List Kosync Documents
+ */
 export function useListKosyncDocuments<
   TData = Awaited<ReturnType<typeof listKosyncDocuments>>,
   TError = Refusal | HTTPValidationError,
@@ -472,6 +493,10 @@ export function useListKosyncDocuments<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's documents linked to one Book they can see.
+ * @summary List Kosync Documents
+ */
 export function useListKosyncDocuments<
   TData = Awaited<ReturnType<typeof listKosyncDocuments>>,
   TError = Refusal | HTTPValidationError,
@@ -499,6 +524,10 @@ export function useListKosyncDocuments<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's documents linked to one Book they can see.
+ * @summary List Kosync Documents
+ */
 export function useListKosyncDocuments<
   TData = Awaited<ReturnType<typeof listKosyncDocuments>>,
   TError = Refusal | HTTPValidationError,
@@ -519,9 +548,9 @@ export function useListKosyncDocuments<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The caller's documents linked to one Book they can see.
  * @summary List Kosync Documents
  */
-
 export function useListKosyncDocuments<
   TData = Awaited<ReturnType<typeof listKosyncDocuments>>,
   TError = Refusal | HTTPValidationError,
@@ -628,6 +657,10 @@ export type UnlinkKosyncDocumentMutationVariables = {
 };
 
 /**
+ * Send a document linked to this Book back to the inbox.
+ *
+ * What it already wrote to the reading log stays: those rows say where the
+ * member was on a day, which a wrong link does not make false.
  * @summary Unlink Kosync Document
  */
 export const useUnlinkKosyncDocument = <
@@ -733,6 +766,11 @@ export type LinkKosyncDocumentMutationVariables = {
 };
 
 /**
+ * Link one of the caller's documents to this Book, and remember it.
+ *
+ * Applies where the device is now, so a document finished before it was
+ * linked marks the Book read. 404 for a document the caller's devices never
+ * pushed, the answer for one that is somebody else's.
  * @summary Link Kosync Document
  */
 export const useLinkKosyncDocument = <
@@ -813,6 +851,13 @@ export type ListKosyncInboxQueryResult = NonNullable<
 >;
 export type ListKosyncInboxQueryError = Refusal;
 
+/**
+ * The caller's documents that no Book is linked to, newest push first.
+ *
+ * At most `INBOX_SHOWN`. Only the caller's own: nobody else's device is
+ * anybody's business.
+ * @summary List Kosync Inbox
+ */
 export function useListKosyncInbox<
   TData = Awaited<ReturnType<typeof listKosyncInbox>>,
   TError = Refusal,
@@ -839,6 +884,13 @@ export function useListKosyncInbox<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's documents that no Book is linked to, newest push first.
+ *
+ * At most `INBOX_SHOWN`. Only the caller's own: nobody else's device is
+ * anybody's business.
+ * @summary List Kosync Inbox
+ */
 export function useListKosyncInbox<
   TData = Awaited<ReturnType<typeof listKosyncInbox>>,
   TError = Refusal,
@@ -865,6 +917,13 @@ export function useListKosyncInbox<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's documents that no Book is linked to, newest push first.
+ *
+ * At most `INBOX_SHOWN`. Only the caller's own: nobody else's device is
+ * anybody's business.
+ * @summary List Kosync Inbox
+ */
 export function useListKosyncInbox<
   TData = Awaited<ReturnType<typeof listKosyncInbox>>,
   TError = Refusal,
@@ -884,9 +943,12 @@ export function useListKosyncInbox<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The caller's documents that no Book is linked to, newest push first.
+ *
+ * At most `INBOX_SHOWN`. Only the caller's own: nobody else's device is
+ * anybody's business.
  * @summary List Kosync Inbox
  */
-
 export function useListKosyncInbox<
   TData = Awaited<ReturnType<typeof listKosyncInbox>>,
   TError = Refusal,
@@ -993,6 +1055,16 @@ export type RevokeMemberKosyncPasswordMutationError =
 export type RevokeMemberKosyncPasswordMutationVariables = { userId: number };
 
 /**
+ * Sign one member out everywhere, devices included, for an admin.
+ *
+ * **The way to shut a person out under proxy or directory auth**, where
+ * removing them from the directory does not reach this library: a sync
+ * password is this library's, the sign in proxy does not stand in front of
+ * `/kosync/`, and under directory auth a token already issued stays good
+ * for its week without asking the directory again. So it ends their tokens
+ * as well, through `accounts.end_every_session`, or a live one would mint a
+ * new sync password the moment the old one went. What their devices already
+ * pushed stays.
  * @summary Revoke Member Kosync Password
  */
 export const useRevokeMemberKosyncPassword = <

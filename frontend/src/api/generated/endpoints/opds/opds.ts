@@ -104,6 +104,10 @@ export type ListServersQueryResult = NonNullable<
 >;
 export type ListServersQueryError = Refusal;
 
+/**
+ * Every OPDS server this library is configured to read.
+ * @summary List Servers
+ */
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
   TError = Refusal,
@@ -126,6 +130,10 @@ export function useListServers<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every OPDS server this library is configured to read.
+ * @summary List Servers
+ */
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
   TError = Refusal,
@@ -148,6 +156,10 @@ export function useListServers<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every OPDS server this library is configured to read.
+ * @summary List Servers
+ */
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
   TError = Refusal,
@@ -163,9 +175,9 @@ export function useListServers<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every OPDS server this library is configured to read.
  * @summary List Servers
  */
-
 export function useListServers<
   TData = Awaited<ReturnType<typeof listServers>>,
   TError = Refusal,
@@ -287,6 +299,12 @@ export type AddServerMutationError = Refusal | HTTPValidationError;
 export type AddServerMutationVariables = { data: OpdsServerIn };
 
 /**
+ * Add a server, with no login on it yet.
+ *
+ * The credential is a second call rather than two more fields here, mirroring
+ * the catalogue settings screen: a login is replaced far more often than an
+ * address is, and folding them would make an edit that leaves the password
+ * field blank ambiguous between "unchanged" and "removed".
  * @summary Add Server
  */
 export const useAddServer = <
@@ -376,6 +394,21 @@ export type ListSyncableServersQueryResult = NonNullable<
 >;
 export type ListSyncableServersQueryError = Refusal;
 
+/**
+ * The servers this member may sync, by id and name.
+ *
+ * **Without this the split above is not deliverable and nothing said so.** The
+ * full listing is admin only, so a member had no way to learn a `server_id`
+ * and could reach `POST /servers/{id}/sync` only by guessing an integer. A
+ * critic found it because the router's own test took the id from the admin's
+ * create response, which is exactly where a missing route does not show.
+ *
+ * **Two fields and not the full row.** A member needs to name the server they
+ * are syncing; the address is the configuration an admin owns, and the
+ * credential state is about a secret. Neither belongs on a screen that only
+ * offers a button.
+ * @summary List Syncable Servers
+ */
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
   TError = Refusal,
@@ -402,6 +435,21 @@ export function useListSyncableServers<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The servers this member may sync, by id and name.
+ *
+ * **Without this the split above is not deliverable and nothing said so.** The
+ * full listing is admin only, so a member had no way to learn a `server_id`
+ * and could reach `POST /servers/{id}/sync` only by guessing an integer. A
+ * critic found it because the router's own test took the id from the admin's
+ * create response, which is exactly where a missing route does not show.
+ *
+ * **Two fields and not the full row.** A member needs to name the server they
+ * are syncing; the address is the configuration an admin owns, and the
+ * credential state is about a secret. Neither belongs on a screen that only
+ * offers a button.
+ * @summary List Syncable Servers
+ */
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
   TError = Refusal,
@@ -428,6 +476,21 @@ export function useListSyncableServers<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The servers this member may sync, by id and name.
+ *
+ * **Without this the split above is not deliverable and nothing said so.** The
+ * full listing is admin only, so a member had no way to learn a `server_id`
+ * and could reach `POST /servers/{id}/sync` only by guessing an integer. A
+ * critic found it because the router's own test took the id from the admin's
+ * create response, which is exactly where a missing route does not show.
+ *
+ * **Two fields and not the full row.** A member needs to name the server they
+ * are syncing; the address is the configuration an admin owns, and the
+ * credential state is about a secret. Neither belongs on a screen that only
+ * offers a button.
+ * @summary List Syncable Servers
+ */
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
   TError = Refusal,
@@ -447,9 +510,20 @@ export function useListSyncableServers<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The servers this member may sync, by id and name.
+ *
+ * **Without this the split above is not deliverable and nothing said so.** The
+ * full listing is admin only, so a member had no way to learn a `server_id`
+ * and could reach `POST /servers/{id}/sync` only by guessing an integer. A
+ * critic found it because the router's own test took the id from the admin's
+ * create response, which is exactly where a missing route does not show.
+ *
+ * **Two fields and not the full row.** A member needs to name the server they
+ * are syncing; the address is the configuration an admin owns, and the
+ * credential state is about a secret. Neither belongs on a screen that only
+ * offers a button.
  * @summary List Syncable Servers
  */
-
 export function useListSyncableServers<
   TData = Awaited<ReturnType<typeof listSyncableServers>>,
   TError = Refusal,
@@ -550,6 +624,13 @@ export type RemoveServerMutationError = Refusal | HTTPValidationError;
 export type RemoveServerMutationVariables = { serverId: number };
 
 /**
+ * Forget a server, and the login sealed for it.
+ *
+ * **Both, and the credential is not merely tidied away.** The key is random
+ * rather than derived from the row id, so no later server can be handed this
+ * one's login even if this delete were skipped, and this delete means the
+ * envelope does not sit in every archive after the machine it was for is gone.
+ * See `models.new_opds_credential_key` for why the two guards are separate.
  * @summary Remove Server
  */
 export const useRemoveServer = <
@@ -686,6 +767,23 @@ export type EditServerMutationVariables = {
 };
 
 /**
+ * Rename a server, or point it somewhere else.
+ *
+ * **Moving it to a different origin drops the stored login**, and what that
+ * buys changed when the envelope started carrying its origin: the login can no
+ * longer be sent to the new address, because it does not open there. That is
+ * true of a household server's envelope at every version, because the
+ * superseded scheme is refused outright for one: `credentials._may_open_unbound`
+ * opens such an envelope only at the address this build published for its own
+ * roster source, and a household server has neither. What this
+ * still does is make the row honest. A login left behind would report as held
+ * and unreadable for the rest of its life, which reads as a damaged row and
+ * sends somebody to the recovery phrase. The response reports the credential
+ * as gone, so nothing has to be inferred from silence.
+ *
+ * A rename, or an edit that keeps the same scheme, host and port, keeps the
+ * login: it is the same machine, and making somebody retype a password to fix
+ * a path would teach them to keep the row wrong.
  * @summary Edit Server
  */
 export const useEditServer = <
@@ -782,6 +880,12 @@ export type ForgetServerCredentialMutationError = Refusal | HTTPValidationError;
 export type ForgetServerCredentialMutationVariables = { serverId: number };
 
 /**
+ * Drop this server's stored login.
+ *
+ * **Succeeds whether or not one was stored, and needs no key**, for the
+ * catalogue credential route's reason: a login nobody can read is exactly the
+ * one somebody most wants to be rid of, and requiring the key to delete it
+ * would make a rotated key unrecoverable without a database edit.
  * @summary Forget Server Credential
  */
 export const useForgetServerCredential = <
@@ -915,6 +1019,16 @@ export type SetServerCredentialMutationVariables = {
 };
 
 /**
+ * Store this server's login, sealed.
+ *
+ * Sealed against the row's own credential key **and its address**, so a
+ * ciphertext moved between rows by a hand edited archive, or left beside an
+ * address that archive rewrote, fails authentication rather than decrypting
+ * into a request aimed at a different machine. `credentials.seal` carries the
+ * argument.
+ *
+ * 409 when no encryption key is configured: there is nowhere to put a secret,
+ * and the message names the variables that would supply one.
  * @summary Set Server Credential
  */
 export const useSetServerCredential = <
@@ -1066,6 +1180,46 @@ export type SyncServerMutationVariables = {
 };
 
 /**
+ * Read one server's feed and record what this member holds.
+ *
+ * **`async def`, and the applying is pushed off the event loop by hand, which
+ * is the opposite arrangement to the other two importers and is deliberate.**
+ * Those read a file that has already arrived and are `def` throughout, so
+ * FastAPI runs them in a threadpool. This one has two halves: the walk is
+ * network bound and awaits, and the apply is blocking, because SQLAlchemy has
+ * no async here. Declaring the whole handler `def` would put an `asyncio.run`
+ * inside a worker thread; leaving the apply on the loop would stop the
+ * application answering for its duration, measured elsewhere at 14.4 seconds
+ * for `GET /api/books` during a 3,000 row import. So the walk awaits and the
+ * apply goes to `anyio.to_thread`.
+ *
+ * **The session is touched from one thread at a time**, which is what makes
+ * that safe: the walk is finished before the apply starts, and nothing else
+ * holds this request's session.
+ *
+ * **Rate limited on the import limiter**, with the other bulk writes. A sync
+ * is a walk of somebody's whole library and a write per entry, and the
+ * address it walks is one an admin chose rather than one this build ships.
+ *
+ * Books created here arrive `ownership=owned`, which is the whole point of the
+ * route: a member's own library server is the evidence of possession that a
+ * reading history and another institution's catalogue both are not. **Only an
+ * entry that says the member holds the book is counted**, so a title a server
+ * offers for sale or loan is passed over rather than recorded as owned: an
+ * entitlement is not a holding.
+ *
+ * **A book added by a sync carries a title, an author and nothing else, and
+ * that is a complete row rather than a half finished one.** What the feed
+ * cannot supply, measured across seven servers rather than read off the
+ * specification, is an identifier, a series, a publisher, a year, a language
+ * and a page count. A description arrives later from the catalogue chain, and
+ * **the chain may have none for a born digital title**: of the eight
+ * catalogues a title search asks, six refuse a record that says it is
+ * electronic. Five decide it from codes, the four MARC ones on their carrier
+ * codes and the Library of Congress on its MODS form, and the BnF decides it
+ * from the format prose alone. Only Open Library and Google Books apply no
+ * such rule. So a row with no description is this route working, not failing,
+ * and it is reported under `created` for that reason.
  * @summary Sync Server
  */
 export const useSyncServer = <

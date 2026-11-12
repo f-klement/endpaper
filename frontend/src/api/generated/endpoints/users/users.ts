@@ -112,6 +112,14 @@ export type ListUsersQueryResult = NonNullable<
 >;
 export type ListUsersQueryError = Refusal;
 
+/**
+ * The member list.
+ *
+ * Readable by every member, not just admins, because the book detail page
+ * needs it to populate the "Loan to…" picker. `UserOut` has no password
+ * field, so this exposes usernames and the admin flag and nothing else.
+ * @summary List Users
+ */
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
   TError = Refusal,
@@ -134,6 +142,14 @@ export function useListUsers<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The member list.
+ *
+ * Readable by every member, not just admins, because the book detail page
+ * needs it to populate the "Loan to…" picker. `UserOut` has no password
+ * field, so this exposes usernames and the admin flag and nothing else.
+ * @summary List Users
+ */
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
   TError = Refusal,
@@ -156,6 +172,14 @@ export function useListUsers<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The member list.
+ *
+ * Readable by every member, not just admins, because the book detail page
+ * needs it to populate the "Loan to…" picker. `UserOut` has no password
+ * field, so this exposes usernames and the admin flag and nothing else.
+ * @summary List Users
+ */
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
   TError = Refusal,
@@ -171,9 +195,13 @@ export function useListUsers<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The member list.
+ *
+ * Readable by every member, not just admins, because the book detail page
+ * needs it to populate the "Loan to…" picker. `UserOut` has no password
+ * field, so this exposes usernames and the admin flag and nothing else.
  * @summary List Users
  */
-
 export function useListUsers<
   TData = Awaited<ReturnType<typeof listUsers>>,
   TError = Refusal,
@@ -258,6 +286,20 @@ export type ListEmailsQueryResult = NonNullable<
 >;
 export type ListEmailsQueryError = Refusal;
 
+/**
+ * Every member's address. Admin only.
+ *
+ * **Reading was the half of this that was argued about**, and the refused
+ * alternative was write only, where nobody sees an address including an admin.
+ * It was refused because a household whose reminders silently go nowhere needs
+ * somebody able to see the typo, and a per sender delivery record tells you a
+ * send failed rather than that the address is wrong. Recorded on issue #80.
+ *
+ * A whole list rather than one member at a time, because the screen behind it
+ * is a list: a household has a handful of accounts and the admin is looking
+ * for the empty row.
+ * @summary List Emails
+ */
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
   TError = Refusal,
@@ -280,6 +322,20 @@ export function useListEmails<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every member's address. Admin only.
+ *
+ * **Reading was the half of this that was argued about**, and the refused
+ * alternative was write only, where nobody sees an address including an admin.
+ * It was refused because a household whose reminders silently go nowhere needs
+ * somebody able to see the typo, and a per sender delivery record tells you a
+ * send failed rather than that the address is wrong. Recorded on issue #80.
+ *
+ * A whole list rather than one member at a time, because the screen behind it
+ * is a list: a household has a handful of accounts and the admin is looking
+ * for the empty row.
+ * @summary List Emails
+ */
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
   TError = Refusal,
@@ -302,6 +358,20 @@ export function useListEmails<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every member's address. Admin only.
+ *
+ * **Reading was the half of this that was argued about**, and the refused
+ * alternative was write only, where nobody sees an address including an admin.
+ * It was refused because a household whose reminders silently go nowhere needs
+ * somebody able to see the typo, and a per sender delivery record tells you a
+ * send failed rather than that the address is wrong. Recorded on issue #80.
+ *
+ * A whole list rather than one member at a time, because the screen behind it
+ * is a list: a household has a handful of accounts and the admin is looking
+ * for the empty row.
+ * @summary List Emails
+ */
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
   TError = Refusal,
@@ -317,9 +387,19 @@ export function useListEmails<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every member's address. Admin only.
+ *
+ * **Reading was the half of this that was argued about**, and the refused
+ * alternative was write only, where nobody sees an address including an admin.
+ * It was refused because a household whose reminders silently go nowhere needs
+ * somebody able to see the typo, and a per sender delivery record tells you a
+ * send failed rather than that the address is wrong. Recorded on issue #80.
+ *
+ * A whole list rather than one member at a time, because the screen behind it
+ * is a list: a household has a handful of accounts and the admin is looking
+ * for the empty row.
  * @summary List Emails
  */
-
 export function useListEmails<
   TData = Awaited<ReturnType<typeof listEmails>>,
   TError = Refusal,
@@ -399,6 +479,15 @@ export type GetMyAppearanceQueryResult = NonNullable<
 >;
 export type GetMyAppearanceQueryError = Refusal;
 
+/**
+ * The caller's own appearance.
+ *
+ * There is no path parameter and no route that takes a member id, so there
+ * is no object to authorize: the only appearance reachable here is the
+ * caller's. That is the point, and it is why this is not a field on
+ * `UserOut`, which every member can read for every other member.
+ * @summary Get My Appearance
+ */
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
   TError = Refusal,
@@ -425,6 +514,15 @@ export function useGetMyAppearance<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's own appearance.
+ *
+ * There is no path parameter and no route that takes a member id, so there
+ * is no object to authorize: the only appearance reachable here is the
+ * caller's. That is the point, and it is why this is not a field on
+ * `UserOut`, which every member can read for every other member.
+ * @summary Get My Appearance
+ */
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
   TError = Refusal,
@@ -451,6 +549,15 @@ export function useGetMyAppearance<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's own appearance.
+ *
+ * There is no path parameter and no route that takes a member id, so there
+ * is no object to authorize: the only appearance reachable here is the
+ * caller's. That is the point, and it is why this is not a field on
+ * `UserOut`, which every member can read for every other member.
+ * @summary Get My Appearance
+ */
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
   TError = Refusal,
@@ -470,9 +577,14 @@ export function useGetMyAppearance<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The caller's own appearance.
+ *
+ * There is no path parameter and no route that takes a member id, so there
+ * is no object to authorize: the only appearance reachable here is the
+ * caller's. That is the point, and it is why this is not a field on
+ * `UserOut`, which every member can read for every other member.
  * @summary Get My Appearance
  */
-
 export function useGetMyAppearance<
   TData = Awaited<ReturnType<typeof getMyAppearance>>,
   TError = Refusal,
@@ -597,6 +709,11 @@ export type SetMyAppearanceMutationError = Refusal | HTTPValidationError;
 export type SetMyAppearanceMutationVariables = { data: AppearanceUpdate };
 
 /**
+ * Replace the caller's own appearance.
+ *
+ * No admin check and no member check, deliberately: a preference about what
+ * a person's own screen looks like needs no permission beyond being signed
+ * in, and the row written is the one the token names.
  * @summary Set My Appearance
  */
 export const useSetMyAppearance = <
@@ -675,6 +792,14 @@ export type GetMyEmailQueryResult = NonNullable<
 >;
 export type GetMyEmailQueryError = Refusal;
 
+/**
+ * The caller's own address.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only address reachable here is the caller's. That is the same shape as
+ * `/me/appearance` and it is the reason neither is a field on `UserOut`.
+ * @summary Get My Email
+ */
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
   TError = Refusal,
@@ -697,6 +822,14 @@ export function useGetMyEmail<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's own address.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only address reachable here is the caller's. That is the same shape as
+ * `/me/appearance` and it is the reason neither is a field on `UserOut`.
+ * @summary Get My Email
+ */
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
   TError = Refusal,
@@ -719,6 +852,14 @@ export function useGetMyEmail<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The caller's own address.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only address reachable here is the caller's. That is the same shape as
+ * `/me/appearance` and it is the reason neither is a field on `UserOut`.
+ * @summary Get My Email
+ */
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
   TError = Refusal,
@@ -734,9 +875,13 @@ export function useGetMyEmail<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The caller's own address.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only address reachable here is the caller's. That is the same shape as
+ * `/me/appearance` and it is the reason neither is a field on `UserOut`.
  * @summary Get My Email
  */
-
 export function useGetMyEmail<
   TData = Awaited<ReturnType<typeof getMyEmail>>,
   TError = Refusal,
@@ -853,6 +998,7 @@ export type SetMyEmailMutationError = Refusal | HTTPValidationError;
 export type SetMyEmailMutationVariables = { data: EmailUpdate };
 
 /**
+ * Set or clear the caller's own address.
  * @summary Set My Email
  */
 export const useSetMyEmail = <
@@ -937,6 +1083,20 @@ export type GetMySecurityQueryResult = NonNullable<
 >;
 export type GetMySecurityQueryError = Refusal;
 
+/**
+ * What has been done to the caller's own account, and by whom.
+ *
+ * **The member's half of an admin confirmed reset.** A reset that left no mark
+ * would be indistinguishable from a quiet takeover, which is the property the
+ * whole flow exists to keep, so the completed request is kept and read back
+ * here with the approver's name on it.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only account reachable here is the caller's. That is the same shape as
+ * `/me/email` and `/me/appearance` and it is why none of the three is a field
+ * on `UserOut`.
+ * @summary Get My Security
+ */
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
   TError = Refusal,
@@ -959,6 +1119,20 @@ export function useGetMySecurity<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What has been done to the caller's own account, and by whom.
+ *
+ * **The member's half of an admin confirmed reset.** A reset that left no mark
+ * would be indistinguishable from a quiet takeover, which is the property the
+ * whole flow exists to keep, so the completed request is kept and read back
+ * here with the approver's name on it.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only account reachable here is the caller's. That is the same shape as
+ * `/me/email` and `/me/appearance` and it is why none of the three is a field
+ * on `UserOut`.
+ * @summary Get My Security
+ */
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
   TError = Refusal,
@@ -981,6 +1155,20 @@ export function useGetMySecurity<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What has been done to the caller's own account, and by whom.
+ *
+ * **The member's half of an admin confirmed reset.** A reset that left no mark
+ * would be indistinguishable from a quiet takeover, which is the property the
+ * whole flow exists to keep, so the completed request is kept and read back
+ * here with the approver's name on it.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only account reachable here is the caller's. That is the same shape as
+ * `/me/email` and `/me/appearance` and it is why none of the three is a field
+ * on `UserOut`.
+ * @summary Get My Security
+ */
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
   TError = Refusal,
@@ -996,9 +1184,19 @@ export function useGetMySecurity<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * What has been done to the caller's own account, and by whom.
+ *
+ * **The member's half of an admin confirmed reset.** A reset that left no mark
+ * would be indistinguishable from a quiet takeover, which is the property the
+ * whole flow exists to keep, so the completed request is kept and read back
+ * here with the approver's name on it.
+ *
+ * No path parameter and no member id, so there is no object to authorize: the
+ * only account reachable here is the caller's. That is the same shape as
+ * `/me/email` and `/me/appearance` and it is why none of the three is a field
+ * on `UserOut`.
  * @summary Get My Security
  */
-
 export function useGetMySecurity<
   TData = Awaited<ReturnType<typeof getMySecurity>>,
   TError = Refusal,
@@ -1082,6 +1280,15 @@ export type ListPasswordResetsQueryResult = NonNullable<
 >;
 export type ListPasswordResetsQueryError = Refusal;
 
+/**
+ * The requests waiting on an admin, oldest first. Admin only.
+ *
+ * Carries no code and never has: an approval's code exists once, in the
+ * response to the approval, and is stored as a bcrypt hash. `approved_at` is
+ * here so the queue can say a request has already been granted, which is the
+ * one thing a screen that cannot show the code again has to be able to say.
+ * @summary List Password Resets
+ */
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
   TError = Refusal,
@@ -1108,6 +1315,15 @@ export function useListPasswordResets<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The requests waiting on an admin, oldest first. Admin only.
+ *
+ * Carries no code and never has: an approval's code exists once, in the
+ * response to the approval, and is stored as a bcrypt hash. `approved_at` is
+ * here so the queue can say a request has already been granted, which is the
+ * one thing a screen that cannot show the code again has to be able to say.
+ * @summary List Password Resets
+ */
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
   TError = Refusal,
@@ -1134,6 +1350,15 @@ export function useListPasswordResets<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The requests waiting on an admin, oldest first. Admin only.
+ *
+ * Carries no code and never has: an approval's code exists once, in the
+ * response to the approval, and is stored as a bcrypt hash. `approved_at` is
+ * here so the queue can say a request has already been granted, which is the
+ * one thing a screen that cannot show the code again has to be able to say.
+ * @summary List Password Resets
+ */
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
   TError = Refusal,
@@ -1153,9 +1378,14 @@ export function useListPasswordResets<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The requests waiting on an admin, oldest first. Admin only.
+ *
+ * Carries no code and never has: an approval's code exists once, in the
+ * response to the approval, and is stored as a bcrypt hash. `approved_at` is
+ * here so the queue can say a request has already been granted, which is the
+ * one thing a screen that cannot show the code again has to be able to say.
  * @summary List Password Resets
  */
-
 export function useListPasswordResets<
   TData = Awaited<ReturnType<typeof listPasswordResets>>,
   TError = Refusal,
@@ -1251,6 +1481,7 @@ export type DeclinePasswordResetMutationError = Refusal | HTTPValidationError;
 export type DeclinePasswordResetMutationVariables = { userId: number };
 
 /**
+ * Decline a request, so it stops occupying the queue.
  * @summary Decline Password Reset
  */
 export const useDeclinePasswordReset = <
@@ -1359,6 +1590,21 @@ export type ApprovePasswordResetMutationError = Refusal | HTTPValidationError;
 export type ApprovePasswordResetMutationVariables = { userId: number };
 
 /**
+ * Grant a request, and show the code once.
+ *
+ * **An admin may approve another admin's request.** Owner's decision on issue
+ * #105: what makes it acceptable is the asymmetry already in the mechanism
+ * rather than a further rule, since the request is still member initiated. The
+ * case it refuses is an admin quietly acquiring a peer's account; the case it
+ * allows is an admin who locked themselves out being helped by the person
+ * beside them, which is the ordinary one in a two person archive.
+ *
+ * **A deployment with exactly one admin therefore has no path in this app**,
+ * and that case belongs to the operator: `README.md` names the command line
+ * recovery, which is the capability whoever runs the container already has.
+ *
+ * 404 when there is no live request, which is true of this route: there is
+ * nothing here to approve, and an admin may already list every member.
  * @summary Approve Password Reset
  */
 export const useApprovePasswordReset = <
@@ -1448,6 +1694,22 @@ export type ListTestAccountsQueryResult = NonNullable<
 >;
 export type ListTestAccountsQueryError = Refusal;
 
+/**
+ * The accounts an admin may switch into, and no others.
+ *
+ * `switch_targets()`, not the flag alone, so that sentence is true of every
+ * row returned. The two differ only for a row nothing here writes (a flagged
+ * account whose `auth_source` was edited to a directory, or whose hash was
+ * cleared), and on that row the flag alone would put a Switch button in front
+ * of an admin that `/auth/switch` then answers 404 to, with nothing the UI
+ * could usefully say.
+ *
+ * Filtering is presentation either way: `/auth/switch` refuses a bad target
+ * whatever the client sends. Admin only because who exists for testing is
+ * nobody else's business, and because every account on this list is one
+ * somebody holds the password to.
+ * @summary List Test Accounts
+ */
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
   TError = Refusal,
@@ -1474,6 +1736,22 @@ export function useListTestAccounts<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The accounts an admin may switch into, and no others.
+ *
+ * `switch_targets()`, not the flag alone, so that sentence is true of every
+ * row returned. The two differ only for a row nothing here writes (a flagged
+ * account whose `auth_source` was edited to a directory, or whose hash was
+ * cleared), and on that row the flag alone would put a Switch button in front
+ * of an admin that `/auth/switch` then answers 404 to, with nothing the UI
+ * could usefully say.
+ *
+ * Filtering is presentation either way: `/auth/switch` refuses a bad target
+ * whatever the client sends. Admin only because who exists for testing is
+ * nobody else's business, and because every account on this list is one
+ * somebody holds the password to.
+ * @summary List Test Accounts
+ */
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
   TError = Refusal,
@@ -1500,6 +1778,22 @@ export function useListTestAccounts<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The accounts an admin may switch into, and no others.
+ *
+ * `switch_targets()`, not the flag alone, so that sentence is true of every
+ * row returned. The two differ only for a row nothing here writes (a flagged
+ * account whose `auth_source` was edited to a directory, or whose hash was
+ * cleared), and on that row the flag alone would put a Switch button in front
+ * of an admin that `/auth/switch` then answers 404 to, with nothing the UI
+ * could usefully say.
+ *
+ * Filtering is presentation either way: `/auth/switch` refuses a bad target
+ * whatever the client sends. Admin only because who exists for testing is
+ * nobody else's business, and because every account on this list is one
+ * somebody holds the password to.
+ * @summary List Test Accounts
+ */
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
   TError = Refusal,
@@ -1519,9 +1813,21 @@ export function useListTestAccounts<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The accounts an admin may switch into, and no others.
+ *
+ * `switch_targets()`, not the flag alone, so that sentence is true of every
+ * row returned. The two differ only for a row nothing here writes (a flagged
+ * account whose `auth_source` was edited to a directory, or whose hash was
+ * cleared), and on that row the flag alone would put a Switch button in front
+ * of an admin that `/auth/switch` then answers 404 to, with nothing the UI
+ * could usefully say.
+ *
+ * Filtering is presentation either way: `/auth/switch` refuses a bad target
+ * whatever the client sends. Admin only because who exists for testing is
+ * nobody else's business, and because every account on this list is one
+ * somebody holds the password to.
  * @summary List Test Accounts
  */
-
 export function useListTestAccounts<
   TData = Awaited<ReturnType<typeof listTestAccounts>>,
   TError = Refusal,
@@ -1651,6 +1957,15 @@ export type CreateTestAccountMutationError = Refusal | HTTPValidationError;
 export type CreateTestAccountMutationVariables = { data: UserCreate };
 
 /**
+ * Create a local account with a password, in any auth mode.
+ *
+ * `UserCreate`, so the registration policy applies unchanged: the 8 character
+ * floor and the 72 byte bcrypt ceiling the schema already documents.
+ *
+ * Never an admin. A test account exists to see the library as an ordinary
+ * member sees it, and an admin can already see the admin view. Nothing else
+ * in this app grants the flag either, so there is no path that turns one into
+ * an admin later.
  * @summary Create Test Account
  */
 export const useCreateTestAccount = <
@@ -1731,6 +2046,16 @@ export type ListVerificationQueryResult = NonNullable<
 >;
 export type ListVerificationQueryError = Refusal;
 
+/**
+ * Every member's confirmation state. Admin only.
+ *
+ * The whole list rather than the unconfirmed ones, for the reason
+ * `list_emails` serves the whole list: the screen is a list of a household's
+ * accounts and the admin is looking for the row that is wrong. It also lets the
+ * screen say which accounts this app never held a credential for, rather than
+ * silently omitting them and leaving somebody to wonder.
+ * @summary List Verification
+ */
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
   TError = Refusal,
@@ -1757,6 +2082,16 @@ export function useListVerification<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every member's confirmation state. Admin only.
+ *
+ * The whole list rather than the unconfirmed ones, for the reason
+ * `list_emails` serves the whole list: the screen is a list of a household's
+ * accounts and the admin is looking for the row that is wrong. It also lets the
+ * screen say which accounts this app never held a credential for, rather than
+ * silently omitting them and leaving somebody to wonder.
+ * @summary List Verification
+ */
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
   TError = Refusal,
@@ -1783,6 +2118,16 @@ export function useListVerification<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Every member's confirmation state. Admin only.
+ *
+ * The whole list rather than the unconfirmed ones, for the reason
+ * `list_emails` serves the whole list: the screen is a list of a household's
+ * accounts and the admin is looking for the row that is wrong. It also lets the
+ * screen say which accounts this app never held a credential for, rather than
+ * silently omitting them and leaving somebody to wonder.
+ * @summary List Verification
+ */
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
   TError = Refusal,
@@ -1802,9 +2147,15 @@ export function useListVerification<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Every member's confirmation state. Admin only.
+ *
+ * The whole list rather than the unconfirmed ones, for the reason
+ * `list_emails` serves the whole list: the screen is a list of a household's
+ * accounts and the admin is looking for the row that is wrong. It also lets the
+ * screen say which accounts this app never held a credential for, rather than
+ * silently omitting them and leaving somebody to wonder.
  * @summary List Verification
  */
-
 export function useListVerification<
   TData = Awaited<ReturnType<typeof listVerification>>,
   TError = Refusal,
@@ -1929,6 +2280,7 @@ export type SetMemberEmailMutationVariables = {
 };
 
 /**
+ * Set or clear any member's address. Admin only.
  * @summary Set Member Email
  */
 export const useSetMemberEmail = <
@@ -2036,6 +2388,24 @@ export type VerifyMemberMutationError = Refusal | HTTPValidationError;
 export type VerifyMemberMutationVariables = { userId: number };
 
 /**
+ * Assert that this account's address is that person's. Admin only.
+ *
+ * **The override that makes "an unverified account may do nothing" survivable.**
+ * A confirmation step completable only by receiving mail cannot be completed at
+ * all by a household with no mail server, which is the ordinary configuration
+ * here, so this is the primary path for some installations and the exception
+ * for others. Owner's decision, 2026-09-06.
+ *
+ * **It is an assertion about a person, so it is recorded as one.** The account
+ * carries that an admin confirmed it and which admin, not merely that it is
+ * confirmed: `AuthorityProvenance` is this codebase's precedent and
+ * `VerificationProvenance` is the same shape.
+ *
+ * 409 where this app never held the credential. Nothing about the caller's
+ * rights is wrong, which is why it is not a 403: a directory authenticated that
+ * account, so confirming its address here would be an assertion this app cannot
+ * make. The same reasoning, and the same status, as
+ * `_refuse_if_the_directory_owns_it`.
  * @summary Verify Member
  */
 export const useVerifyMember = <

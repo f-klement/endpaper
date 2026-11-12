@@ -111,6 +111,13 @@ export type AuthConfigQueryResult = NonNullable<
 >;
 export type AuthConfigQueryError = unknown;
 
+/**
+ * Public: the login page reads this before anyone holds a token.
+ *
+ * Read per request rather than captured at import, so closing registration
+ * takes effect without restarting the container.
+ * @summary Auth Config
+ */
 export function useAuthConfig<
   TData = Awaited<ReturnType<typeof authConfig>>,
   TError = unknown,
@@ -133,6 +140,13 @@ export function useAuthConfig<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Public: the login page reads this before anyone holds a token.
+ *
+ * Read per request rather than captured at import, so closing registration
+ * takes effect without restarting the container.
+ * @summary Auth Config
+ */
 export function useAuthConfig<
   TData = Awaited<ReturnType<typeof authConfig>>,
   TError = unknown,
@@ -155,6 +169,13 @@ export function useAuthConfig<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Public: the login page reads this before anyone holds a token.
+ *
+ * Read per request rather than captured at import, so closing registration
+ * takes effect without restarting the container.
+ * @summary Auth Config
+ */
 export function useAuthConfig<
   TData = Awaited<ReturnType<typeof authConfig>>,
   TError = unknown,
@@ -170,9 +191,12 @@ export function useAuthConfig<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Public: the login page reads this before anyone holds a token.
+ *
+ * Read per request rather than captured at import, so closing registration
+ * takes effect without restarting the container.
  * @summary Auth Config
  */
-
 export function useAuthConfig<
   TData = Awaited<ReturnType<typeof authConfig>>,
   TError = unknown,
@@ -287,9 +311,7 @@ export type LoginMutationBody = LoginRequest;
 export type LoginMutationError = Refusal | HTTPValidationError;
 export type LoginMutationVariables = { data: LoginRequest };
 
-/**
- * @summary Login
- */
+/** @summary Login */
 export const useLogin = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -383,6 +405,16 @@ export type LogoutMutationResult = NonNullable<
 export type LogoutMutationError = unknown;
 
 /**
+ * Drop the cover cookie.
+ *
+ * The access token lives in the browser and signing out discards it there,
+ * but the cookie is ours and would otherwise sit in the browser until it
+ * expired: on a shared machine, the next person's first page load would still
+ * fetch covers as the person who left.
+ *
+ * No authentication required, and none wanted. This only deletes something
+ * the caller already holds, and demanding a valid token would mean an expired
+ * session could never clear its own cookie.
  * @summary Logout
  */
 export const useLogout = <TError = unknown, TContext = unknown>(
@@ -450,6 +482,7 @@ export const getMeQueryOptions = <
 export type MeQueryResult = NonNullable<Awaited<ReturnType<typeof me>>>;
 export type MeQueryError = Refusal;
 
+/** @summary Me */
 export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options: {
     query: Partial<
@@ -469,6 +502,7 @@ export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Me */
 export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options?: {
     query?: Partial<
@@ -488,6 +522,7 @@ export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Me */
 export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options?: {
     query?: Partial<
@@ -499,10 +534,7 @@ export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @summary Me
- */
-
+/** @summary Me */
 export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = Refusal>(
   options?: {
     query?: Partial<
@@ -614,9 +646,7 @@ export type RegisterMutationBody = UserCreate;
 export type RegisterMutationError = Refusal | HTTPValidationError;
 export type RegisterMutationVariables = { data: UserCreate };
 
-/**
- * @summary Register
- */
+/** @summary Register */
 export const useRegister = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -740,6 +770,15 @@ export type RedeemPasswordResetMutationError = Refusal | HTTPValidationError;
 export type RedeemPasswordResetMutationVariables = { data: ResetRedeem };
 
 /**
+ * Spend an approved code on a new password.
+ *
+ * 204 and no token. The code is not a session and never becomes one: the
+ * member signs in with what they just set, which is also the check that it
+ * works.
+ *
+ * One message for every failure, exactly as `/auth/login` answers one for a
+ * missing account and a wrong password, and for the sharper version of the
+ * same reason: this caller holds no session at all.
  * @summary Redeem Password Reset
  */
 export const useRedeemPasswordReset = <
@@ -875,6 +914,22 @@ export type RequestPasswordResetMutationError = Refusal | HTTPValidationError;
 export type RequestPasswordResetMutationVariables = { data: ResetRequest };
 
 /**
+ * Ask an admin to approve a password reset for this account.
+ *
+ * **Unauthenticated, because there is no other moment.** A member who could
+ * sign in would not need this. Everything else about the route follows: it
+ * answers 202 whether or not the account exists, making a request grants
+ * nothing, and at most one request per account is ever live.
+ *
+ * **This is the only place in the application that creates a reset request**,
+ * which is what separates a recovery flow from a back door: an admin may
+ * approve one and cannot start one. The residual is recorded rather than
+ * hidden, since the route takes a username anybody may type. See
+ * `accounts.request_password_reset` and `docs/decisions.md`.
+ *
+ * Refused outright where the deployment does not hold the password, with a
+ * message naming the system that does. That refusal discloses nothing:
+ * `GET /auth/config` already publishes the auth mode to the login page.
  * @summary Request Password Reset
  */
 export const useRequestPasswordReset = <
@@ -1015,6 +1070,28 @@ export type SwitchAccountMutationError = Refusal | HTTPValidationError;
 export type SwitchAccountMutationVariables = { data: LoginRequest };
 
 /**
+ * Exchange a password an admin supplies for a session on a test account.
+ *
+ * A login performed on another account's behalf, not impersonation, and the
+ * difference is the password: it is required and checked the ordinary way.
+ * The admin knows it because the admin set it. Drop that check and this
+ * becomes a button that reads anybody's library.
+ *
+ * `LoginRequest`, not a schema of its own, because this **is** a login and
+ * the same two reasons apply: the registration length floor must not lock out
+ * a password set before it, and a 422 saying "too short" is a different
+ * answer from a 401 saying "wrong".
+ *
+ * The two refusals differ here, unlike at `/auth/login`, and can. That route
+ * answers one message for both cases so nobody can enumerate accounts; this
+ * one is called by an admin who may already list every account. So a name
+ * that is not a test account is a **404**, which is true of it as far as this
+ * route is concerned, and a wrong password is a **401**.
+ *
+ * Rate limited on the same counter as `/auth/login`, keyed the same way. The
+ * caller holds an admin token, so this is not the first line of defence; it
+ * is that a password check reachable over HTTP is a password check worth
+ * bounding, and this one hands back a session on a different account.
  * @summary Switch Account
  */
 export const useSwitchAccount = <
@@ -1135,6 +1212,11 @@ export type ConfirmAddressMutationError = HTTPValidationError;
 export type ConfirmAddressMutationVariables = { data: VerificationRedeem };
 
 /**
+ * Settle an account by returning the code sent to its address.
+ *
+ * 204 and no token, for the reason the reset redemption returns none: a code
+ * proves an address rather than authenticating a person, so the member signs in
+ * afterwards with the password they already chose.
  * @summary Confirm Address
  */
 export const useConfirmAddress = <
@@ -1266,6 +1348,19 @@ export type RequestVerificationMutationVariables = {
 };
 
 /**
+ * Send this account's confirmation code again.
+ *
+ * 202 whatever happened, including for an account that is already confirmed,
+ * that does not exist, or that has no address. A route saying which would tell
+ * a stranger which names are taken and which of them have a mailbox.
+ *
+ * **And it costs the same either way**, which the body alone does not buy.
+ * Minting a code is a bcrypt and finding no account is one indexed SELECT, so
+ * without the discarded comparison the two branches differ by a hash and the
+ * roster is readable off a clock. `accounts.spend_a_comparison` carries the
+ * measurement, once; `tests/test_accounts.py::TestNeitherBranchOfAResendIsFree`
+ * compares the two counts rather than checking each is non zero, which is the
+ * weaker property the first version of that guard settled for.
  * @summary Request Verification
  */
 export const useRequestVerification = <

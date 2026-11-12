@@ -107,6 +107,7 @@ export type GetSettingsQueryResult = NonNullable<
 >;
 export type GetSettingsQueryError = Refusal;
 
+/** @summary Get Settings */
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
   TError = Refusal,
@@ -129,6 +130,7 @@ export function useGetSettings<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Get Settings */
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
   TError = Refusal,
@@ -151,6 +153,7 @@ export function useGetSettings<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary Get Settings */
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
   TError = Refusal,
@@ -165,10 +168,7 @@ export function useGetSettings<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @summary Get Settings
- */
-
+/** @summary Get Settings */
 export function useGetSettings<
   TData = Awaited<ReturnType<typeof getSettings>>,
   TError = Refusal,
@@ -289,6 +289,11 @@ export type UpdateSettingsMutationError = Refusal | HTTPValidationError;
 export type UpdateSettingsMutationVariables = { data: SettingsUpdate };
 
 /**
+ * Apply a partial update.
+ *
+ * Only fields actually present are written. That is what lets the admin form
+ * submit without the API key: the browser never received the real value, so
+ * sending the field back would blank it.
  * @summary Update Settings
  */
 export const useUpdateSettings = <
@@ -408,6 +413,35 @@ export type ForgetSourceCredentialMutationError = Refusal | HTTPValidationError;
 export type ForgetSourceCredentialMutationVariables = { source: string };
 
 /**
+ * Drop a stored login for one catalogue.
+ *
+ * **Succeeds whether or not one was stored**, and needs no key to do it: a
+ * credential nobody can read is exactly the one somebody most wants to be rid
+ * of, and requiring the key to delete it would make a rotated key
+ * unrecoverable without a database edit. It is also what lets somebody who
+ * lost the recovery phrase reach a state where a new key may be made.
+ *
+ * **Reaches a row whose catalogue is no longer in the roster**, which the
+ * write above does not. `catalogue_credentials` carries no foreign key, on
+ * purpose, so that one credential for a source a later release dropped cannot
+ * fail an entire restore; the cost of that is an orphan, and an orphan nothing
+ * can delete would be a row needing a database edit to remove. Deleting sends
+ * nothing anywhere, so the roster check buys nothing here and costs that.
+ *
+ * **The pinned check fires only when nothing is stored, and that ordering is
+ * load bearing.** It read "there is nothing stored to remove", which stopped
+ * being true the moment `unreadable_sources` began counting a pinned source's
+ * sealed row: a login stored for a source the environment also pins **blocks
+ * key creation**, and refusing to delete it made that a dead end whose only
+ * exit was unsetting the variable, deleting, and setting it again, with
+ * nothing on screen saying so. An archive carries `catalogue_credentials`, so
+ * a restore onto a deployment that pins that source arrives there without
+ * anybody doing anything unusual.
+ *
+ * So: a row is a row, pinned or not, and deleting one sends nothing anywhere
+ * and does not touch the environment. With nothing stored the 409 is honest
+ * again, because then there really is nothing here to remove and the
+ * environment's is not this route's to clear.
  * @summary Forget Source Credential
  */
 export const useForgetSourceCredential = <
@@ -542,6 +576,17 @@ export type SetSourceCredentialMutationVariables = {
 };
 
 /**
+ * Store a login for one catalogue, sealed.
+ *
+ * **Any roster source, not only one that declares it needs a credential.** A
+ * library may hold an account at a catalogue that also answers anonymously,
+ * and refusing it would be the storage deciding who may have an account
+ * somewhere else.
+ *
+ * 409 when the deployment pinned this source's credential, the same rule and
+ * the same reason `_refuse_if_pinned` states for a settings row: a value the
+ * environment supplies wins, so storing a different one produces a screen that
+ * disagrees with what the next request actually sends.
  * @summary Set Source Credential
  */
 export const useSetSourceCredential = <
@@ -649,6 +694,24 @@ export type ForgetCredentialKeyMutationResult = NonNullable<
 export type ForgetCredentialKeyMutationError = Refusal;
 
 /**
+ * Drop the key this machine holds, so a new one can be made.
+ *
+ * **The way back from closing the tab without writing the words down.**
+ * Without this, `POST` refuses because a key exists, `PUT` wants a phrase
+ * nobody has, and the deployment is stuck behind a key protecting nothing.
+ *
+ * **It strands whatever the key was opening, and the response says how many**
+ * rather than this route hiding it: `unreadable_credentials` on the way out is
+ * the count of stored catalogue logins that now have to be typed again. A
+ * member's own Readwise token is not in that count: its member is told on
+ * their account page and saves it again. Removing those
+ * logins first is the way to reach a clean state, and `DELETE` on a source's
+ * credential needs no key for exactly that reason.
+ *
+ * 409 when a store holding the key cannot be cleared from here, naming it:
+ * the environment, because a process cannot unset a variable for its own next
+ * start; a key file this process cannot remove; or a keychain that kept the
+ * key.
  * @summary Forget Credential Key
  */
 export const useForgetCredentialKey = <TError = Refusal, TContext = unknown>(
@@ -726,6 +789,13 @@ export type GetCredentialKeyQueryResult = NonNullable<
 >;
 export type GetCredentialKeyQueryError = Refusal;
 
+/**
+ * Whether this deployment holds an encryption key, and where from.
+ *
+ * Never the key. A phrase leaves this application through exactly one route,
+ * the POST below, and only when there was nothing to overwrite.
+ * @summary Get Credential Key
+ */
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
   TError = Refusal,
@@ -752,6 +822,13 @@ export function useGetCredentialKey<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether this deployment holds an encryption key, and where from.
+ *
+ * Never the key. A phrase leaves this application through exactly one route,
+ * the POST below, and only when there was nothing to overwrite.
+ * @summary Get Credential Key
+ */
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
   TError = Refusal,
@@ -778,6 +855,13 @@ export function useGetCredentialKey<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether this deployment holds an encryption key, and where from.
+ *
+ * Never the key. A phrase leaves this application through exactly one route,
+ * the POST below, and only when there was nothing to overwrite.
+ * @summary Get Credential Key
+ */
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
   TError = Refusal,
@@ -797,9 +881,12 @@ export function useGetCredentialKey<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Whether this deployment holds an encryption key, and where from.
+ *
+ * Never the key. A phrase leaves this application through exactly one route,
+ * the POST below, and only when there was nothing to overwrite.
  * @summary Get Credential Key
  */
-
 export function useGetCredentialKey<
   TData = Awaited<ReturnType<typeof getCredentialKey>>,
   TError = Refusal,
@@ -901,6 +988,17 @@ export type CreateCredentialKeyMutationResult = NonNullable<
 export type CreateCredentialKeyMutationError = Refusal;
 
 /**
+ * Make an encryption key, store it, and return the phrase **once**.
+ *
+ * **The one response in this application that carries a secret**, and the
+ * exception is bounded by the route rather than by a promise: it refuses when
+ * a key already exists, so replaying it cannot re-display one. Write the words
+ * down; there is no second chance to read them, by construction.
+ *
+ * Where the key is kept is this machine's business: its keychain where it has
+ * one, otherwise a file readable only by the account the app runs as. Neither
+ * travels in a backup archive, which is what makes the archive safe to hand
+ * around and is also why the phrase matters.
  * @summary Create Credential Key
  */
 export const useCreateCredentialKey = <TError = Refusal, TContext = unknown>(
@@ -1028,6 +1126,17 @@ export type RestoreCredentialKeyMutationError = Refusal | HTTPValidationError;
 export type RestoreCredentialKeyMutationVariables = { data: RecoveryPhraseIn };
 
 /**
+ * Take a recovery phrase back in, on a new machine or after one was lost.
+ *
+ * **The checksum is what makes a wrong word an error rather than a different
+ * key.** A phrase with a word mistyped, misread off paper, or two words
+ * swapped is refused here; without it this route would cheerfully store a key
+ * that opens nothing and report success.
+ *
+ * Replacing a key that currently works is allowed and is not guarded against:
+ * it is what a person restoring a backup onto a new machine is doing, and the
+ * response says how many stored credentials the new key cannot open, which is
+ * the only honest report available.
  * @summary Restore Credential Key
  */
 export const useRestoreCredentialKey = <
@@ -1108,6 +1217,13 @@ export type GetFeatureFlagsQueryResult = NonNullable<
 >;
 export type GetFeatureFlagsQueryError = unknown;
 
+/**
+ * What the UI needs to decide what to render.
+ *
+ * Public on purpose: the login page is localised, so the default language has
+ * to be known before anyone holds a token. Carries no secrets.
+ * @summary Get Feature Flags
+ */
 export function useGetFeatureFlags<
   TData = Awaited<ReturnType<typeof getFeatureFlags>>,
   TError = unknown,
@@ -1134,6 +1250,13 @@ export function useGetFeatureFlags<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What the UI needs to decide what to render.
+ *
+ * Public on purpose: the login page is localised, so the default language has
+ * to be known before anyone holds a token. Carries no secrets.
+ * @summary Get Feature Flags
+ */
 export function useGetFeatureFlags<
   TData = Awaited<ReturnType<typeof getFeatureFlags>>,
   TError = unknown,
@@ -1160,6 +1283,13 @@ export function useGetFeatureFlags<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What the UI needs to decide what to render.
+ *
+ * Public on purpose: the login page is localised, so the default language has
+ * to be known before anyone holds a token. Carries no secrets.
+ * @summary Get Feature Flags
+ */
 export function useGetFeatureFlags<
   TData = Awaited<ReturnType<typeof getFeatureFlags>>,
   TError = unknown,
@@ -1179,9 +1309,12 @@ export function useGetFeatureFlags<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * What the UI needs to decide what to render.
+ *
+ * Public on purpose: the login page is localised, so the default language has
+ * to be known before anyone holds a token. Carries no secrets.
  * @summary Get Feature Flags
  */
-
 export function useGetFeatureFlags<
   TData = Awaited<ReturnType<typeof getFeatureFlags>>,
   TError = unknown,
@@ -1260,6 +1393,10 @@ export type GetLoginImageQueryResult = NonNullable<
 >;
 export type GetLoginImageQueryError = Refusal;
 
+/**
+ * Public: the login page renders before anyone holds a token.
+ * @summary Get Login Image
+ */
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
   TError = Refusal,
@@ -1282,6 +1419,10 @@ export function useGetLoginImage<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Public: the login page renders before anyone holds a token.
+ * @summary Get Login Image
+ */
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
   TError = Refusal,
@@ -1304,6 +1445,10 @@ export function useGetLoginImage<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Public: the login page renders before anyone holds a token.
+ * @summary Get Login Image
+ */
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
   TError = Refusal,
@@ -1319,9 +1464,9 @@ export function useGetLoginImage<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Public: the login page renders before anyone holds a token.
  * @summary Get Login Image
  */
-
 export function useGetLoginImage<
   TData = Awaited<ReturnType<typeof getLoginImage>>,
   TError = Refusal,
@@ -1414,9 +1559,7 @@ export type SetLoginImageMutationBody = BodySetLoginImage;
 export type SetLoginImageMutationError = Refusal | HTTPValidationError;
 export type SetLoginImageMutationVariables = { data: BodySetLoginImage };
 
-/**
- * @summary Set Login Image
- */
+/** @summary Set Login Image */
 export const useSetLoginImage = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -1501,6 +1644,22 @@ export type GetSenderHealthQueryResult = NonNullable<
 >;
 export type GetSenderHealthQueryError = Refusal;
 
+/**
+ * What each switched-on reminder channel last did.
+ *
+ * Declared **before** nothing, and that is worth saying: this prefix has no
+ * path parameter, so the route order rule has no work to do here. It is a
+ * separate endpoint rather than a field on `SettingsOut` because the banner
+ * that reads it lives on the library page, and pulling the whole admin
+ * settings record, four secrets' previews included, to render one line would
+ * be the wrong payload on the wrong screen.
+ *
+ * Admin only, like the settings it reports on and for the same reason: it
+ * names channels, their failures and the sentences those failures produced.
+ * An ordinary member can do nothing with any of it, since only an admin can
+ * reach the screen that fixes it.
+ * @summary Get Sender Health
+ */
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
   TError = Refusal,
@@ -1527,6 +1686,22 @@ export function useGetSenderHealth<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What each switched-on reminder channel last did.
+ *
+ * Declared **before** nothing, and that is worth saying: this prefix has no
+ * path parameter, so the route order rule has no work to do here. It is a
+ * separate endpoint rather than a field on `SettingsOut` because the banner
+ * that reads it lives on the library page, and pulling the whole admin
+ * settings record, four secrets' previews included, to render one line would
+ * be the wrong payload on the wrong screen.
+ *
+ * Admin only, like the settings it reports on and for the same reason: it
+ * names channels, their failures and the sentences those failures produced.
+ * An ordinary member can do nothing with any of it, since only an admin can
+ * reach the screen that fixes it.
+ * @summary Get Sender Health
+ */
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
   TError = Refusal,
@@ -1553,6 +1728,22 @@ export function useGetSenderHealth<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * What each switched-on reminder channel last did.
+ *
+ * Declared **before** nothing, and that is worth saying: this prefix has no
+ * path parameter, so the route order rule has no work to do here. It is a
+ * separate endpoint rather than a field on `SettingsOut` because the banner
+ * that reads it lives on the library page, and pulling the whole admin
+ * settings record, four secrets' previews included, to render one line would
+ * be the wrong payload on the wrong screen.
+ *
+ * Admin only, like the settings it reports on and for the same reason: it
+ * names channels, their failures and the sentences those failures produced.
+ * An ordinary member can do nothing with any of it, since only an admin can
+ * reach the screen that fixes it.
+ * @summary Get Sender Health
+ */
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
   TError = Refusal,
@@ -1572,9 +1763,21 @@ export function useGetSenderHealth<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * What each switched-on reminder channel last did.
+ *
+ * Declared **before** nothing, and that is worth saying: this prefix has no
+ * path parameter, so the route order rule has no work to do here. It is a
+ * separate endpoint rather than a field on `SettingsOut` because the banner
+ * that reads it lives on the library page, and pulling the whole admin
+ * settings record, four secrets' previews included, to render one line would
+ * be the wrong payload on the wrong screen.
+ *
+ * Admin only, like the settings it reports on and for the same reason: it
+ * names channels, their failures and the sentences those failures produced.
+ * An ordinary member can do nothing with any of it, since only an admin can
+ * reach the screen that fixes it.
  * @summary Get Sender Health
  */
-
 export function useGetSenderHealth<
   TData = Awaited<ReturnType<typeof getSenderHealth>>,
   TError = Refusal,

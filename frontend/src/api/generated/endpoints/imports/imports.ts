@@ -154,6 +154,43 @@ export type ImportCsvMutationVariables = {
 };
 
 /**
+ * Apply a library export from Goodreads, LibraryThing, StoryGraph, Libib
+ * or anything else with a title column.
+ *
+ * **Declared `def`, not `async def`, and that is load bearing.** Everything
+ * below is blocking: SQLAlchemy has no async here. An `async` handler runs on
+ * the event loop, so a running import stops the whole application answering.
+ * Measured on a 3000 row file: `GET /api/books` went from 7ms to **14.4
+ * seconds**, and exactly one such request completed for the duration.
+ * FastAPI runs a `def` handler in a threadpool instead, which costs nothing
+ * and keeps the app alive while a library comes across.
+ *
+ * Statuses are **personal**, so this only ever writes the importing member's
+ * own `user_books` rows. Importing your shelves does not change what anyone
+ * else has read, and two members can import their own exports without
+ * fighting over the same books.
+ *
+ * A review the file carries is kept as a **private** note: visible to the
+ * member who imported it and to nobody else, because the column another app
+ * called "private notes" must not become an instance-visible note under their
+ * own name. Notes written here through the app are unaffected and stay
+ * visible to whoever can see the book.
+ *
+ * Books created by `create_missing` are marked `ownership=unknown`: a reading
+ * history is not evidence of possession. They are then confirmed together
+ * from the library view, which is what the bulk ownership endpoint is for.
+ *
+ * `apply_tags` is off by default and deliberately so. A Goodreads export's
+ * tag column is its shelves, which for most people is a few hundred one-off
+ * names, and turning all of them into tags here buries the curated list under
+ * somebody's filing habits from another app.
+ *
+ * `reader` names which reader reads the file, and is left out for all but a
+ * file the detector reads as the wrong service's. A row the file's own
+ * exclusion column marks as deleted is dropped and counted in `excluded`
+ * whichever reader runs, so naming one never brings those titles back: the
+ * column is read wherever it appears, and the preview shows the count and the
+ * column before anything is written.
  * @summary Import Csv
  */
 export const useImportCsv = <
@@ -287,6 +324,30 @@ export type ImportMarcMutationVariables = {
 };
 
 /**
+ * Apply a MARC21 file another library exported.
+ *
+ * MARCXML only. `enums.ExportFormat` says why the binary serialisation is not
+ * read, and it is the same reason it is not written.
+ *
+ * **Declared `def`, not `async def`, for `import_csv`'s reason**, which is
+ * load bearing rather than stylistic: everything below blocks, and an `async`
+ * handler runs on the event loop, so a running import stops the whole
+ * application answering. Measured on a 3000 row file, `GET /api/books` went
+ * from 7ms to 14.4 seconds.
+ *
+ * **Nothing personal is written.** A catalogue record carries no reading
+ * status, no rating and no review, so this touches no `user_books` row and
+ * changes nothing about what anybody has read. `statuses_updated` comes back
+ * zero for that reason rather than because nothing needed changing.
+ *
+ * **`create_missing` defaults to true, where the CSV importer defaults it to
+ * false.** A reading history is mostly books the household does not own, so
+ * creating them by default would fill the shelf; a catalogue transfer that
+ * adds no records has transferred nothing.
+ *
+ * Records added this way arrive `ownership=unknown`: another institution's
+ * record says that institution holds the book. They are confirmed together
+ * from the library view, which is what the bulk ownership endpoint is for.
  * @summary Import Marc
  */
 export const useImportMarc = <
@@ -413,6 +474,39 @@ export type PreviewMarcMutationError = Refusal | HTTPValidationError;
 export type PreviewMarcMutationVariables = { data: BodyPreviewMarc };
 
 /**
+ * Read a MARC file and report what it holds, writing nothing.
+ *
+ * **`already_held` is the number this exists for.** Importing the same file
+ * twice is the ordinary accident in a catalogue transfer, and "will this
+ * double my catalogue" has to be answerable before the write.
+ *
+ * **Every answer the import acts on is counted, not only the match.**
+ * `already_held` counts what it will match, `blocked` what it will refuse for
+ * an ISBN this member cannot see, `in_trash` what only their trash holds and
+ * `ambiguous` what two Books answer, through `importing.recognise_stored`,
+ * the same index and the same question `MarcImport` asks, over the same
+ * stored records. Counting only the first overstated what an import would add
+ * by exactly the number of records another member holds privately.
+ *
+ * **What is left is an upper bound rather than an equality, and it errs
+ * towards promising less.** The index is read once here and grows during an
+ * import: `recognition.Index.remember` makes a freshly created Book findable,
+ * so a work listed twice in one file is created once and matched once, while
+ * this counts both as additions. Measured, two identical records: the preview
+ * would add 2 and the import created 1 and matched 1.
+ *
+ * **`blocked` describes the default.** It is the refusal `create_missing`
+ * reaches, and this endpoint takes no `create_missing` because the import
+ * defaults it true. With it off nothing is created, so nothing can be refused
+ * for a collision.
+ *
+ * **And it under-counts** where a record's ISBN is held invisibly but its
+ * title and author match a visible Book: that is a match, not a refusal. See
+ * `MarcPreviewOut`.
+ *
+ * Rate limited together with the import, so a preview and the import that
+ * follows it spend two of the three a minute allows. Parsing is the expensive
+ * half and `_read_upload` caps the body without capping the rate.
  * @summary Preview Marc
  */
 export const usePreviewMarc = <
@@ -542,6 +636,26 @@ export type PreviewImportMutationVariables = {
 };
 
 /**
+ * Read a file and report what it turned out to be, writing nothing.
+ *
+ * A column guessed wrong is invisible until after the import, and after the
+ * import is too late: undoing it means finding and deleting a few hundred
+ * books. So the mapping is shown first, against the file's real header list,
+ * with the first few rows as the parser actually read them.
+ *
+ * **`reader` is reported as well as the mapping, on every preview**, because a
+ * file read as the wrong service's export is the same class of silent wrong
+ * answer a column guessed wrong is, and it is corrected the same way: name the
+ * right one here and on the import that follows. Reported when it is the
+ * ordinary reader too: a screen that says nothing when the answer is ordinary
+ * cannot be checked at all.
+ *
+ * `excluded` and `exclusion_column` are reported the same way, count included
+ * when it is zero, so "this file marks nothing as deleted" is a different
+ * screen from "this file has no such column".
+ *
+ * Rate limited together with the import itself, so a preview and the import
+ * that follows it spend two of the three a minute allows.
  * @summary Preview Import
  */
 export const usePreviewImport = <

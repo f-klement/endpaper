@@ -124,6 +124,33 @@ export type DownloadBackupQueryResult = NonNullable<
 >;
 export type DownloadBackupQueryError = Refusal;
 
+/**
+ * The whole database and every cover, as a zip.
+ *
+ * Not paginated and not streamed row by row: the archive has to be internally
+ * consistent, so it is built in one pass from one session and then sent.
+ * A library is megabytes, not gigabytes.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`, undeclared for the reason `routers/books.export_books`
+ * states: this document declares a 401, a 403 or a 404 wherever the code a
+ * route runs builds one and no other refusal on any operation, so declaring a
+ * 429 here alone would make it look deliberate and every other one look
+ * accidental. `tests/test_refusals.py` holds the first half and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` the second,
+ * because a reason described in prose rots silently where an asserted one
+ * reddens.
+ *
+ * **The limit bounds how often an archive is built and nothing else.** It
+ * does not bound how large one is: `MAX_ARCHIVE_BYTES` is the *restore*
+ * upload cap and the body size middleware's, both on `/backup/restore`, and
+ * the download reads neither, so `build_archive` returns the whole library as
+ * `bytes` with nothing above it. Nor does it bound how many are built at
+ * once: a sliding window counts starts, not responses in flight, so three
+ * concurrent builds are inside it. Both of those are a concurrency bound,
+ * which is a different instrument.
+ * @summary Download Backup
+ */
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
   TError = Refusal,
@@ -146,6 +173,33 @@ export function useDownloadBackup<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The whole database and every cover, as a zip.
+ *
+ * Not paginated and not streamed row by row: the archive has to be internally
+ * consistent, so it is built in one pass from one session and then sent.
+ * A library is megabytes, not gigabytes.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`, undeclared for the reason `routers/books.export_books`
+ * states: this document declares a 401, a 403 or a 404 wherever the code a
+ * route runs builds one and no other refusal on any operation, so declaring a
+ * 429 here alone would make it look deliberate and every other one look
+ * accidental. `tests/test_refusals.py` holds the first half and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` the second,
+ * because a reason described in prose rots silently where an asserted one
+ * reddens.
+ *
+ * **The limit bounds how often an archive is built and nothing else.** It
+ * does not bound how large one is: `MAX_ARCHIVE_BYTES` is the *restore*
+ * upload cap and the body size middleware's, both on `/backup/restore`, and
+ * the download reads neither, so `build_archive` returns the whole library as
+ * `bytes` with nothing above it. Nor does it bound how many are built at
+ * once: a sliding window counts starts, not responses in flight, so three
+ * concurrent builds are inside it. Both of those are a concurrency bound,
+ * which is a different instrument.
+ * @summary Download Backup
+ */
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
   TError = Refusal,
@@ -168,6 +222,33 @@ export function useDownloadBackup<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The whole database and every cover, as a zip.
+ *
+ * Not paginated and not streamed row by row: the archive has to be internally
+ * consistent, so it is built in one pass from one session and then sent.
+ * A library is megabytes, not gigabytes.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`, undeclared for the reason `routers/books.export_books`
+ * states: this document declares a 401, a 403 or a 404 wherever the code a
+ * route runs builds one and no other refusal on any operation, so declaring a
+ * 429 here alone would make it look deliberate and every other one look
+ * accidental. `tests/test_refusals.py` holds the first half and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` the second,
+ * because a reason described in prose rots silently where an asserted one
+ * reddens.
+ *
+ * **The limit bounds how often an archive is built and nothing else.** It
+ * does not bound how large one is: `MAX_ARCHIVE_BYTES` is the *restore*
+ * upload cap and the body size middleware's, both on `/backup/restore`, and
+ * the download reads neither, so `build_archive` returns the whole library as
+ * `bytes` with nothing above it. Nor does it bound how many are built at
+ * once: a sliding window counts starts, not responses in flight, so three
+ * concurrent builds are inside it. Both of those are a concurrency bound,
+ * which is a different instrument.
+ * @summary Download Backup
+ */
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
   TError = Refusal,
@@ -183,9 +264,32 @@ export function useDownloadBackup<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The whole database and every cover, as a zip.
+ *
+ * Not paginated and not streamed row by row: the archive has to be internally
+ * consistent, so it is built in one pass from one session and then sent.
+ * A library is megabytes, not gigabytes.
+ *
+ * **Rationed, and the schema does not say so.** The refusal is a 429 carrying
+ * `Retry-After`, undeclared for the reason `routers/books.export_books`
+ * states: this document declares a 401, a 403 or a 404 wherever the code a
+ * route runs builds one and no other refusal on any operation, so declaring a
+ * 429 here alone would make it look deliberate and every other one look
+ * accidental. `tests/test_refusals.py` holds the first half and
+ * `tests/test_errors.py::TestTheDocumentDeclaresNoOtherRefusal` the second,
+ * because a reason described in prose rots silently where an asserted one
+ * reddens.
+ *
+ * **The limit bounds how often an archive is built and nothing else.** It
+ * does not bound how large one is: `MAX_ARCHIVE_BYTES` is the *restore*
+ * upload cap and the body size middleware's, both on `/backup/restore`, and
+ * the download reads neither, so `build_archive` returns the whole library as
+ * `bytes` with nothing above it. Nor does it bound how many are built at
+ * once: a sliding window counts starts, not responses in flight, so three
+ * concurrent builds are inside it. Both of those are a concurrency bound,
+ * which is a different instrument.
  * @summary Download Backup
  */
-
 export function useDownloadBackup<
   TData = Awaited<ReturnType<typeof downloadBackup>>,
   TError = Refusal,
@@ -305,6 +409,16 @@ export type RestoreBackupMutationVariables = {
 };
 
 /**
+ * Replace the catalogue with the contents of a backup.
+ *
+ * `confirm` is a required opt-in rather than a body field, so the destructive
+ * call cannot be made by accident by anything replaying a plain upload. This
+ * is the only endpoint in the app that destroys data it was not given the id
+ * of, and it destroys all of it.
+ *
+ * The archive is validated in full before the first row is deleted. A restore
+ * that fails halfway leaves a library that is neither the backup nor what was
+ * there before, which is worse than either.
  * @summary Restore Backup
  */
 export const useRestoreBackup = <

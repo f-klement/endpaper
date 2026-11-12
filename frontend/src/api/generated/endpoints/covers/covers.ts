@@ -117,6 +117,20 @@ export type GetLoginBackgroundQueryResult = NonNullable<
 >;
 export type GetLoginBackgroundQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The login page background. Public, and it has to be.
+ *
+ * The login page renders before anyone holds a token, so an authenticated
+ * background is a broken image on the one screen every visitor sees. It is
+ * also admin-chosen and deliberately shown to anyone who reaches the door, so
+ * there is nothing here to withhold.
+ *
+ * This route is the reason the rest of this module cannot simply be "the
+ * covers directory, authenticated": one file in it is public, and the split
+ * is by name rather than by directory because that is where `settings.py`
+ * already writes it.
+ * @summary Get Login Background
+ */
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
   TError = Refusal | HTTPValidationError,
@@ -144,6 +158,20 @@ export function useGetLoginBackground<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The login page background. Public, and it has to be.
+ *
+ * The login page renders before anyone holds a token, so an authenticated
+ * background is a broken image on the one screen every visitor sees. It is
+ * also admin-chosen and deliberately shown to anyone who reaches the door, so
+ * there is nothing here to withhold.
+ *
+ * This route is the reason the rest of this module cannot simply be "the
+ * covers directory, authenticated": one file in it is public, and the split
+ * is by name rather than by directory because that is where `settings.py`
+ * already writes it.
+ * @summary Get Login Background
+ */
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
   TError = Refusal | HTTPValidationError,
@@ -171,6 +199,20 @@ export function useGetLoginBackground<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The login page background. Public, and it has to be.
+ *
+ * The login page renders before anyone holds a token, so an authenticated
+ * background is a broken image on the one screen every visitor sees. It is
+ * also admin-chosen and deliberately shown to anyone who reaches the door, so
+ * there is nothing here to withhold.
+ *
+ * This route is the reason the rest of this module cannot simply be "the
+ * covers directory, authenticated": one file in it is public, and the split
+ * is by name rather than by directory because that is where `settings.py`
+ * already writes it.
+ * @summary Get Login Background
+ */
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
   TError = Refusal | HTTPValidationError,
@@ -191,9 +233,19 @@ export function useGetLoginBackground<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The login page background. Public, and it has to be.
+ *
+ * The login page renders before anyone holds a token, so an authenticated
+ * background is a broken image on the one screen every visitor sees. It is
+ * also admin-chosen and deliberately shown to anyone who reaches the door, so
+ * there is nothing here to withhold.
+ *
+ * This route is the reason the rest of this module cannot simply be "the
+ * covers directory, authenticated": one file in it is public, and the split
+ * is by name rather than by directory because that is where `settings.py`
+ * already writes it.
  * @summary Get Login Background
  */
-
 export function useGetLoginBackground<
   TData = Awaited<ReturnType<typeof getLoginBackground>>,
   TError = Refusal | HTTPValidationError,
@@ -297,6 +349,20 @@ export type GetCoverQueryResult = NonNullable<
 >;
 export type GetCoverQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The cover for a book the caller may see.
+ *
+ * `book_id` is consumed by the `BookForCover` dependency rather than by this
+ * function: declaring it as a path parameter of the route is what lets the
+ * dependency resolve the book and apply `visible_to()` before any of this
+ * runs. An invisible book raises 404 there and never reaches this body.
+ *
+ * `FileResponse` rather than reading the bytes here, which is half the reason
+ * covers are files: it can hand the file off to the kernel, where reading a
+ * column would pull every image through the Python heap of a pod limited to
+ * 512Mi.
+ * @summary Get Cover
+ */
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
   TError = Refusal | HTTPValidationError,
@@ -321,6 +387,20 @@ export function useGetCover<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The cover for a book the caller may see.
+ *
+ * `book_id` is consumed by the `BookForCover` dependency rather than by this
+ * function: declaring it as a path parameter of the route is what lets the
+ * dependency resolve the book and apply `visible_to()` before any of this
+ * runs. An invisible book raises 404 there and never reaches this body.
+ *
+ * `FileResponse` rather than reading the bytes here, which is half the reason
+ * covers are files: it can hand the file off to the kernel, where reading a
+ * column would pull every image through the Python heap of a pod limited to
+ * 512Mi.
+ * @summary Get Cover
+ */
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
   TError = Refusal | HTTPValidationError,
@@ -345,6 +425,20 @@ export function useGetCover<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The cover for a book the caller may see.
+ *
+ * `book_id` is consumed by the `BookForCover` dependency rather than by this
+ * function: declaring it as a path parameter of the route is what lets the
+ * dependency resolve the book and apply `visible_to()` before any of this
+ * runs. An invisible book raises 404 there and never reaches this body.
+ *
+ * `FileResponse` rather than reading the bytes here, which is half the reason
+ * covers are files: it can hand the file off to the kernel, where reading a
+ * column would pull every image through the Python heap of a pod limited to
+ * 512Mi.
+ * @summary Get Cover
+ */
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
   TError = Refusal | HTTPValidationError,
@@ -362,9 +456,19 @@ export function useGetCover<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The cover for a book the caller may see.
+ *
+ * `book_id` is consumed by the `BookForCover` dependency rather than by this
+ * function: declaring it as a path parameter of the route is what lets the
+ * dependency resolve the book and apply `visible_to()` before any of this
+ * runs. An invisible book raises 404 there and never reaches this body.
+ *
+ * `FileResponse` rather than reading the bytes here, which is half the reason
+ * covers are files: it can hand the file off to the kernel, where reading a
+ * column would pull every image through the Python heap of a pod limited to
+ * 512Mi.
  * @summary Get Cover
  */
-
 export function useGetCover<
   TData = Awaited<ReturnType<typeof getCover>>,
   TError = Refusal | HTTPValidationError,

@@ -120,6 +120,7 @@ export type ListLoansQueryResult = NonNullable<
 >;
 export type ListLoansQueryError = Refusal | HTTPValidationError;
 
+/** @summary List Loans */
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
   TError = Refusal | HTTPValidationError,
@@ -143,6 +144,7 @@ export function useListLoans<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary List Loans */
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
   TError = Refusal | HTTPValidationError,
@@ -166,6 +168,7 @@ export function useListLoans<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/** @summary List Loans */
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
   TError = Refusal | HTTPValidationError,
@@ -181,10 +184,7 @@ export function useListLoans<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/**
- * @summary List Loans
- */
-
+/** @summary List Loans */
 export function useListLoans<
   TData = Awaited<ReturnType<typeof listLoans>>,
   TError = Refusal | HTTPValidationError,
@@ -318,6 +318,23 @@ export type CreateLoanMutationError = Refusal | HTTPValidationError;
 export type CreateLoanMutationVariables = { data: LoanCreate };
 
 /**
+ * Record that a book has gone out.
+ *
+ * **A book marked `lending = never` is refused once, not forbidden.** Neither
+ * extreme is right here. Allowing it silently makes the field decorative, and
+ * a library that took the trouble to mark a copy would find the app had
+ * quietly ignored it. Forbidding it outright is worse: the same library
+ * lends that book to a sibling anyway, and an app that will not let them
+ * record what actually happened gets a loan kept in somebody's head instead,
+ * which is the one thing this table exists to replace.
+ *
+ * So the refusal costs one extra deliberate step: a 409 carrying
+ * `code: not_lendable`, then the same request again with
+ * `acknowledge_not_lendable`. The other two willingness values are not
+ * checked at all. `in_use` means "come back later", which is a conversation
+ * between two people rather than a rule, and `happy` is a yes.
+ *
+ * The flag is not stored: see `LoanCreate.acknowledge_not_lendable`.
  * @summary Create Loan
  */
 export const useCreateLoan = <
@@ -442,6 +459,44 @@ export type ListOverdueQueryResult = NonNullable<
 >;
 export type ListOverdueQueryError = Refusal | HTTPValidationError;
 
+/**
+ * The overdue loans themselves, for the page the banner links to (#102).
+ *
+ * **The same rule as the banner's count, because it is the same audience.**
+ * `notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a
+ * private book somebody else added cannot reach here, and `sees_every_loan`
+ * decides the rest: a member reads the loans they lent or borrowed, staff
+ * read every overdue loan on their shelf, and **in library mode so does every
+ * member**, because a volunteer chasing a book somebody else lent out is what
+ * that mode is for. The widening is about who is party to a loan and never
+ * about which books exist: the Shelf is applied before either arm.
+ *
+ * **Not `list_loans(overdue_only=True)`, which is a wider set**, though in
+ * library mode the two sets meet. That one is
+ * rooted at the Shelf and stops there: it has no lender-or-borrower arm, so a
+ * member sees every overdue loan over a book they can see, housemates'
+ * included. Pointing this page at it would list more rows than the banner
+ * counted, which is the same fact disagreeing with itself on two screens.
+ * The loans page keeps that endpoint, because a loans list is a list of the
+ * household's loans by design.
+ *
+ * **Honours the in app channel's switch**, exactly as `my_overdue` does. That
+ * setting is spelled "show overdue loans in the app", and this page is what
+ * it shows; a page that went on listing them when the channel was off would
+ * make the switch a lie about half its surface. The loans page is not
+ * affected: a loan list is not the reminder channel.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow. `/overdue` and `/overdue/mine` cannot collide with each other,
+ * because they differ in segment count rather than in a parameter's value.
+ *
+ * Eager loading here and none in `overdue_for_viewer`, which is the seam that
+ * function's docstring describes: it hands out the query so the count caller
+ * can stay at one statement and no ORM objects, and a caller that renders
+ * titles adds the loads it needs.
+ * @summary List Overdue
+ */
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
   TError = Refusal | HTTPValidationError,
@@ -465,6 +520,44 @@ export function useListOverdue<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The overdue loans themselves, for the page the banner links to (#102).
+ *
+ * **The same rule as the banner's count, because it is the same audience.**
+ * `notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a
+ * private book somebody else added cannot reach here, and `sees_every_loan`
+ * decides the rest: a member reads the loans they lent or borrowed, staff
+ * read every overdue loan on their shelf, and **in library mode so does every
+ * member**, because a volunteer chasing a book somebody else lent out is what
+ * that mode is for. The widening is about who is party to a loan and never
+ * about which books exist: the Shelf is applied before either arm.
+ *
+ * **Not `list_loans(overdue_only=True)`, which is a wider set**, though in
+ * library mode the two sets meet. That one is
+ * rooted at the Shelf and stops there: it has no lender-or-borrower arm, so a
+ * member sees every overdue loan over a book they can see, housemates'
+ * included. Pointing this page at it would list more rows than the banner
+ * counted, which is the same fact disagreeing with itself on two screens.
+ * The loans page keeps that endpoint, because a loans list is a list of the
+ * household's loans by design.
+ *
+ * **Honours the in app channel's switch**, exactly as `my_overdue` does. That
+ * setting is spelled "show overdue loans in the app", and this page is what
+ * it shows; a page that went on listing them when the channel was off would
+ * make the switch a lie about half its surface. The loans page is not
+ * affected: a loan list is not the reminder channel.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow. `/overdue` and `/overdue/mine` cannot collide with each other,
+ * because they differ in segment count rather than in a parameter's value.
+ *
+ * Eager loading here and none in `overdue_for_viewer`, which is the seam that
+ * function's docstring describes: it hands out the query so the count caller
+ * can stay at one statement and no ORM objects, and a caller that renders
+ * titles adds the loads it needs.
+ * @summary List Overdue
+ */
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
   TError = Refusal | HTTPValidationError,
@@ -488,6 +581,44 @@ export function useListOverdue<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The overdue loans themselves, for the page the banner links to (#102).
+ *
+ * **The same rule as the banner's count, because it is the same audience.**
+ * `notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a
+ * private book somebody else added cannot reach here, and `sees_every_loan`
+ * decides the rest: a member reads the loans they lent or borrowed, staff
+ * read every overdue loan on their shelf, and **in library mode so does every
+ * member**, because a volunteer chasing a book somebody else lent out is what
+ * that mode is for. The widening is about who is party to a loan and never
+ * about which books exist: the Shelf is applied before either arm.
+ *
+ * **Not `list_loans(overdue_only=True)`, which is a wider set**, though in
+ * library mode the two sets meet. That one is
+ * rooted at the Shelf and stops there: it has no lender-or-borrower arm, so a
+ * member sees every overdue loan over a book they can see, housemates'
+ * included. Pointing this page at it would list more rows than the banner
+ * counted, which is the same fact disagreeing with itself on two screens.
+ * The loans page keeps that endpoint, because a loans list is a list of the
+ * household's loans by design.
+ *
+ * **Honours the in app channel's switch**, exactly as `my_overdue` does. That
+ * setting is spelled "show overdue loans in the app", and this page is what
+ * it shows; a page that went on listing them when the channel was off would
+ * make the switch a lie about half its surface. The loans page is not
+ * affected: a loan list is not the reminder channel.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow. `/overdue` and `/overdue/mine` cannot collide with each other,
+ * because they differ in segment count rather than in a parameter's value.
+ *
+ * Eager loading here and none in `overdue_for_viewer`, which is the seam that
+ * function's docstring describes: it hands out the query so the count caller
+ * can stay at one statement and no ORM objects, and a caller that renders
+ * titles adds the loads it needs.
+ * @summary List Overdue
+ */
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
   TError = Refusal | HTTPValidationError,
@@ -504,9 +635,43 @@ export function useListOverdue<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The overdue loans themselves, for the page the banner links to (#102).
+ *
+ * **The same rule as the banner's count, because it is the same audience.**
+ * `notifications.overdue_for_viewer` is rooted at `Shelf.seen_by`, so a
+ * private book somebody else added cannot reach here, and `sees_every_loan`
+ * decides the rest: a member reads the loans they lent or borrowed, staff
+ * read every overdue loan on their shelf, and **in library mode so does every
+ * member**, because a volunteer chasing a book somebody else lent out is what
+ * that mode is for. The widening is about who is party to a loan and never
+ * about which books exist: the Shelf is applied before either arm.
+ *
+ * **Not `list_loans(overdue_only=True)`, which is a wider set**, though in
+ * library mode the two sets meet. That one is
+ * rooted at the Shelf and stops there: it has no lender-or-borrower arm, so a
+ * member sees every overdue loan over a book they can see, housemates'
+ * included. Pointing this page at it would list more rows than the banner
+ * counted, which is the same fact disagreeing with itself on two screens.
+ * The loans page keeps that endpoint, because a loans list is a list of the
+ * household's loans by design.
+ *
+ * **Honours the in app channel's switch**, exactly as `my_overdue` does. That
+ * setting is spelled "show overdue loans in the app", and this page is what
+ * it shows; a page that went on listing them when the channel was off would
+ * make the switch a lie about half its surface. The loans page is not
+ * affected: a loan list is not the reminder channel.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow. `/overdue` and `/overdue/mine` cannot collide with each other,
+ * because they differ in segment count rather than in a parameter's value.
+ *
+ * Eager loading here and none in `overdue_for_viewer`, which is the seam that
+ * function's docstring describes: it hands out the query so the count caller
+ * can stay at one statement and no ORM objects, and a caller that renders
+ * titles adds the loads it needs.
  * @summary List Overdue
  */
-
 export function useListOverdue<
   TData = Awaited<ReturnType<typeof listOverdue>>,
   TError = Refusal | HTTPValidationError,
@@ -609,6 +774,37 @@ export type MyOverdueQueryResult = NonNullable<
 >;
 export type MyOverdueQueryError = Refusal;
 
+/**
+ * The in app reminder, for the member asking.
+ *
+ * #86. Every other channel needs something the household has to obtain first:
+ * a receiver they run, an SMTP account, a bot token. A household with none of
+ * those was told nothing at all, which is the problem the reminder feature was
+ * filed to solve. This is the one channel that works on a fresh install with
+ * nothing configured.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow.
+ *
+ * **Not admin only, and that is the point.** It is per member, and what each
+ * member may see is decided by `notifications.overdue_for_viewer`, which roots
+ * the query at `Shelf.seen_by`. A member reads the loans they are party to; an
+ * admin, and later a library's staff, read every overdue loan on their shelf.
+ * Neither arm can reach another member's private book, because the Shelf
+ * applies `visible_to` before either clause is added.
+ *
+ * A count and no titles. The banner it feeds says how many and links to
+ * `GET /api/loans/overdue`, which lists them **through this same function**.
+ *
+ * **It used to say the loans list, and that sentence was wrong on both
+ * halves.** The loans list is `list_loans`, which is rooted at the Shelf and
+ * applies no lender-or-borrower arm, so it is a wider set than this counts:
+ * for any non admin member the banner said one number and the screen it
+ * opened showed another. #102 moved the link and added the endpoint above,
+ * which is the one that shares this rule.
+ * @summary My Overdue
+ */
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
   TError = Refusal,
@@ -631,6 +827,37 @@ export function useMyOverdue<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The in app reminder, for the member asking.
+ *
+ * #86. Every other channel needs something the household has to obtain first:
+ * a receiver they run, an SMTP account, a bot token. A household with none of
+ * those was told nothing at all, which is the problem the reminder feature was
+ * filed to solve. This is the one channel that works on a fresh install with
+ * nothing configured.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow.
+ *
+ * **Not admin only, and that is the point.** It is per member, and what each
+ * member may see is decided by `notifications.overdue_for_viewer`, which roots
+ * the query at `Shelf.seen_by`. A member reads the loans they are party to; an
+ * admin, and later a library's staff, read every overdue loan on their shelf.
+ * Neither arm can reach another member's private book, because the Shelf
+ * applies `visible_to` before either clause is added.
+ *
+ * A count and no titles. The banner it feeds says how many and links to
+ * `GET /api/loans/overdue`, which lists them **through this same function**.
+ *
+ * **It used to say the loans list, and that sentence was wrong on both
+ * halves.** The loans list is `list_loans`, which is rooted at the Shelf and
+ * applies no lender-or-borrower arm, so it is a wider set than this counts:
+ * for any non admin member the banner said one number and the screen it
+ * opened showed another. #102 moved the link and added the endpoint above,
+ * which is the one that shares this rule.
+ * @summary My Overdue
+ */
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
   TError = Refusal,
@@ -653,6 +880,37 @@ export function useMyOverdue<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * The in app reminder, for the member asking.
+ *
+ * #86. Every other channel needs something the household has to obtain first:
+ * a receiver they run, an SMTP account, a bot token. A household with none of
+ * those was told nothing at all, which is the problem the reminder feature was
+ * filed to solve. This is the one channel that works on a fresh install with
+ * nothing configured.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow.
+ *
+ * **Not admin only, and that is the point.** It is per member, and what each
+ * member may see is decided by `notifications.overdue_for_viewer`, which roots
+ * the query at `Shelf.seen_by`. A member reads the loans they are party to; an
+ * admin, and later a library's staff, read every overdue loan on their shelf.
+ * Neither arm can reach another member's private book, because the Shelf
+ * applies `visible_to` before either clause is added.
+ *
+ * A count and no titles. The banner it feeds says how many and links to
+ * `GET /api/loans/overdue`, which lists them **through this same function**.
+ *
+ * **It used to say the loans list, and that sentence was wrong on both
+ * halves.** The loans list is `list_loans`, which is rooted at the Shelf and
+ * applies no lender-or-borrower arm, so it is a wider set than this counts:
+ * for any non admin member the banner said one number and the screen it
+ * opened showed another. #102 moved the link and added the endpoint above,
+ * which is the one that shares this rule.
+ * @summary My Overdue
+ */
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
   TError = Refusal,
@@ -668,9 +926,36 @@ export function useMyOverdue<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * The in app reminder, for the member asking.
+ *
+ * #86. Every other channel needs something the household has to obtain first:
+ * a receiver they run, an SMTP account, a bot token. A household with none of
+ * those was told nothing at all, which is the problem the reminder feature was
+ * filed to solve. This is the one channel that works on a fresh install with
+ * nothing configured.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a literal
+ * first segment declared after a path parameter is a segment the parameter can
+ * swallow.
+ *
+ * **Not admin only, and that is the point.** It is per member, and what each
+ * member may see is decided by `notifications.overdue_for_viewer`, which roots
+ * the query at `Shelf.seen_by`. A member reads the loans they are party to; an
+ * admin, and later a library's staff, read every overdue loan on their shelf.
+ * Neither arm can reach another member's private book, because the Shelf
+ * applies `visible_to` before either clause is added.
+ *
+ * A count and no titles. The banner it feeds says how many and links to
+ * `GET /api/loans/overdue`, which lists them **through this same function**.
+ *
+ * **It used to say the loans list, and that sentence was wrong on both
+ * halves.** The loans list is `list_loans`, which is rooted at the Shelf and
+ * applies no lender-or-borrower arm, so it is a wider set than this counts:
+ * for any non admin member the banner said one number and the screen it
+ * opened showed another. #102 moved the link and added the endpoint above,
+ * which is the one that shares this rule.
  * @summary My Overdue
  */
-
 export function useMyOverdue<
   TData = Awaited<ReturnType<typeof myOverdue>>,
   TError = Refusal,
@@ -771,6 +1056,21 @@ export type NotifyOverdueMutationResult = NonNullable<
 export type NotifyOverdueMutationError = Refusal;
 
 /**
+ * Run the overdue digest now, and report what it sent.
+ *
+ * Declared **before** `/{loan_id}/return`, per the route-order rule: a
+ * literal first segment that comes after a path parameter is a segment the
+ * parameter can swallow. It does not today (the second segment differs, and
+ * so does the verb), and the ordering is what keeps that true when somebody
+ * adds `POST /{loan_id}/notify`.
+ *
+ * Admin only, for the same reason the settings behind it are: it posts
+ * catalogue content to a destination with no session behind it.
+ *
+ * This is what makes the feature testable by a person, and it is the endpoint
+ * an external cron would call instead of the in-process ticker. Running it by
+ * hand stamps `notified_at` exactly as a tick does, so a manual run also
+ * quiets the next scheduled one for the interval.
  * @summary Notify Overdue
  */
 export const useNotifyOverdue = <TError = Refusal, TContext = unknown>(
@@ -859,6 +1159,8 @@ export type ReturnLoanMutationError = Refusal | HTTPValidationError;
 export type ReturnLoanMutationVariables = { loanId: number };
 
 /**
+ * Recording a return is a shelf action, not an ownership one, so any member
+ * may do it, for any book they can see.
  * @summary Return Loan
  */
 export const useReturnLoan = <

@@ -106,6 +106,11 @@ export type GetReadwiseAccountQueryResult = NonNullable<
 >;
 export type GetReadwiseAccountQueryError = Refusal;
 
+/**
+ * Whether the caller has saved a token, how their last pull went, and
+ * which Readwise books wait for a Book. The token itself is never served.
+ * @summary Get Readwise Account
+ */
 export function useGetReadwiseAccount<
   TData = Awaited<ReturnType<typeof getReadwiseAccount>>,
   TError = Refusal,
@@ -132,6 +137,11 @@ export function useGetReadwiseAccount<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether the caller has saved a token, how their last pull went, and
+ * which Readwise books wait for a Book. The token itself is never served.
+ * @summary Get Readwise Account
+ */
 export function useGetReadwiseAccount<
   TData = Awaited<ReturnType<typeof getReadwiseAccount>>,
   TError = Refusal,
@@ -158,6 +168,11 @@ export function useGetReadwiseAccount<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Whether the caller has saved a token, how their last pull went, and
+ * which Readwise books wait for a Book. The token itself is never served.
+ * @summary Get Readwise Account
+ */
 export function useGetReadwiseAccount<
   TData = Awaited<ReturnType<typeof getReadwiseAccount>>,
   TError = Refusal,
@@ -177,9 +192,10 @@ export function useGetReadwiseAccount<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Whether the caller has saved a token, how their last pull went, and
+ * which Readwise books wait for a Book. The token itself is never served.
  * @summary Get Readwise Account
  */
-
 export function useGetReadwiseAccount<
   TData = Awaited<ReturnType<typeof getReadwiseAccount>>,
   TError = Refusal,
@@ -276,6 +292,13 @@ export type SyncReadwiseMutationResult = NonNullable<
 export type SyncReadwiseMutationError = Refusal;
 
 /**
+ * Pull the caller's changed highlights now, as the daily job does.
+ *
+ * How it ended is the answer's `outcome`, never a status: a refused token or
+ * a Readwise that cannot be reached is a 200 saying so, recorded on the
+ * account as the daily job's would be. 409 `no_token` without a saved token,
+ * 409 `sync_running` while the caller's pull is already under way. Rate
+ * limited on the import limiter, with the other bulk writes.
  * @summary Sync Readwise
  */
 export const useSyncReadwise = <TError = Refusal, TContext = unknown>(
@@ -366,6 +389,13 @@ export type ForgetReadwiseTokenMutationResult = NonNullable<
 export type ForgetReadwiseTokenMutationError = Refusal;
 
 /**
+ * Remove the caller's token and the pull's state. Needs no key, so a
+ * token nobody can open can still be removed. Highlights already pulled
+ * stay; each is the member's to share or keep.
+ *
+ * **`async def`, so the check and the removal run on the event loop with no
+ * await between them**: a pull starts on the same loop, so none can start
+ * between the two and write after the token is gone.
  * @summary Forget Readwise Token
  */
 export const useForgetReadwiseToken = <TError = Refusal, TContext = unknown>(
@@ -496,6 +526,20 @@ export type SaveReadwiseTokenMutationError = Refusal | HTTPValidationError;
 export type SaveReadwiseTokenMutationVariables = { data: ReadwiseTokenIn };
 
 /**
+ * Check the token with Readwise, then seal it as the caller's.
+ *
+ * **Checked before it is stored**, so a mistyped token is refused here rather
+ * than discovered by the first pull: 400 `token_refused` when Readwise says
+ * no, 502 `unavailable` when it cannot be asked. 409 `no_key` when this
+ * library has no encryption key to seal it with.
+ *
+ * Replacing a token starts the next pull from the beginning, since the new
+ * one may be another Readwise account. The first pull runs with the daily
+ * job, or from the sync button.
+ *
+ * **Rate limited first, before anything is checked**, on the import limiter
+ * the pull shares: each save asks Readwise once, and a saved token starts the
+ * pull over.
  * @summary Save Readwise Token
  */
 export const useSaveReadwiseToken = <

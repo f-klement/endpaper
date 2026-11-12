@@ -103,6 +103,21 @@ export type GetStatsQueryResult = NonNullable<
 >;
 export type GetStatsQueryError = Refusal;
 
+/**
+ * Collection statistics, scoped to what this member may see.
+ *
+ * **Every aggregation is rooted at the same shelf**, which is what makes the
+ * scoping structural rather than repeated. Each one used to apply a predicate
+ * bound to a local, and omitting it from any single aggregation would leak
+ * another member's private books as a count: quieter than leaking a title,
+ * and a leak all the same.
+ *
+ * Every join here is written **outward from `books`**, which is the direction
+ * `Shelf.select` anchors. Written the other way round, a query naming another
+ * table and forgetting the join is a cartesian product SQLite answers rather
+ * than refuses.
+ * @summary Get Stats
+ */
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
   TError = Refusal,
@@ -125,6 +140,21 @@ export function useGetStats<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Collection statistics, scoped to what this member may see.
+ *
+ * **Every aggregation is rooted at the same shelf**, which is what makes the
+ * scoping structural rather than repeated. Each one used to apply a predicate
+ * bound to a local, and omitting it from any single aggregation would leak
+ * another member's private books as a count: quieter than leaking a title,
+ * and a leak all the same.
+ *
+ * Every join here is written **outward from `books`**, which is the direction
+ * `Shelf.select` anchors. Written the other way round, a query naming another
+ * table and forgetting the join is a cartesian product SQLite answers rather
+ * than refuses.
+ * @summary Get Stats
+ */
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
   TError = Refusal,
@@ -147,6 +177,21 @@ export function useGetStats<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
+/**
+ * Collection statistics, scoped to what this member may see.
+ *
+ * **Every aggregation is rooted at the same shelf**, which is what makes the
+ * scoping structural rather than repeated. Each one used to apply a predicate
+ * bound to a local, and omitting it from any single aggregation would leak
+ * another member's private books as a count: quieter than leaking a title,
+ * and a leak all the same.
+ *
+ * Every join here is written **outward from `books`**, which is the direction
+ * `Shelf.select` anchors. Written the other way round, a query naming another
+ * table and forgetting the join is a cartesian product SQLite answers rather
+ * than refuses.
+ * @summary Get Stats
+ */
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
   TError = Refusal,
@@ -162,9 +207,20 @@ export function useGetStats<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
+ * Collection statistics, scoped to what this member may see.
+ *
+ * **Every aggregation is rooted at the same shelf**, which is what makes the
+ * scoping structural rather than repeated. Each one used to apply a predicate
+ * bound to a local, and omitting it from any single aggregation would leak
+ * another member's private books as a count: quieter than leaking a title,
+ * and a leak all the same.
+ *
+ * Every join here is written **outward from `books`**, which is the direction
+ * `Shelf.select` anchors. Written the other way round, a query naming another
+ * table and forgetting the join is a cartesian product SQLite answers rather
+ * than refuses.
  * @summary Get Stats
  */
-
 export function useGetStats<
   TData = Awaited<ReturnType<typeof getStats>>,
   TError = Refusal,
