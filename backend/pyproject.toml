@@ -122,7 +122,7 @@ dev = [
     # Off in every ordinary run, by `-p no:randomly` in addopts, so the suite's order
     # and timings stay what they were. The handoff checks turn it back on to rerun the
     # tests a branch changed under several seeds.
-    "pytest-randomly==5.0.0",
+    "pytest-randomly==5.1.0",
 ]
 
 # uv's settings, the PyPI release age among them, are in uv.toml beside this file, and
