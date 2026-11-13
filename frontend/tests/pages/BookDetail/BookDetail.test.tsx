@@ -374,6 +374,32 @@ describe("BookDetail", () => {
       );
     });
 
+    // The server refuses a tag delete from anybody but an admin, so a member
+    // offered the control could only ever be answered with a 403.
+    it.each([
+      { who: "a member", viewer: OWNER, offered: false },
+      { who: "an admin", viewer: ADMIN, offered: true },
+    ])(
+      "offers $who the tag delete control: $offered",
+      async ({ viewer, offered }) => {
+        const invented = makeTag({ name: "Loft finds" });
+        stubLoad({
+          book: makeBook({ id: 1, tags: [], added_by: OWNER }),
+          tags: [invented],
+        });
+        renderDetail(viewer);
+
+        const user = userEvent.setup();
+        await user.click(await screen.findByRole("button", { name: "+ Add" }));
+        await user.click(await screen.findByRole("button", { name: /Genre/ }));
+        await screen.findByRole("button", { name: "Loft finds" });
+
+        expect(
+          screen.queryByRole("button", { name: "Delete Loft finds" }) !== null,
+        ).toBe(offered);
+      },
+    );
+
     it("reports a tag delete the server refused", async () => {
       // Library wide, so the reply is about the tag rather than this book, and
       // it lands in the page's one error slot like every other write here.

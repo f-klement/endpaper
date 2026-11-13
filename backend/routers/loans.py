@@ -1,3 +1,5 @@
+"""Lending: lending a book, returning it, and the overdue lists and reminders."""
+
 from datetime import UTC, datetime
 from typing import Annotated, Final
 

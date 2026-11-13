@@ -226,6 +226,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             actions={actions}
             customFields={customFields}
             sections={sections}
+            canDeleteTags={currentUser.is_admin}
           />
 
           <CollapsibleSection
@@ -398,6 +399,8 @@ interface FilingSectionProps {
   actions: UseBookActionsResult;
   customFields: UseBookCustomFieldsResult;
   sections: UseBookSectionsResult;
+  /** Deleting a tag is admin only on the server; anybody else gets a 403. */
+  canDeleteTags: boolean;
 }
 
 /** Where the book sits in this library: its tags, shelf and collection. */
@@ -409,6 +412,7 @@ function FilingSection({
   actions,
   customFields,
   sections,
+  canDeleteTags,
 }: FilingSectionProps) {
   const { t } = useTranslation();
 
@@ -426,7 +430,7 @@ function FilingSection({
         onRemove={actions.removeTag}
         onCreate={actions.createTag}
         isCreating={actions.isCreatingTag}
-        onDelete={actions.deleteTag}
+        onDelete={canDeleteTags ? actions.deleteTag : undefined}
       />
 
       <OwnershipPicker

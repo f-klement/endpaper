@@ -124,6 +124,24 @@ _2026-10-25_
   counted, instead of making the whole file's import fail; a chapter name containing one is
   dropped from its highlight.
 
+- A configuration reference, `docs/configuration.md`, lists every environment variable and covers
+  the database, sign in, backups, upgrading and recovering the only admin. It explains how to
+  upgrade an image pinned by digest, which accounts become admin under LDAP and proxy sign in, how
+  to keep the app's port reachable only through the proxy, and the `SQLITE_SYNCHRONOUS` variable.
+
+- A handbook, `docs/handbook.md`, explains how to use Endpaper task by task, and `GLOSSARY.md`
+  defines the words it uses.
+
+- The architecture document is rewritten for contributors: a system picture, a contents list,
+  diagrams of a request, the privacy seam, the catalogue lookup, imports, sign in, startup and the
+  image, Postgres beside SQLite, and a module inventory, import layers and catalogue roster
+  generated from the code and checked before every release.
+
+- The feature list says the OPDS sync has no screen yet and is reached through the API.
+
+- The book page no longer offers members a tag delete button that the server would refuse; only
+  an admin sees it.
+
 ## v0.21.0
 
 _2026-10-24_

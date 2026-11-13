@@ -72,8 +72,11 @@ anywhere goes stale on the next branch that adds a test.
 | `bun run test:watch` | Re-run on change |
 | `bun run test:coverage` | Frontend coverage |
 | `bun run typecheck` | `tsc --noEmit`, includes the test tree |
+| `bun run api:generate` | Regenerate the API client from the backend schema |
 
-Neither suite touches the network. Both are safe to run alongside a live dev server.
+Neither suite touches the network. The backend tests stub outbound calls and run against
+throwaway SQLite files, unless `ENDPAPER_TEST_DATABASE_URL` names a Postgres server; the
+frontend tests stub `fetch` outright. Both are safe to run alongside a live dev server.
 
 **A command these documents offer is checked against the project.** Offered means written
 in code, inline or fenced, headed by `uv`, `bun`, `uvx` or `bunx`. That prefix is what

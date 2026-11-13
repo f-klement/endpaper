@@ -1,3 +1,7 @@
+"""Passwords and tokens: hashing, the session and cover tokens, and the dependencies that resolve
+the signed in member.
+"""
+
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 

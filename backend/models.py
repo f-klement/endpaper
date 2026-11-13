@@ -1,3 +1,5 @@
+"""The ORM: every table as a SQLAlchemy model, with the constraints the database holds."""
+
 import logging
 import re
 import secrets

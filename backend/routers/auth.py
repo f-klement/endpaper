@@ -1,3 +1,5 @@
+"""Signing in and out, registration, password resets, address verification and switching accounts."""
+
 import logging
 from typing import Annotated
 

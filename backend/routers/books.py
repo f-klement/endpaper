@@ -1,3 +1,7 @@
+"""The book routes: listing, adding and editing, the trash, merging duplicates, lookup and search,
+exports, tags, custom fields, notes, series and authors.
+"""
+
 import asyncio
 import csv
 import html

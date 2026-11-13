@@ -5,7 +5,9 @@ pages are for changing it.
 
 | Document | What it covers |
 |---|---|
+| [configuration.md](configuration.md) | Installing and running it: every environment variable, the database, sign in, backups, upgrading and recovery |
 | [featurelist.md](featurelist.md) | What the app does today, and what it deliberately does not |
+| [handbook.md](handbook.md) | How to use Endpaper, task by task: first for members, then for admins |
 | [architecture.md](architecture.md) | How the pieces fit: the single-container model, request routing, the build |
 | [data-model.md](data-model.md) | The tables, the relationships, and the privacy rule that every query must honour |
 | [api.md](api.md) | Every endpoint, its auth requirement, and the status codes it returns |

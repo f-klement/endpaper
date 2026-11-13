@@ -1,3 +1,7 @@
+"""The FastAPI application: startup and seeding, the middleware and routers it mounts, the health
+check, and the frontend it serves.
+"""
+
 import asyncio
 import contextlib
 import logging

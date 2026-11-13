@@ -336,9 +336,10 @@ def sees_every_loan(db: Session, viewer: User) -> bool:
     """Whether this viewer reads the whole overdue list rather than their own.
 
     **Library mode, or an admin.** The owner settled the audiences per sender:
-    the household channels go to a mailbox or a chat, mail is addressed to the
-    borrower, and the in app notice is per member **except in library mode or
-    for an admin**, where the reader is staff checking open reminders and
+    the household channels never go to a borrower. Telegram goes to a chat, the
+    webhook to its configured URL, and mail to the household addresses in
+    `overdue_mail_to`. The in app notice is per member **except in library mode
+    or for an admin**, where the reader is staff checking open reminders and
     outstanding books. A volunteer at an archive is not an admin and still has
     to chase a book somebody else lent out, which is the refusal this clause
     lifts.

@@ -1,3 +1,7 @@
+"""Members: the list, test accounts, each member's appearance, email and security, and the admin's
+reset and verification queues.
+"""
+
 import logging
 from typing import Annotated
 

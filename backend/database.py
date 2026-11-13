@@ -1,3 +1,7 @@
+"""The engine and the session: connection settings for SQLite and Postgres, per connection setup,
+and commit and rollback hooks.
+"""
+
 import logging
 import os
 import ssl

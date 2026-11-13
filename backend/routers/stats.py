@@ -1,3 +1,5 @@
+"""A member's reading statistics, over the books that member can see."""
+
 from datetime import datetime
 
 from fastapi import APIRouter

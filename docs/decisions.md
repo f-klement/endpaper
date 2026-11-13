@@ -25258,3 +25258,17 @@ their sources live outside this repository.
 for another node. It is about 65 lines in the runner's signal handling plus a poll loop in
 place of `kubectl wait`, more than one sitting. If the printed reason shows this recurring,
 that handback is the move.
+
+## The architecture check runs on the patch branch as well as the tag
+
+A patch branch is cut from the newest vMAJOR.MINOR.PATCH tag whether or not that tag's
+release passed, and the branch commits nothing the architecture check reads, so a patch
+inherits its base tag's verdict exactly. Run on the tag alone, a refused base would make
+the unattended release push a patch tag for each new fixable advisory, and that tag refuses
+at the image build. Its tag message records a bumped package's advisories as released, so
+the unattended release never retries them and a night finding only those tags nothing; an
+operating system package fixed by a rebuild is never recorded, so a night still finding one
+tags again. Run on the patch branch as well, the refusal arrives in the pipeline the
+release waits on before it tags, and the night pages instead. The rule protects from the
+first tag that carries it: an older base tag's branch runs its own pipeline file. The check
+stays off pushes to main, where the document may lag a docstring until the next release.

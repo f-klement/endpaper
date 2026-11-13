@@ -13,8 +13,9 @@ interface TagEditorProps {
   /** Invent a tag and put it straight on this book. */
   onCreate: (name: string) => void;
   isCreating?: boolean;
-  /** Delete a curated tag everywhere. Seeded ones are not offered. */
-  onDelete: (tag: TagOut) => void;
+  /** Delete a curated tag everywhere. Seeded ones are not offered, and
+   *  without it no tag is: the page passes it to an admin only. */
+  onDelete?: (tag: TagOut) => void;
 }
 
 /** The book's tags, plus a panel for adding more. Used only by BookDetail. */

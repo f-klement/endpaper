@@ -3,7 +3,8 @@
 A catalogue of the books a library holds, and a record of who has them. Built for a
 household's shelves and for the library or archive that has outgrown a spreadsheet.
 
-This is the current feature set, not a roadmap.
+This is the current feature set, not a roadmap. How to do each of these things is
+[the handbook](handbook.md).
 
 **The README's Features section is the summary; this is the complete list.** The
 difference that matters is the last section: what this app deliberately does not
@@ -55,6 +56,25 @@ of the two schemes that place a book on one.
 switch and a position. Off means not asked, not deprioritised. The order is the order they
 are asked in; which source is believed when two disagree is a separate rule that is
 deliberately not exposed.
+
+**Which catalogues, and in what order by default.** For a scanned or typed ISBN, the German
+National Library and K10plus are asked together and their records merged. When neither
+answers, the rest are asked in turn until one does: Open Library, the Czech National
+Library, the Spanish National Library, the National Library of Greece, the Austrian National
+Library, the Argentine National Library, the Uruguayan National Library and Google Books.
+The Greek, Austrian and Uruguayan libraries are asked only about ISBNs in the registration
+groups they collect, so a German book does not wait on Athens, and Settings names the groups
+beside each. A title search asks the German National Library, K10plus, Open Library, the
+Greek and Austrian libraries and Google Books at once, and also the National Library of
+France and the Library of Congress, which answer title searches and no ISBN lookup.
+
+**Google Books needs a login the library supplies; the national libraries that need one come
+with it.** Google Books takes an API key, and is asked after the free catalogues because
+Google may charge for a request. The Argentine and Uruguayan national libraries each take a username and
+password that the library itself publishes for anyone to use; Endpaper carries those
+published pairs, so only Google Books needs anything typed. A library with its own account at
+either enters it under Settings, and that is used instead. Where the logins are stored and how
+they are protected is in [the configuration reference](configuration.md#catalogue-logins).
 
 ---
 
@@ -130,7 +150,8 @@ standing.
 and anything else serving an OPDS 1.x Atom catalogue. An admin adds the feed
 address and, where it needs one, a login sealed with the same key every other
 stored credential uses; any member can then sync it, and what the feed lists
-arrives as books they own. **Titles and authors**, measured across seven
+arrives as books they own. **The app has no screen for this**: the feed is added and synced
+through Endpaper's API. **Titles and authors**, measured across seven
 self hosted servers: not one emits an identifier, so what a book is still comes
 from the catalogue chain. Matching is by ISBN where the feed carries one and by
 title otherwise, a sync fills gaps and never overwrites what somebody wrote, and

@@ -1017,4 +1017,5 @@ repeat the argument.
 |  | [Changed property tests run deep at handoff](decisions.md#changed-property-tests-run-deep-at-handoff) | 134 |
 |  | [A related frontend run is refused without `--isolate`, and a test that passed without the setup fails the run](decisions.md#a-related-frontend-run-is-refused-without---isolate-and-a-test-that-passed-without-the-setup-fails-the-run) | 390 |
 |  | [Resident growth on the smallest CI worker past the suite pod's spare is accepted (2026-11-12)](decisions.md#resident-growth-on-the-smallest-ci-worker-past-the-suite-pods-spare-is-accepted-2026-11-12) | 287 |
+|  | [The architecture check runs on the patch branch as well as the tag](decisions.md#the-architecture-check-runs-on-the-patch-branch-as-well-as-the-tag) | 172 |
 <!-- index: end -->
