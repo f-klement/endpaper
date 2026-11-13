@@ -3277,6 +3277,13 @@
             "title": "Problem",
             "type": "string"
           },
+          "unreadable_settings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unreadable Settings",
+            "type": "array"
+          },
           "unreadable_sources": {
             "items": {
               "type": "string"
@@ -7520,6 +7527,13 @@
             "default": false,
             "title": "Telegram Chat Id From Env",
             "type": "boolean"
+          },
+          "unreadable_secrets": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unreadable Secrets",
+            "type": "array"
           }
         },
         "required": [
@@ -17700,7 +17714,7 @@
     },
     "/api/settings/credential-key": {
       "delete": {
-        "description": "Drop the key this machine holds, so a new one can be made.\n\n**The way back from closing the tab without writing the words down.**\nWithout this, `POST` refuses because a key exists, `PUT` wants a phrase\nnobody has, and the deployment is stuck behind a key protecting nothing.\n\n**It strands whatever the key was opening, and the response says how many**\nrather than this route hiding it: `unreadable_credentials` on the way out is\nthe count of stored catalogue logins that now have to be typed again. A\nmember's own Readwise token is not in that count: its member is told on\ntheir account page and saves it again. Removing those\nlogins first is the way to reach a clean state, and `DELETE` on a source's\ncredential needs no key for exactly that reason.\n\n409 when a store holding the key cannot be cleared from here, naming it:\nthe environment, because a process cannot unset a variable for its own next\nstart; a key file this process cannot remove; or a keychain that kept the\nkey.",
+        "description": "Drop the key this machine holds, so a new one can be made.\n\n**The way back from closing the tab without writing the words down.**\nWithout this, `POST` refuses because a key exists, `PUT` wants a phrase\nnobody has, and the deployment is stuck behind a key protecting nothing.\n\n**It strands whatever the key was opening, and the response says which**\nrather than this route hiding it: `unreadable_sources` and\n`unreadable_settings` on the way out name the stored catalogue logins and\nsettings secrets that now have to be typed again. A\nmember's own Readwise token is not in that count: its member is told on\ntheir account page and saves it again. Removing those\nlogins first is the way to reach a clean state, and `DELETE` on a source's\ncredential needs no key for exactly that reason.\n\n409 when a store holding the key cannot be cleared from here, naming it:\nthe environment, because a process cannot unset a variable for its own next\nstart; a key file this process cannot remove; or a keychain that kept the\nkey.",
         "operationId": "forget_credential_key",
         "responses": {
           "200": {
@@ -18545,7 +18559,7 @@
     },
     "/api/users/password-resets/{user_id}/approve": {
       "post": {
-        "description": "Grant a request, and show the code once.\n\n**An admin may approve another admin's request.** Owner's decision on issue\n#105: what makes it acceptable is the asymmetry already in the mechanism\nrather than a further rule, since the request is still member initiated. The\ncase it refuses is an admin quietly acquiring a peer's account; the case it\nallows is an admin who locked themselves out being helped by the person\nbeside them, which is the ordinary one in a two person archive.\n\n**A deployment with exactly one admin therefore has no path in this app**,\nand that case belongs to the operator: `README.md` names the command line\nrecovery, which is the capability whoever runs the container already has.\n\n404 when there is no live request, which is true of this route: there is\nnothing here to approve, and an admin may already list every member.",
+        "description": "Grant a request, and show the code once.\n\n**An admin may approve another admin's request.** Owner's decision on issue\n#105: what makes it acceptable is the asymmetry already in the mechanism\nrather than a further rule, since the request is still member initiated. The\ncase it refuses is an admin quietly acquiring a peer's account; the case it\nallows is an admin who locked themselves out being helped by the person\nbeside them, which is the ordinary one in a two person archive.\n\n**A deployment with exactly one admin therefore has no path in this app**,\nand that case belongs to the operator: `docs/configuration.md` names the\ncommand line recovery, which is the capability whoever runs the container\nalready has.\n\n404 when there is no live request, which is true of this route: there is\nnothing here to approve, and an admin may already list every member.",
         "operationId": "approve_password_reset",
         "parameters": [
           {

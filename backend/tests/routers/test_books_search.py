@@ -84,7 +84,7 @@ def open_library_search():
 
 
 @pytest.fixture
-def google_enabled(client, admin):
+def google_enabled(client, admin, encryption_key):
     client.put(
         "/api/settings",
         json={"google_books_enabled": True, "google_books_api_key": "test-key"},

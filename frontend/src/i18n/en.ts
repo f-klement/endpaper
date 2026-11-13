@@ -876,11 +876,11 @@ export const en = {
 
   "settings.credentialKey": "Encryption key",
   "settings.credentialKeyHint":
-    "Catalogue logins are encrypted with this key. It is never written to the database, so a backup carries logins nobody can read without it.",
+    "Catalogue logins and the secrets in these settings (the Google Books key, the webhook secret, the mail password and the Telegram bot token) are encrypted with this key. It is never written to the database, so a backup carries secrets nobody can read without it.",
   "settings.credentialKeyCost":
-    "If this key is lost or replaced, every catalogue login stored here has to be entered again. Restoring a backup onto another machine needs the recovery phrase.",
+    "If this key is lost or replaced, every catalogue login and settings secret stored here has to be entered again. Restoring a backup onto another machine needs the recovery phrase.",
   "settings.credentialKeyMissing":
-    "No encryption key yet, so no login can be stored.",
+    "No encryption key yet, so no login or settings secret can be stored.",
   "settings.credentialKeyPresent": "A key is in place, held in {location}.",
   "settings.credentialKeyLocationEnv": "the server's configuration",
   "settings.credentialKeyLocationKeychain": "this machine's keychain",
@@ -896,9 +896,18 @@ export const en = {
   // generation tag exists to maintain.
   "settings.credentialKeyUnreadable":
     "{count} stored logins cannot be read as things stand. Enter the recovery phrase, or remove them.",
+  // A whole phrase for one, as `public.resultCountOne`: no plural engine here.
+  "settings.credentialKeyUnreadableOne":
+    "1 stored login cannot be read as things stand. Enter the recovery phrase, or remove it.",
+  "settings.credentialKeyUnreadableSettings":
+    "{count} settings secrets cannot be read as things stand. Enter the recovery phrase, or enter each again where it is set.",
+  "settings.credentialKeyUnreadableSettingsOne":
+    "1 settings secret cannot be read as things stand. Enter the recovery phrase, or enter it again where it is set.",
+  "settings.secretUnreadable":
+    "Stored under a different encryption key and cannot be read. Enter it again, or enter the recovery phrase.",
   "settings.credentialKeyForget": "Discard this key",
   "settings.credentialKeyForgetHint":
-    "Only if the recovery phrase is lost. Every login stored under this key has to be entered again afterwards.",
+    "Only if the recovery phrase is lost. Every login and settings secret stored under this key has to be entered again afterwards.",
   "settings.credentialKeyCreate": "Create an encryption key",
   "settings.credentialKeyShownOnce":
     "Write these 24 words down now and keep them somewhere safe. They are the key, so this is the only time they are shown.",

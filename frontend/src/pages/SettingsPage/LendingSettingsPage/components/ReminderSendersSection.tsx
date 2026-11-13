@@ -182,6 +182,9 @@ export default function ReminderSendersSection({
           saveLabel={t("settings.telegramTokenSave")}
           clearLabel={t("settings.telegramTokenClear")}
           hasStored={settings.has_telegram_bot_token === true}
+          unreadable={(settings.unreadable_secrets ?? []).includes(
+            "telegram_bot_token",
+          )}
           pinned={tokenPinned}
           isSaving={isSaving}
           onSave={(value) => onSave({ telegram_bot_token: value })}
@@ -416,6 +419,9 @@ function MailBlock({ settings, isSaving, onSave, health }: MailBlockProps) {
         saveLabel={t("settings.mailPasswordSave")}
         clearLabel={t("settings.mailPasswordClear")}
         hasStored={settings.has_mail_password === true}
+        unreadable={(settings.unreadable_secrets ?? []).includes(
+          "mail_password",
+        )}
         pinned={pinned.has("mail_password")}
         isSaving={isSaving}
         onSave={(value) => onSave({ mail_password: value })}

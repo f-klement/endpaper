@@ -25,6 +25,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Query
 
 import catalogue
+import catalogue_access
 import covers
 import credentials
 import marc
@@ -3486,10 +3487,11 @@ class TestTheLookupRouteDoesNotPayPerSourceEither:
 
     The resolver's own arms are
     `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest`, where
-    `_catalogue_logins` lives. Counted here is a whole lookup request, which
-    includes `settings_store._sources_with_a_credential` resolving once for its
-    own loop as well. What is asserted is that neither total moves with the
-    roster.
+    `_catalogue_logins` lives. Counted here is a whole lookup request, whose
+    readers (`_sources_with_a_credential`, `catalogue_logins` and the Google
+    Books key, sealed like any settings secret) take the one key
+    `catalogue_access._resolved_access` resolved. What is asserted is that the
+    total moves neither with the roster nor with a sealed Google key.
     """
 
     def test_the_cost_of_a_lookup_does_not_move_with_the_roster(
@@ -3499,6 +3501,8 @@ class TestTheLookupRouteDoesNotPayPerSourceEither:
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", phrase)
         for name in ("dnb", "k10plus"):
             credentials.put(db, name, targets.SEEDED[CatalogueSource(name)].base_url, "alice", "hunter2")
+        # Sealed, so a reader resolving the key for itself would show here.
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "AIza-measured-key")
 
         counts = []
         for roster in (
@@ -3515,17 +3519,42 @@ class TestTheLookupRouteDoesNotPayPerSourceEither:
             assert res.status_code == 200
             counts.append(tally[0])
 
-        # **The constant and not only the slope.** Measured 2026-09-17 at two
-        # apiece, which is `_catalogue_logins`' resolution plus
-        # `_sources_with_a_credential`'s. Asserted as an equality because a
-        # second `library_access` in a handler leaves the slope flat and moves
-        # the constant, and with only the slope pinned that mutation was green.
-        assert counts == [2, 2], (
+        # **The constant and not only the slope.** One apiece, the resolution
+        # `_resolved_access` hands to every reader. Asserted as an equality
+        # because a second `library_access` in a handler leaves the slope flat
+        # and moves the constant, and with only the slope pinned that mutation
+        # was green.
+        assert counts == [1, 1], (
             f"{counts[0]} resolutions with one credentialled source and "
-            f"{counts[1]} with two, where two apiece is what one request pays: "
+            f"{counts[1]} with two, where one apiece is what one request pays: "
             "a figure that moves with the roster is a cost per source, and one "
             "that moves together is a second resolution in the handler"
         )
+
+    def test_with_google_books_switched_on_its_sealed_key_costs_no_second_resolution(
+        self, db, encryption_key, monkeypatch
+    ):
+        """The switch is what makes `ready_sources` read the key, which the route arm leaves off."""
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "AIza-measured-key")
+        tally = _resolutions_counted(monkeypatch)
+
+        catalogue_access.Enquiry.for_a_member_request(db, member="alice")
+
+        assert tally[0] == 1
+        assert CatalogueSource.GOOGLE_BOOKS in settings_store.ready_sources(db)
+
+    def test_the_batch_backfill_door_passes_its_resolution_to_the_key_reader_too(
+        self, db, encryption_key, monkeypatch
+    ):
+        """`for_a_batch_backfill` is not `_resolved_access`, so the member arm does not hold it."""
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "AIza-measured-key")
+        tally = _resolutions_counted(monkeypatch)
+
+        catalogue_access.GoogleVolumes.for_a_batch_backfill(db, member="alice")
+
+        assert tally[0] == 1
 
 
 class TestAPatchCannotClearAColumnThatRefusesNull:

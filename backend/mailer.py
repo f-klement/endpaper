@@ -129,6 +129,22 @@ class MailRefused(Exception):
     """This configuration is not one a mail will be attempted on."""
 
 
+def _password(db: Session) -> str:
+    """The mail password in force, or a refusal when its sealed row cannot be opened.
+
+    A refusal rather than an empty password, because an empty one would let a
+    send go out with no login, and `MailRefused` is what every caller of
+    `checked_config` already reports as a setting to change.
+    """
+    try:
+        return settings_store.in_force(db, SettingKey.MAIL_PASSWORD)
+    except settings_store.UnreadableSecret:
+        raise MailRefused(
+            "The mail password was stored under a different encryption key and cannot be "
+            "read. Enter it again."
+        ) from None
+
+
 @dataclass(frozen=True)
 class MailConfig:
     """A checked SMTP configuration. Only `checked_config` builds one.
@@ -202,7 +218,7 @@ def checked_config(db: Session, *, recipients: tuple[str, ...] | None = None) ->
         raise MailRefused("Choose implicit TLS or STARTTLS, not both. They are two protocols.")
 
     username = settings_store.in_force(db, SettingKey.MAIL_USERNAME).strip()
-    password = settings_store.in_force(db, SettingKey.MAIL_PASSWORD)
+    password = _password(db)
     if password and not (use_ssl or use_tls):
         raise MailRefused(
             "A mail password with neither STARTTLS nor TLS would cross the "

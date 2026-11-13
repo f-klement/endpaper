@@ -58,7 +58,7 @@ describe("with no key yet", () => {
     render();
     expect(
       await screen.findByText(
-        "No encryption key yet, so no login can be stored.",
+        "No encryption key yet, so no login or settings secret can be stored.",
       ),
     ).toBeInTheDocument();
   });
@@ -78,7 +78,7 @@ describe("with no key yet", () => {
     );
     render();
     await screen.findByText(
-      "No encryption key yet, so no login can be stored.",
+      "No encryption key yet, so no login or settings secret can be stored.",
     );
     expect(
       screen.queryByRole("button", { name: "Create an encryption key" }),
@@ -89,7 +89,7 @@ describe("with no key yet", () => {
     render();
     expect(
       await screen.findByText(
-        /every catalogue login stored here has to be entered again/,
+        /every catalogue login and settings secret stored here has to be entered again/,
       ),
     ).toBeInTheDocument();
   });
@@ -198,6 +198,58 @@ describe("with a key in place", () => {
     render();
     expect(
       await screen.findByText(/2 stored logins cannot be read as things stand/),
+    ).toBeInTheDocument();
+  });
+
+  it("counts the settings secrets it cannot open", async () => {
+    api.on(
+      "/api/settings/credential-key",
+      {
+        body: {
+          ...NO_KEY,
+          unreadable_settings: ["mail_password", "telegram_bot_token"],
+        },
+      },
+      "GET",
+    );
+    render();
+    expect(
+      await screen.findByText(
+        /2 settings secrets cannot be read as things stand/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says one settings secret in the singular", async () => {
+    api.on(
+      "/api/settings/credential-key",
+      { body: { ...NO_KEY, unreadable_settings: ["mail_password"] } },
+      "GET",
+    );
+    render();
+    expect(
+      await screen.findByText(
+        /^1 settings secret cannot be read as things stand/,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says one stored login in the singular", async () => {
+    api.on(
+      "/api/settings/credential-key",
+      {
+        body: {
+          ...NO_KEY,
+          configured: true,
+          location: "file",
+          unreadable_sources: ["bne"],
+        },
+      },
+      "GET",
+    );
+    render();
+    expect(
+      await screen.findByText(/^1 stored login cannot be read as things stand/),
     ).toBeInTheDocument();
   });
 

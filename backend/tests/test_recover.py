@@ -110,9 +110,9 @@ class TestItRefusesAnAccountItDoesNotHoldThePasswordFor:
     """The same refusal a redemption makes, through the same predicate.
 
     A hash written on a directory row is one nothing ever checks, so the
-    operator would leave believing the account was recovered. `README.md` points
-    the last admin at this command, which is what makes a silent success worse
-    than a refusal.
+    operator would leave believing the account was recovered.
+    `docs/configuration.md` points the last admin at this command, which is what
+    makes a silent success worse than a refusal.
     """
 
     def test_a_directory_row_is_refused(self, monkeypatch, db, admin) -> None:

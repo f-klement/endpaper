@@ -29,12 +29,13 @@ from sqlalchemy.exc import DBAPIError
 import backup
 import credentials
 import filing
+import settings_store
 import targets
 from authors import author_key
 from backup import RestoreError
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from database import Base, SessionLocal
-from enums import CatalogueSource, ClassificationScheme
+from enums import CatalogueSource, ClassificationScheme, SettingKey
 from migrations.versions import (
     b7d4e6f01a95_a_catalogue_source_becomes_a_row as a_catalogue_source_becomes_a_row,
 )
@@ -52,11 +53,13 @@ from models import (
     Tag,
     UserBook,
 )
+from tests.conftest import forget_any_encryption_key
 from tests.helpers import (
     JPEG_BYTES,
     PNG_BYTES,
     WEBP_BYTES,
     sealed_before_the_origin_was_bound,
+    store_plaintext,
 )
 from tests.strategies import PATCHES, answer_of, patched, witness
 from uploads import SNIFF_BYTES
@@ -85,14 +88,6 @@ def rewrite(data: bytes, manifest: dict, covers: dict[str, bytes] | None = None)
         for name, body in (covers or {}).items():
             archive.writestr(name, body)
     return buffer.getvalue()
-
-
-@pytest.fixture
-def encryption_key():
-    """A key, so a credential can be sealed. Removed again by the conftest."""
-    import credentials
-
-    credentials.store_key(credentials.generate_phrase())
 
 
 @pytest.fixture
@@ -2835,3 +2830,54 @@ class TestTheSchemaRefusesEveryRecordedHostileValue:
             attempt(case.table, {case.column: case.value}, a_book_id)
 
         assert row_count(case.table) == 0, case.why
+
+
+class TestTheAppsOwnSecretsTravelSealed:
+    """The four settings secrets in the archive, as `catalogue_credentials` travels: sealed,
+    the key never with them, restored with the same key."""
+
+    def _restore(self, client, admin, archive):
+        response = client.post(
+            "/api/backup/restore",
+            files={"file": ("backup.zip", archive, "application/zip")},
+            params={"confirm": True},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200, response.text
+
+    def test_the_archive_carries_no_secret_in_the_clear(self, client, admin, db, encryption_key):
+        """Read inside the manifest: the archive is deflated, so its bytes hide plaintext too."""
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "hunter2-plain")
+        archive = client.get("/api/backup", headers=admin["headers"]).content
+        with zipfile.ZipFile(BytesIO(archive)) as opened:
+            manifest = opened.read(backup.MANIFEST_NAME).decode("utf-8")
+        assert "mail_password" in manifest
+        assert "hunter2-plain" not in manifest
+
+    def test_a_restore_under_the_same_key_opens_it(self, client, admin, db, encryption_key):
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        archive = client.get("/api/backup", headers=admin["headers"]).content
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "")
+        self._restore(client, admin, archive)
+        db.expire_all()
+        assert settings_store.in_force(db, SettingKey.MAIL_PASSWORD) == "hunter2"
+
+    def test_a_restore_under_another_key_leaves_it_to_be_entered_again(
+        self, client, admin, db, encryption_key
+    ):
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        archive = client.get("/api/backup", headers=admin["headers"]).content
+        forget_any_encryption_key()
+        credentials.store_key(credentials.generate_phrase())
+        self._restore(client, admin, archive)
+        db.expire_all()
+        assert settings_store.unreadable_secrets(db) == ["mail_password"]
+
+    def test_a_plaintext_secret_from_an_older_archive_is_sealed_on_restore(self, client, admin, db):
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        archive = client.get("/api/backup", headers=admin["headers"]).content
+        credentials.store_key(credentials.generate_phrase())
+        self._restore(client, admin, archive)
+        db.expire_all()
+        assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.MAIL_PASSWORD))
+        assert settings_store.in_force(db, SettingKey.MAIL_PASSWORD) == "hunter2"

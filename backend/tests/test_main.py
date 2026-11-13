@@ -10,11 +10,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+import credentials
 import errors
 import main
+import settings_store
 from database import Base, engine
-from enums import TagKey
+from enums import SettingKey, TagKey
 from models import Tag
+from tests.helpers import store_plaintext
 
 
 class TestSeedTags:
@@ -718,3 +721,14 @@ def _routes(*named: tuple[str, bool]) -> list:
     for index, (name, published) in enumerate(named):
         router.add_api_route(f"/{index}", endpoint, name=name, include_in_schema=published, methods=["GET"])
     return list(router.routes)
+
+
+class TestAStartWithAKeySealsWhatWasWrittenWithout:
+    """A key set in the environment or a file between two starts reaches no route, so the
+    start is where a plaintext secret from before it is sealed."""
+
+    def test_a_plaintext_secret_is_sealed(self, db, encryption_key):
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        main.seal_plaintext_secrets()
+        db.expire_all()
+        assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.MAIL_PASSWORD))

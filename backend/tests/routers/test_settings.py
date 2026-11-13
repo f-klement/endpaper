@@ -14,10 +14,11 @@ import notifications
 import settings_store
 import sources
 import targets
-from enums import CatalogueSource, OverdueNotifyReason, OverdueSender
+from enums import CatalogueSource, OverdueNotifyReason, OverdueSender, SettingKey
 from routers import settings as settings_router
 from schemas import RecoveryPhraseOut
-from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES
+from tests.conftest import forget_any_encryption_key
+from tests.helpers import JPEG_BYTES, NOT_AN_IMAGE, PNG_BYTES, WEBP_BYTES, store_plaintext
 
 PNG = PNG_BYTES
 
@@ -190,6 +191,7 @@ class TestFeatureFlags:
         assert "secret" not in str(body).lower()
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestReadSettings:
     def test_requires_admin(self, client, member):
         assert client.get("/api/settings", headers=member["headers"]).status_code == 403
@@ -219,6 +221,7 @@ class TestReadSettings:
         assert body["google_books_api_key_preview"] == ""
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestUpdateSettings:
     def test_requires_admin(self, client, member):
         res = client.put("/api/settings", json={"google_books_enabled": True}, headers=member["headers"])
@@ -292,7 +295,7 @@ class TestUpdateSettings:
 
         session = SessionLocal()
         try:
-            stored = settings_store.get_raw(session, SettingKey.GOOGLE_BOOKS_API_KEY)
+            stored = settings_store.in_force(session, SettingKey.GOOGLE_BOOKS_API_KEY)
         finally:
             session.close()
         assert stored == "AIzaSy-padded-1234"
@@ -306,6 +309,7 @@ class TestUpdateSettings:
         assert res.status_code == 422
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestReadinessFlag:
     """`google_books_ready` is whether the lookup will actually work: the
     admin's toggle is on and a key is stored. The UI needs it to decide between
@@ -373,6 +377,7 @@ class TestReadinessFlag:
         assert "super-secret" not in client.get("/api/settings/features").text
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestKeyFromTheEnvironment:
     """A key supplied by the deployment wins and cannot be edited here.
 
@@ -430,7 +435,7 @@ class TestKeyFromTheEnvironment:
         assert res.status_code == 200
         assert res.json()["google_books_enabled"] is True
 
-    def test_it_wins_over_a_stored_key(self, client, admin, monkeypatch, db):
+    def test_it_wins_over_a_stored_key(self, client, admin, monkeypatch, db, encryption_key):
         import settings_store
         from enums import SettingKey
 
@@ -444,7 +449,8 @@ class TestKeyFromTheEnvironment:
         assert settings_store.google_books_api_key(db) == "env-key"
         # The stored one is left alone rather than deleted: unsetting the
         # environment variable should put it back, not lose it.
-        assert settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "stored"
+        stored = settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY)
+        assert credentials.unseal_setting(encryption_key, "google_books_api_key", stored) == "stored"
 
     def test_it_makes_the_feature_ready(self, client, admin, monkeypatch):
         self.with_env_key(monkeypatch)
@@ -469,6 +475,7 @@ class TestKeyFromTheEnvironment:
         assert body["google_books_api_key_from_env"] is False
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestOverdueWebhookSettings:
     """The four settings behind the overdue digest.
 
@@ -559,7 +566,7 @@ class TestOverdueWebhookSettings:
             headers=admin["headers"],
         )
 
-        assert settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET) == "kept"
+        assert settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_SECRET) == "kept"
 
     def test_an_empty_secret_clears_it(self, client, admin):
         client.put(
@@ -585,6 +592,7 @@ class TestOverdueWebhookSettings:
         assert client.get("/api/settings", headers=member["headers"]).status_code == 403
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestEverySecretSettingIsMasked:
     """`SECRET_KEYS` names the secrets; this is what makes it enforce anything.
 
@@ -663,6 +671,7 @@ class TestEverySecretSettingIsMasked:
         assert settings_store.mask("secret-value-abcd").endswith("abcd")
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestReminderSenderSettings:
     """The mail and Telegram configuration, over the API.
 
@@ -1080,6 +1089,7 @@ class TestInAppReminderSetting:
         assert res.status_code == 403
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestEverySettingsWriteClearsWhatItInvalidates:
     """`update_settings` writes through one door, so the second half of a write
     cannot be forgotten (#82)."""
@@ -1375,6 +1385,7 @@ class TestTheProviderList:
         assert response.status_code == 403
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestASourceThatCannotAnswerSaysSo:
     """Google Books has two switches, and the screen has to explain both."""
 
@@ -1492,6 +1503,7 @@ class TestARouteRefusesRatherThanAnsweringNothing:
         assert "not found" not in detail.lower()
 
 
+@pytest.mark.usefixtures("encryption_key")
 class TestTheLookupCacheIsDroppedByEveryWriteThatChangesWhatIsAsked:
     """Three writes, not one.
 
@@ -2058,3 +2070,59 @@ class TestASealedRowUnderAPinnedSourceIsNotADeadEnd:
         response = client.delete("/api/settings/catalogue-sources/bne/credential", headers=admin["headers"])
         assert response.status_code == 409
         assert "CATALOGUE_CREDENTIAL_BNE" in response.json()["detail"]
+
+
+class TestASettingsSecretIsSealedOnTheScreen:
+    """The four secrets through the routes: refused with no key, reported when stranded,
+    sealed when a key arrives."""
+
+    def test_saving_one_with_no_key_is_a_conflict_and_writes_nothing(self, client, admin, db):
+        response = client.put("/api/settings", json={"mail_password": "hunter2"}, headers=admin["headers"])
+        assert response.status_code == 409
+        assert "encryption key" in response.json()["detail"]
+        assert settings_store.get_raw(db, SettingKey.MAIL_PASSWORD) == ""
+
+    @pytest.mark.parametrize("key", sorted(settings_store.SECRET_KEYS))
+    def test_one_sealed_under_a_lost_key_is_named_and_shows_no_preview(
+        self, client, admin, db, encryption_key, key
+    ):
+        """Walks `SECRET_KEYS`: a reader of any of them that raises is a 500 on this screen."""
+        settings_store.set_value(db, key, "s3cret-value")
+        forget_any_encryption_key()
+        response = client.get("/api/settings", headers=admin["headers"])
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["unreadable_secrets"] == [key.value]
+        assert body[f"{key.value}_preview"] == ""
+
+    def test_the_key_screen_names_it_too(self, client, admin, db, encryption_key):
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        forget_any_encryption_key()
+        body = client.get("/api/settings/credential-key", headers=admin["headers"]).json()
+        assert body["unreadable_settings"] == ["mail_password"]
+
+    def test_the_key_screen_names_one_sealed_under_a_key_since_replaced(
+        self, client, admin, db, encryption_key
+    ):
+        """A restore onto another machine: a key is present, and it is not the one."""
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        forget_any_encryption_key()
+        credentials.store_key(credentials.generate_phrase())
+        body = client.get("/api/settings/credential-key", headers=admin["headers"]).json()
+        assert body["unreadable_settings"] == ["mail_password"]
+
+    def test_making_a_key_seals_a_plaintext_secret_from_before(self, client, admin, db):
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        assert client.post("/api/settings/credential-key", headers=admin["headers"]).status_code == 200
+        db.expire_all()
+        assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.MAIL_PASSWORD))
+
+    def test_entering_the_phrase_seals_a_plaintext_secret_from_before(self, client, admin, db):
+        store_plaintext(db, SettingKey.TELEGRAM_BOT_TOKEN, "0:TOKEN")
+        phrase = credentials.generate_phrase()
+        response = client.put(
+            "/api/settings/credential-key", json={"phrase": phrase}, headers=admin["headers"]
+        )
+        assert response.status_code == 200, response.text
+        db.expire_all()
+        assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.TELEGRAM_BOT_TOKEN))

@@ -18,5 +18,6 @@ export interface CredentialKeyOut {
   configured?: boolean;
   location?: string;
   problem?: string;
+  unreadable_settings?: string[];
   unreadable_sources?: string[];
 }

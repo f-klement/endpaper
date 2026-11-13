@@ -29,6 +29,7 @@ import notifications
 import settings_store
 from enums import OverdueNotifyReason, OverdueSender, SettingKey
 from models import Book, Loan, User
+from tests.conftest import forget_any_encryption_key
 
 HOOK = "https://hooks.example.org/t/abcdef"
 
@@ -78,7 +79,7 @@ def in_app_on(db):
 
 
 @pytest.fixture
-def configured(db):
+def configured(db, encryption_key):
     """A webhook that is switched on, with no secret."""
     settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_ENABLED, "true")
     settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_URL, HOOK)
@@ -438,6 +439,19 @@ class TestRunDigest:
         expected = hmac.new(b"s3cret", request.content, hashlib.sha256).hexdigest()
         assert hmac.compare_digest(request.headers["X-Endpaper-Signature"], f"sha256={expected}")
 
+    async def test_a_secret_no_key_opens_refuses_the_send_rather_than_sending_unsigned(
+        self, configured, lend
+    ):
+        settings_store.set_value(configured, SettingKey.OVERDUE_WEBHOOK_SECRET, "s3cret")
+        forget_any_encryption_key()
+        lend()
+        with respx.mock as mock:
+            route = mock.post(HOOK).mock(return_value=httpx.Response(200))
+            result = await notifications.run_digest(configured)
+
+        assert route.call_count == 0
+        assert result["reason"] is OverdueNotifyReason.MISCONFIGURED
+
     async def test_it_sends_no_signature_without_a_secret(self, configured, lend):
         lend()
         with respx.mock as mock:
@@ -675,7 +689,7 @@ TELEGRAM_SEND = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 
 @pytest.fixture
-def telegram_on(db):
+def telegram_on(db, encryption_key):
     settings_store.set_value(db, SettingKey.OVERDUE_TELEGRAM_ENABLED, "true")
     settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, BOT_TOKEN)
     settings_store.set_value(db, SettingKey.TELEGRAM_CHAT_ID, CHAT_ID)
@@ -793,7 +807,7 @@ class TestTelegram:
         "token",
         ["", "nonsense", "../../evil", "123456:short", "123456:AA/../BBbbCCccDDddEEeeFF"],
     )
-    async def test_a_token_that_is_not_a_token_is_refused(self, db, token):
+    async def test_a_token_that_is_not_a_token_is_refused(self, db, token, encryption_key):
         """It becomes a URL **path segment**, so a `/` or a `..` would choose
         the method being called or walk out of `/bot<token>/` entirely."""
         settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, token)
@@ -803,7 +817,7 @@ class TestTelegram:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("chat", ["", "not a chat", "@a", "12 34"])
-    async def test_a_chat_id_that_is_not_one_is_refused(self, db, chat):
+    async def test_a_chat_id_that_is_not_one_is_refused(self, db, chat, encryption_key):
         settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, BOT_TOKEN)
         settings_store.set_value(db, SettingKey.TELEGRAM_CHAT_ID, chat)
         with pytest.raises(notifications.TelegramRefused):
@@ -860,7 +874,7 @@ class TestTelegram:
         assert "AAaaBBbb" not in caplog.text
 
     @pytest.mark.asyncio
-    async def test_a_refusal_never_names_the_token(self, db, lend):
+    async def test_a_refusal_never_names_the_token(self, db, lend, encryption_key):
         lend()
         settings_store.set_value(db, SettingKey.OVERDUE_TELEGRAM_ENABLED, "true")
         settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, "sekrit-not-a-token")

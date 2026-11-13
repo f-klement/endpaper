@@ -689,9 +689,14 @@ def enable_google_books(db: Any, key: str = "a-test-key") -> None:
     hole independently. The tests still assert the fallback; they now configure
     the source first, which is what a library that wants the fallback does.
     """
+    import credentials
     import settings_store
     from enums import SettingKey
 
+    # The key is a sealed secret, so it needs an encryption key to be stored;
+    # the conftest's `forget_the_encryption_key` removes this one again.
+    if credentials.key_material() is None:
+        credentials.store_key(credentials.generate_phrase())
     settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_ENABLED, "true")
     settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, key)
 
@@ -876,3 +881,14 @@ class VirtualClock:
                 return clock.now
 
         return Loop(Selector())
+
+
+def store_plaintext(db: Any, key: Any, value: str) -> None:
+    """A settings row written as a deployment with no key wrote one before secrets were sealed.
+
+    Straight onto the table, because `settings_store.set_value` refuses exactly this.
+    """
+    from models import Setting
+
+    db.merge(Setting(key=key.value, value=value))
+    db.commit()

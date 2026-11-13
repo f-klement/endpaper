@@ -7,6 +7,7 @@ import re
 from typing import Final
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 import config
 import credentials
@@ -14,7 +15,9 @@ import settings_store
 import sources
 import targets
 from enums import CatalogueSource, Locale, SettingKey
+from tests.conftest import forget_any_encryption_key
 from tests.corpus import application_sources
+from tests.helpers import store_plaintext
 
 TREE_GUARDS = {
     "TestAnOverriddenSettingIsReadWhereItIsPinned": ("application_sources",),
@@ -39,13 +42,13 @@ class TestReadAndWrite:
         assert settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) is False
 
     def test_a_written_value_comes_back(self, db):
-        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "abc123")
-        assert settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "abc123"
+        settings_store.set_value(db, SettingKey.MAIL_SERVER, "smtp.example.org")
+        assert settings_store.get_raw(db, SettingKey.MAIL_SERVER) == "smtp.example.org"
 
     def test_writing_twice_updates_rather_than_duplicating(self, db):
-        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "first")
-        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "second")
-        assert settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "second"
+        settings_store.set_value(db, SettingKey.MAIL_SERVER, "first")
+        settings_store.set_value(db, SettingKey.MAIL_SERVER, "second")
+        assert settings_store.get_raw(db, SettingKey.MAIL_SERVER) == "second"
 
     @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on"])
     def test_truthy_spellings(self, db, value):
@@ -1156,7 +1159,9 @@ def _reads_of_a_pinned_key(
     read is resolved against modules no verdict is being asked about.
     """
     off_the_table, in_force = _keyed_readers(modules[_STORE])
-    pinned = {key.name for key in config._ENV_OVERRIDES}
+    # A secret is read through `in_force` too, pinned or not, because it is the
+    # one reader that opens the sealed row: off the table it is an envelope.
+    pinned = {key.name for key in config._ENV_OVERRIDES} | {key.name for key in settings_store.SECRET_KEYS}
 
     offenders: list[str] = []
     unreadable: list[str] = []
@@ -1360,7 +1365,7 @@ _ATTRIBUTE_SPELLINGS: Final = (
 
 
 class TestAnOverriddenSettingIsReadWhereItIsPinned:
-    """No key the environment can pin is read off the table.
+    """No key the environment can pin, and no sealed secret, is read off the table.
 
     Ten keys carry an entry in `config._ENV_OVERRIDES` and all ten were already
     read through `in_force`, so this starts green: it guards a hole rather than
@@ -1924,3 +1929,105 @@ class TestThePlanAndTheLoginsAgreeOnWhoNeedsOne:
             "the rule no longer notices a source admitted on a credential whose door "
             "carries none, which is the whole of what it is for"
         )
+
+
+class TestTheAppsOwnSecretsAreSealedAtRest:
+    """Owner's rule: sealed with the catalogue key, refused with none, an older plaintext row
+    kept readable until a key exists and sealed once one does."""
+
+    @pytest.mark.parametrize("key", sorted(settings_store.SECRET_KEYS))
+    def test_every_secret_is_stored_as_an_envelope(self, db, encryption_key, key):
+        """Walks `SECRET_KEYS`, so a secret added there is held to this with no edit here."""
+        settings_store.set_value(db, key, "s3cret-value")
+        stored = settings_store.get_raw(db, key)
+        assert credentials.is_sealed(stored)
+        assert "s3cret-value" not in stored
+
+    @pytest.mark.parametrize("key", sorted(settings_store.SECRET_KEYS))
+    def test_every_secret_comes_back_through_in_force(self, db, encryption_key, key):
+        settings_store.set_value(db, key, "s3cret-value")
+        assert settings_store.in_force(db, key) == "s3cret-value"
+
+    def test_a_secret_is_refused_when_there_is_no_key(self, db):
+        with pytest.raises(credentials.NoKeyConfigured):
+            settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        assert settings_store.get_raw(db, SettingKey.MAIL_PASSWORD) == ""
+
+    def test_clearing_a_secret_needs_no_key(self, db):
+        """What lets somebody who lost the phrase clear a stranded field."""
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "")
+        assert settings_store.get_raw(db, SettingKey.MAIL_PASSWORD) == ""
+
+    def test_a_plaintext_row_from_before_a_key_is_read_as_it_is(self, db):
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        assert settings_store.in_force(db, SettingKey.MAIL_PASSWORD) == "hunter2"
+
+    def test_a_plaintext_row_is_sealed_once_a_key_exists(self, db, encryption_key):
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        assert settings_store.seal_plaintext_secrets(db) == 1
+        assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.MAIL_PASSWORD))
+        assert settings_store.in_force(db, SettingKey.MAIL_PASSWORD) == "hunter2"
+
+    def test_sealing_with_no_key_leaves_the_row_alone(self, db):
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        assert settings_store.seal_plaintext_secrets(db) == 0
+        assert settings_store.get_raw(db, SettingKey.MAIL_PASSWORD) == "hunter2"
+
+    def test_a_setting_that_is_not_a_secret_is_never_sealed(self, db, encryption_key):
+        store_plaintext(db, SettingKey.MAIL_SERVER, "smtp.example.org")
+        settings_store.seal_plaintext_secrets(db)
+        assert settings_store.get_raw(db, SettingKey.MAIL_SERVER) == "smtp.example.org"
+
+    def test_a_secret_sealed_under_a_lost_key_is_refused_rather_than_answered_empty(self, db, encryption_key):
+        settings_store.set_value(db, SettingKey.OVERDUE_WEBHOOK_SECRET, "s3cret")
+        forget_any_encryption_key()
+        with pytest.raises(settings_store.UnreadableSecret):
+            settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
+
+    def test_the_google_key_under_a_lost_key_reads_as_absent(self, db, encryption_key):
+        """On the path that adds a book, so it degrades to "not ready" instead of raising."""
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "AIza-key")
+        forget_any_encryption_key()
+        assert settings_store.google_books_api_key(db) == ""
+
+    def test_a_stranded_secret_is_named(self, db, encryption_key):
+        settings_store.set_value(db, SettingKey.TELEGRAM_BOT_TOKEN, "0:TOKEN")
+        forget_any_encryption_key()
+        assert settings_store.unreadable_secrets(db) == ["telegram_bot_token"]
+
+    def test_with_nothing_left_to_seal_no_key_is_resolved(self, db, encryption_key, monkeypatch):
+        """Every start calls this, and on a desktop a resolution is a keychain read."""
+        settings_store.set_value(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        tally = [0]
+        real = credentials._supplied
+
+        def counting():
+            tally[0] += 1
+            return real()
+
+        monkeypatch.setattr(credentials, "_supplied", counting)
+        assert settings_store.seal_plaintext_secrets(db) == 0
+        assert tally[0] == 0
+
+    def test_a_database_error_while_sealing_is_not_raised_and_leaves_the_row_readable(
+        self, db, encryption_key, monkeypatch
+    ):
+        """Its callers run after a key is stored or a restore committed, so a raise loses more."""
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+
+        def refuse() -> None:
+            raise OperationalError("COMMIT", {}, Exception("database is locked"))
+
+        monkeypatch.setattr(db, "commit", refuse)
+        assert settings_store.seal_plaintext_secrets(db) == 0
+        assert settings_store.in_force(db, SettingKey.MAIL_PASSWORD) == "hunter2"
+        # **Only a reloaded row answers this.** Without the rollback the identity map still
+        # holds the envelope, and `in_force` opens it to the same value with the key present.
+        # The rollback is what keeps the session usable for the caller's next read.
+        assert settings_store.get_raw(db, SettingKey.MAIL_PASSWORD) == "hunter2"
+
+    def test_every_setting_named_like_a_secret_is_one(self):
+        """A new key named like a secret and left out of `SECRET_KEYS` would be stored in plaintext."""
+        named = {key for key in SettingKey if key.value.endswith(("_password", "_token", "_secret", "_key"))}
+        assert named <= settings_store.SECRET_KEYS, sorted(named - settings_store.SECRET_KEYS)

@@ -148,7 +148,7 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
             {/* The moment to say it, which is the cheapest place to prevent
                 the situation rather than recover from it: a reset is approved
                 by another admin, so the first account has nobody to approve
-                its own. `README.md` carries the command line way back. */}
+                its own. `docs/configuration.md` carries the command line way back. */}
             <p className="text-center text-xs text-paper-600 mt-2 dark:text-paper-400">
               {t("login.soleAdminWarning")}
             </p>

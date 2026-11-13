@@ -405,8 +405,8 @@ def upsert_directory_user(
     back in the admin group and signing in again. A cleared address is gone:
     the value is not kept anywhere, and the field is read only from the moment
     the attribute is configured, so neither the member nor an admin can type it
-    back. `.env.example`, `README.md` and `DOCKERHUB.md` all say so, because
-    the person who turns the attribute on is the one who needs to know.
+    back. `.env.example`, `docs/configuration.md` and `DOCKERHUB.md` all say so,
+    because the person who turns the attribute on is the one who needs to know.
     """
     # **Refused, not truncated, and this is where both doors meet.** The
     # column is `String(USERNAME_MAX)` and SQLite does not enforce a VARCHAR

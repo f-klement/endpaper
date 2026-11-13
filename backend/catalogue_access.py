@@ -58,6 +58,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 import catalogue
+import credentials
 import metadata
 import settings_store
 import sources
@@ -155,11 +156,18 @@ def _resolved_access(db: Session) -> metadata.Access:
     source the plan admits.** `metadata._lookup_one` hands a credential to a bespoke
     adapter and `_search_one` to a metered one, and neither is constructed for a source
     the plan left out.
+
+    **The key is resolved once here and handed to all three**, because each opens
+    something sealed: the logins, a credentialled source's readiness, and the Google
+    Books key since it is sealed too. Each resolving its own cost a lookup three
+    resolutions once the Google key was sealed, each a keychain round trip on a
+    desktop.
     """
+    state = credentials.key_state()
     access = metadata.Access(
-        plan=settings_store.catalogue_sources(db),
-        api_key=settings_store.google_books_api_key(db),
-        logins=settings_store.catalogue_logins(db),
+        plan=settings_store.catalogue_sources(db, state),
+        api_key=settings_store.google_books_api_key(db, state),
+        logins=settings_store.catalogue_logins(db, state),
     )
     _warn_about_any_source_asked_with_no_login(access)
     return access
@@ -388,10 +396,12 @@ class GoogleVolumes:
         comes back `NO_SOURCES` and the reply is an honest looking zero.
         """
         identifier_backfill_limiter.check(member)
-        plan = settings_store.catalogue_sources(db)
+        # One resolution for both readers, as `_resolved_access` does.
+        state = credentials.key_state()
+        plan = settings_store.catalogue_sources(db, state)
         if CatalogueSource.GOOGLE_BOOKS not in plan.asked:
             raise _refused(GOOGLE_BOOKS_IS_NOT_ASKED)
-        return cls(_plan=plan, _api_key=settings_store.google_books_api_key(db))
+        return cls(_plan=plan, _api_key=settings_store.google_books_api_key(db, state))
 
     def __str__(self) -> str:
         return f"<google volume access, {len(self._plan.asked)} catalogue(s) asked>"

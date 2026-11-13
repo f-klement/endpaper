@@ -741,8 +741,7 @@ lose, which is also what would stop it being reconciled.
 `source` it is for, and an `envelope`.
 
 **Not a settings row, and the difference is whose secret it is.** Every secret `settings`
-holds is this deployment's own, and `settings` is plaintext that `backup.py` copies
-wholesale. A row here is an institution's account with a third party, held on their behalf,
+holds is this deployment's own, sealed in its row under its setting's name. A row here is an institution's account with a third party, held on their behalf,
 so the failure mode is leaking somebody else's login. **The username is sealed with the
 password rather than stored beside it**, which is why the table is two columns: half a
 login is still half a login, this table rides in every archive, and nothing readable is

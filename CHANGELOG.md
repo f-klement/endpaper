@@ -142,6 +142,20 @@ _2026-10-25_
 - The book page no longer offers members a tag delete button that the server would refuse; only
   an admin sees it.
 
+- The Google Books key, the mail password, the Telegram bot token and the webhook secret are now
+  encrypted at rest and in backups with the catalogue logins' key. Saving one needs an encryption
+  key; one saved earlier is encrypted once a key exists, and a secret no key can open is listed on
+  the settings screen to be entered again. The key screen counts "1 settings secret" and "1
+  stored login" in the singular, and refusing a new key over a secret the environment supplies
+  names the variable to unset.
+
+- The README is now a short front door: what Endpaper is, a quick start and pointers. Installing
+  and configuring it is `docs/configuration.md`, using it `docs/handbook.md`. The quick start now
+  creates the data directory before the first start, gives the `SECRET_KEY` minimum with a
+  command to make one, and says the phone's camera needs HTTPS.
+
+- The Docker Hub page no longer claims an arm64 image: images are built for `linux/amd64` only.
+
 ## v0.21.0
 
 _2026-10-24_

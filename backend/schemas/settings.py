@@ -394,6 +394,13 @@ class SettingsOut(BaseModel):
     #: catalogue content somewhere outside this app.
     overdue_in_app_enabled: bool = True
 
+    #: The secrets sealed under a key this deployment cannot open, by setting
+    #: name: `google_books_api_key`, `overdue_webhook_secret`, `mail_password`
+    #: or `telegram_bot_token`. Each has to be entered again; until then its
+    #: preview is empty, a sender refuses rather than sending without it, and
+    #: Google Books reads as not ready.
+    unreadable_secrets: list[str] = Field(default_factory=list)
+
     # ── Library mode and the public catalogue ────────────────────────────
     #: The two switches **as stored**, not as they take effect. This model is
     #: the admin's view of the settings table, and a screen that showed
@@ -493,6 +500,9 @@ class CredentialKeyOut(BaseModel):
     #: was nothing to remove while the server refused to make a key until they
     #: removed it.
     unreadable_sources: list[str] = Field(default_factory=list)
+    #: Which of the app's own sealed settings secrets cannot be opened as things
+    #: stand, by setting name, read off the table the way `unreadable_sources` is.
+    unreadable_settings: list[str] = Field(default_factory=list)
 
 
 class RecoveryPhraseOut(BaseModel):

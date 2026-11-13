@@ -1609,8 +1609,8 @@ that lazy loads unless the caller fetched it. Every listing in `routers/books.py
 
 ### `SECRET_KEYS` is enforced by a test that walks it, not by being read
 
-Nothing in the application reads that set. Masking is written by hand per field in
-`_read_settings`, so the set was a list beside the code rather than a rule over it: a third
+Masking does not read that set (sealing does): it is written by hand per field in
+`_read_settings`, so the set is a list beside the masking rather than a rule over it: a third
 secret added to it would have been masked by nothing, returned in full to every admin page
 load, and no test would have failed.
 
@@ -1631,6 +1631,47 @@ absent means "leave alone", an empty string clears.
 The URL's scheme is checked twice, in `SettingsUpdate` and again in `notifications.py`
 before every send. The first gives the caller a 422 naming the field; the second still runs
 for a row a restore wrote.
+
+### The app's own settings secrets are sealed, and a row from before a key stays readable until one exists
+
+**Owner's decision, 2026-11-13 (questions 128 and 131).** The Google Books key, the webhook
+secret, the mail password and the Telegram bot token (`settings_store.SECRET_KEYS`) are sealed
+at rest with the catalogue credential key, under `endpaper/v2/app-setting/<name>`, and travel
+sealed in the archive. A restore under the same key opens them; under another key, or none,
+each is listed on the settings screen to be entered again.
+
+**The key is optional, so the rule for a secret with no key to seal it is the owner's, option C
+of four.** A new write with no key is refused (409), as a catalogue login's is. A row written
+before the deployment had a key, by an earlier release or in an archive from one, stays
+plaintext and readable until a key exists, and `settings_store.seal_plaintext_secrets` seals it
+when one does: at start, on `POST` and `PUT /api/settings/credential-key`, and after a
+restore. **A database error in that step is logged and swallowed**, because its callers run after
+the key was stored or the restore committed and a raise would lose the recovery phrase shown
+once. A row it missed is sealed at the next start or key event instead. Refused: dropping such
+rows (mail and reminders stop on upgrade for every keyless install), writing plaintext until a
+key exists (sealing would hold only where a key does), and refusing to start (already rejected
+in `credentials.py`).
+
+**Unreadable is a refusal for a sender and an absence for a lookup.** `in_force` raises
+`settings_store.UnreadableSecret`; the senders refuse rather than send an unsigned webhook or a
+mail without its login, and the Google key reads as absent so a lookup degrades to "not ready".
+
+**No Alembic migration.** Sealing has to run whenever a key appears, which a migration cannot;
+a migration would also import live application code into a frozen file, which none does. The
+start up step covers an upgrade with a key. **What a downgrade costs**: an older build reads an
+envelope as the secret itself, so each of the four fails (a rejected key or login, a
+webhook signed with the wrong secret) until entered again there. Nothing leaks.
+
+**The residue, accepted:** a keyless deployment's archive carries such an old row as typed, and a
+plaintext value shaped exactly like an envelope reads as one and is reported unreadable.
+
+**A pinned secret over a stranded row is refused with the variable to unset.** The new key is
+refused while a sealed row cannot be opened, and a field the environment supplies has no Remove on
+the settings screen, so the refusal names its variable (`GOOGLE_BOOKS_API_KEY`, `MAIL_PASSWORD`,
+`TELEGRAM_BOT_TOKEN`), never its value. The way out is unset, clear, make the key, set again.
+**Letting an empty write through was refused**: the pinned value would still win on every read, so
+the screen would show a cleared field that is not, and the stranded envelope would stay under a key
+that now opens nothing. Unsetting removes the pin, which is the cause.
 
 ### The ticker is one asyncio task, and assumes one process
 
@@ -6248,8 +6289,9 @@ precedent.** A wrongly demoted member is restored by putting them back in the ad
 cleared address is gone: the value is kept nowhere and the field is read only from the moment
 the attribute is configured, so neither the member nor an admin can type it back. Turning
 `LDAP_EMAIL_ATTRIBUTE` on therefore empties the stored address of every member the directory
-has none for. `.env.example`, `README.md`, `DOCKERHUB.md` and `upsert_directory_user` all say
-so, because the person who turns it on is the one who needs to know.
+has none for. `.env.example`, `docs/configuration.md`, `DOCKERHUB.md` and
+`upsert_directory_user` all say so, because the person who turns it on is the one who needs to
+know.
 
 **A refused value is a different event from an absent one**, and both clear the column. A
 `Remote-Email` carrying a newline is the injection shape, on the same request whose

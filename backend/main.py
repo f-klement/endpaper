@@ -30,6 +30,7 @@ import metadata
 import notifications
 import readwise as readwise_pull
 import refusals
+import settings_store
 import targets
 from config import (
     DATA_DIR,
@@ -328,6 +329,20 @@ def seed_catalogue_targets() -> None:
         db.commit()
 
 
+def seal_plaintext_secrets() -> None:
+    """Seal any settings secret still in plaintext, when this start has a key.
+
+    The case it covers is a key that arrived with no route seeing it: set in the
+    environment or a key file between two starts, over secrets written while there
+    was none. The owner's rule is that such a secret stays readable until a key
+    exists and is sealed once one does; without a key this does nothing.
+    """
+    with DBSession(engine) as db:
+        sealed = settings_store.seal_plaintext_secrets(db)
+    if sealed:
+        logger.info("Sealed %d settings secrets written before this deployment had a key", sealed)
+
+
 def init_db() -> None:
     # Checked before anything else: booting production with the example
     # signing key means every session token is forgeable.
@@ -340,6 +355,7 @@ def init_db() -> None:
     upgrade_to_head()
     seed_tags()
     seed_catalogue_targets()
+    seal_plaintext_secrets()
 
 
 init_db()

@@ -119,10 +119,15 @@ def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
     module and expects exactly one, and it caught the bypass that produced this
     paragraph.
     """
-    if isinstance(value, dict):
-        settings_store.set_json(db, key, value)
-    else:
-        settings_store.set_value(db, key, value)
+    try:
+        if isinstance(value, dict):
+            settings_store.set_json(db, key, value)
+        else:
+            settings_store.set_value(db, key, value)
+    except credentials.NoKeyConfigured as refusal:
+        # A secret with no key to seal it with: refused, never written in
+        # plaintext. The message says how to make a key.
+        raise HTTPException(status_code=409, detail=str(refusal)) from None
     sender = notifications.sender_for(key)
     if sender is not None:
         notifications.forget_health(db, sender)
@@ -213,13 +218,17 @@ def _read_settings(db: DbSession) -> SettingsOut:
     # would then need. `from_env` stays because the response also reports
     # **whether** the deployment supplied it, which is provenance rather than
     # the value.
-    key = settings_store.in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
-    webhook_secret = settings_store.get_raw(db, SettingKey.OVERDUE_WEBHOOK_SECRET)
+    # Empty for a sealed secret the key cannot open, rather than a 500 on this
+    # page: `unreadable_secrets` below says which to enter again.
+    key = settings_store.in_force_if_readable(db, SettingKey.GOOGLE_BOOKS_API_KEY, encryption_key)
+    webhook_secret = settings_store.in_force_if_readable(
+        db, SettingKey.OVERDUE_WEBHOOK_SECRET, encryption_key
+    )
     # The one in force for both, for the reason the Google key's preview is:
     # showing a preview of a secret that is not the one being used is worse
     # than showing none at all.
-    mail_password = settings_store.in_force(db, SettingKey.MAIL_PASSWORD)
-    telegram_token = settings_store.in_force(db, SettingKey.TELEGRAM_BOT_TOKEN)
+    mail_password = settings_store.in_force_if_readable(db, SettingKey.MAIL_PASSWORD, encryption_key)
+    telegram_token = settings_store.in_force_if_readable(db, SettingKey.TELEGRAM_BOT_TOKEN, encryption_key)
 
     return SettingsOut(
         google_books_enabled=settings_store.get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED),
@@ -262,6 +271,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
         telegram_chat_id=settings_store.in_force(db, SettingKey.TELEGRAM_CHAT_ID),
         telegram_chat_id_from_env=settings_store.is_from_env(SettingKey.TELEGRAM_CHAT_ID),
         overdue_in_app_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_IN_APP_ENABLED),
+        unreadable_secrets=settings_store.unreadable_secrets(db, encryption_key),
         # The two switches as stored, so the form shows what an admin typed,
         # plus the conjunction that decides whether anything is actually
         # served. See `SettingsOut` for why the screen needs all three.
@@ -544,6 +554,7 @@ def _read_credential_key(db: DbSession) -> CredentialKeyOut:
         # why, and `generate_key` refuses against the same function, so the
         # refusal cannot quote a number this screen denies.
         unreadable_sources=credentials.unreadable_sources(db, state),
+        unreadable_settings=credentials.unreadable_settings(db, state),
     )
 
 
@@ -581,6 +592,8 @@ def create_credential_key(
         phrase, _ = credentials.generate_key(db)
     except credentials.KeyConfigurationError as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from None
+    # A secret written before there was a key is sealed now there is one.
+    settings_store.seal_plaintext_secrets(db)
     return RecoveryPhraseOut(phrase=phrase)
 
 
@@ -611,6 +624,8 @@ def restore_credential_key(
         raise HTTPException(status_code=400, detail=str(refusal)) from None
     except credentials.KeyConfigurationError as refusal:
         raise HTTPException(status_code=409, detail=str(refusal)) from None
+    # As `POST` does: a secret written before there was a key is sealed now.
+    settings_store.seal_plaintext_secrets(db)
     return _read_credential_key(db)
 
 
@@ -625,9 +640,10 @@ def forget_credential_key(
     Without this, `POST` refuses because a key exists, `PUT` wants a phrase
     nobody has, and the deployment is stuck behind a key protecting nothing.
 
-    **It strands whatever the key was opening, and the response says how many**
-    rather than this route hiding it: `unreadable_credentials` on the way out is
-    the count of stored catalogue logins that now have to be typed again. A
+    **It strands whatever the key was opening, and the response says which**
+    rather than this route hiding it: `unreadable_sources` and
+    `unreadable_settings` on the way out name the stored catalogue logins and
+    settings secrets that now have to be typed again. A
     member's own Readwise token is not in that count: its member is told on
     their account page and saves it again. Removing those
     logins first is the way to reach a clean state, and `DELETE` on a source's

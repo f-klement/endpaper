@@ -66,6 +66,9 @@ export default function GoogleBooksSection({
         saveLabel={t("common.save")}
         clearLabel={t("settings.apiKeyClear")}
         hasStored={settings.has_google_books_api_key}
+        unreadable={(settings.unreadable_secrets ?? []).includes(
+          "google_books_api_key",
+        )}
         pinned={settings.google_books_api_key_from_env === true}
         pinnedNotice={
           <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-200 dark:bg-amber-950 dark:border-amber-900">

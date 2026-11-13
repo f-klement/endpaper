@@ -1,21 +1,25 @@
 """A login at somebody else's catalogue: sealed at rest, bound to one origin.
 
-**This is not one of the app's own secrets, and that is the whole reason this
-module exists rather than a row in `settings`.** Every secret `settings_store`
-holds is this deployment's: an API key it uses, a mail password for its own
-mailbox, a webhook secret it signs with. Losing one costs this library an
-account it owns. What is held here is **an institution's account with a third
-party**, and losing one costs somebody else's login. `settings` is written in
-plaintext and `backup.py` copies it wholesale, so a credential of this kind put
-there would sit unmasked in every archive an admin can download.
+**This is not one of the app's own secrets, and that is why it has a table of its
+own rather than a row in `settings`.** Every secret `settings_store` holds is this
+deployment's: an API key it uses, a mail password for its own mailbox, a webhook
+secret it signs with. Losing one costs this library an account it owns. What is
+held here is **an institution's account with a third party**, and losing one
+costs somebody else's login. Both are sealed with the one key below; what
+differs is the subject the envelope is bound to and who may replace it.
 
 ## Three kinds of secret, and they are not interchangeable
 
 | Kind | Owner | Lives in | Replaced by | If that person goes |
 |---|---|---|---|---|
-| The app's own | the deployment | `settings`, plaintext | any admin | nothing |
+| The app's own | the deployment | `settings`, sealed (`seal_setting`) | any admin | nothing |
 | **An account elsewhere** | the library | here, sealed | any admin | nothing |
 | A member's own login | one member | **`member_logins`** | that member | deleted with them |
+
+**The app's own are sealed only once a key exists.** A row written before this
+deployment had one stays readable as it was, and `settings_store.seal_plaintext_secrets`
+seals it the moment a key appears; no new plaintext is written, because a write
+with no key is refused. Owner's decision, recorded in `docs/decisions.md`.
 
 **Distinguished by construction rather than by being named.** Every envelope is
 sealed against an additional-authenticated-data string carrying its kind, its
@@ -126,8 +130,8 @@ from sqlalchemy.orm import Session
 
 import config
 import targets
-from enums import CatalogueSource, CredentialProvenance
-from models import CatalogueCredential
+from enums import CatalogueSource, CredentialProvenance, SettingKey
+from models import CatalogueCredential, Setting
 
 logger = logging.getLogger("endpaper.credentials")
 
@@ -593,6 +597,7 @@ def generate_key(db: Session) -> tuple[str, str]:
     stranded = unreadable_sources(db)
     if stranded:
         raise KeyConfigurationError(_stranded_refusal(stranded))
+    _refuse_over_sealed_settings(db)
     phrase = generate_phrase()
     return phrase, store_key(phrase)
 
@@ -613,6 +618,42 @@ def _stranded_refusal(stranded: list[str]) -> str:
         f"Catalogue logins are stored for {', '.join(stranded)} and were sealed "
         "with a key this machine no longer has. Enter the recovery phrase to "
         "open them. If it is lost, remove those logins and then make a new key."
+    )
+
+
+def _refuse_over_sealed_settings(db: Session) -> None:
+    """`generate_key`'s refusal for the app's own sealed secrets, beside the catalogue's.
+
+    **The same proof and the same remedy**: a sealed settings row means a key
+    existed, so the phrase is what opens it. Somebody who lost the phrase clears
+    those fields on the settings screen, which needs no key, and then makes one.
+    Separate from `_stranded_refusal` because the remedy names a different screen.
+
+    **A field the environment pins cannot be cleared on that screen**, so the
+    refusal names its variable, which is the one way out left without the phrase.
+    """
+    stranded = unreadable_settings(db, KeyState(None))
+    if stranded:
+        raise KeyConfigurationError(
+            f"Settings secrets are stored for {', '.join(stranded)} and were sealed with a key this "
+            "machine no longer has. Enter the recovery phrase to open them. If it is lost, clear "
+            "those fields and then make a new key." + _unpin_first(stranded)
+        )
+
+
+def _unpin_first(stranded: list[str]) -> str:
+    """The sentence naming each variable that pins a stranded setting, or nothing."""
+    pinned = [
+        config.env_variable_name(key)
+        for key in SettingKey
+        if key.value in stranded and config.env_override(key)
+    ]
+    if not pinned:
+        return ""
+    return (
+        " A field the environment supplies cannot be cleared here, so unset "
+        f"{', '.join(pinned[:-1])}{' and ' if len(pinned) > 1 else ''}{pinned[-1]} "
+        "where the app is configured first, and set it again once the new key is made."
     )
 
 
@@ -1161,6 +1202,92 @@ def unseal_member_login(material: bytes, service: str, member_id: int, base_url:
         return box.decrypt(_unb64(nonce), _unb64(sealed), associated).decode("utf-8")
     except (InvalidTag, ValueError, UnicodeDecodeError) as error:
         raise UnreadableCredential("The stored login could not be read. Enter it again.") from error
+
+
+#: The associated data's purpose for one of the app's own settings secrets.
+#:
+#: **Bound to the setting's name and to no origin**: the secret is this
+#: deployment's, used wherever its setting says, so there is no address to bind.
+#: The name is what stops an envelope copied from the mail password's row onto the
+#: webhook secret's, by a hand edited archive, signing a webhook with a password.
+_SETTING_PURPOSE: Final = "endpaper/v2/app-setting/{name}"
+
+
+def _setting_associated(material: bytes, name: str) -> bytes:
+    if not is_safe_source(name):
+        raise CredentialError("That is not a setting a secret can be stored under.")
+    return f"{VERSION}.{generation_of_key(material)}.{_SETTING_PURPOSE.format(name=name)}".encode()
+
+
+def seal_setting(material: bytes, name: str, secret: str) -> str:
+    """One of the app's own secrets, sealed as `seal` seals a catalogue's login.
+
+    The same envelope shape, key and generation tag, over associated data of its
+    own kind (`_SETTING_PURPOSE`).
+    """
+    nonce = secrets.token_bytes(_NONCE_BYTES)
+    box = AESGCM(_expand(material, _ENCRYPTION_INFO, 32))
+    sealed = box.encrypt(nonce, secret.encode("utf-8"), _setting_associated(material, name))
+    return ".".join((VERSION, generation_of_key(material), _b64(nonce), _b64(sealed)))
+
+
+def unseal_setting(material: bytes, name: str, envelope: str) -> str:
+    """The setting's secret back, or the refusal `unseal` would raise.
+
+    No superseded version is opened: this kind was first written under
+    `VERSION`, so anything else is unreadable rather than carried forward.
+    """
+    parts = envelope.split(".")
+    if len(parts) != 4 or parts[0] != VERSION:
+        raise UnreadableCredential("The stored secret is not in a known format.")
+    _version, generation, nonce, sealed = parts
+    if generation != generation_of_key(material):
+        raise WrongKeyGeneration(
+            "This secret was stored under a different encryption key and cannot be read. Enter it again."
+        )
+    box = AESGCM(_expand(material, _ENCRYPTION_INFO, 32))
+    try:
+        return box.decrypt(_unb64(nonce), _unb64(sealed), _setting_associated(material, name)).decode("utf-8")
+    except (InvalidTag, ValueError, UnicodeDecodeError) as error:
+        raise UnreadableCredential("The stored secret could not be read. Enter it again.") from error
+
+
+def is_sealed(value: str) -> bool:
+    """Whether a stored value is an envelope rather than the plaintext a row held before a key.
+
+    **The shape decides, read without a key**, which is `generation_of`'s own
+    question. A plaintext secret that happens to be four dot separated parts led
+    by a known version reads as an envelope, fails to open, and is reported as
+    needing to be entered again: a refusal, never a value sent as something else.
+    """
+    return bool(generation_of(value))
+
+
+def unreadable_settings(db: Session, state: KeyState | None = None) -> list[str]:
+    """Every settings row holding an envelope this key cannot open, by name, sorted.
+
+    **Read off the shape of the row and not off a list of secret names**, so this
+    module never has to know which settings are secrets: a row is stranded when it
+    is sealed and the key in force is absent or of another generation. A plaintext
+    row is never stranded, which is the owner's rule for a row written before a key.
+
+    Asked of the key and the version, as `unreadable_sources` asks it, rather than
+    by opening the envelope: a damaged ciphertext under this key is reported by the
+    settings screen, which opens each one.
+    """
+    resolved = key_state() if state is None else state
+    stranded: list[str] = []
+    for name, value in db.query(Setting.key, Setting.value).all():
+        if not value or not is_sealed(value):
+            continue
+        parts = value.split(".")
+        if (
+            resolved.material is None
+            or parts[0] != VERSION
+            or parts[1] != generation_of_key(resolved.material)
+        ):
+            stranded.append(name)
+    return sorted(stranded)
 
 
 def origin_of(url: str) -> str:

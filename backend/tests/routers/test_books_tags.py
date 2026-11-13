@@ -14,6 +14,7 @@ would look like it silently failed.
 import httpx
 import respx
 
+import credentials
 from models import Book, Tag
 from tags import MAX_TAGS_PER_BOOK
 from tests.helpers import (
@@ -761,6 +762,9 @@ class TestTheSuggestionFeedAnswersWithTheSameVocabulary:
     # a word with it.
 
     def _enable_google(self, client, admin):
+        # The Google key is a sealed secret, so storing it needs an encryption
+        # key; the conftest removes this one after the test.
+        credentials.store_key(credentials.generate_phrase())
         client.put(
             "/api/settings",
             json={"google_books_enabled": True, "google_books_api_key": "test-key"},

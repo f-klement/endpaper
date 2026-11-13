@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 35,011 |
+|  | [Backend](decisions.md#backend) | 35,524 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -96,8 +96,9 @@ repeat the argument.
 | Backend | [The digest result carries a `reason`, and it is null exactly when it sent](decisions.md#the-digest-result-carries-a-reason-and-it-is-null-exactly-when-it-sent) | 258 |
 | Backend | [`count_private_overdue` takes no reminder interval](decisions.md#count_private_overdue-takes-no-reminder-interval) | 143 |
 | Backend | [A measured number lives in one place, and the other places point at it](decisions.md#a-measured-number-lives-in-one-place-and-the-other-places-point-at-it) | 133 |
-| Backend | [`SECRET_KEYS` is enforced by a test that walks it, not by being read](decisions.md#secret_keys-is-enforced-by-a-test-that-walks-it-not-by-being-read) | 136 |
+| Backend | [`SECRET_KEYS` is enforced by a test that walks it, not by being read](decisions.md#secret_keys-is-enforced-by-a-test-that-walks-it-not-by-being-read) | 137 |
 | Backend | [The webhook URL is returned in full; the signing secret is masked](decisions.md#the-webhook-url-is-returned-in-full-the-signing-secret-is-masked) | 114 |
+| Backend | [The app's own settings secrets are sealed, and a row from before a key stays readable until one exists](decisions.md#the-apps-own-settings-secrets-are-sealed-and-a-row-from-before-a-key-stays-readable-until-one-exists) | 492 |
 | Backend | [The ticker is one asyncio task, and assumes one process](decisions.md#the-ticker-is-one-asyncio-task-and-assumes-one-process) | 89 |
 | Backend | [Reading dates are derived, not entered](decisions.md#reading-dates-are-derived-not-entered) | 53 |
 | Backend | [Series is two columns, not a table](decisions.md#series-is-two-columns-not-a-table) | 46 |

@@ -755,11 +755,11 @@ export const de: Messages = {
 
   "settings.credentialKey": "Verschlüsselungsschlüssel",
   "settings.credentialKeyHint":
-    "Katalogzugänge werden mit diesem Schlüssel verschlüsselt. Er wird nie in die Datenbank geschrieben, deshalb enthält eine Sicherung nur Zugänge, die ohne ihn niemand lesen kann.",
+    "Katalogzugänge und die Geheimnisse in diesen Einstellungen (der Google-Books-Schlüssel, das Webhook-Geheimnis, das Mail-Passwort und das Telegram-Bot-Token) werden mit diesem Schlüssel verschlüsselt. Er wird nie in die Datenbank geschrieben, deshalb enthält eine Sicherung nur Geheimnisse, die ohne ihn niemand lesen kann.",
   "settings.credentialKeyCost":
-    "Geht dieser Schlüssel verloren oder wird er ersetzt, muss jeder hier gespeicherte Katalogzugang erneut eingegeben werden. Für das Wiederherstellen einer Sicherung auf einem anderen Gerät wird die Wiederherstellungsphrase gebraucht.",
+    "Geht dieser Schlüssel verloren oder wird er ersetzt, muss jeder hier gespeicherte Katalogzugang und jedes Einstellungsgeheimnis erneut eingegeben werden. Für das Wiederherstellen einer Sicherung auf einem anderen Gerät wird die Wiederherstellungsphrase gebraucht.",
   "settings.credentialKeyMissing":
-    "Noch kein Verschlüsselungsschlüssel, deshalb lässt sich kein Zugang speichern.",
+    "Noch kein Verschlüsselungsschlüssel, deshalb lässt sich weder ein Zugang noch ein Einstellungsgeheimnis speichern.",
   "settings.credentialKeyPresent":
     "Ein Schlüssel liegt vor, verwahrt in {location}.",
   "settings.credentialKeyLocationEnv": "der Serverkonfiguration",
@@ -767,9 +767,17 @@ export const de: Messages = {
   "settings.credentialKeyLocationFile": "einer Datei auf diesem Gerät",
   "settings.credentialKeyUnreadable":
     "{count} gespeicherte Zugänge lassen sich derzeit nicht lesen. Die Wiederherstellungsphrase eingeben oder die Zugänge entfernen.",
+  "settings.credentialKeyUnreadableOne":
+    "1 gespeicherter Zugang lässt sich derzeit nicht lesen. Die Wiederherstellungsphrase eingeben oder den Zugang entfernen.",
+  "settings.credentialKeyUnreadableSettings":
+    "{count} Einstellungsgeheimnisse lassen sich derzeit nicht lesen. Die Wiederherstellungsphrase eingeben oder jedes dort erneut eingeben, wo es eingestellt wird.",
+  "settings.credentialKeyUnreadableSettingsOne":
+    "1 Einstellungsgeheimnis lässt sich derzeit nicht lesen. Die Wiederherstellungsphrase eingeben oder es dort erneut eingeben, wo es eingestellt wird.",
+  "settings.secretUnreadable":
+    "Unter einem anderen Verschlüsselungsschlüssel gespeichert und nicht lesbar. Erneut eingeben oder die Wiederherstellungsphrase eingeben.",
   "settings.credentialKeyForget": "Diesen Schlüssel verwerfen",
   "settings.credentialKeyForgetHint":
-    "Nur wenn die Wiederherstellungsphrase verloren ist. Jeder unter diesem Schlüssel gespeicherte Zugang muss danach erneut eingegeben werden.",
+    "Nur wenn die Wiederherstellungsphrase verloren ist. Jeder unter diesem Schlüssel gespeicherte Zugang und jedes Einstellungsgeheimnis muss danach erneut eingegeben werden.",
   "settings.credentialKeyCreate": "Verschlüsselungsschlüssel erstellen",
   "settings.credentialKeyShownOnce":
     "Diese 24 Wörter jetzt notieren und sicher verwahren. Die Wörter sind der Schlüssel, deshalb werden sie nur dieses eine Mal angezeigt.",

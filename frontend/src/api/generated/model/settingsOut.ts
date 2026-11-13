@@ -51,4 +51,5 @@ export interface SettingsOut {
   telegram_bot_token_preview?: string;
   telegram_chat_id?: string;
   telegram_chat_id_from_env?: boolean;
+  unreadable_secrets?: string[];
 }

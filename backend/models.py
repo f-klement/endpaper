@@ -3889,8 +3889,8 @@ class CatalogueCredential(Base):
     Every secret `settings` holds is the app's own: an API key it uses, a mail
     password for its own mailbox. This is an institution's account with a third
     party, held here on its behalf, so the failure mode is leaking somebody
-    else's login rather than losing one of ours. `settings` is plaintext and
-    `backup.py` copies it wholesale.
+    else's login rather than losing one of ours. Both are sealed with one key;
+    `credentials.py` holds the three kinds side by side.
 
     **Two columns, and the second is the whole record.** The username is sealed
     with the password rather than stored beside it: it is half of a login, this

@@ -46,8 +46,10 @@ the file stays on the image it named when you downloaded it, `:latest` or not, u
 change the line: [Upgrading](#upgrading).
 
 **The container runs as uid 1000**, so the host directory mounted at `/app/data` has to be
-writable by uid 1000. On most Linux desktops your own account already is; otherwise
-`mkdir -p data && sudo chown 1000:1000 data` before the first start.
+writable by uid 1000. Create it yourself before the first start, `mkdir -p data`, since a
+directory Docker creates for the mount belongs to root. That is enough when your account is
+uid 1000, as the first account on most Linux desktops is; otherwise follow it with
+`sudo chown 1000:1000 data`.
 
 **To build the image from source** instead, clone the repository and run
 `docker compose up --build` in its root. That uses `docker-compose.yml`, which builds the
@@ -301,9 +303,11 @@ corrected by another click rather than a redeploy.
 
 Some catalogues need a login. [The feature list](featurelist.md#the-catalogue) says which.
 **A catalogue login is somebody else's account**, held here on its behalf, so it is stored
-apart from this deployment's own secrets: sealed with a key that is never written to the
-database. A backup carries the sealed logins and not the key, so nobody can read them from
-the archive alone.
+apart from this deployment's own secrets. Both are sealed with one key that is never written
+to the database: the logins, and the Google Books key, mail password, Telegram bot token and
+webhook secret set under Settings. A backup carries them sealed and not the key, so nobody
+can read them from the archive alone. A secret saved before the deployment had a key stays
+as it was typed until a key exists, and is sealed then.
 
 ### The key
 
@@ -311,7 +315,8 @@ The key is a recovery phrase of **24 words**, in the shape a wallet recovery phr
 It is checksummed, so a mistyped or misread word is refused rather than quietly becoming a
 different key.
 
-With no key the app starts and simply cannot store a login. Settings then offers to make
+With no key the app starts and simply cannot store a login or one of those four secrets;
+one set through the environment is never stored, and needs no key. Settings then offers to make
 one and shows the words **once**; nothing can display them again. The app keeps the key in
 the machine's keychain where there is one, and otherwise in a file only its own account
 can read. The container has no keychain, so there the key is a file in `DATA_DIR`.
@@ -321,8 +326,8 @@ can read. The container has no keychain, so there the key is a file in `DATA_DIR
 | `CREDENTIAL_ENCRYPTION_KEY` | empty | The phrase itself. Pinned this way, Settings cannot replace or discard it |
 | `CREDENTIAL_ENCRYPTION_KEY_FILE` | `$DATA_DIR/credential-key` | Read the phrase from this file instead. A Docker secret and a Kubernetes Secret both arrive as a file. On a read only mount, Settings cannot discard it |
 
-**Write the words down.** If the key is lost or replaced, every stored catalogue login has
-to be entered again. Restoring a backup onto another machine needs the phrase, because the
+**Write the words down.** If the key is lost or replaced, every stored catalogue login and
+settings secret has to be entered again. Restoring a backup onto another machine needs the phrase, because the
 archive deliberately does not carry the key.
 
 ### Which login is used
@@ -395,7 +400,8 @@ newer version that cannot read an archive refuses it and says which format it is
 - **A restore replaces everything** in the library. It asks first.
 - **A restore signs everybody out**, because the accounts table it brings back may give a
   live session's account number to somebody else.
-- **The archive does not carry the catalogue key.** Keep the recovery phrase with it:
+- **The archive does not carry the key** its logins and settings secrets are sealed with.
+  Keep the recovery phrase with it:
   [Catalogue logins](#catalogue-logins).
 
 **Copying `library.db` out from under a running container is not a consistent backup.**

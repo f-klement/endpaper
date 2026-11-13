@@ -965,6 +965,16 @@ def forget_the_encryption_key() -> Iterator[None]:
     forget_any_encryption_key()
 
 
+@pytest.fixture
+def encryption_key() -> bytes:
+    """A key, so a credential or a settings secret can be sealed. Removed again by
+    `forget_the_encryption_key` above."""
+    credentials.store_key(credentials.generate_phrase())
+    material = credentials.key_material()
+    assert material is not None
+    return material
+
+
 @pytest.fixture(autouse=True)
 def reset_rate_limits() -> None:
     """Clear every rate-limit counter between tests.

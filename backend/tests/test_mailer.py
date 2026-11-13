@@ -15,10 +15,11 @@ import config
 import mailer
 import settings_store
 from enums import SettingKey
+from tests.conftest import forget_any_encryption_key
 
 
 @pytest.fixture
-def configured(db):
+def configured(db, encryption_key):
     """A mail server that `checked_config` accepts."""
     settings_store.set_value(db, SettingKey.MAIL_SERVER, "smtp.example.org")
     settings_store.set_value(db, SettingKey.MAIL_PORT, "587")
@@ -27,6 +28,17 @@ def configured(db):
     settings_store.set_value(db, SettingKey.MAIL_DEFAULT_SENDER, "library@example.org")
     settings_store.set_value(db, SettingKey.OVERDUE_MAIL_TO, "house@example.org")
     return db
+
+
+class TestAPasswordNoKeyOpens:
+    def test_it_is_a_refusal_naming_the_cure(self, configured):
+        """A `MailRefused`, which every caller reports as a setting to change, and never
+        an empty password a send would go out without."""
+        settings_store.set_value(configured, SettingKey.MAIL_USERNAME, "library")
+        settings_store.set_value(configured, SettingKey.MAIL_PASSWORD, "hunter2")
+        forget_any_encryption_key()
+        with pytest.raises(mailer.MailRefused, match="Enter it again"):
+            mailer.checked_config(configured)
 
 
 class FakeSMTP:

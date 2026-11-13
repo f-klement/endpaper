@@ -1616,15 +1616,15 @@ settings that is roughly 109 days of held request. The same trickle now raises
 Every other secret this application stores is **its own**: an API key it uses, a mail
 password for its own mailbox, a webhook secret it signs with. A catalogue credential is
 **an institution's account with a third party**, held here on its behalf, and the failure
-mode is leaking somebody else's login rather than losing one of ours. That is why it does
-not live in the settings table, which is written in plaintext and which `backup.py` copies
-wholesale.
+mode is leaking somebody else's login rather than losing one of ours. That is why it has a
+table of its own rather than a row in `settings`. Both are sealed with the same key; the
+kinds differ in who owns the secret and what the envelope is bound to.
 
 **Three kinds of secret, and they are not interchangeable.**
 
 | Kind | Owner | Where | Who may replace it | If that person goes |
 |---|---|---|---|---|
-| The app's own | the deployment | `settings`, plaintext | any admin | nothing happens |
+| The app's own | the deployment | `settings`, sealed | any admin | nothing happens |
 | A catalogue account | the library | `catalogue_credentials`, sealed | any admin | nothing happens |
 | A member's own login elsewhere | one member | `member_logins`, sealed | that member | deleted with them |
 
@@ -1636,8 +1636,10 @@ associated data naming its own kind, the service and the member, so it opens on 
 member's row and in no other table. *A Readwise token leaves only for Readwise* says what
 the one such login today is used for.
 The distinction is enforced rather than described. Every sealed value is bound to
-additional authenticated data naming its kind, its subject and the origin it may be sent to
-(`endpaper/v2/catalogue-credential/<source>/<origin>`), so a ciphertext moved between rows,
+additional authenticated data naming its kind and its subject, and a login also the origin it
+may be sent to (`endpaper/v2/catalogue-credential/<source>/<origin>`; one of the app's own
+secrets is `endpaper/v2/app-setting/<name>`, with no origin because it is not sent to one
+address), so a ciphertext moved between rows,
 between kinds, between subjects, or beside an address a hand-edited archive wrote, fails
 authentication instead of decrypting into somebody else's request. **An envelope written under
 the previous version is opened and carried forward rather than refused**, at the one address this
@@ -2018,8 +2020,8 @@ prevented is doing it quietly:
 
 **A deployment with exactly one admin has no in app path**, because the flow is member
 initiated by design and nobody can approve that admin's own request. That case belongs to
-the operator: `README.md` names the command line reset, which is a capability whoever runs
-the container already has rather than a new one.
+the operator: `docs/configuration.md` names the command line reset, which is a capability
+whoever runs the container already has rather than a new one.
 
 ### Confirming an address
 
@@ -2167,17 +2169,20 @@ Worth knowing before exposing this beyond a private network:
   could not be reached."), or the message from a refusal, and every refusal in `mailer.py`
   and `notifications.py` names the shape of what is wrong rather than the value: "The
   Telegram bot token is not a bot token", never the token. It is admin only regardless.
-- **The backup carries every stored secret in plaintext, except catalogue credentials.**
-  `backup._TABLES` includes `settings`, so `endpaper.json` holds `mail_password`,
-  `telegram_bot_token`, `overdue_webhook_secret` and `google_books_api_key` in full,
-  unmasked. `catalogue_credentials` is the one table in the archive that is not: it holds
-  sealed envelopes and the key is never in the database. That is not an
-  escalation: a backup is admin only and an admin already sets those values. It matters
-  because of what they are rather than who can read them, and a household mail account is
-  usually the same account as everything else that household owns, so the archive deserves
-  the handling a password file gets. A deployment that would rather not carry them can pin
-  them through the environment instead, where they are never written to a settings row and
-  so never reach the archive.
+- **The backup carries the app's own secrets sealed, as it carries catalogue credentials.**
+  `mail_password`, `telegram_bot_token`, `overdue_webhook_secret` and `google_books_api_key`
+  (`settings_store.SECRET_KEYS`) are sealed at rest under `endpaper/v2/app-setting/<name>`,
+  so `endpaper.json` holds envelopes for them and the key is never in it. A restore under
+  the same key opens them; under another key, or none, each is listed on the settings
+  screen to be entered again. Until then a sender refuses rather than sending without it (no
+  unsigned webhook, no mail login without its password), and Google Books reads as not
+  ready. A write with no key is refused.
+  **One residue, by the owner's decision**: a secret written before the deployment had a
+  key stays plaintext, readable, until a key exists, and is sealed when one is made, a
+  phrase is entered, the app starts with one, or a restore runs with one. Until then an
+  archive from such a deployment carries it as typed. A deployment that would rather not
+  carry them at all can pin them through the environment, where they are never written to
+  a settings row.
 - **A hung mail server costs a worker thread, not the ticker.** `asyncio.to_thread` cannot
   be cancelled, so `MAIL_DEADLINE_SECONDS` bounds the coroutine and leaves the thread to
   expire on its own socket timeout. What it guarantees is that the hourly run and

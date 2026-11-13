@@ -20,14 +20,15 @@ import keyring.errors
 import pytest
 from sqlalchemy.exc import OperationalError
 
+import config
 import credentials
 import targets
 from database import Base
-from enums import CatalogueSource, CredentialProvenance
+from enums import CatalogueSource, CredentialProvenance, SettingKey
 from models import CatalogueCredential
 from tests.conftest import forget_any_encryption_key
 from tests.corpus import application_modules
-from tests.helpers import sealed_before_the_origin_was_bound
+from tests.helpers import sealed_before_the_origin_was_bound, store_plaintext
 from tests.test_house_rules import _docstring_nodes
 
 TREE_GUARDS = {
@@ -2618,3 +2619,72 @@ class TestTheSourceRuleAndItsConstraintAgree:
         with pytest.raises((IntegrityError, DataError)):
             db.commit()
         db.rollback()
+
+
+class TestAnAppSettingIsSealedForItsOwnName:
+    """`seal_setting` binds the envelope to the setting it was written for."""
+
+    def test_it_opens_under_its_own_name(self, encryption_key):
+        envelope = credentials.seal_setting(encryption_key, "mail_password", "hunter2")
+        assert credentials.unseal_setting(encryption_key, "mail_password", envelope) == "hunter2"
+
+    def test_it_does_not_open_under_another_settings_name(self, encryption_key):
+        """A mail password copied onto the webhook secret's row must not sign webhooks."""
+        envelope = credentials.seal_setting(encryption_key, "mail_password", "hunter2")
+        with pytest.raises(credentials.UnreadableCredential):
+            credentials.unseal_setting(encryption_key, "overdue_webhook_secret", envelope)
+
+    def test_it_does_not_open_as_a_catalogue_login(self, encryption_key):
+        envelope = credentials.seal_setting(encryption_key, "bne", "hunter2")
+        with pytest.raises(credentials.UnreadableCredential):
+            credentials.unseal(encryption_key, "bne", targets.SEEDED[CatalogueSource.BNE].base_url, envelope)
+
+    def test_under_another_key_it_says_the_key_changed(self, encryption_key):
+        envelope = credentials.seal_setting(encryption_key, "mail_password", "hunter2")
+        other = credentials.phrase_to_key(credentials.generate_phrase())
+        with pytest.raises(credentials.WrongKeyGeneration):
+            credentials.unseal_setting(other, "mail_password", envelope)
+
+
+class TestASealedSettingIsCountedWhenItIsStranded:
+    """`unreadable_settings` reads the shape of each row, never a list of names."""
+
+    def test_a_sealed_row_with_no_key_is_stranded(self, db, encryption_key):
+        store_plaintext(
+            db, SettingKey.MAIL_PASSWORD, credentials.seal_setting(encryption_key, "mail_password", "x")
+        )
+        assert credentials.unreadable_settings(db, credentials.KeyState(None)) == ["mail_password"]
+
+    def test_a_plaintext_row_is_never_stranded(self, db):
+        store_plaintext(db, SettingKey.MAIL_PASSWORD, "hunter2")
+        assert credentials.unreadable_settings(db, credentials.KeyState(None)) == []
+
+    def test_a_new_key_is_refused_over_one(self, db, encryption_key):
+        """Ciphertext proves a key existed, so the phrase is the answer, not a second key."""
+        store_plaintext(
+            db, SettingKey.MAIL_PASSWORD, credentials.seal_setting(encryption_key, "mail_password", "x")
+        )
+        forget_any_encryption_key()
+        with pytest.raises(credentials.KeyConfigurationError, match="mail_password"):
+            credentials.generate_key(db)
+
+    def test_the_refusal_names_the_variable_pinning_one(self, db, encryption_key, monkeypatch):
+        """A pinned field offers no Remove, so without the phrase the variable is the way out."""
+        store_plaintext(
+            db, SettingKey.MAIL_PASSWORD, credentials.seal_setting(encryption_key, "mail_password", "x")
+        )
+        forget_any_encryption_key()
+        monkeypatch.setenv("MAIL_PASSWORD", "from-the-environment")
+        with pytest.raises(credentials.KeyConfigurationError, match="MAIL_PASSWORD"):
+            credentials.generate_key(db)
+
+    def test_the_refusal_names_two_pinned_variables_as_a_list_in_one_sentence(
+        self, db, encryption_key, monkeypatch
+    ):
+        for key in (SettingKey.MAIL_PASSWORD, SettingKey.TELEGRAM_BOT_TOKEN):
+            store_plaintext(db, key, credentials.seal_setting(encryption_key, key.value, "x"))
+            monkeypatch.setenv(config.env_variable_name(key), "from-the-environment")
+        forget_any_encryption_key()
+        with pytest.raises(credentials.KeyConfigurationError) as refusal:
+            credentials.generate_key(db)
+        assert "unset MAIL_PASSWORD and TELEGRAM_BOT_TOKEN where" in str(refusal.value)

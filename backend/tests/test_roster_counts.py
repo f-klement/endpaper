@@ -250,6 +250,7 @@ from pathlib import Path
 import pytest
 
 import sources
+import targets
 from enums import CatalogueSource
 from tests.corpus import is_vendored, markdown_files, project_files
 from tests.declaration import HEADER_LINES, SENTENCE, declares, declares_itself_internal
@@ -2741,3 +2742,109 @@ def test_the_register_of_decisions_is_read():
     assert read, "docs/decisions.md is out of scope again; see DATED_REGISTERS"
     judged = [o for o, _ in verdicts() if o.path == "docs/decisions.md"]
     assert judged, "docs/decisions.md is in scope and no verdict judges anything in it"
+
+
+class TestTheFeatureListNamesTheRosterAsSourcesHoldsIt:
+    """`docs/featurelist.md` spells the default plan out by name, and this holds
+    it to `sources.py` and `targets.SEEDED`.
+
+    The census above checks numbers. The paragraph *Which catalogues, and in what
+    order by default* carries no number: it names which catalogues answer an
+    ISBN and in what order, which are asked together, which keep to their ISBN
+    groups, and which answer a title search. A source added, reordered or given a
+    remit leaves every count right and that paragraph wrong, which is how the
+    README's version of it went stale.
+
+    **Read by name, so `NAMES` is the one list here**, and a source it lacks
+    fails `test_every_source_has_a_name` rather than going unread. A sentence the
+    paragraph gains about some other subject that names a catalogue is read as
+    part of whichever half it sits in.
+    """
+
+    DOCUMENT = REPO / "docs" / "featurelist.md"
+    LEAD = "**Which catalogues, and in what order by default.**"
+
+    #: How the paragraph names each source in full.
+    NAMES: dict[CatalogueSource, str] = {
+        CatalogueSource.DNB: "German National Library",
+        CatalogueSource.K10PLUS: "K10plus",
+        CatalogueSource.OPEN_LIBRARY: "Open Library",
+        CatalogueSource.NKP: "Czech National Library",
+        CatalogueSource.BNE: "Spanish National Library",
+        CatalogueSource.NLG: "National Library of Greece",
+        CatalogueSource.OENB: "Austrian National Library",
+        CatalogueSource.BNA: "Argentine National Library",
+        CatalogueSource.BNU: "Uruguayan National Library",
+        CatalogueSource.GOOGLE_BOOKS: "Google Books",
+        CatalogueSource.BNF: "National Library of France",
+        CatalogueSource.LOC: "Library of Congress",
+    }
+
+    #: The short form a list of libraries uses, "the Greek and Austrian
+    #: libraries". A source with none is matched by its full name alone.
+    ADJECTIVES: dict[CatalogueSource, str] = {
+        CatalogueSource.DNB: "German",
+        CatalogueSource.NKP: "Czech",
+        CatalogueSource.BNE: "Spanish",
+        CatalogueSource.NLG: "Greek",
+        CatalogueSource.OENB: "Austrian",
+        CatalogueSource.BNA: "Argentine",
+        CatalogueSource.BNU: "Uruguayan",
+        CatalogueSource.BNF: "French",
+    }
+
+    @classmethod
+    def paragraph(cls) -> str:
+        text = cls.DOCUMENT.read_text(encoding="utf-8")
+        start = text.index(cls.LEAD)
+        end = text.find("\n\n", start)
+        return " ".join(text[start : end if end != -1 else len(text)].split())
+
+    @classmethod
+    def named(cls, text: str, *, short: bool) -> set[CatalogueSource]:
+        """The sources `text` names, in full or, where `short`, by adjective."""
+        return {
+            source
+            for source, name in cls.NAMES.items()
+            if name in text
+            or (short and source in cls.ADJECTIVES and re.search(rf"\b{cls.ADJECTIVES[source]}\b", text))
+        }
+
+    def halves(self) -> tuple[str, str]:
+        """The ISBN half and the title search half."""
+        lookup, marker, search = self.paragraph().partition("A title search")
+        assert marker, f"no title search sentence in {self.LEAD}"
+        return lookup, marker + search
+
+    def test_every_source_has_a_name(self) -> None:
+        assert set(self.NAMES) == set(CatalogueSource)
+
+    def test_the_lookup_sources_are_named_in_the_default_order(self) -> None:
+        lookup, _ = self.halves()
+        named = sorted(self.named(lookup, short=False), key=lambda source: lookup.index(self.NAMES[source]))
+
+        assert named == [source for source in sources.DEFAULT_ORDER if source in sources.LOOKUP_SOURCES]
+
+    def test_the_sources_asked_together_are_the_first_tier(self) -> None:
+        sentence = next(part for part in self.paragraph().split(". ") if "asked together" in part)
+
+        assert self.named(sentence, short=False) == set(sources.DEFAULT_PLAN.lookup_together)
+
+    def test_the_sources_with_a_remit_are_the_ones_named_as_keeping_to_one(self) -> None:
+        sentence = next(part for part in self.paragraph().split(". ") if "registration groups" in part)
+        subject = sentence.partition("are asked only")[0]
+
+        assert self.named(subject, short=True) == {
+            source for source in sources.LOOKUP_SOURCES if targets.SEEDED[source].serves_groups
+        }
+
+    def test_the_title_search_names_the_search_sources(self) -> None:
+        _, search = self.halves()
+        only, marker, _ = search.partition("which answer title searches")
+        assert marker, "no sentence naming the sources that answer title searches only"
+
+        assert self.named(search, short=True) == set(sources.SEARCH_SOURCES)
+        assert (
+            self.named(only.rpartition("and also")[2], short=True)
+            == sources.SEARCH_SOURCES - sources.LOOKUP_SOURCES
+        )

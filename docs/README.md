@@ -1,82 +1,36 @@
-# Developer documentation
+# Documentation
 
-The top-level [`README`](../README.md) covers running and operating Endpaper. These
-pages are for changing it.
+Every document here, by what you came to do. What Endpaper is and how to start it is the
+top level [README](../README.md).
+
+## Use it
+
+| Document | What it covers |
+|---|---|
+| [handbook.md](handbook.md) | How to use Endpaper, task by task: first for members, then for admins |
+| [featurelist.md](featurelist.md) | What the app does today, and what it deliberately does not |
+| [../GLOSSARY.md](../GLOSSARY.md) | The words the app and these documents use: member, book, copy, loan, private book and the rest |
+| [legend.md](legend.md) | The library science vocabulary this codebase borrows: the catalogues, MARC, the classification and authority schemes, and the codes inside a record |
+
+## Run it
 
 | Document | What it covers |
 |---|---|
 | [configuration.md](configuration.md) | Installing and running it: every environment variable, the database, sign in, backups, upgrading and recovery |
-| [featurelist.md](featurelist.md) | What the app does today, and what it deliberately does not |
-| [handbook.md](handbook.md) | How to use Endpaper, task by task: first for members, then for admins |
-| [architecture.md](architecture.md) | How the pieces fit: the single-container model, request routing, the build |
+| [security.md](security.md) | The authorization model, rate limiting, uploads, headers, and the known limits |
+
+## Change it
+
+| Document | What it covers |
+|---|---|
+| [architecture.md](architecture.md) | How the pieces fit, from the request path down to every backend module, with diagrams. Start here |
 | [data-model.md](data-model.md) | The tables, the relationships, and the privacy rule that every query must honour |
 | [api.md](api.md) | Every endpoint, its auth requirement, and the status codes it returns |
-| [theming.md](theming.md) | The ten palettes and the rule that generated them, the sixteen wallpapers and the rule that admits them, the picker, and where an appearance is stored |
 | [frontend.md](frontend.md) | Component and page layout, state handling, the typed API client |
-| [security.md](security.md) | The authorization model, rate limiting, uploads, headers, and the known limits |
-| [testing.md](testing.md) | How the mirrored test tree works and the conventions to follow when adding tests |
+| [theming.md](theming.md) | The ten palettes and the rule that generated them, the sixteen wallpapers and the rule that admits them, the picker, and where an appearance is stored |
+| [testing.md](testing.md) | Running the suites, how the mirrored test tree works, and the conventions to follow when adding tests |
 | [device-libraries.md](device-libraries.md) | Reading a catalogue off a device the member owns: what the SQLite engine costs, and the rule that an unreadable store is one skipped source |
 | [cloud-exports.md](cloud-exports.md) | Reading a library out of a service's own export: which seam an export belongs to, and why a name inside a member's file is not evidence |
-| [legend.md](legend.md) | The library science vocabulary this codebase borrows: the catalogues, MARC, the classification and authority schemes, and the codes inside a record. |
-| [decisions.md](decisions.md) | Choices that look odd until you know why. Read before "fixing" one. |
-| [decisions-index.md](decisions-index.md) | Every entry of the register, with the section it sits under and how long it is. Generated from its headings, and a grep target rather than a page to read |
 | [../conformance/README.md](../conformance/README.md) | The shared fixture set: rules that must give the same answer in Python and in TypeScript, and how to add a case |
-
-## Orientation
-
-```
-endpaper/
-├── backend/              FastAPI application
-│   ├── main.py           app wiring, tag seeding, the ad-hoc migration
-│   ├── serialisation.py  assembling BookOut, and the per-request fields
-│   ├── config.py         environment-driven settings + the startup secret guard
-│   ├── dependencies.py   book access control and pagination
-│   ├── models.py         ORM models and the visible_to() predicate
-│   ├── schemas/          request/response contracts, one module per domain
-│   ├── auth.py           password hashing and JWTs
-│   ├── auth_backends.py  local / LDAP / proxy identity sources
-│   ├── settings_store.py runtime settings (feature flags, the API key)
-│   ├── isbn.py           parsing, validation, ISBN-10 to ISBN-13
-│   ├── ddc.py            Dewey headings, and the divisions that suggest a tag
-│   ├── google_books.py   metadata lookup, search and the gap-filling merge
-│   ├── goodreads.py      reading a CSV export
-│   ├── schema.py         Alembic runner: create, adopt or upgrade
-│   ├── migrations/       Alembic revisions
-│   ├── ratelimit.py      the login/registration limiter
-│   ├── uploads.py        content-sniffed image validation
-│   ├── errors.py         content-negotiated error responses
-│   ├── middleware.py     security headers
-│   ├── routers/          one module per domain
-│   └── tests/            mirrors backend/, see its COVERAGE.md
-├── frontend/             React PWA
-│   ├── src/
-│   │   ├── api/          mutator, query client, generated/ (Orval output)
-│   │   ├── app/          shell: routing, providers, top bar
-│   │   ├── components/   general dumb components only
-│   │   ├── i18n/         English and German message catalogues
-│   │   ├── lib/          pure helpers: ISBN parsing, Goodreads URLs
-│   │   └── pages/        one folder per page, with its own hooks/types/components
-│   └── tests/            mirrors frontend/src/, see its COVERAGE.md
-├── conformance/          language neutral fixtures both suites run, see its README
-└── docs/                 you are here
-```
-
-## The shortest useful summary
-
-One container. FastAPI serves both the JSON API and the compiled React bundle, so there
-is no CORS problem in production and no second web server. Authentication is a stateless
-JWT in `localStorage`. Storage is a single SQLite file plus a directory of uploaded cover
-images, both under `DATA_DIR`. Book metadata is fetched on demand from the German
-National Library and K10plus together, with Open Library, the Czech National Library, the
-Spanish National Library, the National Library of Greece, the Austrian National Library, the
-Biblioteca Nacional Argentina and Google Books as fallbacks. Two of those need a credential
-before they answer anything, Google Books a key you supply and the Argentine catalogue a
-login the library publishes and Endpaper ships, so a stock install runs eight of the nine
-and only Google Books needs anything typed.
-
-The frontend's API client and its React Query hooks are **generated** from the backend's
-OpenAPI schema, so the two halves cannot drift apart silently. Access to a book is decided
-in one place, `backend/dependencies.py`, and the rules are in [security.md](security.md).
-
-Nothing in the stack requires a network connection except the metadata lookup, and
-nothing in the test suite requires one at all.
+| [decisions.md](decisions.md) | Choices that look odd until you know why. Read before "fixing" one |
+| [decisions-index.md](decisions-index.md) | Every entry of the register, with the section it sits under and how long it is. Generated from its headings, and a grep target rather than a page to read |

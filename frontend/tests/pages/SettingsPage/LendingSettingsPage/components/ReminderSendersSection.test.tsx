@@ -165,6 +165,24 @@ describe("ReminderSendersSection", () => {
       renderSection();
       expect(screen.queryByText("Remove stored password")).toBeNull();
     });
+
+    it("says it must be entered again when no key opens it, and offers to clear it", () => {
+      // Clearing needs no key, and is what lets a new key be made once the
+      // recovery phrase is lost.
+      const { onSave } = renderSection({
+        unreadable_secrets: ["mail_password"],
+      });
+      expect(
+        screen.getByText(/stored under a different encryption key/i),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Remove stored password"));
+      expect(onSave).toHaveBeenCalledWith({ mail_password: "" });
+    });
+
+    it("says nothing about a key when the bot token is the one no key opens", () => {
+      renderSection({ unreadable_secrets: ["telegram_bot_token"] });
+      expect(screen.queryByText("Remove stored password")).toBeNull();
+    });
   });
 
   describe("the bot token", () => {

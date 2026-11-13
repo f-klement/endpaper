@@ -1117,6 +1117,16 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
 
     db.commit()
 
+    # `settings` carries the app's own four secrets (`settings_store.SECRET_KEYS`)
+    # **sealed**, as `catalogue_credentials` carries its logins and with its cost:
+    # the key is never in the archive, so a restore onto a machine without it
+    # brings each back unreadable until the recovery phrase is entered. Meanwhile
+    # a sender refuses and Google Books reads as not ready. An archive written
+    # before secrets were sealed, or by a deployment that never had a key, carries
+    # them in plaintext: sealed now if this deployment has a key, kept readable
+    # until it does otherwise. The owner's rule.
+    settings_store.seal_plaintext_secrets(db)
+
     # Covers last, and only once the database is committed. A cover with no row
     # is orphaned clutter; a row with no cover shows the placeholder. The
     # second is the better failure.

@@ -18,6 +18,8 @@ interface SecretFieldProps {
   saveLabel: string;
   clearLabel: string;
   hasStored: boolean;
+  /** Sealed under a key this deployment cannot open: say so, and offer Remove. */
+  unreadable?: boolean;
   /** Fixed by the deployment: nothing to type, unmask, save or remove. */
   pinned?: boolean;
   /** Shown where the buttons would be, when pinned. */
@@ -59,6 +61,7 @@ export default function SecretField({
   saveLabel,
   clearLabel,
   hasStored,
+  unreadable = false,
   pinned = false,
   pinnedNotice,
   isSaving,
@@ -70,25 +73,9 @@ export default function SecretField({
   const [value, setValue] = useState("");
   const [shown, setShown] = useState(false);
 
-  const labelElement = (
-    <label
-      htmlFor={id}
-      className="block text-xs font-medium text-paper-600 dark:text-paper-300"
-    >
-      {label}
-    </label>
-  );
-
   return (
     <div className="space-y-1.5">
-      {labelAside ? (
-        <div className="flex items-center gap-2">
-          {labelElement}
-          {labelAside}
-        </div>
-      ) : (
-        labelElement
-      )}
+      <FieldLabel id={id} label={label} aside={labelAside} />
       <div className="relative">
         <input
           id={id}
@@ -121,34 +108,104 @@ export default function SecretField({
         )}
       </div>
       <p className="text-xs text-paper-600 dark:text-paper-400">{status}</p>
+      {unreadable && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-200 dark:bg-amber-950 dark:border-amber-900">
+          {t("settings.secretUnreadable")}
+        </p>
+      )}
       {pinned ? (
         pinnedNotice
       ) : (
-        <div className="flex gap-2 pt-1">
-          <button
-            type="button"
-            disabled={isSaving || value.trim() === ""}
-            onClick={() => {
-              onSave(value.trim());
-              setValue("");
-            }}
-            className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
-          >
-            {isSaving ? t("common.saving") : saveLabel}
-          </button>
-          {hasStored && (
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={onClear}
-              className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
-            >
-              {clearLabel}
-            </button>
-          )}
-        </div>
+        <SecretActions
+          draft={value}
+          saveLabel={saveLabel}
+          clearLabel={clearLabel}
+          offerClear={hasStored || unreadable}
+          isSaving={isSaving}
+          onSave={(draft) => {
+            onSave(draft);
+            setValue("");
+          }}
+          onClear={onClear}
+        />
       )}
       {children}
     </div>
+  );
+}
+
+/** Save and Remove, for a field the deployment has not pinned. */
+function SecretActions({
+  draft,
+  saveLabel,
+  clearLabel,
+  offerClear,
+  isSaving,
+  onSave,
+  onClear,
+}: {
+  draft: string;
+  saveLabel: string;
+  clearLabel: string;
+  offerClear: boolean;
+  isSaving: boolean;
+  /** Called with the trimmed draft, never with an empty one. */
+  onSave: (value: string) => void;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex gap-2 pt-1">
+      <button
+        type="button"
+        disabled={isSaving || draft.trim() === ""}
+        onClick={() => onSave(draft.trim())}
+        className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+      >
+        {isSaving ? t("common.saving") : saveLabel}
+      </button>
+      {/* Offered on an unreadable row too: clearing it needs no key, and
+          it is what lets a new key be made once the phrase is lost. */}
+      {offerClear && (
+        <button
+          type="button"
+          disabled={isSaving}
+          onClick={onClear}
+          className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
+        >
+          {clearLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The field's label, with the caller's aside beside it when there is one. */
+function FieldLabel({
+  id,
+  label,
+  aside,
+}: {
+  id: string;
+  label: string;
+  aside: ReactNode;
+}) {
+  const labelElement = (
+    <label
+      htmlFor={id}
+      className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+    >
+      {label}
+    </label>
+  );
+
+  return aside ? (
+    <div className="flex items-center gap-2">
+      {labelElement}
+      {aside}
+    </div>
+  ) : (
+    labelElement
   );
 }

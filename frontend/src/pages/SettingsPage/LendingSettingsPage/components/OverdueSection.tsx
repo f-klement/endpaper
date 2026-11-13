@@ -74,10 +74,6 @@ export default function OverdueSection({
   health,
 }: OverdueSectionProps) {
   const { t } = useTranslation();
-  // A draft rather than a controlled mirror of `settings`: typing a URL should
-  // not save it a character at a time.
-  const [url, setUrl] = useState(settings.overdue_webhook_url ?? "");
-  const urlDirty = url !== (settings.overdue_webhook_url ?? "");
 
   return (
     <SettingsSection title={t("settings.overdue")} icon="handshake">
@@ -102,58 +98,16 @@ export default function OverdueSection({
         {t("settings.overduePrivacyNote")}
       </p>
 
-      <div className="space-y-1.5">
-        <label
-          htmlFor="overdue-webhook-url"
-          className="block text-xs font-medium text-paper-600 dark:text-paper-300"
-        >
-          {t("settings.overdueUrl")}
-        </label>
-        <input
-          id="overdue-webhook-url"
-          type="url"
-          autoComplete="off"
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder={t("settings.overdueUrlPlaceholder")}
-          className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-        />
-        {/* Named for its field rather than "Save". Three buttons reading
-            "Save" on one screen is one label a screen reader repeats three
-            times with nothing to tell them apart. */}
-        {urlDirty && (
-          <button
-            type="button"
-            disabled={isSaving}
-            onClick={() => onSave({ overdue_webhook_url: url.trim() })}
-            className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
-          >
-            {isSaving ? t("common.saving") : t("settings.overdueUrlSave")}
-          </button>
-        )}
-      </div>
-
-      <SecretField
-        id="overdue-webhook-secret"
-        label={t("settings.overdueSecret")}
-        placeholder={t("settings.overdueSecretPlaceholder")}
-        showLabel={t("settings.overdueSecretShow")}
-        hideLabel={t("settings.overdueSecretHide")}
-        status={
-          settings.has_overdue_webhook_secret
-            ? t("settings.overdueSecretSet", {
-                preview: settings.overdue_webhook_secret_preview ?? "",
-              })
-            : t("settings.overdueSecretMissing")
-        }
-        saveLabel={t("settings.overdueSecretSave")}
-        clearLabel={t("settings.overdueSecretClear")}
-        hasStored={settings.has_overdue_webhook_secret === true}
+      <WebhookUrlField
+        stored={settings.overdue_webhook_url}
         isSaving={isSaving}
-        onSave={(value) => onSave({ overdue_webhook_secret: value })}
-        // An empty string clears it; `undefined` would mean "leave alone",
-        // which is the opposite.
-        onClear={() => onSave({ overdue_webhook_secret: "" })}
+        onSave={onSave}
+      />
+
+      <WebhookSecretField
+        settings={settings}
+        isSaving={isSaving}
+        onSave={onSave}
       />
 
       <ReminderDaysField
@@ -182,6 +136,94 @@ export default function OverdueSection({
         )}
       </div>
     </SettingsSection>
+  );
+}
+
+interface WebhookFieldProps {
+  isSaving: boolean;
+  onSave: (patch: SettingsUpdate) => void;
+}
+
+/** Where the digest is posted, as a draft with its own save. */
+function WebhookUrlField({
+  stored,
+  isSaving,
+  onSave,
+}: WebhookFieldProps & { stored: string | null | undefined }) {
+  const { t } = useTranslation();
+  // A draft rather than a controlled mirror of `settings`: typing a URL should
+  // not save it a character at a time.
+  const [url, setUrl] = useState(stored ?? "");
+  const urlDirty = url !== (stored ?? "");
+
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor="overdue-webhook-url"
+        className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+      >
+        {t("settings.overdueUrl")}
+      </label>
+      <input
+        id="overdue-webhook-url"
+        type="url"
+        autoComplete="off"
+        value={url}
+        onChange={(event) => setUrl(event.target.value)}
+        placeholder={t("settings.overdueUrlPlaceholder")}
+        className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+      />
+      {/* Named for its field rather than "Save". Three buttons reading
+          "Save" on one screen is one label a screen reader repeats three
+          times with nothing to tell them apart. */}
+      {urlDirty && (
+        <button
+          type="button"
+          disabled={isSaving}
+          onClick={() => onSave({ overdue_webhook_url: url.trim() })}
+          className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+        >
+          {isSaving ? t("common.saving") : t("settings.overdueUrlSave")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The webhook's signing secret, write only. */
+function WebhookSecretField({
+  settings,
+  isSaving,
+  onSave,
+}: WebhookFieldProps & { settings: SettingsOut }) {
+  const { t } = useTranslation();
+
+  return (
+    <SecretField
+      id="overdue-webhook-secret"
+      label={t("settings.overdueSecret")}
+      placeholder={t("settings.overdueSecretPlaceholder")}
+      showLabel={t("settings.overdueSecretShow")}
+      hideLabel={t("settings.overdueSecretHide")}
+      status={
+        settings.has_overdue_webhook_secret
+          ? t("settings.overdueSecretSet", {
+              preview: settings.overdue_webhook_secret_preview ?? "",
+            })
+          : t("settings.overdueSecretMissing")
+      }
+      saveLabel={t("settings.overdueSecretSave")}
+      clearLabel={t("settings.overdueSecretClear")}
+      hasStored={settings.has_overdue_webhook_secret === true}
+      unreadable={(settings.unreadable_secrets ?? []).includes(
+        "overdue_webhook_secret",
+      )}
+      isSaving={isSaving}
+      onSave={(value) => onSave({ overdue_webhook_secret: value })}
+      // An empty string clears it; `undefined` would mean "leave alone",
+      // which is the opposite.
+      onClear={() => onSave({ overdue_webhook_secret: "" })}
+    />
   );
 }
 

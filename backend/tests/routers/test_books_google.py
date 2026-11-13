@@ -54,7 +54,7 @@ def volume(
 
 
 @pytest.fixture
-def google_enabled(client, admin):
+def google_enabled(client, admin, encryption_key):
     """Switch the feature on and store a key, as an admin would in Settings."""
     client.put(
         "/api/settings",
@@ -314,7 +314,7 @@ class TestKeyHandling:
         """
         import settings_store
 
-        assert settings_store.get_raw(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "test-key"
+        assert settings_store.in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY) == "test-key"
 
 
 class TestApplyingAChosenEdition:

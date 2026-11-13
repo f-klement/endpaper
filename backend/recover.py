@@ -6,7 +6,8 @@ admin has nobody who can approve that admin's own request. Owner's decision on
 issue #105: that case belongs to the operator rather than to the product.
 Whoever runs the container can already read and write the database, so this adds
 no capability; it names the one that exists, so the last admin does not conclude
-the deployment is lost. `README.md` carries the recipe.
+the deployment is lost. `docs/configuration.md` carries the recipe, under
+*Recovering the only admin*.
 
 **Never reachable over HTTP.** Nothing imports this module; it is run as
 `python -m recover`, which means the only caller is somebody with a shell in the

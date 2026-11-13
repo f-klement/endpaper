@@ -690,8 +690,8 @@ rather than deleted, so unsetting the variable restores it.
 ### Sealed logins
 
 **A login at somebody else's catalogue is not one of the app's own secrets**, so it does not
-live in `settings`, which is plaintext and goes whole into every backup. `credentials.py`
-seals each one at rest, bound to its kind, its subject and the origin it is for, so a
+live in `settings`, whose four secrets are sealed under their own names. `credentials.py`
+seals each login at rest, bound to its kind, its subject and the origin it is for, so a
 ciphertext moved to another row or another address fails to open rather than being sent there.
 The key comes from the deployment and is never a default.
 

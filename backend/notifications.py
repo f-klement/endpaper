@@ -145,7 +145,11 @@ class TelegramRefused(Exception):
 #: module that owns SMTP and importing a base from here would be a cycle. The
 #: cost is this line; the benefit is that neither module has to know the other's
 #: hierarchy.
-_REFUSALS: Final = (WebhookRefused, TelegramRefused, mailer.MailRefused)
+#:
+#: `settings_store.UnreadableSecret` is the fourth: the webhook secret or the bot
+#: token sealed under a key this deployment no longer has. Read before anything
+#: is dialled, it is a setting to enter again, never an unsigned or tokenless send.
+_REFUSALS: Final = (WebhookRefused, TelegramRefused, mailer.MailRefused, settings_store.UnreadableSecret)
 
 
 def checked_url(raw: str) -> str:
@@ -1000,7 +1004,7 @@ MIN_FAILURES_TO_INTERRUPT: Final = 2
 #:
 #: This is the whole of the network versus configuration distinction, and it is
 #: a property of the code rather than a guess about the world: every one of
-#: these comes out of `_REFUSALS`, and all three of those are raised before
+#: these comes out of `_REFUSALS`, and every one of those is raised before
 #: anything is dialled. `checked_url` is string handling, `send_telegram`
 #: matches both of its regexes before `_post`, and `mailer.checked_config`
 #: raises long before `smtplib.SMTP(...)` is constructed.

@@ -27,6 +27,7 @@ import logging
 import secrets
 from typing import Any, Final
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import config
@@ -120,7 +121,9 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS: "false",
 }
 
-# Settings whose value must never be sent back to a browser in full.
+# Settings whose value must never be sent back to a browser in full, and which are
+# sealed at rest: `set_value` seals every one of them and `in_force` opens it, so a
+# key added here is sealed by construction.
 SECRET_KEYS: Final[frozenset[SettingKey]] = frozenset(
     {
         SettingKey.GOOGLE_BOOKS_API_KEY,
@@ -224,15 +227,148 @@ def get_locale(db: Session, key: SettingKey) -> Locale:
         return Locale(DEFAULTS[key])
 
 
+class UnreadableSecret(Exception):
+    """A sealed secret this deployment's key cannot open.
+
+    Raised rather than answered as empty, because an empty webhook secret is an
+    unsigned delivery and an empty mail password is a login attempted without one:
+    a sender meeting this refuses, and says the secret has to be entered again.
+    """
+
+
+#: What a write of a secret is told when there is no key to seal it with.
+#:
+#: **Refused rather than written in plaintext**, the owner's rule: a row from
+#: before a key stays readable, but nothing new is written that the archive would
+#: carry in the clear.
+_NO_KEY_TO_SEAL: Final = (
+    "This deployment has no encryption key, so a secret cannot be stored. Create one "
+    "on the Catalogue settings screen, or set CREDENTIAL_ENCRYPTION_KEY where the app "
+    "is configured."
+)
+
+
+def _storable(key: SettingKey, value: str | None) -> str | None:
+    """The value as the row holds it: sealed for a secret, as given otherwise.
+
+    An empty secret is a clear and needs no key, which is what lets somebody who
+    lost the phrase clear a stranded field before making a new key.
+    """
+    if key not in SECRET_KEYS or not value:
+        return value
+    material = credentials.key_state().material
+    if material is None:
+        raise credentials.NoKeyConfigured(_NO_KEY_TO_SEAL)
+    return credentials.seal_setting(material, key.value, value)
+
+
 def set_value(db: Session, key: SettingKey, value: str | None) -> None:
-    """Write a setting. `None` clears it back to the default."""
+    """Write a setting. `None` clears it back to the default.
+
+    A secret (`SECRET_KEYS`) is sealed on the way in, and refused with
+    `credentials.NoKeyConfigured` when there is no key.
+    """
+    stored = _storable(key, value)
     row = db.get(Setting, key.value)
     if row is None:
-        row = Setting(key=key.value, value=value)
+        row = Setting(key=key.value, value=stored)
         db.add(row)
     else:
-        row.value = value
+        row.value = stored
     db.commit()
+
+
+def _opened(key: SettingKey, raw: str, state: credentials.KeyState | None) -> str:
+    """A stored value as its reader takes it: a secret's envelope opened.
+
+    **A plaintext row is answered as it is**: a secret written before this
+    deployment had a key, kept readable until `seal_plaintext_secrets` seals it.
+    """
+    if key not in SECRET_KEYS or not credentials.is_sealed(raw):
+        return raw
+    material = _resolved(state).material
+    if material is None:
+        raise UnreadableSecret(f"The {key.value} was sealed with a key this deployment does not have.")
+    try:
+        return credentials.unseal_setting(material, key.value, raw)
+    except credentials.CredentialError as refusal:
+        raise UnreadableSecret(f"The {key.value} cannot be opened: {refusal}") from None
+
+
+def _resolved(state: credentials.KeyState | None) -> credentials.KeyState:
+    """The key a caller already resolved, or this one resolution if it did not."""
+    return credentials.key_state() if state is None else state
+
+
+def seal_plaintext_secrets(db: Session, state: credentials.KeyState | None = None) -> int:
+    """Seal every secret still held in plaintext, if there is a key. Returns how many.
+
+    **The other half of the owner's rule**: a secret written before a key existed
+    stays readable until one does, and is sealed the moment one does. Called where
+    a key can appear, which is start up (a key set in the environment or a file),
+    `POST` and `PUT /api/settings/credential-key`, and a restore, which can bring
+    back an archive written before secrets were sealed.
+
+    **The rows are read before the key is resolved**, because nothing is usually
+    left to seal and every start calls this: resolving first read the keychain on
+    a desktop at each start for nothing.
+
+    **A database error is logged and answered 0, never raised.** Both route
+    callers run after the key is stored and `restore` after its commit, so a
+    raise here would lose the recovery phrase shown once, or the covers. The
+    rows stay plaintext and readable, and the next start seals them.
+    """
+    try:
+        return _seal_plaintext_rows(db, state)
+    except SQLAlchemyError as error:
+        db.rollback()
+        # The type alone: the statement's parameters are what was being written.
+        logger.warning("Settings secrets were left unsealed: %s", type(error).__name__)
+        return 0
+
+
+def _seal_plaintext_rows(db: Session, state: credentials.KeyState | None) -> int:
+    """`seal_plaintext_secrets` without its refusal handling."""
+    plaintext = [
+        (row, value)
+        for row in db.query(Setting).filter(Setting.key.in_([key.value for key in SECRET_KEYS]))
+        if (value := row.value) and not credentials.is_sealed(value)
+    ]
+    if not plaintext:
+        return 0
+    material = _resolved(state).material
+    if material is None:
+        return 0
+    for row, value in plaintext:
+        row.value = credentials.seal_setting(material, row.key, value)
+    db.commit()
+    return len(plaintext)
+
+
+def unreadable_secrets(db: Session, state: credentials.KeyState | None = None) -> list[str]:
+    """The secrets whose stored envelope cannot be opened here, by name, sorted.
+
+    What the settings screen says "enter it again" beside. Read off what is
+    stored rather than what is in force, so a secret the environment pins over a
+    stranded row is still reported: the row is what a key change strands.
+    """
+    resolved = _resolved(state)
+    stored = {
+        row.key: row.value
+        for row in db.query(Setting).filter(Setting.key.in_([key.value for key in SECRET_KEYS]))
+    }
+    return [
+        key.value for key in sorted(SECRET_KEYS) if not _opens(key, stored.get(key.value) or "", resolved)
+    ]
+
+
+def _opens(key: SettingKey, raw: str, state: credentials.KeyState) -> bool:
+    """Whether this stored value of a setting can be taken by its reader."""
+    try:
+        _opened(key, raw, state)
+    except UnreadableSecret:
+        return False
+    return True
 
 
 def mask(value: str) -> str:
@@ -249,8 +385,13 @@ def mask(value: str) -> str:
     return f"{'•' * 8}{value[-4:]}"
 
 
-def in_force(db: Session, key: SettingKey) -> str:
+def in_force(db: Session, key: SettingKey, state: credentials.KeyState | None = None) -> str:
     """The value actually used: the environment's if it supplied one, else the stored one.
+
+    **A secret is opened here, and this is the one seam that opens it.** Every
+    reader of the four `SECRET_KEYS` takes the plaintext from this function, and
+    one the key cannot open raises `UnreadableSecret`. `state` is a key already
+    resolved, for a caller that reads more than one.
 
     **Every consumer of a settable value goes through here rather than
     `get_raw`, and the two are not interchangeable.** `get_raw` answers "what is
@@ -285,7 +426,7 @@ def in_force(db: Session, key: SettingKey) -> str:
     argued. The first key of theirs to earn one fails the guard above until the
     arm exists, which is the order the work has to happen in.
     """
-    return config.env_override(key) or get_raw(db, key)
+    return config.env_override(key) or _opened(key, get_raw(db, key), state)
 
 
 def bool_in_force(db: Session, key: SettingKey) -> bool:
@@ -306,9 +447,32 @@ def is_from_env(key: SettingKey) -> bool:
     return bool(config.env_override(key))
 
 
-def google_books_api_key(db: Session) -> str:
-    """The key actually in force. See `in_force`; this name has its own callers."""
-    return in_force(db, SettingKey.GOOGLE_BOOKS_API_KEY)
+def in_force_if_readable(db: Session, key: SettingKey, state: credentials.KeyState | None = None) -> str:
+    """`in_force`, answering empty for a sealed secret the key cannot open.
+
+    For a reader that degrades rather than refuses: the settings screen's
+    previews, where `unreadable_secrets` says which to enter again, and the
+    Google Books key on the path that adds a book. A sender refuses instead, so
+    it calls `in_force`.
+    """
+    try:
+        return in_force(db, key, state)
+    except UnreadableSecret:
+        return ""
+
+
+def google_books_api_key(db: Session, state: credentials.KeyState | None = None) -> str:
+    """The key actually in force. See `in_force`; this name has its own callers.
+
+    **Empty when the stored key cannot be opened, rather than raising**: this is
+    read on the path that adds a book, and a key nobody can read is a source that
+    is not ready, which is what `ready_sources` then answers. The settings screen
+    is what says it has to be entered again.
+
+    `state` is the request's resolved key: a sealed key opened without one is a
+    keychain round trip on a desktop, on the member request path.
+    """
+    return in_force_if_readable(db, SettingKey.GOOGLE_BOOKS_API_KEY, state)
 
 
 #: The sources whose credential is a **settings row** rather than a sealed login.
@@ -332,7 +496,9 @@ def google_books_api_key(db: Session) -> str:
 _SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_BOOKS})
 
 
-def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
+def _sources_with_a_credential(
+    db: Session, state: credentials.KeyState | None = None
+) -> set[CatalogueSource]:
     """Which credential-needing sources hold a readable login, from any level.
 
     **Two sources today, and that is a fact about the roster rather than about
@@ -360,11 +526,11 @@ def _sources_with_a_credential(db: Session) -> set[CatalogueSource]:
     sealed = sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW
     if not sealed:
         return set()
-    state = credentials.key_state()
+    resolved = _resolved(state)
     return {
         source
         for source in sealed
-        if credentials.is_held(db, source.value, targets.SEEDED[source].base_url, state)
+        if credentials.is_held(db, source.value, targets.SEEDED[source].base_url, resolved)
     }
 
 
@@ -388,7 +554,7 @@ def source_credentials(db: Session) -> frozenset[CatalogueSource]:
     return frozenset(held | _sources_with_a_credential(db))
 
 
-def ready_sources(db: Session) -> frozenset[CatalogueSource]:
+def ready_sources(db: Session, state: credentials.KeyState | None = None) -> frozenset[CatalogueSource]:
     """The sources whose prerequisites this deployment actually meets.
 
     Everything free and keyless is always ready. Google Books is ready only when
@@ -397,9 +563,9 @@ def ready_sources(db: Session) -> frozenset[CatalogueSource]:
     anyway is what sent an ISBN to a third party with the feature switched off.
     """
     ready = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
-    if get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) and google_books_api_key(db):
+    if get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) and google_books_api_key(db, state):
         ready.add(CatalogueSource.GOOGLE_BOOKS)
-    return frozenset(ready | _sources_with_a_credential(db))
+    return frozenset(ready | _sources_with_a_credential(db, state))
 
 
 def stored_catalogue_sources(db: Session) -> sources.Plan:
@@ -418,7 +584,7 @@ def stored_catalogue_sources(db: Session) -> sources.Plan:
     return sources.parse(get_json(db, SettingKey.CATALOGUE_SOURCES))
 
 
-def catalogue_sources(db: Session) -> sources.Plan:
+def catalogue_sources(db: Session, state: credentials.KeyState | None = None) -> sources.Plan:
     """Which catalogues this library **actually asks**, and in what order.
 
     **Every caller that reaches outward goes through here rather than
@@ -440,7 +606,7 @@ def catalogue_sources(db: Session) -> sources.Plan:
     immediately. If this ever shows up in a measurement, the honest fix is to
     resolve it once per request rather than to remember it between them.
     """
-    return sources.in_force(stored_catalogue_sources(db), ready_sources(db))
+    return sources.in_force(stored_catalogue_sources(db), ready_sources(db, state))
 
 
 def sources_whose_door_carries_a_login() -> list[CatalogueSource]:
@@ -466,7 +632,9 @@ def sources_whose_door_carries_a_login() -> list[CatalogueSource]:
     ]
 
 
-def catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credential]:
+def catalogue_logins(
+    db: Session, state: credentials.KeyState | None = None
+) -> dict[CatalogueSource, credentials.Credential]:
     """The login each catalogue's request will carry, resolved before it is made.
 
     **Resolved here rather than in `metadata`, and that is the same rule the
@@ -552,10 +720,10 @@ def catalogue_logins(db: Session) -> dict[CatalogueSource, credentials.Credentia
     doors = [targets.SEEDED[source] for source in sources_whose_door_carries_a_login()]
     if not doors:
         return {}
-    state = credentials.key_state()
+    key = _resolved(state)
     resolved: dict[CatalogueSource, credentials.Credential] = {}
     for target in doors:
-        login = credentials.for_request(db, target.source.value, target.base_url, state)
+        login = credentials.for_request(db, target.source.value, target.base_url, key)
         if login is not None:
             resolved[target.source] = login
     return resolved

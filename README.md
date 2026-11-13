@@ -43,151 +43,67 @@ Run the published image. No build step, nothing to clone:
 
 ```bash
 curl -O https://raw.githubusercontent.com/f-klement/endpaper/main/docker-compose.deploy.yml
-# edit SECRET_KEY first: it signs the login tokens
+# set SECRET_KEY to 32 or more random characters (openssl rand -hex 32): it signs the login tokens
+mkdir -p data
 docker compose -f docker-compose.deploy.yml up -d
 ```
 
-Images are on Docker Hub as [`fklement/endpaper`](https://hub.docker.com/r/fklement/endpaper):
-`:latest` tracks the newest release; every release also gets an immutable `:vX.Y.Z` tag.
-Pin that one to decide for yourself when to upgrade. Currently amd64 only.
+Create `data` yourself before the first start: the container runs as uid 1000 and writes its
+database there, and a directory Docker creates for the mount belongs to root.
+[Install](docs/configuration.md#install) says what to do when your account is not uid 1000.
 
-What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
+Then open port 8000 on that host in a browser. The first account you register becomes the
+admin, so register it before anybody else can reach the port. The same address works on your
+phone, but its camera, and so the barcode scanner, needs HTTPS:
+[Before you expose it](docs/configuration.md#before-you-expose-it).
 
-Or build from source instead:
+The file names the image [`fklement/endpaper`](https://hub.docker.com/r/fklement/endpaper)
+by digest, so it stays on the release it names until you change its `image:` line, whatever
+`:latest` does in the meantime. [Upgrading](docs/configuration.md#upgrading) says how to
+move it. The image is built for `linux/amd64` only. What changed in each release is in
+[CHANGELOG.md](CHANGELOG.md).
 
-```bash
-docker compose up --build
-```
-
-Then open **server-ip:port** you set in your yml in your browser (or your local IP on your phone).
+Building from source, the image tags, every environment variable and what to do before
+other people can reach it are in [the configuration reference](docs/configuration.md).
 
 ## Features
-- **Barcode scanning**: point your phone camera at a book's barcode, or type the ISBN
-- **Auto metadata**: title, author, publisher, page count, language and cover art, looked
-  up in ten catalogues (the German National Library, K10plus, Open Library, the Czech
-  National Library, the Spanish National Library, the National Library of Greece, the
-  Austrian National Library, the Argentine National Library, the Uruguayan National
-  Library, Google Books). The first two
-  are asked together and their
-  records are merged; the rest are asked
-  in turn until one answers. A national catalogue in that second group is asked only about
-  the ISBN registration groups it collects, so a German library is not waiting on Athens for
-  a German book. The Spanish National Library is the exception and declares no such remit,
-  because it alone answers for Spanish language books published outside Spain.
-  Seven are free and need nothing. Three need a login: Google Books takes an API key you
-  supply and bills for what it answers, and the Argentine and Uruguayan national libraries
-  each take a username and password that the library publishes itself and charges nothing
-  for. Endpaper carries those published pairs, so a stock install runs nine of the ten and
-  only Google Books needs anything typed. A library with its own account at either enters it
-  under Settings and that is what gets used instead.
-  A catalogue's Dewey number is kept and read as a suggested tag, so a German record and an
-  English one suggest the same one
-- **Covers are downloaded and served from here**, not linked to somebody else's server, so
-  a shelf does not go blank when an image service moves a URL. Settings has a button that
-  fetches the ones already missing, and your browser never tells a third party which books
-  the library holds
-- **Library import**: bring a library across from Goodreads, LibraryThing, StoryGraph,
-  Libib or Openreads. The columns are worked out for you and shown before anything is
-  saved, and a title your old app says you deleted is not brought back
-- **Calibre import**: point it at a copy of a Calibre library's `metadata.db` and the whole
-  library is read in your own browser, with the ISBN, the series and the position in it that
-  a feed does not carry. Picking the library folder as well fills in what the index left
-  blank from the file beside each book, and records where each book's files are: each file's
-  name, the folders above it and a fingerprint computed from up to 12 KiB of it, which
-  everyone who can see the book can see. A library folder picked on the add page is read
-  through its index the same way. No file leaves
-  your browser, only the records it turned out to hold, and nothing is written to the
-  library
-- **Add a book from its own file**: point the add page at book files or a whole folder and
-  Endpaper drafts the rows out of them. EPUB, MOBI, AZW, FictionBook, CBZ, PDF, and M4B or
-  tagged MP3 for audiobooks, where a folder of chapter files is read as one book rather
-  than thirty. A file that says nothing useful about itself is offered a catalogue lookup
-  under its own name instead. **The files are read in your browser and never uploaded**:
-  only what a file said is sent, plus, for a file picked from a folder, its location and a
-  fingerprint computed from up to 12 KiB of its bytes, which everyone who can see the book
-  can see. Endpaper never takes custody of a book. What holds
-  that up is the server rather than the page: no route accepts a book file, so there is
-  nowhere to send one
-- **Read your own OPDS server**: Calibre-Web, Komga, Kavita, Ubooquity or anything else
-  serving an OPDS 1.x catalogue. An admin adds the feed once and any member can sync it;
-  what the feed lists arrives as books they own, matched on ISBN where the feed carries one
-  and on title otherwise, filling gaps and overwriting nothing
-- **Per-book privacy**: a book can be yours alone inside a shared library catalogue.
-  Nobody else sees it, in listings, in search, in stats or by guessing a URL
-- **Reading status**: per-person "unread / want to read / reading / read / did not finish",
-  with ratings, notes and the dates you started and finished. A book you gave up on keeps
-  the date you started it and is never counted as finished
-- **Quotes**: copy out a passage worth keeping, with the page it is on and a line about
-  why. Every quote the library can see is on one page, newest first
-- **More than one copy**: two paperbacks of the same title are two objects, each with its
-  own shelf, condition, price and loan. Scanning a book you already own still asks before
-  it adds anything, so a mis-scan is caught and a real second copy is one more press
-- **Collections**: split the shelf the way your library already does, physical from
-  ebook, kept from sold, yours from mine. A book is in one or in none, and filing it
-  changes nothing about who can see it: that is still up to whether it is private
-- **Loan tracking**: record who borrowed what, set a due date, and see what is overdue.
-  The borrower does not need an account: lend to a neighbour by typing their name. Overdue
-  loans get their own page, with the reminder channels' standing state beside them
-- **Overdue reminders**: Endpaper can send a digest of every overdue loan on a schedule
-  you set, by email, to a Telegram chat, or to a webhook you choose (signed, so the
-  receiver can check it came from here). Switch on as many as you like; they all carry the
-  same list. Private books are never included: every one of those goes to a place with no
-  single account behind it
-- **Three ways to look at it**: a grid of covers whose cards fold out for the details, a
-  dense list of one line per book, or a table of metadata columns. Your choice
-  is remembered in your browser
-- **Backup and restore**: download the whole library, covers included, and put it back
-- **Search and filters**: by title, author, ISBN, tag, series, shelf location or format
-- **Author pages**: everybody your shelf credits, with their books behind one click. Where
-  one person has ended up under two spellings, fold them together: your books are never
-  edited, and any fold can be undone
-- **Installable from the browser**: Endpaper is a progressive web app, so "Add to
-  Home Screen" gives it its own icon and its own window, with no app store and
-  nothing to sign. It is still the web interface talking to your instance, so it
-  needs the instance reachable: there is no offline mode, by choice, because an
-  offline shell could only lie about a library it cannot read. **On iPhone, iPad
-  and Mac this is the only option there is**, and it is not a placeholder for a
-  native app: Endpaper ships no Apple build and is not planning one, because
-  building for Apple platforms requires Apple hardware to build on. An Android
-  client is planned separately
-- **Directory sign-in**: optional LDAP or reverse-proxy auth instead of local accounts
 
-**That is the shape of it. The complete list, including what Endpaper
-deliberately does not do**, is in [`docs/featurelist.md`](docs/featurelist.md):
-no offline mode, no circulation desk. Worth knowing before you install it rather
-than after.
+- **Barcode scanning** with a phone camera, or type the ISBN.
+- **Records from ten catalogues**, asked in an order you choose, with the cover stored here
+  rather than linked from somebody else's server.
+- **Bringing a library in** from Goodreads, LibraryThing, StoryGraph, Libib, Openreads,
+  Calibre or MARC records, or from a folder of ebook files that are read in your browser and
+  never uploaded.
+- **Private or shared, decided per book.** A private book is invisible to everybody else, in
+  listings, in search, in statistics and by guessing its address.
+- **Reading status, ratings, notes, quotes and highlights**, each member's own.
+- **Lending**: who has which copy and until when, with overdue reminders by email, Telegram
+  or a signed webhook. A borrower needs no account.
+- **More than one copy** of a title, each with its own shelf, condition and loan.
+- **Finding things**: search and filters, a cover grid, a dense list or a table, author
+  pages, series, collections, tags and custom fields.
+- **Library mode and a public catalogue**, both off by default, with SRU for other
+  libraries' software.
+- **Sign in** with local accounts, against an LDAP directory, or behind an authenticating
+  reverse proxy.
+- **Backup and restore** of the whole library, covers included, from Settings.
+- **Installable on a phone** as a progressive web app, with no app store involved.
+- **German and English** throughout the interface.
 
-A **public catalogue** is there if you want one, off by default and behind two
-switches: library mode changes what a cataloguer sees and publishes nothing, and
-publishing is a second, separate decision. Private books stay private in every
-mode.
+**The complete list, including what Endpaper deliberately does not do, is
+[`docs/featurelist.md`](docs/featurelist.md)**: no offline mode, no Apple build, no
+circulation desk. Worth knowing before you install it rather than after.
 
-## Usage
+## Documentation
 
-**Getting books in.** Open the app on a phone and point the camera at a barcode, or type an
-ISBN, and the catalogues above fill in the record. For books already on disk, point Endpaper
-at a folder of ebooks and it drafts a row out of each file, reading what the file itself
-says rather than guessing from its name. A spreadsheet or an export from another cataloguing
-tool can be imported instead. Anything the lookup gets wrong is editable afterwards, and a
-book with no ISBN at all can be typed in by hand.
-
-**Organising them.** Shelves, collections and tags are yours to invent. Custom fields cover
-whatever the standard record leaves out, such as which box a book is in or where a copy was
-bought. Several copies of one title are held as copies of one book rather than as duplicates
-that have to be kept in step by hand.
-
-**Sharing them.** Every book is private or shared, decided per book. A shared book is visible
-to the other members of your library, who can see that it exists, who has it, and whether it
-is currently lent out. Lending records who took a book and when, so the answer to "where did
-that go" is in the catalogue rather than in somebody's memory.
-
-**Reading them.** Mark a book as reading or finished, rate it, and keep notes and quotes
-against it. Reading status belongs to the member rather than to the book, so two people
-reading the same copy do not overwrite each other.
-
-**Finding them.** Search covers titles, authors, series, subjects and identifiers, and the
-same catalogue is reachable from an ebook reader through OPDS, so the shelf shows up in the
-reading app rather than only in a browser.
+| Document | For |
+|---|---|
+| [The handbook](docs/handbook.md) | Using it, task by task: first for members, then for admins |
+| [The configuration reference](docs/configuration.md) | Installing and running it: every environment variable, the database, sign in, backups, upgrading, recovery |
+| [The feature list](docs/featurelist.md) | Whether it does something, and what it deliberately does not do |
+| [The glossary](GLOSSARY.md) | The words the app and these documents use |
+| [The developer docs](docs/README.md) | Changing it: architecture, data model, API, security, testing |
+| [The changelog](CHANGELOG.md) | What changed in each release |
 
 ## Local Development
 
@@ -212,228 +128,21 @@ bun install
 bun run dev
 ```
 
-### Testing
+`bun install` screens every incoming package through Bun's security scanner
+(`frontend/bunfig.toml`) before any package code runs, and a critical finding stops the
+install.
 
-Tests live in a mirror tree, never beside the file under test. `backend/tests/` mirrors
-`backend/`; `frontend/tests/` mirrors `frontend/src/`. So `backend/routers/books.py` is
-tested at `backend/tests/routers/test_books.py`.
-
-What each suite covers is written down: [`backend/tests/COVERAGE.md`](backend/tests/COVERAGE.md)
-and [`frontend/tests/COVERAGE.md`](frontend/tests/COVERAGE.md).
-
-```bash
-cd backend   && uv run pytest              # pytest, no network access
-cd frontend  && bun run test               # vitest + Testing Library
-```
-
-Both suites refuse to start unless `ENDPAPER_SUITE_SANCTIONED` is `1`. On a machine of
-your own with nothing else on it, set it for the one command,
-`ENDPAPER_SUITE_SANCTIONED=1 uv run pytest` or `ENDPAPER_SUITE_SANCTIONED=1 bun run test`,
-rather than exporting it, which would turn the guard off for everything started from that
-shell. [`docs/testing.md`](docs/testing.md#running) says why.
-
-Useful variants:
-
-| Command | What it does |
-|---|---|
-| `uv run pytest --cov` | Backend coverage report |
-| `uv run ruff check .` | Backend lint |
-| `uv run ruff format --check --config pyproject.toml .` | Backend formatting; drop `--check` to apply it |
-| `uv run mypy .` | Backend type check (strict) |
-| `bun run api:generate` | Regenerate the API client from the backend schema |
-| `bun run test:watch` | Re-run frontend tests on change |
-| `bun run test:coverage` | Frontend coverage report |
-| `bun run typecheck` | TypeScript, no emit |
-
-[`docs/testing.md`](docs/testing.md) holds the rest of them and how these suites are run.
-The table above is the short list.
-
-Neither suite touches the network or a real database. The backend tests run against a
-throwaway SQLite file and stub outbound calls; the frontend tests stub `fetch` outright.
-
-### Dependency security
-
-`bun install` screens every incoming package through Bun's security-scanner API
-(`frontend/bunfig.toml`) before any package code executes. A critical finding aborts the
-install. No account needed.
-
-## Production Notes
-
-- Change `SECRET_KEY` before deploying. It signs the login tokens.
-- Camera access on phones requires HTTPS. Deploy behind Caddy or nginx with TLS.
-- Data lives in `./data/library.db` (bind-mounted). Back up by copying it.
-- `ALLOW_REGISTRATION=false` closes signups without affecting existing accounts.
-- **Keep the first admin's password.** A password reset is approved by another admin, so a
-  library with exactly one admin has no way to reset that account from inside the app. The
-  way back is a shell in the container:
-
-  ```bash
-  docker compose exec endpaper python -m recover <username>
-  ```
-
-  It asks for the new password twice on standard input, never on the command line, and it
-  ends every session on that account. Whoever can run it can already read the database, so
-  this names a capability that exists rather than adding one.
-- **Confirming new accounts** is off by default. Turn on *Accounts are open to people
-  outside the household* under Settings, Data and accounts, and a new account must confirm
-  the address it registered with before it can sign in. A code is mailed to that address if
-  a mail server is configured, and an admin can confirm an account from the same screen
-  instead, which is the path for a deployment with no mailbox. Accounts that already exist
-  are unaffected: confirmation is decided when an account is made.
+**Testing.** Both suites refuse to start unless `ENDPAPER_SUITE_SANCTIONED` is `1`, and
+neither touches the network. [`docs/testing.md`](docs/testing.md#running) says why, how to
+run them and their variants, and how the mirrored test tree is laid out.
 
 ## Architecture
 
-Single Docker container: FastAPI (Python 3.14) serves the REST API and the compiled
-React 19 PWA as static files. SQLite for storage. The multi-stage build compiles the
-frontend with Bun, then copies only the built assets into the Python image. Bun and
-`node_modules` are not in the shipped image.
-
-```
-Phone (PWA) ──► FastAPI ──► scan an ISBN:  DNB + K10plus  (together, merged)
-                  │                       ↳ Open Library  (fallback)
-                  │                       ↳ Czech National Library (fallback)
-                  │                       ↳ Spanish National Library (fallback)
-                  │                       ↳ National Library of Greece (Greek ISBNs)
-                  │                       ↳ Austrian National Library (978-3 ISBNs)
-                  │                       ↳ Argentine National Library (login shipped)
-                  │                       ↳ Uruguayan National Library (978-9974, login shipped)
-                  │                       ↳ Google Books  (needs a key)
-                  │
-                  │          search a title: Open Library + K10plus + DNB
-                  │                       + BnF + Library of Congress
-                  │                       + Austrian National Library
-                  │                       + National Library of Greece
-                  │                       + Google Books (needs a key)
-                  │                       ranked, denoised and merged here
-              SQLite DB (./data/)
-```
-
-Environment variables:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `SECRET_KEY` | dev placeholder | Signs the JWTs. **Change this.** |
-| `DATABASE_URL` | `sqlite:///$DATA_DIR/library.db` | SQLAlchemy URL, and in practice where the SQLite file goes. Postgres is the one other engine: spell it `postgresql+pg8000://user:password@host/endpaper`, and see below |
-| `DATABASE_SSL_MODE` | unset | How hard to insist on TLS to a Postgres server: `disable`, `prefer`, `require`, `verify-ca` or `verify-full`, which are libpq's names. **Leave it unset**, which means `prefer` on a Postgres URL and reads as nothing at all on a SQLite one. Setting it beside a URL that is not Postgres is a startup failure, including setting it to `prefer` or `disable`. See below |
-| `DATABASE_SSL_ROOT_CERT` | none | The CA `verify-ca` and `verify-full` check against, as a path inside the container. It replaces the image's trust store rather than adding to it |
-| `DATA_DIR` | `/app/data` | SQLite file + uploaded covers |
-| `ALLOW_REGISTRATION` | `true` | `false` closes new signups |
-| `APP_ENV` | `prod` | `dev` relaxes the startup secret-key check |
-| `AUTH_MODE` | `local` | `local`, `ldap` or `proxy`. See below. |
-| `GOOGLE_BOOKS_API_KEY` | none | Supplies the key from the deployment instead of the settings screen |
-| `MAIL_SERVER`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_USE_TLS`, `MAIL_USE_SSL`, `MAIL_DEFAULT_SENDER` | none, `587`, none, none, `true`, `false`, none | The seven standard mail names, for reminders sent by email. `MAIL_DEBUG` is deliberately not honoured: smtplib writes the AUTH exchange to stderr under it |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | none | For reminders sent to a Telegram chat |
-| `ENABLE_OVERDUE_TICKER` | `true` | `false` stops the hourly overdue digest. Set it when running more than one web process, or when driving `POST /api/loans/overdue/notify` from cron instead |
-| `ENABLE_READWISE_TICKER` | `true` | `false` stops the daily Readwise pull; members can still pull from their account page. Set it when running more than one web process. A pull needs outbound HTTPS to `readwise.io` |
-| `SERVE_FRONTEND` | `true` | `false` runs the API without mounting the compiled frontend. For a host with no reader; an unmatched path is then a plain 404, because there are no client routes to serve the shell for |
-| `CREDENTIAL_ENCRYPTION_KEY` | none | The 24 word recovery phrase that encrypts catalogue logins. Leave it unset and the app makes one for itself the first time you ask it to |
-| `CREDENTIAL_ENCRYPTION_KEY_FILE` | `$DATA_DIR/credential-key` | Read the phrase from this file instead. A Docker secret and a Kubernetes Secret both arrive this way |
-| `CATALOGUE_CREDENTIAL_<SOURCE>` | none | Pins one catalogue's login, as `username:password`, e.g. `CATALOGUE_CREDENTIAL_BNA`. Wins over one entered in Settings, which in turn wins over one Endpaper ships. **Setting it to nothing pins it as unusable rather than clearing it**, so `- CATALOGUE_CREDENTIAL_BNA=${LOGIN}` with `LOGIN` unset stops that catalogue answering; unset the variable to fall back |
-
-**SQLite or Postgres, and SQLite is the primary target.** It is the default, it needs no
-server, and it is what the whole test suite runs on. Postgres is the one other engine the
-schema is created on: the pipeline builds it on a real server from the same migration
-chain, finishes a database left half migrated, and runs the engine aware part of the suite
-against the result before every release. The whole suite runs against Postgres every
-night as well, less the tests that assert SQLite's own behaviour on purpose.
-
-The `pg8000` driver is **in the image**, so nothing has to be installed to use it. It is
-pure Python, which is why it is affordable on an Alpine image with no compiler: about
-2.4 MB installed, across five packages. The measurement and the method are in the comment
-beside the dependency in `backend/pyproject.toml`. **Spell the URL
-`postgresql+pg8000://`**; a bare `postgresql://` asks SQLAlchemy for its default driver,
-psycopg, which is not here.
-
-**The default connection is not certificate checked and can be cleartext, so either set
-`DATABASE_SSL_MODE` or keep the server on a network you trust.** The default, `prefer`,
-offers TLS and, on a server that accepts it, verifies neither the certificate nor the
-hostname; on a server that declines, it carries on in the clear and **logs a warning
-saying so**. This is weaker than the mail path, where verification is a property rather
-than a default, cannot be relaxed at all, and a server that will not upgrade is a failure.
-The gap is deliberate: a self hosted Postgres is usually a container with no certificate,
-so the mail module's posture as a default would refuse the ordinary deployment.
-
-| `DATABASE_SSL_MODE` | Refuses | Breaks |
-|---|---|---|
-| `disable` | nothing; it offers no TLS at all | a managed server that only accepts TLS |
-| `prefer` | nothing. The downgrade is logged, not refused | nothing. It is what this connection already did |
-| `require` | a server that declines the upgrade | the usual compose Postgres, which ships with TLS off |
-| `verify-ca` | and a certificate that chains to nothing trusted | a self signed certificate with no `DATABASE_SSL_ROOT_CERT`, and a private CA that is not mounted into the container |
-| `verify-full` | and a certificate whose name is not the host in `DATABASE_URL` | reaching the server by container name or by IP, which is most of compose |
-
-`docs/security.md` states the posture in full.
-
-**Where a credential lives.** By default an admin pastes it into Settings and it is stored
-in the database. Setting the matching environment variable instead hands that job to the
-deployment: the environment value **wins**, the field in Settings is greyed out, and the
-app refuses to overwrite it rather than accepting a change that would be undone at the next
-restart. Either way it is never shown again once set. This holds for
-`GOOGLE_BOOKS_API_KEY`, the seven `MAIL_*` names and the two `TELEGRAM_*` ones alike, and
-for `CATALOGUE_CREDENTIAL_<SOURCE>`.
-
-**A catalogue login is different from the rest, and is stored encrypted.** The others are
-this deployment's own secrets; a catalogue login is an account at somebody else's library,
-held here on its behalf. Those go in their own table as sealed envelopes, and the key is
-never written to the database, so a backup archive carries logins that nobody can read
-without it.
-
-**Two catalogues' logins ship with Endpaper, and each is the last resort rather than the
-first.** The Argentine and Uruguayan national libraries each publish a username and password
-on their own page for librarians, so carrying those pairs discloses nothing the libraries have
-not, and both sources answer on a stock install. A login entered in Settings replaces it and the environment
-variable replaces both; removing the one in Settings falls back to the shipped pair rather
-than to nothing. The Settings screen names which of the three is being used.
-
-The key is **24 words**, in the shape a wallet recovery phrase takes, and it is checksummed:
-a mistyped or misread word is refused rather than quietly becoming a different key. With no
-key configured the app starts and simply cannot store a login; Settings then offers to make
-one and shows you the words **once**. It keeps them in the machine's keychain where there is
-one, otherwise in a file only the app's own account can read.
-
-**Write the words down.** If the key is lost or replaced, every stored catalogue login has to
-be entered again, and restoring a backup onto a different machine needs the phrase, because
-the archive deliberately does not carry the key.
-
-**Directory sign-in.** `AUTH_MODE=ldap` checks credentials against a directory instead of
-this app's own table. Accounts are created here on first sign-in, so books and notes still
-have an owner. `AUTH_MODE=proxy` takes the identity from headers set by a reverse proxy and
-hides the login form entirely.
-
-**Test accounts.** In any of the three modes, an admin can create a local account with a
-password in Settings and switch into it, which is how you see the library the way an
-ordinary member sees it when the directory owns everybody's password. Under `ldap` and
-`proxy` they are not offered at the login screen, because that screen offers nothing at
-all there; under `local` one signs in through the ordinary form like any other account.
-They are never admins, and they are the only accounts a switch will accept: nobody can be
-signed in as a real member this way.
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `LDAP_URL` | none | e.g. `ldaps://directory.example:636`. Required for `ldap` |
-| `LDAP_USER_BASE_DN` | none | Where to search for accounts. Required for `ldap` |
-| `LDAP_BIND_DN` | none | Service account for the search. Leave empty to search anonymously |
-| `LDAP_BIND_PASSWORD` | none | **Required if `LDAP_BIND_DN` is set.** The app refuses to start otherwise. |
-| `LDAP_USER_FILTER` | `(&(objectClass=person)(uid={username}))` | `{username}` is substituted and escaped |
-| `LDAP_USERNAME_ATTRIBUTE` | `uid` | The attribute holding the login name |
-| `LDAP_ADMIN_GROUP` | none | Members of this group get admin, re-checked at each sign-in |
-| `LDAP_EMAIL_ATTRIBUTE` | none | The attribute holding a member's address, usually `mail`. Set it and the directory owns the address, re-applied at each sign-in and read only in the app. **Setting it clears the stored address of any member the directory has none for**, at their next sign-in, and the field is read only from then on, so it cannot be put back |
-| `LDAP_START_TLS` | `false` | Upgrade a plain connection with StartTLS. If the directory does not upgrade, no password is sent |
-| `LDAP_CA_FILE` | none | CA bundle the directory's certificate is checked against, for a self signed or private CA. **Replaces** the image's trust store. The certificate and host name are always checked over TLS; nothing turns that off. A certificate listing DNS names in its subjectAltName must list the `LDAP_URL` host among them. Python's strict X.509 checks need a home made CA to carry key usage and a subject key identifier, and the server certificate an authority key identifier |
-| `LDAP_ALLOW_CLEARTEXT` | `false` | **Required to start without TLS.** An `ldap://` URL without StartTLS sends every sign in's password in cleartext, so it is refused unless this is `true` |
-| `PROXY_USER_HEADER` | `Remote-User` | Header naming the signed-in account |
-| `PROXY_GROUPS_HEADER` | `Remote-Groups` | Comma-separated group list |
-| `PROXY_ADMIN_GROUP` | none | Membership of this group grants admin |
-| `PROXY_EMAIL_HEADER` | none | Header asserting the member's address, `Remote-Email` for Authelia. Same ownership rule, and the same clearing, as `LDAP_EMAIL_ATTRIBUTE` |
-
-> **`AUTH_MODE=proxy` trusts headers.** Safe only behind a proxy that sets them itself
-> *and strips any arriving from the client*. Exposed directly, anyone can claim to be admin.
-> An `LDAP_BIND_DN` with a blank password is refused at startup for a similar reason: most
-> directories accept it as an anonymous bind and quietly return nothing.
-
-**Google Books and Goodreads** are configured in the app, not here: sign in as an admin
-and open Settings. The API key is stored in the database and never shown again after saving.
-
-Design notes (data model, the privacy rule, auth, testing) are in [`docs/`](docs/).
+One Docker container: FastAPI (Python 3.14) serves the REST API and the compiled React 19
+PWA as static files. Storage is SQLite by default, or Postgres. The multi-stage build
+compiles the frontend with Bun, then copies only the built assets into the Python image, so
+Bun and `node_modules` are not in the shipped image. [`docs/architecture.md`](docs/architecture.md)
+describes the pieces, the catalogue lookup and the build, with diagrams.
 
 ## Contributing
 
@@ -441,9 +150,9 @@ Bug reports, questions and patches are all welcome. **For anything larger than a
 open an issue first**, because the reasoning behind a surprising decision is usually written
 down somewhere and it is cheaper to read it than to rediscover it.
 
-Set up a local checkout with *Local Development* above, and run the suites and the linters in
-*Testing* before proposing a change. Both suites run offline, so neither needs credentials or
-a network.
+Set up a local checkout with *Local Development* above, and run the suites and the linters
+[`docs/testing.md`](docs/testing.md) lists before proposing a change. Both suites run
+offline, so neither needs credentials or a network.
 
 A few conventions are load bearing, and a change that ignores them will be sent back:
 
@@ -460,3 +169,7 @@ A few conventions are load bearing, and a change that ignores them will be sent 
 **Read [`docs/decisions.md`](docs/decisions.md) before changing something that looks wrong.**
 It records what was already tried and why the current shape was chosen, and a good proportion
 of the odd looking things in this repository are odd on purpose.
+
+## License
+
+MIT. The full text is in [`LICENSE`](LICENSE).

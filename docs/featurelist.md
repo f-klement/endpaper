@@ -6,11 +6,10 @@ household's shelves and for the library or archive that has outgrown a spreadshe
 This is the current feature set, not a roadmap. How to do each of these things is
 [the handbook](handbook.md).
 
-**The README's Features section is the summary; this is the complete list.** The
-difference that matters is the last section: what this app deliberately does not
-do. Somebody deciding whether to run it should learn that here rather than by
-trying it. If the two ever disagree, this file is wrong, because the README is
-what people read first and gets corrected first.
+**The README's Features section is a one line summary of each item; this is the
+complete list.** The difference that matters is the last section: what this app
+deliberately does not do. Somebody deciding whether to run it should learn that
+here rather than by trying it.
 
 ## The catalogue
 

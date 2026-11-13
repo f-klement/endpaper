@@ -394,8 +394,10 @@ decide which catalogue is believed when two disagree. The line under each one sa
 answers (scans, title searches or both) and which ISBNs it is asked about. Which catalogues there
 are, and which need a login, is in [the feature list](featurelist.md#the-catalogue).
 
-**Catalogue logins** stores the username and password a catalogue needs. Logins are encrypted
-with a key that is never written to the database:
+**Catalogue logins** stores the username and password a catalogue needs. Logins, and the
+secrets other settings hold (the Google Books key, the mail password, the Telegram bot token and
+the webhook secret), are encrypted with a key that is never written to the database, so none of
+those can be saved until there is one:
 
 1. Press **Create an encryption key**. Endpaper shows a **recovery phrase** of 24 words, once.
 2. Write it down and press **I have written it down**. Restoring a backup on another machine
@@ -488,12 +490,16 @@ notes, unshared highlights, a key for each highlight they deleted (not its text)
 status, ratings, dates, progress and talk offers, KOReader positions and Readwise book matches,
 so whoever holds the file can read them all. Passwords for signing in here are in it only as
 hashes. The mail password, the Telegram bot token, the webhook secret and the Google Books key
-are in it as typed.
+are sealed with the encryption key, like saved logins; one saved before this library had a key
+is in it as typed until a key is made.
 
 **Restore from a backup** replaces everything in the library with the file, and cannot be
 undone; books added since the backup was taken are gone. Saved logins in a backup (a
-catalogue's, an OPDS server's, a member's Readwise token) are sealed, and readable only with the
-recovery phrase
+catalogue's, an OPDS server's, a member's Readwise token) and the four secrets above are sealed,
+and readable only with the recovery phrase. Until it is entered, each of the four says on its
+settings screen that it has to be entered again, and what uses it stops: Google Books, the
+reminders on that channel, and for the mail password every mail the app sends, account mails
+included
 ([Catalogue sources and logins](#catalogue-sources-and-logins)). A restore drops every OPDS
 server's login all the same, recovery phrase or not, so type each one again afterwards.
 

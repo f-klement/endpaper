@@ -323,8 +323,9 @@ def approve_password_reset(
     beside them, which is the ordinary one in a two person archive.
 
     **A deployment with exactly one admin therefore has no path in this app**,
-    and that case belongs to the operator: `README.md` names the command line
-    recovery, which is the capability whoever runs the container already has.
+    and that case belongs to the operator: `docs/configuration.md` names the
+    command line recovery, which is the capability whoever runs the container
+    already has.
 
     404 when there is no live request, which is true of this route: there is
     nothing here to approve, and an admin may already list every member.

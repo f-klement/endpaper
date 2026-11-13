@@ -180,7 +180,7 @@ def volume_body(volume_id: str = VOLUME_ID, **info) -> dict:
 
 
 @pytest.fixture
-def google_enabled(client, admin):
+def google_enabled(client, admin, encryption_key):
     """Switch the feature on and store a key, as an admin would in Settings."""
     client.put(
         "/api/settings",

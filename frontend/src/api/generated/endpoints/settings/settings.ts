@@ -625,9 +625,10 @@ export const getForgetCredentialKeyUrl = () => {
  * Without this, `POST` refuses because a key exists, `PUT` wants a phrase
  * nobody has, and the deployment is stuck behind a key protecting nothing.
  *
- * **It strands whatever the key was opening, and the response says how many**
- * rather than this route hiding it: `unreadable_credentials` on the way out is
- * the count of stored catalogue logins that now have to be typed again. A
+ * **It strands whatever the key was opening, and the response says which**
+ * rather than this route hiding it: `unreadable_sources` and
+ * `unreadable_settings` on the way out name the stored catalogue logins and
+ * settings secrets that now have to be typed again. A
  * member's own Readwise token is not in that count: its member is told on
  * their account page and saves it again. Removing those
  * logins first is the way to reach a clean state, and `DELETE` on a source's
@@ -700,9 +701,10 @@ export type ForgetCredentialKeyMutationError = Refusal;
  * Without this, `POST` refuses because a key exists, `PUT` wants a phrase
  * nobody has, and the deployment is stuck behind a key protecting nothing.
  *
- * **It strands whatever the key was opening, and the response says how many**
- * rather than this route hiding it: `unreadable_credentials` on the way out is
- * the count of stored catalogue logins that now have to be typed again. A
+ * **It strands whatever the key was opening, and the response says which**
+ * rather than this route hiding it: `unreadable_sources` and
+ * `unreadable_settings` on the way out name the stored catalogue logins and
+ * settings secrets that now have to be typed again. A
  * member's own Readwise token is not in that count: its member is told on
  * their account page and saves it again. Removing those
  * logins first is the way to reach a clean state, and `DELETE` on a source's
