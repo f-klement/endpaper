@@ -73,6 +73,25 @@ describe("SelectionBar", () => {
       ).toBeDisabled();
     });
 
+    it("disables the five verbs behind the disclosure, delete included", async () => {
+      renderBar({
+        selectedCount: 0,
+        collections: [makeCollection({ id: 3, name: "Ebooks" })],
+      });
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: /More actions/ }));
+
+      expect(screen.getByLabelText("Set reading status")).toBeDisabled();
+      expect(screen.getByLabelText("Add tag")).toBeDisabled();
+      expect(screen.getByLabelText("Put in a collection")).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Set location" }),
+      ).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+    });
+
     it("still allows selecting everything", () => {
       renderBar({ selectedCount: 0 });
       expect(screen.getByRole("button", { name: "Select all" })).toBeEnabled();

@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Iterable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
-from typing import Final, NamedTuple
+from typing import Any, Final, NamedTuple
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
@@ -25,6 +25,7 @@ from starlette.responses import Response
 from starlette.routing import BaseRoute
 from starlette.types import Scope
 
+import book_columns
 import kosync as kosync_protocol
 import metadata
 import notifications
@@ -710,6 +711,37 @@ assert_unique_operation_ids()
 # the schema or serves a request: see `refusals.declare`. A route it misses
 # is one `tests/test_refusals.py` names.
 refusals.declare(schema_routes())
+
+#: The schema FastAPI derives from the routes, before `openapi_with_work_facts`
+#: adds to it.
+_routed_openapi: Final = app.openapi
+
+
+def openapi_with_work_facts() -> dict[str, Any]:
+    """The routes' schema, plus `book_columns.WORK_FACTS` as the closed set `WorkFact`.
+
+    **No route takes or answers one**, so FastAPI would publish none. The scan
+    page needs the set all the same: it files a catalogue's record as changed
+    here when a file's value filled a work fact the record left empty, and a
+    copy of the list in TypeScript would drift from the partition. Published
+    here, the generated client carries it, derived from the one tuple.
+    """
+    if app.openapi_schema is not None:
+        return app.openapi_schema
+    schema = _routed_openapi()
+    schema["components"]["schemas"]["WorkFact"] = {
+        "title": "WorkFact",
+        "description": (
+            "A column of `books` that describes the work. A file's value filling one a "
+            "catalogue's record left empty files that record as changed here."
+        ),
+        "type": "string",
+        "enum": list(book_columns.WORK_FACTS),
+    }
+    return schema
+
+
+app.openapi = openapi_with_work_facts  # type: ignore[method-assign]
 
 # Vite's `build.assetsDir`. Every filename it emits there carries a content
 # hash, so the name changes whenever the bytes do.

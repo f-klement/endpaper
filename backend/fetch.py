@@ -394,6 +394,15 @@ def classify(address: str | ipaddress.IPv4Address | ipaddress.IPv6Address) -> Ad
         inner = _embedded_ipv4(parsed)
         if inner is not None:
             return classify(inner)
+    return _class_past_the_unwrap(parsed)
+
+
+def _class_past_the_unwrap(parsed: ipaddress.IPv4Address | ipaddress.IPv6Address) -> AddressClass:
+    """`classify`'s bottom half, for an address embedding no IPv4 one.
+
+    In `classify`'s order, which is load bearing for the reason its docstring
+    gives: `is_global` last, because it is True for multicast.
+    """
     if parsed.is_link_local:
         return AddressClass.LINK_LOCAL
     if parsed.is_multicast:
@@ -529,22 +538,32 @@ def _without_lone_surrogates(value: Any) -> Any:
     while stack:
         node = stack.pop()
         if isinstance(node, list):
-            for index, item in enumerate(node):
-                if isinstance(item, str):
-                    node[index] = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", item)
-                elif isinstance(item, list | dict):
-                    stack.append(item)
+            _repair_list(node, stack)
         elif isinstance(node, dict):
-            for key, item in list(node.items()):
-                if isinstance(item, str):
-                    item = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", item)
-                elif isinstance(item, list | dict):
-                    stack.append(item)
-                repaired = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", key)
-                if repaired != key:
-                    del node[key]
-                node[repaired] = item
+            _repair_dict(node, stack)
     return value
+
+
+def _repair_list(node: list[Any], stack: list[Any]) -> None:
+    """Repairs a list's strings in place and pushes its containers onto `stack`."""
+    for index, item in enumerate(node):
+        if isinstance(item, str):
+            node[index] = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", item)
+        elif isinstance(item, list | dict):
+            stack.append(item)
+
+
+def _repair_dict(node: dict[str, Any], stack: list[Any]) -> None:
+    """Repairs a dict's keys and string values in place and pushes its containers onto `stack`."""
+    for key, item in list(node.items()):
+        if isinstance(item, str):
+            item = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", item)
+        elif isinstance(item, list | dict):
+            stack.append(item)
+        repaired = _LONE_SURROGATE.sub("\N{REPLACEMENT CHARACTER}", key)
+        if repaired != key:
+            del node[key]
+        node[repaired] = item
 
 
 @dataclass(frozen=True)

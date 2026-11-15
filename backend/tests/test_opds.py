@@ -478,6 +478,20 @@ class TestAPageIsReadOrRefusedByName:
     whose links do and do not make a holding.
     """
 
+    def test_the_first_next_link_is_the_one_followed(self):
+        links = (
+            '<link rel="self" href="/opds/books"/>'
+            '<link rel="next" href="/opds/books/2"/>'
+            '<link rel="next" href="/opds/books/3"/>'
+        )
+
+        assert opds.read_page(_feed(_book("One"), links=links)).next_href == "/opds/books/2"
+
+    def test_a_blank_next_link_is_no_next_page(self):
+        page = opds.read_page(_feed(_book("One"), links='<link rel="next" href="  "/>'))
+
+        assert page.next_href is None
+
     @given(spec=FEEDS)
     def test_it_answers_a_page_or_refuses_inside_its_allocation_bound(self, spec):
         """**The value is the spec's own**: every entry with no holding link is
@@ -734,6 +748,16 @@ class TestWalkingAFeed:
         assert not found.truncated
 
     @respx.mock
+    async def test_an_address_with_no_origin_is_refused_before_any_request(self):
+        """`is_fetchable` admits it and `origin_of` reads no origin out of it,
+        so there is nothing to hold the paging links to."""
+        unread = "http://xn--a.com/opds"
+        assert opds.is_fetchable(unread)
+
+        with pytest.raises(opds.UnusableAddress):
+            await opds.holdings(unread)
+
+    @respx.mock
     async def test_a_feed_whose_next_points_at_a_page_already_read_stops(self):
         """A loop ends the walk rather than spending the page cap on it."""
         route = respx.get(BASE).respond(text=_feed(_book("One"), links=f'<link rel="next" href="{BASE}"/>'))
@@ -777,6 +801,19 @@ class TestWalkingAFeed:
         assert found.truncated
 
     @respx.mock
+    async def test_a_full_entry_cap_reads_no_further_page(self):
+        respx.get(BASE).respond(
+            text=_feed(_book("One") + _book("Two"), links='<link rel="next" href="/opds/books/2"/>')
+        )
+        following = respx.get("http://10.0.9.9:8083/opds/books/2").respond(text=_feed(_book("Three")))
+
+        found = await opds.holdings(BASE, max_entries=2)
+
+        assert found.pages_read == 1
+        assert following.call_count == 0
+        assert found.truncated
+
+    @respx.mock
     async def test_the_deadline_stops_the_walk(self):
         respx.get(BASE).respond(text=_feed(_book("One"), links='<link rel="next" href="/opds/books/2"/>'))
 
@@ -792,7 +829,8 @@ class TestWalkingAFeed:
             "<entry><title>For sale</title>"
             '<link rel="http://opds-spec.org/acquisition/buy" href="/b/1"/></entry>'
         )
-        respx.get(BASE).respond(text=_feed(shelf * 2 + sale))
+        respx.get(BASE).respond(text=_feed(shelf * 2, links='<link rel="next" href="/opds/books/2"/>'))
+        respx.get("http://10.0.9.9:8083/opds/books/2").respond(text=_feed(sale))
 
         found = await opds.holdings(BASE)
 
@@ -818,6 +856,17 @@ class TestWalkingAFeed:
     async def test_an_address_this_server_will_not_open_is_refused_before_any_request(self):
         with pytest.raises(opds.UnusableAddress):
             await opds.holdings("file:///etc/passwd")
+
+    @respx.mock
+    async def test_an_address_carrying_a_login_is_refused_before_any_request(self):
+        """It has an origin, so only `is_fetchable` stands between it and a request."""
+        credentialed = "http://reader:secret@10.0.9.9:8083/opds/books"
+        route = respx.get(BASE).respond(text=_feed(_book("One")))
+
+        with pytest.raises(opds.UnusableAddress):
+            await opds.holdings(credentialed)
+
+        assert route.call_count == 0
 
     @respx.mock
     async def test_a_body_over_the_fetch_cap_is_refused(self):

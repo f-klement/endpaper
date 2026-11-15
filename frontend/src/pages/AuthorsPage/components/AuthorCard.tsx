@@ -31,7 +31,8 @@ import { safeHref } from "../../../lib/safeHref";
  * **The four `disabled:` declarations are deliberately absent**, and that is the
  * whole of the remaining difference: an anchor has no disabled state, so
  * `:disabled` never matches and the classes would be dead weight. A link that
- * should not be followed is not rendered, which is what `href &&` does.
+ * should not be followed is not rendered, which is what the early return in
+ * `WikipediaLink` does.
  */
 const ACTION =
   "inline-flex h-8 items-center justify-center gap-2 rounded-lg px-3 text-xs " +
@@ -86,42 +87,12 @@ export default function AuthorCard({
   onUndo,
   wikipedia,
 }: AuthorCardProps) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const merged = author.merged ?? [];
   const mergedSpellings = new Set(merged.map((entry) => entry.spelling));
   const others = (author.spellings ?? []).filter(
     (spelling) => spelling !== author.name && !mergedSpellings.has(spelling),
   );
-
-  // **Checked here as well as on the server, and the coupling is the point.**
-  // `authority._WIKIPEDIA_ARTICLE` already refuses anything that is not an
-  // article URL, so on a healthy response these two agree and this line costs
-  // nothing. What it buys is that the agreement is not the only thing standing
-  // between a response and an `href`: `safeHref`'s own docstring records that
-  // React 19 renders a `javascript:` href silently, and this was the only one
-  // of the five `href={` sites in this app taking a URL from a response without
-  // it. `undefined` removes the button rather than rendering a dead one.
-  const href = wikipedia ? safeHref(wikipedia.url) : undefined;
-
-  // Three labels rather than one, because they say three different things and a
-  // reader deserves to know which. `language` null means the link is the
-  // Wikidata item, and naming the language when it is not the page's is the
-  // owner's rule on #89: a page you cannot read beats an absent button, and a
-  // surprise is what makes that feel broken rather than generous.
-  const wikipediaLabel = !wikipedia
-    ? ""
-    : wikipedia.language == null
-      ? t("authors.wikidataItem", { name: author.name })
-      : wikipedia.language === locale
-        ? t("authors.wikipediaOn", { name: author.name })
-        : t("authors.wikipediaInOther", {
-            name: author.name,
-            // The name, not the subdomain: "in fr" reads as a fault. Codes
-            // with no name fall back to themselves, and four real Wikipedia
-            // codes make `Intl` throw rather than fall back. See
-            // `lib/languageName`.
-            language: languageName(wikipedia.language, locale),
-          });
 
   return (
     <div className="bg-paper-0 border border-paper-200 rounded-2xl p-4 dark:bg-paper-900 dark:border-paper-700">
@@ -184,34 +155,74 @@ export default function AuthorCard({
           {t("authors.browse")}
         </Link>
 
-        {wikipedia && href && (
-          <a
-            href={href}
-            target="_blank"
-            // noreferrer as well as noopener: the target is a third party and
-            // has no business knowing which page linked to it. The same rule
-            // `BookHeader` applies to its Goodreads link.
-            rel="noopener noreferrer"
-            // `hreflang` where we know it, because the article may not be in
-            // the page's language and a screen reader should switch voice.
-            hrefLang={wikipedia.language ?? undefined}
-            title={wikipediaLabel}
-            aria-label={wikipediaLabel}
-            className={ACTION}
-          >
-            {/* The stylised W of the Wikipedia wordmark, which is a serif
-                capital rather than the puzzle globe: the globe is a trademarked
-                logo and would be an asset, a licence question and a CSP change.
-                Hidden from assistive tech, which reads the label above. */}
-            <span
-              aria-hidden="true"
-              className="font-serif text-sm leading-none"
-            >
-              W
-            </span>
-          </a>
+        {wikipedia && (
+          <WikipediaLink name={author.name} wikipedia={wikipedia} />
         )}
       </div>
     </div>
+  );
+}
+
+function WikipediaLink({
+  name,
+  wikipedia,
+}: {
+  name: string;
+  wikipedia: AuthorWikipediaOut;
+}) {
+  const { t, locale } = useTranslation();
+  // **Checked here as well as on the server, and the coupling is the point.**
+  // `authority._WIKIPEDIA_ARTICLE` already refuses anything that is not an
+  // article URL, so on a healthy response these two agree and this line costs
+  // nothing. What it buys is that the agreement is not the only thing standing
+  // between a response and an `href`: `safeHref`'s own docstring records that
+  // React 19 renders a `javascript:` href silently, and this was the only one
+  // of the five `href={` sites in this app taking a URL from a response without
+  // it. `undefined` removes the button rather than rendering a dead one.
+  const href = safeHref(wikipedia.url);
+  if (!href) return null;
+
+  // Three labels rather than one, because they say three different things and a
+  // reader deserves to know which. `language` null means the link is the
+  // Wikidata item, and naming the language when it is not the page's is the
+  // owner's rule on #89: a page you cannot read beats an absent button, and a
+  // surprise is what makes that feel broken rather than generous.
+  const label =
+    wikipedia.language == null
+      ? t("authors.wikidataItem", { name })
+      : wikipedia.language === locale
+        ? t("authors.wikipediaOn", { name })
+        : t("authors.wikipediaInOther", {
+            name,
+            // The name, not the subdomain: "in fr" reads as a fault. Codes
+            // with no name fall back to themselves, and four real Wikipedia
+            // codes make `Intl` throw rather than fall back. See
+            // `lib/languageName`.
+            language: languageName(wikipedia.language, locale),
+          });
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      // noreferrer as well as noopener: the target is a third party and
+      // has no business knowing which page linked to it. The same rule
+      // `BookHeader` applies to its Goodreads link.
+      rel="noopener noreferrer"
+      // `hreflang` where we know it, because the article may not be in
+      // the page's language and a screen reader should switch voice.
+      hrefLang={wikipedia.language ?? undefined}
+      title={label}
+      aria-label={label}
+      className={ACTION}
+    >
+      {/* The stylised W of the Wikipedia wordmark, which is a serif
+          capital rather than the puzzle globe: the globe is a trademarked
+          logo and would be an asset, a licence question and a CSP change.
+          Hidden from assistive tech, which reads the label above. */}
+      <span aria-hidden="true" className="font-serif text-sm leading-none">
+        W
+      </span>
+    </a>
   );
 }

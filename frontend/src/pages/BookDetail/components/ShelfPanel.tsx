@@ -33,6 +33,23 @@ function shelfDraft(book: BookOut) {
 }
 
 /**
+ * The PATCH a submit sends. Empty string means "clear", which is why these are
+ * normalised to null rather than sent as "": the API distinguishes absent from
+ * null, and an empty string would be neither. An index that is not a number is
+ * sent as no index.
+ */
+function shelfUpdate(draft: ReturnType<typeof shelfDraft>): BookDetailsUpdate {
+  const parsedIndex =
+    draft.seriesIndex.trim() === "" ? null : Number(draft.seriesIndex);
+  return {
+    series_name: draft.seriesName.trim() || null,
+    series_index:
+      parsedIndex !== null && Number.isFinite(parsedIndex) ? parsedIndex : null,
+    location: draft.location.trim() || null,
+  };
+}
+
+/**
  * Which series a book belongs to, and where the copy physically is.
  *
  * Both are free text and both are edited here rather than in a modal, because
@@ -71,18 +88,7 @@ export default function ShelfPanel({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const parsedIndex = seriesIndex.trim() === "" ? null : Number(seriesIndex);
-    onSave({
-      // Empty string means "clear", which is why these are normalised to null
-      // rather than sent as "". The API distinguishes absent from null, and an
-      // empty string would be neither.
-      series_name: seriesName.trim() || null,
-      series_index:
-        parsedIndex !== null && Number.isFinite(parsedIndex)
-          ? parsedIndex
-          : null,
-      location: location.trim() || null,
-    });
+    onSave(shelfUpdate({ seriesName, seriesIndex, location }));
   }
 
   return (

@@ -355,6 +355,95 @@ describe("an ID3 tagged MP3", () => {
     expect(await tagsOf(mp3({ head: tag }))).toBeNull();
   });
 
+  it("reads the first of two frames with the same id", async () => {
+    const tags = await tagsOf(
+      mp3({
+        head: id3v2({
+          frames: [plainFrame("TIT2", "First"), plainFrame("TIT2", "Second")],
+        }),
+      }),
+    );
+
+    expect(tags?.title).toBe("First");
+  });
+
+  it("stops at a frame id it cannot name rather than reading on", async () => {
+    const tags = await tagsOf(
+      mp3({
+        head: id3v2({
+          frames: [
+            plainFrame("TALB", "Dune"),
+            textFrame("ab!?", new Uint8Array([0])),
+            plainFrame("TIT2", "Lost"),
+          ],
+        }),
+      }),
+    );
+
+    expect(tags).toEqual({ album: "Dune", artists: [], title: null });
+  });
+
+  it("stops at a 2.4 frame whose length is not synchsafe", async () => {
+    // The bad frame's body is itself a whole frame, so a walk that read on
+    // from the bad length would find a title there.
+    const inner = id3v2({ major: 4, frames: [plainFrame("TIT2", "Lost")] });
+    const tag = id3v2({
+      major: 4,
+      frames: [
+        plainFrame("TALB", "Dune"),
+        textFrame("TXXX", inner.subarray(10)),
+      ],
+    });
+    // TALB's frame is 15 bytes from 10, so TXXX's size ends at byte 32.
+    tag[32] = tag[32]! | 0x80;
+
+    const tags = await tagsOf(mp3({ head: tag }));
+
+    expect(tags).toEqual({ album: "Dune", artists: [], title: null });
+  });
+
+  it("does not read a 2.2 tag flagged as compressed, and reads the tail", async () => {
+    const tags = await tagsOf(
+      mp3({
+        head: id3v2({
+          major: 2,
+          extendedHeader: new Uint8Array(0),
+          frames: [plainFrame("TT2", "Lost")],
+        }),
+        tail: id3v1({ title: "Right" }),
+      }),
+    );
+
+    expect(tags?.title).toBe("Right");
+  });
+
+  it("leaves a 2.4 tag's unsynchronisation to each frame's own flag", async () => {
+    const tag = id3v2({
+      major: 4,
+      frames: [textFrame("TPE1", new Uint8Array([0, 0xff, 0x00, 0x41]))],
+    });
+    tag[5] = tag[5]! | 0x80;
+
+    const tags = await tagsOf(mp3({ head: tag }));
+
+    expect(tags?.artists).toEqual(["\u00ff", "A"]);
+  });
+
+  it("reads the tail tag past a head tag of a version that does not exist", async () => {
+    const tags = await tagsOf(
+      mp3({
+        head: id3v2({ major: 5, frames: [plainFrame("TIT2", "Lost")] }),
+        tail: id3v1({ title: "Right" }),
+      }),
+    );
+
+    expect(tags?.title).toBe("Right");
+  });
+
+  it("says a tail tag whose fields are all blank carries no tags", async () => {
+    expect(await failureOf(mp3({ tail: id3v1() }))).toBe("no-tags");
+  });
+
   it("reads the tail tag when there is no head one", async () => {
     // Measured: 3 of 3 of the Internet Archive's own 64 kbps derivatives of the
     // LibriVox chapters carry no ID3v2 at all, and the one whose tail was
@@ -574,6 +663,66 @@ describe("an M4B", () => {
     expect(tags).toBeNull();
   });
 
+  it("reads a value written as UTF-16 with no byte order mark as big endian", async () => {
+    const tags = await tagsOf(
+      m4b({ entries: [ilstEntry("©nam", utf16("Moby Dick", true, false), 2)] }),
+      ".m4b",
+    );
+
+    expect(tags?.title).toBe("Moby Dick");
+  });
+
+  it("reads a value whose kind is left to its key as UTF-8", async () => {
+    const tags = await tagsOf(
+      m4b({ entries: [ilstEntry("©nam", "Émile", 0)] }),
+      ".m4b",
+    );
+
+    expect(tags?.title).toBe("Émile");
+  });
+
+  it("reads the first of two entries with the same key", async () => {
+    const tags = await tagsOf(
+      m4b({
+        entries: [ilstEntry("©nam", "First"), ilstEntry("©nam", "Second")],
+      }),
+      ".m4b",
+    );
+
+    expect(tags?.title).toBe("First");
+  });
+
+  it("stops walking the entries once all three keys are read", async () => {
+    // Each further entry costs one read to walk, so a walk that went on past
+    // the third key would spend the budget and read the file as unreadable.
+    const reading = await readAudioTags(
+      m4b({
+        entries: [
+          ilstEntry("©alb", "Emma"),
+          ilstEntry("©ART", "Jane Austen"),
+          ilstEntry("©nam", "Emma Part 1"),
+          ...Array.from({ length: MAX_READS }, () => box("free")),
+        ],
+      }),
+      ".m4b",
+    );
+
+    expect(reading).toEqual({
+      ok: true,
+      tags: { album: "Emma", artists: ["Jane Austen"], title: "Emma Part 1" },
+    });
+  });
+
+  it("reads the data box past another child of the entry", async () => {
+    // An entry's own `data` box, without the eight byte header of the entry.
+    const data = ilstEntry("©nam", "Emma").subarray(8);
+    const entry = box("©nam", box("mean", latin1("com.apple.iTunes")), data);
+
+    const tags = await tagsOf(m4b({ entries: [entry] }), ".m4b");
+
+    expect(tags?.title).toBe("Emma");
+  });
+
   it("reads a box that carries its length as 64 bits", async () => {
     const tags = await tagsOf(
       new Blob([
@@ -625,6 +774,49 @@ describe("an M4B", () => {
       box("ftyp", latin1("M4A ")),
       box("moov", brokenBox("udta", 0x7fffffff, new Uint8Array(16))),
     ] as BlobPart[]);
+
+    expect(await failureOf(file, ".m4b")).toBe("no-tags");
+  });
+
+  it.each([
+    // Under four bytes, so not even the length field can be read.
+    ["too short to hold a header", new Uint8Array(3)],
+    // A 64 bit length whose length field the parent cuts off.
+    [
+      "a 64 bit header cut short",
+      new Uint8Array([0, 0, 0, 1, ...latin1("free"), 0, 0, 0, 0]),
+    ],
+  ])("stops at a scrap %s after the last entry", async (_, scrap) => {
+    // Read on rather than refused, either one indexes past the bytes it was
+    // given, and the walk throws instead of ending.
+    const entry = ilstEntry("©alb", "Dune");
+    const tags = await tagsOf(m4b({ entries: [entry, scrap] }), ".m4b");
+
+    expect(tags?.album).toBe("Dune");
+  });
+
+  it("stops at an entry that says it is smaller than its own header", async () => {
+    // Four bytes long by its own word, so taking it at that word would step
+    // into the middle of its header, where a whole entry starts.
+    const entries = [new Uint8Array([0, 0, 0, 4]), ilstEntry("©alb", "Dune")];
+
+    expect(await failureOf(m4b({ entries }), ".m4b")).toBe("no-tags");
+  });
+
+  it("ends the walk at a read that comes back short", async () => {
+    // A blob backed by a file that changed under it can answer a slice with
+    // fewer bytes than were asked for. Only the sixteen byte box headers come
+    // back short here, so reading on would still find the album.
+    const file = m4b({ entries: [ilstEntry("©alb", "Dune")] });
+    const slice = Blob.prototype.slice;
+    vi.spyOn(Blob.prototype, "slice").mockImplementation(function (
+      this: Blob,
+      start?: number,
+      end?: number,
+    ) {
+      const whole = slice.call(this, start, end);
+      return whole.size === 16 ? slice.call(whole, 0, 15) : whole;
+    });
 
     expect(await failureOf(file, ".m4b")).toBe("no-tags");
   });

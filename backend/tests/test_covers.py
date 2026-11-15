@@ -1144,6 +1144,11 @@ class TestTheInteractiveBudget:
 
         assert route.call_count == 0
 
+    def test_an_unlisted_host_is_dropped_even_with_no_budget_left(self):
+        """Refused for its host before the budget is read, so it is absent, never unknown."""
+        with respx.mock:
+            assert _await(_check_one("https://evil.test/x.jpg", budget=0.0)) is False
+
     def test_a_check_of_a_trickling_service_answers_inside_the_budget(self, monkeypatch):
         """The arm that was missing, and the one that cost the most.
 

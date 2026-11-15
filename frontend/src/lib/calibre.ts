@@ -681,8 +681,14 @@ function collectText(node: Node, into: string[]): void {
   const name = (node as Element).localName;
   if (SILENT_ELEMENTS.has(name)) return;
   for (const child of node.childNodes) collectText(child, into);
-  if (PARAGRAPH_ELEMENTS.has(name)) into.push("\n\n");
-  else if (LINE_ELEMENTS.has(name)) into.push("\n");
+  const ending = breakAfter(name);
+  if (ending !== null) into.push(ending);
+}
+
+/** The break an element's text ends with, or `null` for an inline one. */
+function breakAfter(name: string): string | null {
+  if (PARAGRAPH_ELEMENTS.has(name)) return "\n\n";
+  return LINE_ELEMENTS.has(name) ? "\n" : null;
 }
 
 /**
@@ -744,15 +750,26 @@ function bookRows(
   if (!REQUIRED_TABLES.every((name) => tables.has(name))) return null;
   const columns = columnsIn(db, "books");
   if (!columns.has("id") || !columns.has("title")) return null;
-  const has = (column: string) => columns.has(column);
   return db.query(
     `SELECT id, title,
-            ${has("path") ? "path" : "'' AS path"},
-            ${has("uuid") ? "uuid" : "NULL AS uuid"},
-            ${has("pubdate") ? "pubdate" : "NULL AS pubdate"},
-            ${has("series_index") ? "series_index" : "NULL AS series_index"}
+            ${optionalColumn(columns, "path", "''")},
+            ${optionalColumn(columns, "uuid", "NULL")},
+            ${optionalColumn(columns, "pubdate", "NULL")},
+            ${optionalColumn(columns, "series_index", "NULL")}
        FROM books ORDER BY id`,
   );
+}
+
+/**
+ * One optional column of a select: the column itself where the table has it,
+ * else `absent`, a SQL literal, under the column's name.
+ */
+function optionalColumn(
+  columns: ReadonlySet<string>,
+  name: string,
+  absent: string,
+): string {
+  return columns.has(name) ? name : `${absent} AS ${name}`;
 }
 
 /** What every link table says, grouped by the book it points at. */
@@ -832,7 +849,7 @@ function relationsIn(
       () =>
         db.query(
           `SELECT book, format,
-                  ${columnsIn(db, "data").has("name") ? "name" : "NULL AS name"}
+                  ${optionalColumn(columnsIn(db, "data"), "name", "NULL")}
              FROM data`,
         ),
       (row): CalibreFile | null => {
@@ -862,14 +879,13 @@ function firstOf<T>(links: Map<number, T[]>, id: number): T | null {
 function bookOf(row: SqliteRow, relations: Relations): CalibreBook | null {
   const id = integer(row["id"]);
   if (id === null) return null;
-  const title = text(row["title"]);
   const identifiers = relations.identifiers.get(id) ?? [];
   const seriesName = firstOf(relations.series, id);
   return {
     id,
     path: text(row["path"]) ?? "",
     uuid: text(row["uuid"]),
-    title: title !== null && CALIBRE_PLACEHOLDER.title(title) ? null : title,
+    title: readTitle(row["title"]),
     authors: relations.authors.get(id) ?? [],
     // One `authors` row per person, linked to the book.
     authorsSeparated: true,
@@ -886,6 +902,12 @@ function bookOf(row: SqliteRow, relations: Relations): CalibreBook | null {
     seriesIndex: seriesName === null ? null : decimal(row["series_index"]),
     files: relations.files.get(id) ?? [],
   };
+}
+
+/** The title, or `null` where it is Calibre's placeholder for none. */
+function readTitle(value: unknown): string | null {
+  const title = text(value);
+  return title !== null && CALIBRE_PLACEHOLDER.title(title) ? null : title;
 }
 
 function readDescription(html: string | null): string | null {
@@ -1136,10 +1158,22 @@ function seriesOf(
   if (opf.seriesName !== null && opf.seriesName !== book.seriesName) {
     tally.disagreed += 1;
   }
-  const sameSeries = opf.seriesName === book.seriesName;
-  const index = book.seriesIndex ?? (sameSeries ? opf.seriesIndex : null);
-  if (book.seriesIndex === null && index !== null) tally.filled += 1;
-  return { name: book.seriesName, index };
+  return { name: book.seriesName, index: seriesIndexOf(book, opf, tally) };
+}
+
+/**
+ * The position in a series the database names: its own, else the file's
+ * where the file names the same series, counted as filled.
+ */
+function seriesIndexOf(
+  book: CalibreBook,
+  opf: FileMetadata,
+  tally: Tally,
+): number | null {
+  if (book.seriesIndex !== null) return book.seriesIndex;
+  const index = opf.seriesName === book.seriesName ? opf.seriesIndex : null;
+  if (index !== null) tally.filled += 1;
+  return index;
 }
 
 /** The file's series, for a book the database files in none. */

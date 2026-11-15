@@ -333,7 +333,8 @@ in the app asks at all.
 **MARC21 import and export** (library mode). Read a MARCXML file another
 library exported; write the whole shelf back out as MARCXML. Matched on ISBN,
 then author and title together. Carries the classifications, which is what a
-receiving library shelves by.
+receiving library shelves by, and names in `040 $a` the national library that
+created a record where it has a citable MARC organization code.
 
 **ISO 2709 is deliberately not read or written**, the binary MARC serialisation. It carries a
 directory of byte offsets that has to agree with the field data after every
@@ -342,8 +343,8 @@ import is also out: this app stores an author identifier, not an authority
 record.
 
 **A public catalogue, off by default and behind two switches.** Library mode
-changes what a cataloguer sees: call number and Classification in, ownership,
-lending willingness and reading status out. It also opens on the dense list,
+changes what a cataloguer sees: call number, Classification and the record
+source in, ownership, lending willingness and reading status out. It also opens on the dense list,
 which is the view that puts the most records on a counter's screen. Which
 columns the table draws is chosen from that set, and both the columns and the
 view are remembered separately for each mode, so turning the mode on and off
@@ -359,13 +360,15 @@ whenever library mode is off, so turning library mode back off cannot leave a
 catalogue public.
 
 What a reader with no account gets is **search and one item record, and nothing
-else**. Ownership, lending willingness, reading status, member names, notes,
-purchase details, the trash and every per member field are absent from the
-payload, not merely hidden by a client. **Private books stay private in every
-mode**: that rule is not the switch's to relax. The public routes are rate
-limited, and a published catalogue is `noindex` until indexing is separately
-allowed, because publishing a catalogue and inviting a search engine to crawl it
-are different decisions.
+else**. The record names its source, the catalogue it came from or how it was
+entered; whether it was changed here is not published. Ownership, lending
+willingness, reading status, member names, notes, purchase details, the trash
+and every per member field are absent from the payload, not merely hidden by a
+client. **Private books stay private in every mode**: that rule is not the
+switch's to relax. The public routes are rate limited, and a published
+catalogue is `noindex` until indexing is separately allowed, because
+publishing a catalogue and inviting a search engine to crawl it are different
+decisions.
 
 **An SRU server, on the same two switches.** A published catalogue can be
 searched by a person; being searched by another institution's software needs a

@@ -14,6 +14,7 @@ import {
   useLoginBackground,
   useLoginForm,
   useRecovery,
+  type UseLoginFormResult,
 } from "./hooks";
 import { Icon } from "../../components";
 
@@ -90,69 +91,11 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
         )}
 
         {panel === "credentials" && (
-          <>
-            <LoginForm
-              mode={form.mode}
-              registrationEnabled={form.registrationEnabled}
-              addressRequired={form.verificationRequired}
-              isSubmitting={form.isSubmitting}
-              error={form.error}
-              onModeChange={form.setMode}
-              onSubmit={form.submit}
-            />
-
-            {/* Said where the account is being made rather than found out
-                afterwards: a code has been sent and nothing else will happen
-                until it comes back. */}
-            {form.awaitingConfirmation && (
-              <p
-                role="status"
-                className="text-center text-sm text-paper-700 mt-4 dark:text-paper-300"
-              >
-                {t("login.registered")}
-              </p>
-            )}
-
-            <div className="mt-4 space-y-1 text-center text-sm">
-              {form.passwordResetEnabled && (
-                <p>
-                  <button
-                    type="button"
-                    onClick={() => setPanel("recovery")}
-                    className="font-medium text-accent-700 dark:text-accent-300"
-                  >
-                    {t("login.forgotPassword")}
-                  </button>
-                </p>
-              )}
-              {form.verificationRequired && (
-                <p>
-                  <button
-                    type="button"
-                    onClick={() => setPanel("confirm")}
-                    className="font-medium text-accent-700 dark:text-accent-300"
-                  >
-                    {t("login.haveCode")}
-                  </button>
-                </p>
-              )}
-            </div>
-          </>
-        )}
-
-        {panel === "credentials" && form.mode === "register" && (
-          <>
-            <p className="text-center text-xs text-paper-600 mt-4 dark:text-paper-400">
-              {t("login.firstAccountAdmin")}
-            </p>
-            {/* The moment to say it, which is the cheapest place to prevent
-                the situation rather than recover from it: a reset is approved
-                by another admin, so the first account has nobody to approve
-                its own. `docs/configuration.md` carries the command line way back. */}
-            <p className="text-center text-xs text-paper-600 mt-2 dark:text-paper-400">
-              {t("login.soleAdminWarning")}
-            </p>
-          </>
+          <CredentialsPanel
+            form={form}
+            onRecover={() => setPanel("recovery")}
+            onConfirm={() => setPanel("confirm")}
+          />
         )}
 
         {form.isDirectoryLogin && (
@@ -181,5 +124,91 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
         )}
       </div>
     </div>
+  );
+}
+
+interface CredentialsPanelProps {
+  form: UseLoginFormResult;
+  onRecover: () => void;
+  onConfirm: () => void;
+}
+
+/**
+ * The card for signing in or registering, and what is said beneath it.
+ *
+ * A fragment, so it adds no element of its own between the page's
+ * children.
+ */
+function CredentialsPanel({
+  form,
+  onRecover,
+  onConfirm,
+}: CredentialsPanelProps) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <LoginForm
+        mode={form.mode}
+        registrationEnabled={form.registrationEnabled}
+        addressRequired={form.verificationRequired}
+        isSubmitting={form.isSubmitting}
+        error={form.error}
+        onModeChange={form.setMode}
+        onSubmit={form.submit}
+      />
+
+      {/* Said where the account is being made rather than found out
+          afterwards: a code has been sent and nothing else will happen
+          until it comes back. */}
+      {form.awaitingConfirmation && (
+        <p
+          role="status"
+          className="text-center text-sm text-paper-700 mt-4 dark:text-paper-300"
+        >
+          {t("login.registered")}
+        </p>
+      )}
+
+      <div className="mt-4 space-y-1 text-center text-sm">
+        {form.passwordResetEnabled && (
+          <p>
+            <button
+              type="button"
+              onClick={onRecover}
+              className="font-medium text-accent-700 dark:text-accent-300"
+            >
+              {t("login.forgotPassword")}
+            </button>
+          </p>
+        )}
+        {form.verificationRequired && (
+          <p>
+            <button
+              type="button"
+              onClick={onConfirm}
+              className="font-medium text-accent-700 dark:text-accent-300"
+            >
+              {t("login.haveCode")}
+            </button>
+          </p>
+        )}
+      </div>
+
+      {form.mode === "register" && (
+        <>
+          <p className="text-center text-xs text-paper-600 mt-4 dark:text-paper-400">
+            {t("login.firstAccountAdmin")}
+          </p>
+          {/* The moment to say it, which is the cheapest place to prevent
+              the situation rather than recover from it: a reset is approved
+              by another admin, so the first account has nobody to approve
+              its own. `docs/configuration.md` carries the command line way back. */}
+          <p className="text-center text-xs text-paper-600 mt-2 dark:text-paper-400">
+            {t("login.soleAdminWarning")}
+          </p>
+        </>
+      )}
+    </>
   );
 }

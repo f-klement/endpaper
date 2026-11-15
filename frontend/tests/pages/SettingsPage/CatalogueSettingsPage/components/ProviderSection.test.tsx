@@ -497,3 +497,43 @@ describe("a slow catalogue", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+/** Draw the section and keep the handles a lifecycle test needs. */
+function mount() {
+  const onSave = vi.fn<(data: SettingsUpdate) => void>();
+  const section = (sources: CatalogueSourceOut[]) => (
+    <ProviderSection
+      settings={{ catalogue_sources: sources } as SettingsOut}
+      onSave={onSave}
+    />
+  );
+  const view = renderLocalised(section(ROSTER));
+  return { onSave, view, section };
+}
+
+describe("a reorder still inside its debounce window", () => {
+  it("is still sent when the section is left before the save fires", () => {
+    const { onSave, view } = mount();
+    fireEvent.click(screen.getByLabelText("Move Austrian National Library up"));
+    view.unmount();
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(
+      sentRoster(onSave)
+        .map((entry) => entry.source)
+        .slice(0, 3),
+    ).toEqual(["dnb", "oenb", "k10plus"]);
+  });
+
+  it("is not snapped back by a server answer landing mid burst", () => {
+    const { view, section } = mount();
+    fireEvent.click(screen.getByLabelText("Move Austrian National Library up"));
+    // A fresh array: the reseed keys on identity, so the same one would not fire it.
+    view.rerender(section([...ROSTER]));
+
+    const listed = screen
+      .getAllByRole("listitem")
+      .map((item) => item.textContent ?? "");
+    expect(listed[1]).toContain("Austrian National Library");
+  });
+});

@@ -6,12 +6,13 @@ on who is asking.
 """
 
 import re
+from datetime import datetime
 
 import pytest
 from sqlalchemy import event
 
 from enums import ClassificationScheme, ReadStatus
-from models import Book, Collection, Loan, Tag, User, UserBook
+from models import Book, Collection, Loan, ReadingProgress, Tag, User, UserBook
 from schemas import ClassificationOut
 from serialisation import (
     book_to_out,
@@ -544,3 +545,30 @@ class TestThePublicSerialiserCannotAskWhoIsAsking:
         from shelf import Outbound
 
         assert self._annotations()["books"] is Outbound
+
+
+class TestTheCallersOwnRecordReachesItsFields:
+    def test_the_start_and_the_finish_land_in_their_own_fields(self, db, admin, two_books):
+        user = db.get(User, admin["user"]["id"])
+        started, finished = datetime(2026, 1, 1), datetime(2026, 2, 1)
+        db.add(UserBook(user_id=user.id, book_id=two_books[0].id, started_at=started, finished_at=finished))
+        db.commit()
+
+        out = book_to_out(two_books[0], user, db)
+
+        assert out.my_started_at is not None
+        assert out.my_finished_at is not None
+        assert (out.my_started_at.replace(tzinfo=None), out.my_finished_at.replace(tzinfo=None)) == (
+            started,
+            finished,
+        )
+
+    def test_a_page_is_served_with_the_percent_the_page_count_makes_of_it(self, db, admin, two_books):
+        user = db.get(User, admin["user"]["id"])
+        two_books[0].page_count = 200
+        db.add(ReadingProgress(user_id=user.id, book_id=two_books[0].id, page=50))
+        db.commit()
+
+        out = book_to_out(two_books[0], user, db)
+
+        assert (out.my_progress_page, out.my_progress_percent) == (50, 25)

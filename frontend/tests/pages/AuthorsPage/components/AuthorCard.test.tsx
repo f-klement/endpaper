@@ -240,6 +240,19 @@ describe("AuthorCard", () => {
       ).toBeInTheDocument();
     });
 
+    it("leaves no dead anchor behind for a URL safeHref refuses", () => {
+      // An anchor with no href has no link role, so the query above cannot
+      // tell a removed button from a rendered one that goes nowhere.
+      card({
+        key: "frank herbert",
+        url: "javascript:alert(1)",
+        language: "en",
+      });
+
+      expect(screen.queryByLabelText(/Wikipedia/)).toBeNull();
+      expect(screen.queryByText("W")).toBeNull();
+    });
+
     it("leaves the app in a new tab and tells the target nothing", () => {
       // `noreferrer` as well as `noopener`: the target is a third party and has
       // no business knowing which page linked to it. The same rule the book

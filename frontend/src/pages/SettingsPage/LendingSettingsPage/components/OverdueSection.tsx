@@ -321,30 +321,41 @@ function SendReport({ result }: { result: OverdueNotifyResult }) {
             count: result.skipped_private ?? 0,
           })}`}
       </p>
-      {/* One line per channel that was tried. `sent` at the top is true when
-            any channel delivered, and the loans are stamped on that, so a run
-            that reached the chat and not the webhook would otherwise read as a
-            clean send with the failure nowhere on the screen. */}
-      {(result.senders?.length ?? 0) > 0 && (
-        <ul className="text-xs text-paper-600 dark:text-paper-400 space-y-0.5">
-          {(result.senders ?? []).map((entry: SenderOutcome) => (
-            <li key={entry.sender}>
-              {entry.sent
-                ? t("settings.overdueSenderSent", {
-                    sender: t(SENDER_LABELS[entry.sender]),
-                  })
-                : t("settings.overdueSenderFailed", {
-                    sender: t(SENDER_LABELS[entry.sender]),
-                    detail: t(
-                      entry.reason
-                        ? SENDER_ROW_REASONS[entry.reason]
-                        : "settings.overdueRowNothingSent",
-                    ),
-                  })}
-            </li>
-          ))}
-        </ul>
-      )}
+      <SenderRows senders={result.senders} />
     </>
+  );
+}
+
+/**
+ * One line per channel that was tried, or nothing when none was.
+ *
+ * `sent` at the top is true when any channel delivered, and the loans are
+ * stamped on that, so a run that reached the chat and not the webhook would
+ * otherwise read as a clean send with the failure nowhere on the screen.
+ */
+function SenderRows({ senders }: { senders: OverdueNotifyResult["senders"] }) {
+  const { t } = useTranslation();
+
+  if (!senders || senders.length === 0) return null;
+
+  return (
+    <ul className="text-xs text-paper-600 dark:text-paper-400 space-y-0.5">
+      {senders.map((entry: SenderOutcome) => (
+        <li key={entry.sender}>
+          {entry.sent
+            ? t("settings.overdueSenderSent", {
+                sender: t(SENDER_LABELS[entry.sender]),
+              })
+            : t("settings.overdueSenderFailed", {
+                sender: t(SENDER_LABELS[entry.sender]),
+                detail: t(
+                  entry.reason
+                    ? SENDER_ROW_REASONS[entry.reason]
+                    : "settings.overdueRowNothingSent",
+                ),
+              })}
+        </li>
+      ))}
+    </ul>
   );
 }

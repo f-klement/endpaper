@@ -172,6 +172,20 @@ describe("what the sidecar says", () => {
     expect(found.books[0]?.finished).toBeNull();
   });
 
+  it("reads a blank metadata line as saying nothing about the reading state", async () => {
+    expect(
+      library(await read([{ sidecar: { state: " " } }])).books[0]?.finished,
+    ).toBe(false);
+  });
+
+  it("keeps a book finished whatever unread line follows the sentence", async () => {
+    // The fixture writes one state line, so the second is closed into it.
+    const state = `${FINISHED_SENTENCE}</div><div class="meta-entry">Du hast es gelesen.`;
+    expect(
+      library(await read([{ sidecar: { state } }])).books[0]?.finished,
+    ).toBe(true);
+  });
+
   it("counts annotations without carrying a word of them", async () => {
     const found = library(
       await read([{ sidecar: { annotations: ["", "my own note"] } }]),
@@ -561,6 +575,13 @@ describe("what the volume id has to look like", () => {
     );
     expect(found.books.map((book) => book.volumeId)).toEqual([A_VOLUME_ID]);
     expect(found.skipped).toBe(1);
+  });
+
+  it("takes the first volume id where a sidecar names two", async () => {
+    const found = library(
+      await read([{ sidecar: { state: "Status\nzY9-xW8_vU7t" } }]),
+    );
+    expect(found.books[0]?.volumeId).toBe(A_VOLUME_ID);
   });
 
   it("does not take a twelve character run out of a longer line", async () => {

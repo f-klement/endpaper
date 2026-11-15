@@ -65,6 +65,7 @@ import {
   type CollectionOut,
   type LocationOut,
   type OverdueSender,
+  type PageBookOut,
   type SenderHealth,
   type TagOut,
 } from "../../api/generated/model";
@@ -147,34 +148,21 @@ export function useLibrary(): UseLibraryResult {
     [],
   );
 
-  const params = { ...toParams(filters), page_size: PAGE_SIZE };
+  const pages = useBookPages(filters);
+  const lists = useFilterPanelLists();
+  return { filters, update, ...lists, ...pages };
+}
 
-  const books = useListBooksInfinite(params, {
-    query: {
-      initialPageParam: 1,
-      // Keep the current results on screen while a new query runs.
-      //
-      // Without this, changing the search term produces a query key with no
-      // cached data, so `isPending` flips true and `data` is undefined for the
-      // length of the request. The grid emptied and redrew its skeletons
-      // between every debounce window, which reads as a grid of books flashing
-      // up for a moment with nothing in it. The results themselves were never
-      // the problem; the gap between them was.
-      placeholderData: keepPreviousData,
-      // Stop asking once the pages so far account for every matching row.
-      // Returning undefined is what tells React Query there is no next page.
-      getNextPageParam: (lastPage, allPages) => {
-        const loaded = allPages.reduce(
-          (count, page) => count + page.items.length,
-          0,
-        );
-        return loaded < lastPage.total ? allPages.length + 1 : undefined;
-      },
-    },
-  });
-
-  // Tags and locations drive the filter panel only. A failure there costs the
-  // panel, not the grid, so their errors are deliberately not surfaced.
+/**
+ * The lists the filter panel and the selection bar offer.
+ *
+ * Tags and locations drive the filter panel only. A failure there costs the
+ * panel, not the grid, so their errors are deliberately not surfaced.
+ */
+function useFilterPanelLists(): Pick<
+  UseLibraryResult,
+  "locations" | "collections" | "classifications" | "tags"
+> {
   const tags = useListTags();
   const locations = useListLocations({ query: { staleTime: 5 * 60_000 } });
   // Cached like the locations, and for the same reason: how a library has
@@ -191,25 +179,52 @@ export function useLibrary(): UseLibraryResult {
   // `locations` is left alone: it arrives most-populated first, which answers
   // a different question. See `lib/nameOrder.ts`.
   const filed = useSortedByName(collections.data);
+  return {
+    locations: locations.data ?? [],
+    collections: filed,
+    classifications: classifications.data,
+    tags: tags.data ?? [],
+  };
+}
+
+/** The books matching `filters`, a page at a time, and the state of the request. */
+function useBookPages(
+  filters: BookFilters,
+): Omit<
+  UseLibraryResult,
+  | "filters"
+  | "update"
+  | "locations"
+  | "collections"
+  | "classifications"
+  | "tags"
+> {
+  const params = { ...toParams(filters), page_size: PAGE_SIZE };
+
+  const books = useListBooksInfinite(params, {
+    query: {
+      initialPageParam: 1,
+      // Keep the current results on screen while a new query runs.
+      //
+      // Without this, changing the search term produces a query key with no
+      // cached data, so `isPending` flips true and `data` is undefined for the
+      // length of the request. The grid emptied and redrew its skeletons
+      // between every debounce window, which reads as a grid of books flashing
+      // up for a moment with nothing in it. The results themselves were never
+      // the problem; the gap between them was.
+      placeholderData: keepPreviousData,
+      getNextPageParam: nextPageParam,
+    },
+  });
 
   const flatBooks = useMemo(
     () => books.data?.pages.flatMap((page) => page.items) ?? [],
     [books.data],
   );
 
-  const total = books.data?.pages[0]?.total ?? 0;
-
   return {
-    filters,
-    update,
-
-    locations: locations.data ?? [],
-    collections: filed,
-    classifications: classifications.data,
-
     books: flatBooks,
-    total,
-    tags: tags.data ?? [],
+    total: books.data?.pages[0]?.total ?? 0,
 
     // True only when there is genuinely nothing to draw. With previous results
     // held, a re-search is no longer a loading state, it is a stale one.
@@ -222,6 +237,19 @@ export function useLibrary(): UseLibraryResult {
     isLoadingMore: books.isFetchingNextPage,
     loadMore: () => void books.fetchNextPage(),
   };
+}
+
+/**
+ * Stop asking once the pages so far account for every matching row.
+ *
+ * Returning undefined is what tells React Query there is no next page.
+ */
+function nextPageParam(
+  lastPage: PageBookOut,
+  allPages: PageBookOut[],
+): number | undefined {
+  const loaded = allPages.reduce((count, page) => count + page.items.length, 0);
+  return loaded < lastPage.total ? allPages.length + 1 : undefined;
 }
 
 /**

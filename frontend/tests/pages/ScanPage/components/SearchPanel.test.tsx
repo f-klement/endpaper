@@ -109,6 +109,13 @@ describe("SearchPanel", () => {
       ).toBeInTheDocument();
     });
 
+    it("shows a subtitle under the title when the record has one", () => {
+      renderPanel({
+        matches: [match({ title: "Dune", subtitle: "The First Novel" })],
+      });
+      expect(screen.getByText("The First Novel")).toBeInTheDocument();
+    });
+
     it("leaves out the parts a record does not have", () => {
       renderPanel({ matches: [match({ publisher: null, year: null })] });
       expect(screen.getByText("Frank Herbert")).toBeInTheDocument();
@@ -131,6 +138,14 @@ describe("SearchPanel", () => {
       expect(
         screen.getByText(/Nothing is saved until you confirm/),
       ).toBeInTheDocument();
+    });
+
+    it("says nothing about picking before there is anything to pick", () => {
+      renderPanel({ matches: [] });
+      expect(
+        screen.queryByText(/Nothing is saved until you confirm/),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("list")).not.toBeInTheDocument();
     });
 
     it("renders results that share a missing id", () => {

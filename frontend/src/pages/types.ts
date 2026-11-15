@@ -21,13 +21,16 @@
 import {
   BookCondition,
   BookFormat,
+  CatalogueSource,
   LendingWillingness,
   OwnershipStatus,
   ReadStatus,
+  RecordOrigin,
   TagCategory,
 } from "../api/generated/model";
 import type { Locale, TagOut } from "../api/generated/model";
 import { tagName, type MessageKey } from "../i18n";
+import { catalogueName } from "../lib/catalogueName";
 import { sortByName } from "../lib/nameOrder";
 import type { ThemePreference } from "../theme";
 
@@ -205,6 +208,43 @@ export const OWNERSHIP_LABELS: Record<OwnershipStatus, MessageKey> = {
   [OwnershipStatus.not_owned]: "ownership.not_owned",
   [OwnershipStatus.unknown]: "ownership.unknown",
 };
+
+/**
+ * What each record origin is called, for the table, the book page and the
+ * public page alike.
+ *
+ * **A catalogue is named by `catalogueName`, never by a second key**: every
+ * `CatalogueSource` is a `RecordOrigin` under the same value, and the settings
+ * list already names each, so a copy here would be the one that drifts. The
+ * origins that are not a catalogue have keys of their own. `Record<...>` for
+ * `FORMAT_LABELS`' reason: an origin added to the backend is a compile error.
+ */
+export const ORIGIN_LABELS: Record<RecordOrigin, MessageKey> = {
+  ...(Object.fromEntries(
+    Object.values(CatalogueSource).map((source) => [
+      source,
+      catalogueName(source),
+    ]),
+  ) as Record<CatalogueSource, MessageKey>),
+  [RecordOrigin.manual]: "origin.manual",
+  [RecordOrigin.file]: "origin.file",
+  [RecordOrigin.csv_import]: "origin.csv_import",
+  [RecordOrigin.marc_import]: "origin.marc_import",
+  [RecordOrigin.opds_import]: "origin.opds_import",
+  [RecordOrigin.calibre_import]: "origin.calibre_import",
+  [RecordOrigin.store_import]: "origin.store_import",
+};
+
+/**
+ * The origin's label, and `origin.unknown` for a row written before anybody
+ * recorded one. Null is a real state on every row older than the column, so it
+ * reads as unknown rather than as a blank somebody might take for "none".
+ */
+export function originLabel(
+  origin: RecordOrigin | null | undefined,
+): MessageKey {
+  return origin ? ORIGIN_LABELS[origin] : "origin.unknown";
+}
 
 /**
  * What each format and condition is called.

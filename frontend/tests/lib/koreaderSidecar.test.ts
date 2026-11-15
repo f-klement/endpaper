@@ -24,6 +24,17 @@ function highlights(source: string) {
   return reading.highlights;
 }
 
+/** The positions of the one annotation whose `pos0` and `pos1` are given. */
+function positions(pos0: string, pos1: string) {
+  const marks = highlights(`return {
+  ["partial_md5_checksum"] = "${DIGEST}",
+  ["annotations"] = {
+    [1] = { ["drawer"] = "lighten", ["text"] = "A passage", ["pos0"] = ${pos0}, ["pos1"] = ${pos1} },
+  },
+}`);
+  return marks.map((mark) => [mark.pos0, mark.pos1]);
+}
+
 describe("the current annotations array", () => {
   const sidecar = `return {
   ["partial_md5_checksum"] = "${DIGEST}",
@@ -78,13 +89,15 @@ describe("the current annotations array", () => {
     ]);
   });
 
-  it.each(["2026-03-01 25:00:00", "0000-03-01 22:15:09"])(
-    "drops a time that does not exist, %s, from its mark alone",
-    (when) => {
-      const [mark] = highlights(sidecar.replace("2026-03-01 22:15:09", when));
-      expect(mark?.highlightedAt).toBeNull();
-    },
-  );
+  it.each([
+    "2026-03-01 25:00:00",
+    "2026-03-01 22:15:60",
+    "0000-03-01 22:15:09",
+    "2026-3-1 22:15:09",
+  ])("drops a time that does not exist, %s, from its mark alone", (when) => {
+    const [mark] = highlights(sidecar.replace("2026-03-01 22:15:09", when));
+    expect(mark?.highlightedAt).toBeNull();
+  });
 
   it("drops a date that does not exist from its mark alone", () => {
     const [mark] = highlights(
@@ -220,6 +233,39 @@ describe("the older bookmarks and highlight pair", () => {
   });
 });
 
+describe("a position", () => {
+  it("passes a number on as its digits", () => {
+    expect(positions("12", "13.5")).toEqual([["12", "13.5"]]);
+  });
+
+  it("leaves out a mark whose position is neither text, a number nor a table", () => {
+    expect(positions("true", '"/p[1]"')).toEqual([]);
+  });
+
+  it("writes a table nested in coordinates inside braces, its keys sorted too", () => {
+    expect(
+      positions('{ ["box"] = { ["y"] = 2, ["x"] = 1 }, ["a"] = 0 }', '"/p[1]"'),
+    ).toEqual([["a=0;box={x=1;y=2}", "/p[1]"]]);
+  });
+
+  it("keeps the page a fixed layout bookmark's coordinates already name", () => {
+    const [mark] = highlights(`return {
+  ["partial_md5_checksum"] = "${DIGEST}",
+  ["highlights_imported"] = true,
+  ["bookmarks"] = {
+    [1] = {
+      ["highlighted"] = true,
+      ["notes"] = "On a PDF page",
+      ["page"] = 4,
+      ["pos0"] = { ["page"] = 7, ["x"] = 1 },
+      ["pos1"] = { ["x"] = 2 },
+    },
+  },
+}`);
+    expect([mark?.pos0, mark?.pos1]).toEqual(["page=7;x=1", "page=4;x=2"]);
+  });
+});
+
 describe("a sidecar that cannot be imported", () => {
   it("says so when it carries no fingerprint", () => {
     expect(readSidecar('return { ["annotations"] = {} }')).toEqual({
@@ -251,6 +297,22 @@ describe("a sidecar that cannot be imported", () => {
       ["pos0"] = "a",
       ["pos1"] = "b",
       ["text"] = "${"x".repeat(10_001)}",
+    },
+  },
+}`);
+    expect(reading).toMatchObject({ ok: true, highlights: [], oversized: 1 });
+  });
+
+  it("counts a note too long to store instead of sending it", () => {
+    const reading = readSidecar(`return {
+  ["partial_md5_checksum"] = "${DIGEST}",
+  ["annotations"] = {
+    [1] = {
+      ["drawer"] = "lighten",
+      ["pos0"] = "a",
+      ["pos1"] = "b",
+      ["text"] = "kept short",
+      ["note"] = "${"x".repeat(10_001)}",
     },
   },
 }`);

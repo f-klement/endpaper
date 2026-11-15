@@ -545,7 +545,7 @@ export const de: Messages = {
   "settings.public.modeTitle": "Bibliotheksmodus",
   "settings.public.modeLabel": "Diese Bibliothek als Bibliothek katalogisieren",
   "settings.public.modeHint":
-    "Zeigt Signatur und Schlagwörter und blendet Besitz und Lesestatus aus. Veröffentlicht wird dadurch nichts.",
+    "Zeigt Signatur, Schlagwörter und die Herkunft jeder Aufnahme und blendet Besitz und Lesestatus aus. Veröffentlicht wird dadurch nichts.",
   "settings.public.modeRepublishes":
     "Das Veröffentlichen ist bereits eingeschaltet. Wird dies wieder eingeschaltet, ist der Katalog sofort erneut öffentlich.",
   "settings.public.publishTitle": "Veröffentlichen",
@@ -1839,6 +1839,18 @@ export const de: Messages = {
   "public.fact.pages": "Seiten",
   "public.fact.format": "Ausgabeform",
   "public.fact.series": "Reihe",
+  "origin.label": "Herkunft der Aufnahme",
+  "origin.unknown": "Unbekannt",
+  "origin.manual": "Von Hand erfasst",
+  "origin.file": "Aus der Datei des Buchs gelesen",
+  "origin.csv_import": "Import einer Lesehistorie",
+  "origin.marc_import": "MARC-Import",
+  "origin.opds_import": "Import vom Bibliotheksserver",
+  "origin.calibre_import": "Import einer Calibre-Bibliothek",
+  "origin.store_import": "Import aus Shop oder Lesegerät",
+  "origin.modified.label": "Hier geändert",
+  "origin.modified.yes": "Ja, seit der Übernahme",
+  "origin.modified.no": "Nein",
 
   // Die Anbieterliste. Katalognamen sind Eigennamen und bleiben unübersetzt.
   "providers.title": "Woher die Buchdaten kommen",

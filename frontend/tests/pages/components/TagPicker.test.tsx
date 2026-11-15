@@ -5,7 +5,12 @@ import { renderLocalised } from "../../utils";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Locale, TagCategory, TagKey } from "../../../src/api/generated/model";
+import {
+  Locale,
+  TagCategory,
+  TagKey,
+  type TagOut,
+} from "../../../src/api/generated/model";
 import TagPicker from "../../../src/pages/components/TagPicker";
 import { makeTag, makeTagSet, resetIds } from "../../factories";
 
@@ -412,6 +417,34 @@ describe("TagPicker, inventing a tag", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove Loft finds" }));
 
     expect(onForget).toHaveBeenCalledWith("Loft finds");
+  });
+
+  it("offers to delete an invented tag and never a seeded one", () => {
+    // A seeded tag comes straight back at the next restart, so a delete
+    // button on it would offer an action that undoes itself. Both selected,
+    // so their category opens without a click.
+    const seeded = makeTag({
+      name: "Fiction",
+      category: TagCategory.type,
+      key: TagKey.fiction,
+      is_predefined: true,
+    });
+    const invented = makeTag({ name: "Novella", category: TagCategory.type });
+    const onDelete = vi.fn<(tag: TagOut) => void>();
+    renderLocalised(
+      <TagPicker
+        tags={[seeded, invented]}
+        selectedIds={[seeded.id, invented.id]}
+        onToggle={vi.fn<OnToggle>()}
+        onDelete={onDelete}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Delete Fiction" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Novella" }));
+    expect(onDelete).toHaveBeenCalledWith(invented);
   });
 
   it("renders no such group for a picker given no pending names", () => {

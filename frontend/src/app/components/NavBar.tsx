@@ -128,83 +128,31 @@ export default function NavBar({
   isSwitched,
   onSignOut,
 }: NavBarProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+  const {
+    menuOpen,
+    setMenuOpen,
+    exportOpen,
+    setExportOpen,
+    menuRef,
+    triggerRef,
+  } = useMenu();
   // **All three, and reading only the first is what made a refused export
   // silent.** The hook has always returned the error and the pending flag and
   // this component destructured neither, so a 403 on MARCXML outside library
   // mode, a 401 past the edge handling and the 429 the route now answers all
   // showed the reader nothing at all: the button simply stopped working. The
   // backup door renders its equivalent through `ErrorState` and always has.
-  const { exportLibrary, isExporting, error: exportError } = useExportLibrary();
+  //
+  // Called here rather than in the menu, which unmounts on every close and
+  // would take a refusal with it.
+  const exporting = useExportLibrary();
   // MARCXML is offered only in library mode. The server refuses the format
   // without it, so this decides what a household is shown rather than what it
   // may do.
   const libraryMode = useLibraryMode();
   const { t } = useTranslation();
 
-  // Under proxy auth both of these are inert: the upstream owns the session,
-  // and the app re-identifies the same person on the very next request. An
-  // offer that cannot do anything is worse than no offer.
-  const ownsTheSession = mode !== AuthMode.proxy;
-
-  useEffect(() => {
-    if (!menuOpen) {
-      setExportOpen(false);
-      return;
-    }
-    function handleClick(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    }
-    // Escape closes it and hands focus back. Without this the only way out by
-    // keyboard is to tab through every item in the menu.
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [menuOpen]);
-
-  const linkClass = ({ isActive }: { isActive: boolean }) =>
-    [
-      "relative flex items-center gap-2 px-2.5 sm:px-3 h-9 rounded-lg text-sm font-medium",
-      "transition-[background-color,color] duration-150 ease-[var(--ease-out-soft)]",
-      // The underline is the state and the tint only supports it. Colour alone
-      // would leave the current page indistinguishable to anyone who cannot
-      // separate these two hues.
-      isActive
-        ? "text-accent-700 bg-accent-50 dark:text-accent-200 dark:bg-accent-500/12 " +
-          "after:absolute after:left-2.5 after:right-2.5 after:-bottom-[7px] " +
-          "after:h-[2px] after:rounded-full after:bg-accent-fill " +
-          "dark:after:bg-accent-400"
-        : "text-paper-600 hover:text-paper-900 hover:bg-paper-100 " +
-          "dark:text-paper-400 dark:hover:text-paper-100 dark:hover:bg-paper-800/70",
-    ].join(" ");
-
-  function go(children: ReactNode, to: string, key: string) {
-    return (
-      <Link
-        key={key}
-        to={to}
-        role="menuitem"
-        onClick={() => setMenuOpen(false)}
-        className={ITEM_CLASS}
-      >
-        {children}
-      </Link>
-    );
-  }
+  const close = () => setMenuOpen(false);
 
   return (
     <nav
@@ -275,93 +223,238 @@ export default function NavBar({
             aria-label={t("nav.menu")}
             className="absolute right-0 top-full mt-2 w-56 bg-paper-0 border border-paper-200 rounded-xl shadow-[var(--shadow-lift)] overflow-hidden dark:bg-paper-900 dark:border-paper-800"
           >
-            {SECONDARY.map((link) => go(t(link.label), link.to, link.to))}
-
-            <button
-              role="menuitem"
-              onClick={() => setExportOpen((open) => !open)}
-              className={`${ITEM_CLASS} flex items-center justify-between`}
-            >
-              {t("nav.exportLibrary")}
-              <Icon
-                name="chevron"
-                className={`w-3.5 h-3.5 opacity-60 transition-transform duration-150 ${
-                  exportOpen ? "rotate-90" : ""
-                }`}
-              />
-            </button>
-
-            {exportOpen && (
-              <div className="border-t border-paper-200 bg-paper-100 flex gap-2 px-4 py-2.5 dark:border-paper-800 dark:bg-paper-950/60">
-                {exportFormats(libraryMode).map((format) => (
-                  <button
-                    key={format}
-                    // **The menu stays open, where it used to close on this
-                    // click.** Closing it unmounted the only place the outcome
-                    // could be shown, which is half of why a refusal was
-                    // invisible. It still closes on Escape, on a click outside
-                    // and on every navigation item, which is how every other
-                    // popover here closes.
-                    onClick={() => exportLibrary(format)}
-                    title={t(EXPORT_HINTS[format])}
-                    disabled={isExporting}
-                    aria-busy={isExporting}
-                    className="flex-1 text-center py-1.5 text-xs font-medium rounded-lg border border-paper-200 bg-paper-0 text-paper-700 hover:border-accent-300 hover:text-accent-700 transition-colors uppercase tracking-wide disabled:opacity-60 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200 dark:hover:text-accent-300"
-                  >
-                    {format}
-                  </button>
-                ))}
-              </div>
+            {SECONDARY.map((link) =>
+              menuLink(t(link.label), link.to, link.to, close),
             )}
 
-            {exportOpen && exportError != null && (
-              <div className="border-t border-paper-200 px-4 py-2.5 dark:border-paper-800">
-                {/* No fallback of its own: what a reader needs to see here is
-                    the server's own sentence, which `ErrorState` renders
-                    verbatim, and the shared wording covers the case where
-                    nothing usable was thrown. */}
-                <ErrorState error={exportError} />
-              </div>
-            )}
+            <ExportItems
+              open={exportOpen}
+              onToggle={() => setExportOpen((open) => !open)}
+              libraryMode={libraryMode}
+              {...exporting}
+            />
 
-            {ownsTheSession && (
-              <>
-                {/* A link, not a sign out: the current session survives until a
-                    new login succeeds. */}
-                {go(t("nav.switchAccount"), "/login", "switch")}
-
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onSignOut();
-                  }}
-                  className="w-full text-left px-4 py-2.5 text-sm text-danger-600 hover:bg-danger-100 transition-colors dark:text-danger-300 dark:hover:bg-danger-700/25"
-                >
-                  {t("nav.logout")}
-                </button>
-              </>
-            )}
-
-            {/* Same handler as sign out, and a different sentence, because in
-                this mode that is what it does: drop the switch token and the
-                cover cookie with it, and the upstream names the admin again on
-                the next request. Nothing here signs anybody out of anything. */}
-            {!ownsTheSession && isSwitched && (
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onSignOut();
-                }}
-                className={ITEM_CLASS}
-              >
-                {t("nav.returnToMyAccount")}
-              </button>
-            )}
+            <SessionItems
+              ownsTheSession={mode !== AuthMode.proxy}
+              isSwitched={isSwitched}
+              onClose={close}
+              onSignOut={onSignOut}
+            />
           </div>
         )}
       </div>
     </nav>
+  );
+}
+
+/**
+ * The menu's open state, the export panel inside it, and the two ways out of
+ * it that are not a click on an item.
+ *
+ * Closing the menu folds the export panel too, so it never reopens on a panel
+ * nobody asked for.
+ */
+function useMenu() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      setExportOpen(false);
+      return;
+    }
+    function handleClick(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    // Escape closes it and hands focus back. Without this the only way out by
+    // keyboard is to tab through every item in the menu.
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [menuOpen]);
+
+  return {
+    menuOpen,
+    setMenuOpen,
+    exportOpen,
+    setExportOpen,
+    menuRef,
+    triggerRef,
+  };
+}
+
+function linkClass({ isActive }: { isActive: boolean }): string {
+  return [
+    "relative flex items-center gap-2 px-2.5 sm:px-3 h-9 rounded-lg text-sm font-medium",
+    "transition-[background-color,color] duration-150 ease-[var(--ease-out-soft)]",
+    // The underline is the state and the tint only supports it. Colour alone
+    // would leave the current page indistinguishable to anyone who cannot
+    // separate these two hues.
+    isActive
+      ? "text-accent-700 bg-accent-50 dark:text-accent-200 dark:bg-accent-500/12 " +
+        "after:absolute after:left-2.5 after:right-2.5 after:-bottom-[7px] " +
+        "after:h-[2px] after:rounded-full after:bg-accent-fill " +
+        "dark:after:bg-accent-400"
+      : "text-paper-600 hover:text-paper-900 hover:bg-paper-100 " +
+        "dark:text-paper-400 dark:hover:text-paper-100 dark:hover:bg-paper-800/70",
+  ].join(" ");
+}
+
+/** A menu entry that navigates, and closes the menu on the way. */
+function menuLink(
+  children: ReactNode,
+  to: string,
+  key: string,
+  onClose: () => void,
+) {
+  return (
+    <Link
+      key={key}
+      to={to}
+      role="menuitem"
+      onClick={onClose}
+      className={ITEM_CLASS}
+    >
+      {children}
+    </Link>
+  );
+}
+
+interface ExportItemsProps {
+  open: boolean;
+  onToggle: () => void;
+  libraryMode: boolean;
+  exportLibrary: (format: ExportFormat) => void;
+  isExporting: boolean;
+  error: unknown;
+}
+
+/** The export entry, the format picker it folds out, and what a refusal says. */
+function ExportItems({
+  open,
+  onToggle,
+  libraryMode,
+  exportLibrary,
+  isExporting,
+  error,
+}: ExportItemsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <button
+        role="menuitem"
+        onClick={onToggle}
+        className={`${ITEM_CLASS} flex items-center justify-between`}
+      >
+        {t("nav.exportLibrary")}
+        <Icon
+          name="chevron"
+          className={`w-3.5 h-3.5 opacity-60 transition-transform duration-150 ${
+            open ? "rotate-90" : ""
+          }`}
+        />
+      </button>
+
+      {open && (
+        <div className="border-t border-paper-200 bg-paper-100 flex gap-2 px-4 py-2.5 dark:border-paper-800 dark:bg-paper-950/60">
+          {exportFormats(libraryMode).map((format) => (
+            <button
+              key={format}
+              // **The menu stays open, where it used to close on this
+              // click.** Closing it unmounted the only place the outcome
+              // could be shown, which is half of why a refusal was
+              // invisible. It still closes on Escape, on a click outside
+              // and on every navigation item, which is how every other
+              // popover here closes.
+              onClick={() => exportLibrary(format)}
+              title={t(EXPORT_HINTS[format])}
+              disabled={isExporting}
+              aria-busy={isExporting}
+              className="flex-1 text-center py-1.5 text-xs font-medium rounded-lg border border-paper-200 bg-paper-0 text-paper-700 hover:border-accent-300 hover:text-accent-700 transition-colors uppercase tracking-wide disabled:opacity-60 dark:border-paper-700 dark:bg-paper-900 dark:text-paper-200 dark:hover:text-accent-300"
+            >
+              {format}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {open && error != null && (
+        <div className="border-t border-paper-200 px-4 py-2.5 dark:border-paper-800">
+          {/* No fallback of its own: what a reader needs to see here is
+              the server's own sentence, which `ErrorState` renders
+              verbatim, and the shared wording covers the case where
+              nothing usable was thrown. */}
+          <ErrorState error={error} />
+        </div>
+      )}
+    </>
+  );
+}
+
+interface SessionItemsProps {
+  /**
+   * False under proxy auth, where the upstream owns the session and the app
+   * re-identifies the same person on the very next request. An offer that
+   * cannot do anything is worse than no offer.
+   */
+  ownsTheSession: boolean;
+  isSwitched: boolean;
+  onClose: () => void;
+  onSignOut: () => void;
+}
+
+/** The entries about the session itself: switch, sign out, or the way back. */
+function SessionItems({
+  ownsTheSession,
+  isSwitched,
+  onClose,
+  onSignOut,
+}: SessionItemsProps) {
+  const { t } = useTranslation();
+  const signOut = () => {
+    onClose();
+    onSignOut();
+  };
+  return (
+    <>
+      {ownsTheSession && (
+        <>
+          {/* A link, not a sign out: the current session survives until a
+              new login succeeds. */}
+          {menuLink(t("nav.switchAccount"), "/login", "switch", onClose)}
+
+          <button
+            role="menuitem"
+            onClick={signOut}
+            className="w-full text-left px-4 py-2.5 text-sm text-danger-600 hover:bg-danger-100 transition-colors dark:text-danger-300 dark:hover:bg-danger-700/25"
+          >
+            {t("nav.logout")}
+          </button>
+        </>
+      )}
+
+      {/* Same handler as sign out, and a different sentence, because in
+          this mode that is what it does: drop the switch token and the
+          cover cookie with it, and the upstream names the admin again on
+          the next request. Nothing here signs anybody out of anything. */}
+      {!ownsTheSession && isSwitched && (
+        <button role="menuitem" onClick={signOut} className={ITEM_CLASS}>
+          {t("nav.returnToMyAccount")}
+        </button>
+      )}
+    </>
   );
 }

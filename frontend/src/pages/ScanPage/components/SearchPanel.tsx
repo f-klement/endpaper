@@ -68,14 +68,7 @@ export default function SearchPanel({
   isSearchingHarder,
   hasSearchedHarder,
 }: SearchPanelProps) {
-  const { t, locale } = useTranslation();
-  // The same conjunction list the settings screen uses for registration groups,
-  // and for the same reason: it gets "and" right in both languages and handles
-  // one, two and three without a branch here.
-  const names = useMemo(
-    () => new Intl.ListFormat(locale, { type: "conjunction" }),
-    [locale],
-  );
+  const { t } = useTranslation();
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -149,16 +142,52 @@ export default function SearchPanel({
         </p>
       )}
 
-      {/* **Offered after the search has come back, empty results included.**
-          Nothing found is the commonest moment somebody wants to look further,
-          and a reader looking at ten wrong printings is the only one who can
-          tell the quick catalogues answered the wrong question.
+      <SlowCatalogues
+        unasked={unasked}
+        onSearchHarder={onSearchHarder}
+        isSearchingHarder={isSearchingHarder}
+        hasSearchedHarder={hasSearchedHarder}
+      />
 
-          **Read off `unasked` rather than off what was requested.** A request
-          to search harder runs the ordinary search when this library has no
-          slow catalogue and when the one long fan out allowed at a time is
-          already running, so the answer is the only honest source for whether
-          anything is still unasked. */}
+      <Matches matches={matches} onChoose={onChoose} />
+    </div>
+  );
+}
+
+/**
+ * The offer to ask the slow catalogues, and what became of asking.
+ *
+ * **Offered after the search has come back, empty results included.** Nothing
+ * found is the commonest moment somebody wants to look further, and a reader
+ * looking at ten wrong printings is the only one who can tell the quick
+ * catalogues answered the wrong question.
+ *
+ * **Read off `unasked` rather than off what was requested.** A request to
+ * search harder runs the ordinary search when this library has no slow
+ * catalogue and when the one long fan out allowed at a time is already
+ * running, so the answer is the only honest source for whether anything is
+ * still unasked.
+ */
+function SlowCatalogues({
+  unasked,
+  onSearchHarder,
+  isSearchingHarder,
+  hasSearchedHarder,
+}: Pick<
+  SearchPanelProps,
+  "unasked" | "onSearchHarder" | "isSearchingHarder" | "hasSearchedHarder"
+>) {
+  const { t, locale } = useTranslation();
+  // The same conjunction list the settings screen uses for registration groups,
+  // and for the same reason: it gets "and" right in both languages and handles
+  // one, two and three without a branch here.
+  const names = useMemo(
+    () => new Intl.ListFormat(locale, { type: "conjunction" }),
+    [locale],
+  );
+
+  return (
+    <>
       {/* **The refused state, derived rather than sent.** One long fan out runs
           at a time, so a second reader asking at the same moment is answered
           with an ordinary search: the offer would come back unchanged, the
@@ -199,51 +228,73 @@ export default function SearchPanel({
           {t("search.slow.done")}
         </p>
       )}
+    </>
+  );
+}
 
-      {matches.length > 0 && (
-        <>
-          <ul className="mt-4 space-y-2">
-            {matches.map((match, index) => (
-              // No result carries a stable id across both sources: Open
-              // Library rows have no volume id at all. Two printings of one
-              // book differ only by year, so the index is the only key that
-              // cannot collapse two rows into one.
-              <li
-                key={`${match.google_books_id ?? match.isbn13 ?? ""}-${index}`}
-              >
-                <button
-                  type="button"
-                  onClick={() => onChoose(match)}
-                  className="w-full flex gap-3 text-left p-2.5 rounded-xl border border-paper-200 hover:border-accent-300 hover:bg-accent-50 transition-colors dark:border-paper-800 dark:hover:border-accent-700 dark:hover:bg-accent-500/10"
-                >
-                  <CoverImage
-                    src={match.cover_url}
-                    alt=""
-                    iconClassName="w-5 h-5"
-                    className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium text-paper-900 truncate dark:text-paper-100">
-                      {match.title}
-                    </span>
-                    {match.subtitle && (
-                      <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
-                        {match.subtitle}
-                      </span>
-                    )}
-                    <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
-                      {summarise(match)}
-                    </span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs text-paper-600 text-center mt-3 dark:text-paper-400">
-            {t("search.pickHint")}
-          </p>
-        </>
-      )}
-    </div>
+/** The editions found, each one a button that picks it. */
+function Matches({
+  matches,
+  onChoose,
+}: Pick<SearchPanelProps, "matches" | "onChoose">) {
+  const { t } = useTranslation();
+  if (matches.length === 0) return null;
+  return (
+    <>
+      <ul className="mt-4 space-y-2">
+        {matches.map((match, index) => (
+          // No result carries a stable id across both sources: Open
+          // Library rows have no volume id at all. Two printings of one
+          // book differ only by year, so the index is the only key that
+          // cannot collapse two rows into one.
+          <MatchRow
+            key={`${match.google_books_id ?? match.isbn13 ?? ""}-${index}`}
+            match={match}
+            onChoose={onChoose}
+          />
+        ))}
+      </ul>
+      <p className="text-xs text-paper-600 text-center mt-3 dark:text-paper-400">
+        {t("search.pickHint")}
+      </p>
+    </>
+  );
+}
+
+function MatchRow({
+  match,
+  onChoose,
+}: {
+  match: BookMatch;
+  onChoose: (match: BookMatch) => void;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onChoose(match)}
+        className="w-full flex gap-3 text-left p-2.5 rounded-xl border border-paper-200 hover:border-accent-300 hover:bg-accent-50 transition-colors dark:border-paper-800 dark:hover:border-accent-700 dark:hover:bg-accent-500/10"
+      >
+        <CoverImage
+          src={match.cover_url}
+          alt=""
+          iconClassName="w-5 h-5"
+          className="w-10 h-14 object-cover rounded shrink-0 bg-paper-100 dark:bg-paper-800"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-paper-900 truncate dark:text-paper-100">
+            {match.title}
+          </span>
+          {match.subtitle && (
+            <span className="block text-xs text-paper-600 truncate dark:text-paper-400">
+              {match.subtitle}
+            </span>
+          )}
+          <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
+            {summarise(match)}
+          </span>
+        </span>
+      </button>
+    </li>
   );
 }

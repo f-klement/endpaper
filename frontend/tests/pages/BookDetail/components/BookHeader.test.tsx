@@ -11,6 +11,7 @@ import {
   type BookIdentifierOut,
   BookIdentifierScheme,
   Locale,
+  RecordOrigin,
 } from "../../../../src/api/generated/model";
 import BookHeader from "../../../../src/pages/BookDetail/components/BookHeader";
 import { makeBook } from "../../../factories";
@@ -340,5 +341,46 @@ describe("the Goodreads link", () => {
     expect(
       screen.queryByRole("link", { name: "Look up on Goodreads" }),
     ).toBeNull();
+  });
+});
+
+describe("the record's provenance", () => {
+  it("names where the record came from and that it was changed here", () => {
+    renderHeader(
+      makeBook({
+        record_origin: RecordOrigin.dnb,
+        record_modified_here: true,
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        "Record source: German National Library. Changed here: Yes, since it arrived.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("reads both facts of a row older than the columns as unknown", () => {
+    renderHeader(makeBook({ record_origin: null, record_modified_here: null }));
+
+    expect(
+      screen.getByText("Record source: Unknown. Changed here: Unknown."),
+    ).toBeInTheDocument();
+  });
+
+  it("names a record typed here and untouched since in German", () => {
+    renderHeader(
+      makeBook({
+        record_origin: RecordOrigin.manual,
+        record_modified_here: false,
+      }),
+      Locale.de,
+    );
+
+    expect(
+      screen.getByText(
+        "Herkunft der Aufnahme: Von Hand erfasst. Hier geändert: Nein.",
+      ),
+    ).toBeInTheDocument();
   });
 });

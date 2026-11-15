@@ -141,6 +141,37 @@ def test_a_share_committed_while_an_import_lengthens_it_is_taken_back(db, member
     assert db.query(Highlight.is_shared).scalar() is False
 
 
+def test_a_mark_its_source_rekeyed_moves_the_held_row_to_the_new_key(db, member, make_book):
+    book_id = make_book(member["headers"])["id"]
+    member_id = member["user"]["id"]
+    mark = highlights.Mark(text="passage", note=None, page=None, highlighted_at=None)
+    highlights.write(db, member_id, HighlightSource.READWISE, book_id, {"old": mark})
+    db.commit()
+
+    rekeyed = highlights.Mark(text="passage", note=None, page=None, highlighted_at=None, former_key="old")
+    counts = highlights.write(db, member_id, HighlightSource.READWISE, book_id, {"new": rekeyed})
+    db.commit()
+
+    assert (counts.created, db.query(Highlight.source_key).all()) == (0, [("new",)])
+
+
+def test_a_moved_row_reads_private_in_the_session_that_moved_it(db, member, make_book):
+    """The statement taking the share back bypasses the session, so the row in
+    hand reads private before any refresh only because the write sets it too."""
+    first = make_book(member["headers"])["id"]
+    second = make_book(member["headers"], title="Emma")["id"]
+    member_id = member["user"]["id"]
+    marks = {"7": highlights.Mark(text="passage", note=None, page=None, highlighted_at=None)}
+    highlights.write(db, member_id, HighlightSource.READWISE, first, marks)
+    db.commit()
+    db.query(Highlight).update({"is_shared": True})
+    db.commit()
+
+    highlights.write(db, member_id, HighlightSource.READWISE, second, marks)
+
+    assert db.query(Highlight).one().is_shared is False
+
+
 def test_a_removal_takes_only_the_member_s_own_row_under_a_shared_key(db, member, other_user, make_book):
     """Two members linking one Readwise account hold the same ids, and one
     member's pull reporting a deletion leaves the other's row."""

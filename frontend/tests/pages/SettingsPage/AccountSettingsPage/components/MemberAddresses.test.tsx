@@ -97,6 +97,17 @@ describe("MemberAddresses", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Settings saved.");
   });
 
+  it("reports a failed save and does not also say it landed", () => {
+    renderLocalised(
+      <MemberAddresses
+        state={state({ hasSaved: true, saveError: new Error("refused") })}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("refused");
+    expect(screen.queryByText("Settings saved.")).not.toBeInTheDocument();
+  });
+
   it("explains a directory refusal instead of reporting an error", () => {
     renderLocalised(
       <MemberAddresses
@@ -111,5 +122,8 @@ describe("MemberAddresses", () => {
       /the directory's to set/,
     );
     expect(screen.queryByText(/could not be saved/)).not.toBeInTheDocument();
+    // `ErrorState` prefers the error's own message, so the fallback absent says
+    // nothing about the alert; the alert absent does.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

@@ -12,6 +12,7 @@ import type { ClassificationOut } from "./classificationOut.ts";
 import type { LendingWillingness } from "./lendingWillingness.ts";
 import type { OnlineLinkOut } from "./onlineLinkOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
+import type { RecordOrigin } from "./recordOrigin.ts";
 import type { TagOut } from "./tagOut.ts";
 import type { UserOut } from "./userOut.ts";
 
@@ -53,6 +54,8 @@ export interface BookColumns {
   purchase_price_minor?: number | null;
   purchase_source?: string | null;
   purchased_at?: string | null;
+  record_modified_here?: boolean | null;
+  record_origin?: RecordOrigin | null;
   series_index?: number | null;
   series_name?: string | null;
   subtitle: string | null;

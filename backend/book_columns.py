@@ -6,7 +6,7 @@ four to `Book`, so a column added to the schema joined none of them and no
 diagnostic said so. Completeness held by accident of nullability and by nobody
 noticing.
 
-**A partition, not a list of disciplines.** The six sets below are disjoint and
+**A partition, not a list of disciplines.** The seven sets below are disjoint and
 their union is every column of `books`, checked against the mapper at import. What
 each writer then does with a set stays at that writer: fill only, overwrite on
 request, refuse. Those rules differ per writer and there is no enum over them.
@@ -129,6 +129,16 @@ ROW_KEEPING: Final[tuple[str, ...]] = (
     "is_private",
 )
 
+#: Where the record came from and whether anything here changed it since: facts
+#: about the record rather than about the work, so no catalogue, file or losing
+#: row fills them. `models.Book` says why they are two and who writes each.
+#:
+#: Never in `FILLABLE_FROM_ANOTHER_ROW`: the survivor of a merge keeps its own
+#: origin, because its record is the one that stays. A **copy** takes both from
+#: the book it copies, through `COPIED_FROM_THE_BOOK`, because it is the same
+#: record about a second object.
+RECORD_PROVENANCE: Final[tuple[str, ...]] = ("record_origin", "record_modified_here")
+
 PARTITION: Final[tuple[tuple[str, ...], ...]] = (
     WORK_IDENTITY,
     WORK_DETAIL,
@@ -136,15 +146,22 @@ PARTITION: Final[tuple[tuple[str, ...], ...]] = (
     COPY_DETAIL,
     COPY_STANDING,
     ROW_KEEPING,
+    RECORD_PROVENANCE,
 )
 
 # ── The doors ─────────────────────────────────────────────────────────────────
 
-#: Every fact about the work that lives in a column of its own, which is what a
-#: new copy takes from the book it copies.
+#: Every fact about the work that lives in a column of its own: the record's
+#: description. A write to any of them after the create is what
+#: `evidence.touched` counts as changing the record here.
 #:
-#: `WORK_COVER` is absent: see there.
+#: `WORK_COVER` is absent: see there. A cover is an image beside the record
+#: rather than a statement in it, and MARC carries none.
 WORK_FACTS: Final[tuple[str, ...]] = WORK_IDENTITY + WORK_DETAIL
+
+#: What a new copy takes from the book it copies in the constructor: the work's
+#: facts and where its record came from. `WORK_COVER` is absent: see there.
+COPIED_FROM_THE_BOOK: Final[tuple[str, ...]] = WORK_FACTS + RECORD_PROVENANCE
 
 #: Every column a merge may take off a losing row of the same book.
 #:

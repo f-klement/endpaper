@@ -1,5 +1,7 @@
 /** Tests for src/theme/patterns.ts. */
 
+import { createHash } from "node:crypto";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -112,6 +114,43 @@ describe("PATTERNS", () => {
   it("has several to choose between", () => {
     // One would make "a different one each visit" a lie.
     expect(PATTERNS.length).toBeGreaterThan(1);
+  });
+
+  it("draws every tile exactly as it did", () => {
+    // A digest of what each pattern generates, so a refactor of the primitives
+    // that build them (`grow`, `lattice` and the rest) cannot move a single
+    // placement unseen. A deliberate change to a pattern changes its digest;
+    // look at the tile, then take the new one.
+    const digests = Object.fromEntries(
+      PATTERNS.map((pattern) => [
+        pattern.id,
+        createHash("sha256")
+          .update(
+            JSON.stringify({ defs: pattern.defs, layers: pattern.layers }),
+          )
+          .digest("hex")
+          .slice(0, 16),
+      ]),
+    );
+
+    expect(digests).toEqual({
+      willow: "161cc138f0a33041",
+      acanthus: "9df43afda1422b8d",
+      pimpernel: "640f855d5ce756c3",
+      strawberry: "b947439554bb45ca",
+      lily: "e77d7f35654c87f3",
+      trellis: "43323aa599fbbb02",
+      marigold: "bd432121d56c70d2",
+      jasmine: "694b5b61e92a0faf",
+      nonpareil: "9a11c8f3d08c0f0e",
+      seigaiha: "b6cac813f9ba2fc6",
+      asanoha: "ee024aa8dedce3ee",
+      plait: "e5f09dc87ffc6ed8",
+      khatam: "b822adee63579afd",
+      shippo: "493a1bad0ff1884c",
+      meander: "1f88c2de614857e3",
+      curl: "b2e47fbc57545bf0",
+    });
   });
 
   it("gives each a unique id", () => {
@@ -760,6 +799,19 @@ describe("measure", () => {
     const arc = measure(bend);
     expect(arc.at(1).angle).toBeCloseTo(0, 0);
     expect(arc.at(arc.length - 1).angle).toBeCloseTo(90, 0);
+  });
+
+  it("places a point on a branch of no length rather than nowhere", () => {
+    const dot: Branch = [
+      [
+        [7, 9],
+        [7, 9],
+        [7, 9],
+        [7, 9],
+      ],
+    ];
+    const { x, y } = measure(dot).at(0);
+    expect([x, y]).toEqual([7, 9]);
   });
 });
 

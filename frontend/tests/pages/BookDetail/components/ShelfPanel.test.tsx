@@ -80,6 +80,28 @@ describe("ShelfPanel", () => {
     );
   });
 
+  it("trims a typed series and sends a cleared number and place as null", async () => {
+    const onSave = renderPanel({
+      series_name: "Dune",
+      series_index: 1,
+      location: "Loft",
+    });
+    const user = userEvent.setup();
+
+    fireEvent.change(screen.getByLabelText("Series"), {
+      target: { value: "  Dune Messiah  " },
+    });
+    await user.clear(screen.getByLabelText("No."));
+    await user.clear(screen.getByLabelText("Where it is"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      series_name: "Dune Messiah",
+      series_index: null,
+      location: null,
+    });
+  });
+
   it("keeps a half number, which omnibus editions really have", async () => {
     const onSave = renderPanel({ series_name: "Discworld" });
     const user = userEvent.setup();

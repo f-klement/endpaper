@@ -259,6 +259,18 @@ describe("CustomFieldsPanel", () => {
     expect(screen.queryByLabelText("Bought from")).not.toBeInTheDocument();
   });
 
+  it("closes the editor without writing when nothing changed", async () => {
+    const props = renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(props.onSave).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Edit details" }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps every draft when only one of two writes is refused", async () => {
     // A partial failure is the case a per-field close would get wrong: one
     // field lands, the other is refused, and reopening has to show both drafts.

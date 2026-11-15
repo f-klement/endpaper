@@ -3092,7 +3092,7 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
         (4, "k10plus", 2019, "Zorba the Greek"),
         (5, "open_library", 1993, "Zorba the Greek"),
         (6, "open_library", 1969, "Zorba the Greek"),
-        (7, "loc+open_library", 1952, "Zorba the Greek"),
+        (7, "open_library+loc", 1952, "Zorba the Greek"),
         (8, "loc", 2014, "Zorba the Greek"),
         (9, "open_library", 2003, "Zorba the Greek / Grek Zorba"),
         (10, "loc", 1996, "Zorba the Greek"),
@@ -3693,8 +3693,8 @@ class TestLibraryOfCongressClassifications:
         "</mods>"
     )
 
-    def _classifications(self) -> tuple[Heading, ...]:
-        parsed = _loc_record(ElementTree.fromstring(self.MODS), source="loc")
+    def _classifications(self, mods: str | None = None) -> tuple[Heading, ...]:
+        parsed = _loc_record(ElementTree.fromstring(mods or self.MODS), source="loc")
         assert parsed is not None
         return parsed.headings
 
@@ -3716,6 +3716,11 @@ class TestLibraryOfCongressClassifications:
         numbers = [entry.number for entry in parsed.headings if entry.scheme is ClassificationScheme.DDC]
 
         assert numbers == ["005.133"]
+
+    def test_a_dewey_number_the_normaliser_refuses_is_dropped(self):
+        mods = self.MODS.replace(">005.133<", ">[Fic]<")
+
+        assert self._classifications(mods) == (Heading(ClassificationScheme.LCC, "QA76.73.P98 V53 2021"),)
 
     def test_an_authority_with_no_reading_here_is_dropped(self):
         """RVK is a German shelving scheme this app has no mapping for, and a
@@ -3759,6 +3764,31 @@ class TestALibraryOfCongressRecordIsReadOrRefusedByItsOwnFields:
         with_translator = self._read(translated)
         assert with_translator is not None
         assert with_translator.author == alone.author
+
+    def test_a_name_credited_as_creator_is_an_author(self):
+        creator = self.MODS.replace("<roleTerm>author</roleTerm>", "<roleTerm>creator</roleTerm>")
+        read = self._read(creator)
+        assert read is not None
+        assert read.author
+
+    def test_an_elided_leading_article_joins_the_title_without_a_space(self):
+        elided = self.MODS.replace(
+            "<title>Clean Code</title>", "<nonSort>L'</nonSort><title>étranger</title>"
+        )
+        whole = self.MODS.replace("<title>Clean Code</title>", "<nonSort>The </nonSort><title>Hobbit</title>")
+        read_elided, read_whole = self._read(elided), self._read(whole)
+        assert read_elided is not None
+        assert read_whole is not None
+        assert (read_elided.title, read_whole.title) == ("L'étranger", "The Hobbit")
+
+    def test_a_language_code_padded_with_whitespace_still_maps(self):
+        padded = self.MODS.replace(
+            "<physicalDescription>",
+            "<language><languageTerm> fre </languageTerm></language><physicalDescription>",
+        )
+        read = self._read(padded)
+        assert read is not None
+        assert read.language == "fr"
 
 
 class TestLibraryOfCongressSubjectHeadings:
@@ -4195,6 +4225,14 @@ class TestTheOpenLibraryLookup:
         return await metadata._open_library(ENGLISH_ISBN)
 
     @pytest.mark.asyncio
+    async def test_an_edition_refused_with_a_server_error_is_unavailable_rather_than_a_miss(self):
+        with respx.mock(assert_all_called=False) as mock:
+            _open_library_routes(mock, edition=httpx.Response(503))
+            result = await self._lookup(mock)
+
+        assert result.outcome is metadata.Outcome.UNAVAILABLE
+
+    @pytest.mark.asyncio
     async def test_the_work_record_supplies_the_subjects_the_edition_lacks(self):
         """Measured over nine live editions: two carried subjects, seven did not
         while their work did. Reading only the edition is why Open Library used
@@ -4503,6 +4541,11 @@ class TestAMalformedOpenLibraryFieldCostsThatFieldAlone:
         assert record.subject_labels == ["Algorithms"]
 
     @pytest.mark.asyncio
+    async def test_a_subject_field_written_as_one_string_contributes_nothing(self):
+        record = await self._record(work={"subjects": "Algorithms"})
+        assert record.subject_labels == []
+
+    @pytest.mark.asyncio
     async def test_a_dewey_entry_that_is_not_text_is_skipped(self):
         record = await self._record({"dewey_decimal_class": [5, "005.1"], "lc_classifications": None})
         assert record.headings == (Heading(ClassificationScheme.DDC, "005.1"),)
@@ -4658,6 +4701,49 @@ class TestTheEditionCluster:
 
         assert author.call_count == 1
         assert rows[0].author == "Thomas H. Cormen"
+
+    @pytest.mark.asyncio
+    async def test_a_repeated_author_key_spends_one_of_the_three_lookups(self):
+        """The cap counts distinct keys, so a key named twice leaves room for a third author."""
+        listing = {
+            "size": 4,
+            "entries": [
+                {"title": title, "authors": [{"key": f"/authors/{key}"}]}
+                for title, key in (
+                    ("First", "OL1A"),
+                    ("Second", "OL1A"),
+                    ("Third", "OL2A"),
+                    ("Fourth", "OL3A"),
+                )
+            ],
+        }
+
+        def _author(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, json={"name": request.url.path.rsplit("/", 1)[-1].removesuffix(".json")}
+            )
+
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock, listing)
+            mock.get(url__startswith=OL_AUTHORS).mock(side_effect=_author)
+            rows = await editions(ENGLISH_ISBN, 5)
+
+        assert {row.title: row.author for row in rows} == {
+            "First": "OL1A",
+            "Second": "OL1A",
+            "Third": "OL2A",
+            "Fourth": "OL3A",
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_printing_with_a_cover_id_and_an_isbn_takes_the_cover_by_id(self):
+        """The cover id resolves for printings whose ISBN the cover service does not know."""
+        with respx.mock(assert_all_called=False) as mock:
+            self._routes(mock)
+            rows = await editions(ENGLISH_ISBN, 5)
+
+        assert rows[0].isbn == "9780262270830"
+        assert rows[0].cover_url == covers.open_library_id_url(12345)
 
     @pytest.mark.asyncio
     async def test_a_classification_on_a_sibling_printing_is_carried(self):
@@ -6492,11 +6578,11 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
     """
 
     @staticmethod
-    def _bnf(kind: str, extent: str) -> Any:
+    def _bnf(kind: str, extent: str, title: str = "Un livre") -> Any:
         return metadata._bnf_record(
             ElementTree.fromstring(
                 '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
-                "<dc:title>Un livre</dc:title>"
+                f"<dc:title>{title}</dc:title>"
                 f"<dc:type>{kind}</dc:type>"
                 f"<dc:format>{extent}</dc:format></record>"
             ),
@@ -6505,6 +6591,9 @@ class TestTheDublinCoreAndModsSourcesRefuseInTheirOwnTerms:
 
     def test_an_ordinary_printed_bnf_record_is_still_a_book(self):
         assert self._bnf("texte imprime | printed text | text", "200 p.") is not None
+
+    def test_a_printed_bnf_record_titled_as_a_volume_slot_is_refused(self):
+        assert self._bnf("texte imprime | printed text | text", "200 p.", title="Volume 2") is None
 
     def test_the_dcmi_text_on_an_electronic_resource_no_longer_passes(self):
         """`_BNF_PRINTED` matches `text` as a substring, and the BnF writes the
@@ -8313,7 +8402,9 @@ class TestSearchingHarder:
         second = asyncio.ensure_future(
             metadata.search("moby dick", access=access(sources.DEFAULT_PLAN, "key"), harder=True)
         )
-        await second
+        # Bounded, because a refused slot that became a wait would hang here
+        # until the suite's own timeout instead of failing this test by name.
+        await asyncio.wait_for(second, 5)
 
         assert CatalogueSource.OENB not in asked
         assert budgets[-1] == metadata.SEARCH_DEADLINE_SECONDS

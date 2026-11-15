@@ -135,6 +135,111 @@ function ProgressLog({
   );
 }
 
+type ProgressEntry = Parameters<ProgressPanelProps["onRecord"]>[0];
+
+/**
+ * The entry a submit records, or null when the position is not a number.
+ *
+ * Exactly one unit, which is what the API accepts and what the CHECK
+ * constraint behind it enforces. Sending both is not expressible here. The
+ * minutes are sent only when they are a positive number.
+ */
+function progressEntry(
+  unit: Unit,
+  position: string,
+  minutes: string,
+): ProgressEntry | null {
+  const value = Number(position);
+  if (!Number.isFinite(value) || position.trim() === "") return null;
+
+  const sitting = Number(minutes);
+  return {
+    ...(unit === "page" ? { page: value } : { percent: value }),
+    ...(minutes.trim() !== "" && Number.isFinite(sitting) && sitting > 0
+      ? { minutes: sitting }
+      : {}),
+  };
+}
+
+/** The two units as a pressed pair, the chosen one pressed. */
+function UnitChoice({
+  unit,
+  onChoose,
+}: {
+  unit: Unit;
+  onChoose: (unit: Unit) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex gap-2" role="group" aria-label={t("progress.unit")}>
+      {(["page", "percent"] as const).map((choice) => (
+        <button
+          key={choice}
+          type="button"
+          onClick={() => onChoose(choice)}
+          aria-pressed={unit === choice}
+          className={`flex-1 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
+            unit === choice
+              ? "bg-accent-50 border-accent-300 text-accent-800 " +
+                "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
+              : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 " +
+                "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
+          }`}
+        >
+          {choice === "page"
+            ? t("progress.unitPage")
+            : t("progress.unitPercent")}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The position in the chosen unit, bounded to it, and the sitting's minutes. */
+function PositionFields({
+  unit,
+  position,
+  minutes,
+  onPosition,
+  onMinutes,
+}: {
+  unit: Unit;
+  position: string;
+  minutes: string;
+  onPosition: (value: string) => void;
+  onMinutes: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  const isPage = unit === "page";
+  return (
+    <div className="flex gap-2">
+      <input
+        type="number"
+        min={isPage ? 1 : 0}
+        max={isPage ? undefined : 100}
+        value={position}
+        onChange={(event) => onPosition(event.target.value)}
+        placeholder={
+          isPage
+            ? t("progress.pagePlaceholder")
+            : t("progress.percentPlaceholder")
+        }
+        aria-label={isPage ? t("progress.unitPage") : t("progress.unitPercent")}
+        className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+      />
+      <input
+        type="number"
+        min={1}
+        value={minutes}
+        onChange={(event) => onMinutes(event.target.value)}
+        placeholder={t("progress.minutesPlaceholder")}
+        aria-label={t("progress.minutes")}
+        className="w-24 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+      />
+    </div>
+  );
+}
+
 /**
  * Where this reader has got to, and how they got there.
  *
@@ -160,18 +265,9 @@ export default function ProgressPanel({
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const value = Number(position);
-    if (!Number.isFinite(value) || position.trim() === "") return;
-
-    const sitting = Number(minutes);
-    onRecord({
-      // Exactly one unit, which is what the API accepts and what the CHECK
-      // constraint behind it enforces. Sending both is not expressible here.
-      ...(unit === "page" ? { page: value } : { percent: value }),
-      ...(minutes.trim() !== "" && Number.isFinite(sitting) && sitting > 0
-        ? { minutes: sitting }
-        : {}),
-    });
+    const entry = progressEntry(unit, position, minutes);
+    if (entry === null) return;
+    onRecord(entry);
     setPosition("");
     setMinutes("");
   }
@@ -192,61 +288,15 @@ export default function ProgressPanel({
             with a page count can still be listened to, and a reader who knows
             they are halfway through should not have to work out which page
             that is. */}
-        <div
-          className="flex gap-2"
-          role="group"
-          aria-label={t("progress.unit")}
-        >
-          {(["page", "percent"] as const).map((choice) => (
-            <button
-              key={choice}
-              type="button"
-              onClick={() => setUnit(choice)}
-              aria-pressed={unit === choice}
-              className={`flex-1 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
-                unit === choice
-                  ? "bg-accent-50 border-accent-300 text-accent-800 " +
-                    "dark:bg-accent-950 dark:border-accent-800 dark:text-accent-200"
-                  : "bg-paper-0 border-paper-200 text-paper-600 hover:bg-paper-50 " +
-                    "dark:bg-paper-900 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-              }`}
-            >
-              {choice === "page"
-                ? t("progress.unitPage")
-                : t("progress.unitPercent")}
-            </button>
-          ))}
-        </div>
+        <UnitChoice unit={unit} onChoose={setUnit} />
 
-        <div className="flex gap-2">
-          <input
-            type="number"
-            min={unit === "page" ? 1 : 0}
-            max={unit === "page" ? undefined : 100}
-            value={position}
-            onChange={(event) => setPosition(event.target.value)}
-            placeholder={
-              unit === "page"
-                ? t("progress.pagePlaceholder")
-                : t("progress.percentPlaceholder")
-            }
-            aria-label={
-              unit === "page"
-                ? t("progress.unitPage")
-                : t("progress.unitPercent")
-            }
-            className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-          />
-          <input
-            type="number"
-            min={1}
-            value={minutes}
-            onChange={(event) => setMinutes(event.target.value)}
-            placeholder={t("progress.minutesPlaceholder")}
-            aria-label={t("progress.minutes")}
-            className="w-24 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-          />
-        </div>
+        <PositionFields
+          unit={unit}
+          position={position}
+          minutes={minutes}
+          onPosition={setPosition}
+          onMinutes={setMinutes}
+        />
 
         <button
           type="submit"

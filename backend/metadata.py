@@ -328,16 +328,25 @@ def _open_library_subjects(*records: dict[str, Any]) -> list[str]:
     found: dict[str, None] = {}
     for record in records:
         for key in _OPEN_LIBRARY_SUBJECT_KEYS:
-            entries = record.get(key)
-            if not isinstance(entries, list):
-                continue
-            for entry in entries:
-                name = entry if isinstance(entry, str) else None
-                if isinstance(entry, dict):
-                    name = entry.get("name")
-                if isinstance(name, str) and name.strip():
-                    found.setdefault(" ".join(name.split()), None)
+            for name in _open_library_subject_names(record.get(key)):
+                found.setdefault(name, None)
     return list(found)[:_OPEN_LIBRARY_MAX_SUBJECTS]
+
+
+def _open_library_subject_names(entries: object) -> list[str]:
+    """One subject field's names, whitespace collapsed, in order.
+
+    A field that is not a list carries none. An entry is a bare string or an
+    object whose `name` is one; anything else, and a blank name, is skipped.
+    """
+    if not isinstance(entries, list):
+        return []
+    names: list[str] = []
+    for entry in entries:
+        name = entry.get("name") if isinstance(entry, dict) else entry
+        if isinstance(name, str) and name.strip():
+            names.append(" ".join(name.split()))
+    return names
 
 
 def _open_library_classifications(record: dict[str, Any]) -> list[Heading]:
@@ -375,7 +384,17 @@ def _open_library_classifications(record: dict[str, Any]) -> list[Heading]:
                 continue
             number, label = heading
             found.append(Heading(ClassificationScheme.DDC, number, label))
-    call_numbers = record.get("lc_classifications")
+    call_number = _open_library_call_number(record.get("lc_classifications"))
+    if call_number is not None:
+        found.append(call_number)
+    return found
+
+
+def _open_library_call_number(call_numbers: object) -> Heading | None:
+    """The first `lc_classifications` value as an LCC heading, or None.
+
+    Only the first: `_open_library_classifications` says why.
+    """
     if isinstance(call_numbers, list) and call_numbers:
         # No normaliser for LCC, the same as the Library of Congress path: a
         # call number is alphanumeric and this app has no schedule for it.
@@ -390,8 +409,8 @@ def _open_library_classifications(record: dict[str, Any]) -> list[Heading]:
         first = call_numbers[0]
         number = " ".join(first.split()) if isinstance(first, str) else ""
         if number:
-            found.append(Heading(ClassificationScheme.LCC, number))
-    return found
+            return Heading(ClassificationScheme.LCC, number)
+    return None
 
 
 def _open_library_year(raw: object) -> int | None:
@@ -402,7 +421,17 @@ def _open_library_year(raw: object) -> int | None:
     """
     if not isinstance(raw, str):
         return None
-    match = re.search(r"\d{4}", raw)
+    return _year_in(raw)
+
+
+def _year_in(text: str) -> int | None:
+    """The first run of four digits in free text, as a year.
+
+    Every reader in this module whose source writes its date as prose rather
+    than a code reads it this way: Open Library's `publish_date`, a Dublin Core `date` and a MODS
+    `dateIssued`, each joined into one string first where the record repeats it.
+    """
+    match = re.search(r"\d{4}", text)
     return int(match.group()) if match else None
 
 
@@ -553,12 +582,9 @@ async def _open_library(isbn: str) -> Lookup:
     try:
         async with fetch.catalogue_client() as client:
             response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
-            if response.status_code == 429:
-                return Lookup(Outcome.RATE_LIMITED, source="open_library")
-            if response.status_code == 404:
-                return Lookup(Outcome.NOT_FOUND, source="open_library")
-            if response.status_code != 200:
-                return Lookup(Outcome.UNAVAILABLE, source="open_library")
+            missed = _open_library_miss(response.status_code)
+            if missed is not None:
+                return Lookup(missed, source="open_library")
             data = _open_library_object(response)
             if not data:
                 # A 200 carrying no object at all is a fault at the other end
@@ -610,6 +636,21 @@ async def _open_library(isbn: str) -> Lookup:
             headings=tuple(_open_library_classifications(data)),
         ),
     )
+
+
+def _open_library_miss(status_code: int) -> Outcome | None:
+    """What an edition request's status says when it is not a 200, or None on a 200.
+
+    A 429 is throttling and a 404 is a book Open Library does not hold; anything
+    else is a fault at the other end.
+    """
+    if status_code == 200:
+        return None
+    if status_code == 429:
+        return Outcome.RATE_LIMITED
+    if status_code == 404:
+        return Outcome.NOT_FOUND
+    return Outcome.UNAVAILABLE
 
 
 # ── Google Books ──────────────────────────────────────────────────────────────
@@ -929,39 +970,7 @@ def _dnb_record(
     common case the first thing a reader sees.
     """
     title, subtitle, series_name, series_index = fields.title_statement()
-    if not title:
-        return None
-    # A cross-referenced ISBN matched a volume slot, not this book. Reporting a
-    # miss is right: some other catalogue may hold the real record, and putting
-    # `[Hauptbd.].` in as a title poisons the entry for good.
-    if is_placeholder_title(title):
-        return None
-
-    # **The one refusal here still decided by prose, and it decides almost
-    # nothing.** Measured over 510 live DNB search records on 2026-09-03, 91 are
-    # discs by their own codes and `is_a_disc` names **0** of them: the German
-    # for what this catalogue holds is `2 CDs`, `15 CDs`, `1 Schallplatte` and
-    # `1 Track`, and `bibliographic._DISC_FORMS` spells none of those. 84 of the 91 are refused
-    # anyway by the **online** half of `bibliographic._NOT_A_BOOK`, because a DNB audiobook is
-    # usually a download, so the disc half has been carrying none of them and
-    # **7 escape both halves**: `1 Track` twice, `2 CDs` twice, `1 CD`,
-    # `1 Schallplatte`, `15 CDs`. An earlier draft of this sentence credited the
-    # disc half with those 7, which inverts what they are and would send anyone
-    # deleting `is_a_disc` looking for seven regressions that do not exist.
-    # Both critics caught it separately. Separately again, `is_a_disc` names 7
-    # records across all 2,605, and that coincidence is where the wrong 7 came
-    # from.
-    #
-    # So this is not a language gap, it is a vocabulary gap that English shares,
-    # and #124's answer covers it: every caller now applies
-    # `marc_fields.Fields.describes_a_book`, which refuses all 91 on `007/00`
-    # and leader/06.
-    # What is left here is one asymmetry worth naming rather than half fixing:
-    # this refuses outright and the caller only ranks, so a disc this misses is
-    # ranked down at a lookup where one it names is a miss. Closing that means
-    # giving this function the record node, a four call site signature change,
-    # and it changes an answer rather than correcting one.
-    if is_a_disc(fields.extent()):
+    if _dnb_refuses(fields, title):
         return None
 
     isbn = isbn or fields.isbn()
@@ -1002,6 +1011,43 @@ def _dnb_record(
         # rule: see `read_author_identifiers`.
         author_identifiers=(tuple(fields.author_identifiers()) if read_author_identifiers else ()),
     )
+
+
+def _dnb_refuses(fields: marc_fields.Fields, title: str) -> bool:
+    """Whether `_dnb_record` refuses this record: no title, a placeholder title, or a disc."""
+    if not title:
+        return True
+    # A cross-referenced ISBN matched a volume slot, not this book. Reporting a
+    # miss is right: some other catalogue may hold the real record, and putting
+    # `[Hauptbd.].` in as a title poisons the entry for good.
+    if is_placeholder_title(title):
+        return True
+
+    # **The one refusal here still decided by prose, and it decides almost
+    # nothing.** Measured over 510 live DNB search records on 2026-09-03, 91 are
+    # discs by their own codes and `is_a_disc` names **0** of them: the German
+    # for what this catalogue holds is `2 CDs`, `15 CDs`, `1 Schallplatte` and
+    # `1 Track`, and `bibliographic._DISC_FORMS` spells none of those. 84 of the 91 are refused
+    # anyway by the **online** half of `bibliographic._NOT_A_BOOK`, because a DNB audiobook is
+    # usually a download, so the disc half has been carrying none of them and
+    # **7 escape both halves**: `1 Track` twice, `2 CDs` twice, `1 CD`,
+    # `1 Schallplatte`, `15 CDs`. An earlier draft of this sentence credited the
+    # disc half with those 7, which inverts what they are and would send anyone
+    # deleting `is_a_disc` looking for seven regressions that do not exist.
+    # Both critics caught it separately. Separately again, `is_a_disc` names 7
+    # records across all 2,605, and that coincidence is where the wrong 7 came
+    # from.
+    #
+    # So this is not a language gap, it is a vocabulary gap that English shares,
+    # and #124's answer covers it: every caller now applies
+    # `marc_fields.Fields.describes_a_book`, which refuses all 91 on `007/00`
+    # and leader/06.
+    # What is left here is one asymmetry worth naming rather than half fixing:
+    # this refuses outright and the caller only ranks, so a disc this misses is
+    # ranked down at a lookup where one it names is a miss. Closing that means
+    # giving `_dnb_record` the record node, a four call site signature change,
+    # and it changes an answer rather than correcting one.
+    return is_a_disc(fields.extent())
 
 
 # How many records the lookup asks for, where it asked for one until
@@ -1416,9 +1462,42 @@ def _nkp_records(root: ElementTree.Element) -> list[ElementTree.Element]:
     return list(root.iter(_NKP_RECORD))
 
 
-def _nkp_text(record: ElementTree.Element, tag: str) -> list[str]:
-    """Every non empty value of one un-namespaced element."""
+def _dc_text(record: ElementTree.Element, tag: str) -> list[str]:
+    """Every non empty value of one Dublin Core element, stripped.
+
+    `tag` as the record writes it: bare in this dialect, `_DC` qualified in the
+    BnF's, whose reader asks through here too.
+    """
     return [element.text.strip() for element in record.findall(tag) if element.text and element.text.strip()]
+
+
+def _dc_says_printed(kinds: str) -> bool:
+    """Whether a Dublin Core record's casefolded `type` values admit a printed book.
+
+    **One rule for both Dublin Core dialects**, over the one constant
+    `_BNF_PRINTED`: the Czech catalogue writes `text`, which it already holds. A
+    record naming no type at all is not refused, since a thin record is not a
+    disc.
+    """
+    return not kinds or any(kind in kinds for kind in _BNF_PRINTED)
+
+
+def _dc_says_online(extent: str | None, online: re.Pattern[str]) -> bool:
+    """Whether a Dublin Core `format` names a digital copy in its catalogue's own words.
+
+    The second of the two refusals each Dublin Core reader makes, after the
+    shared `is_physical_book`, which cannot see this phrasing. `online` is
+    `_NKP_ONLINE` or `_BNF_ONLINE`; why each is the source's own is said at the
+    constant. **The shared rule stays called in each reader**:
+    `tests/test_bibliographic.py::TestTheProseRuleIsReachedOnlyThroughACarrierAwareDoor`
+    pins every reader as a door of its own.
+    """
+    return extent is not None and online.search(extent) is not None
+
+
+def _dc_language(values: list[str]) -> str | None:
+    """The first Dublin Core `language` value through the shared table, or None."""
+    return LANGUAGES.get((values or [""])[0].lower())
 
 
 def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
@@ -1430,7 +1509,7 @@ def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
     plaintext connection is the reason it is here even though this target
     diagnoses a wrong attribute rather than answering with the catalogue.
     """
-    return any(parse_isbn(value) == isbn for value in _nkp_text(record, "identifier"))
+    return any(parse_isbn(value) == isbn for value in _dc_text(record, "identifier"))
 
 
 #: What this catalogue calls an online resource.
@@ -1497,20 +1576,62 @@ def _nkp_record(record: ElementTree.Element, isbn: str, *, source: str) -> Recor
     the same mistake with a different constant. A real contributor role reader
     belongs to whichever ticket gives this source a second measurement.
     """
-    titles = _nkp_text(record, "title")
+    book = _nkp_book(record)
+    if book is None:
+        return None
+    title, subtitle, extent = book
+    # The shared refusal and this catalogue's own Czech phrasing: see `_NKP_ONLINE`.
+    if not is_physical_book(extent, title) or _dc_says_online(extent, _NKP_ONLINE):
+        return None
+
+    contributors = _dc_text(record, "contributor")
+    publisher = next(iter(_dc_text(record, "publisher")), None)
+
+    return Record(
+        source=source,
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=flip_catalogue_name(contributors[0]) if contributors else None,
+        publisher=strip_isbd_punctuation(publisher) if publisher else None,
+        year=_year_in(" ".join(_dc_text(record, "date"))),
+        language=_dc_language(_dc_text(record, "language")),
+        page_count=pages_from_extent(extent),
+        cover_url=covers.open_library_url(isbn),
+        # The un-namespaced dialect, and it has no more room for a stamp than
+        # the namespaced one: see `catalogue.uncontrolled`.
+        subjects=uncontrolled(_dc_text(record, "subject")),
+    )
+
+
+def _nkp_book(record: ElementTree.Element) -> tuple[str, str | None, str | None] | None:
+    """A printed record's title, subtitle and extent, or None where it has no usable title or is not printed.
+
+    The extent's own refusal stays in `_nkp_record`, which is the door
+    `test_bibliographic.py` names for the prose rule.
+    """
+    titles = _dc_text(record, "title")
     if not titles:
         return None
 
-    # Printed books only, the same rule and the same constant the BnF uses:
-    # this catalogue writes `text`, which `_BNF_PRINTED` already holds.
-    kinds = " ".join(_nkp_text(record, "type")).casefold()
-    if kinds and not any(kind in kinds for kind in _BNF_PRINTED):
+    # Printed books only, the same rule the BnF applies: see `_dc_says_printed`.
+    if not _dc_says_printed(" ".join(_dc_text(record, "type")).casefold()):
         return None
 
+    titled = _nkp_title(titles[0])
+    if titled is None:
+        return None
+    title, subtitle = titled
+
+    return title, subtitle, next(iter(_dc_text(record, "format")), None)
+
+
+def _nkp_title(raw: str) -> tuple[str, str | None] | None:
+    """This dialect's first `title` as a title and subtitle, or None for a placeholder."""
     # `Ostře sledované vlaky /` is how this catalogue writes it: the ISBD slash
     # introduces a statement of responsibility that is not in this record at
     # all, so `split_title_statement` has nothing to split off and leaves it.
-    title, subtitle = split_title_statement(titles[0])
+    title, subtitle = split_title_statement(raw)
     title = strip_isbd_punctuation(title)
     # **Both halves, and the subtitle half was missing.** `split_title_statement`
     # drops a statement of responsibility only where the slash has a space after
@@ -1524,33 +1645,7 @@ def _nkp_record(record: ElementTree.Element, isbn: str, *, source: str) -> Recor
     subtitle = strip_isbd_punctuation(subtitle) if subtitle else None
     if is_placeholder_title(title):
         return None
-
-    extent = next(iter(_nkp_text(record, "format")), None)
-    # Two refusals rather than one: the shared rule for the forms every source
-    # writes, and this catalogue's own Czech phrasing, which the shared one
-    # cannot see. See `_NKP_ONLINE`.
-    if not is_physical_book(extent, title) or (extent is not None and _NKP_ONLINE.search(extent)):
-        return None
-
-    contributors = _nkp_text(record, "contributor")
-    year_match = re.search(r"\d{4}", " ".join(_nkp_text(record, "date")))
-    publisher = next(iter(_nkp_text(record, "publisher")), None)
-
-    return Record(
-        source=source,
-        isbn=isbn,
-        title=title,
-        subtitle=subtitle,
-        author=flip_catalogue_name(contributors[0]) if contributors else None,
-        publisher=strip_isbd_punctuation(publisher) if publisher else None,
-        year=int(year_match.group()) if year_match else None,
-        language=LANGUAGES.get((_nkp_text(record, "language") or [""])[0].lower()),
-        page_count=pages_from_extent(extent),
-        cover_url=covers.open_library_url(isbn),
-        # The un-namespaced dialect, and it has no more room for a stamp than
-        # the namespaced one: see `catalogue.uncontrolled`.
-        subjects=uncontrolled(_nkp_text(record, "subject")),
-    )
+    return title, subtitle
 
 
 # ── The Spanish National Library ──────────────────────────────────────────────
@@ -2265,23 +2360,45 @@ _BNF_ONLINE: Final = re.compile(r"ressources?\s+d[eé]mat[eé]rialis", re.IGNORE
 
 def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     def texts(tag: str) -> list[str]:
-        return [
-            element.text.strip()
-            for element in record.findall(f"{_DC}{tag}")
-            if element.text and element.text.strip()
-        ]
+        return _dc_text(record, f"{_DC}{tag}")
 
-    titles = texts("title")
-    if not titles:
+    book = _bnf_book(record)
+    if book is None:
+        return None
+    title, subtitle, extent = book
+    # The same pair of refusals `_nkp_record` makes, with this catalogue's own
+    # French: see `_BNF_ONLINE`.
+    if not is_physical_book(extent, title) or _dc_says_online(extent, _BNF_ONLINE):
         return None
 
-    # Printed books only. `dc:type` is repeated in French and English.
-    kinds = " ".join(texts("type")).casefold()
-    if kinds and not any(kind in kinds for kind in _BNF_PRINTED):
-        return None
-    # And not printed, which is a separate question from not being printed:
-    # the DCMI `text` on an ebook satisfies the gate above. See the constant.
-    if _BNF_NOT_PRINTED in kinds:
+    isbn = _bnf_isbn(texts("identifier"))
+    # "M. J. Minard, Lettres modernes (Paris)" is publisher then place.
+    publisher = next(iter(texts("publisher")), None)
+
+    return Record(
+        source=source,
+        isbn=isbn,
+        title=title,
+        subtitle=subtitle,
+        author=_bnf_authors(texts("creator")),
+        publisher=_without_trailing_place(publisher) if publisher else None,
+        year=_year_in(" ".join(texts("date"))),
+        language=_dc_language(texts("language")),
+        page_count=pages_from_extent(extent),
+        cover_url=covers.open_library_url(isbn) if isbn else None,
+        # Dublin Core names no vocabulary and carries no identifier, in either
+        # dialect: see `catalogue.uncontrolled`.
+        subjects=uncontrolled(texts("subject")),
+    )
+
+
+def _bnf_book(record: ElementTree.Element) -> tuple[str, str | None, str | None] | None:
+    """A printed record's title, subtitle and extent, or None where it has no usable title or is not printed.
+
+    The extent's own refusal stays in `_bnf_record`, for the reason `_nkp_book` gives.
+    """
+    titles = _dc_text(record, f"{_DC}title")
+    if not titles or not _bnf_says_printed(record):
         return None
 
     # The BnF writes the statement of responsibility into the title, the same
@@ -2290,45 +2407,32 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     if is_placeholder_title(title):
         return None
 
-    extent = next((value for value in texts("format")), None)
-    # Two refusals, the same pair `_nkp_record` makes: the shared rule for the
-    # forms every source writes, and this catalogue's own French, which the
-    # shared one cannot see. See `_BNF_ONLINE`.
-    if not is_physical_book(extent, title) or (extent is not None and _BNF_ONLINE.search(extent)):
-        return None
+    return title, subtitle, next(iter(_dc_text(record, f"{_DC}format")), None)
 
-    # `dc:identifier` holds an ARK URL and sometimes "ISBN 0333532945".
-    isbn = next(
+
+def _bnf_says_printed(record: ElementTree.Element) -> bool:
+    """Whether the BnF's `dc:type` says printed, and does not also say electronic."""
+    # Printed books only. `dc:type` is repeated in French and English.
+    kinds = " ".join(_dc_text(record, f"{_DC}type")).casefold()
+    # And not printed, which is a separate question from not being printed:
+    # the DCMI `text` on an ebook satisfies the first test. See the constant.
+    return _dc_says_printed(kinds) and _BNF_NOT_PRINTED not in kinds
+
+
+def _bnf_isbn(identifiers: list[str]) -> str | None:
+    """The first ISBN among a BnF record's `dc:identifier` values.
+
+    They hold an ARK URL and sometimes "ISBN 0333532945", so the prefix is
+    dropped and anything that does not parse is passed over.
+    """
+    return next(
         (
             parsed
-            for value in texts("identifier")
+            for value in identifiers
             for parsed in [parse_isbn(value.replace("ISBN", "").strip())]
             if parsed is not None
         ),
         None,
-    )
-
-    # "M. J. Minard, Lettres modernes (Paris)" is publisher then place.
-    publisher = next((value for value in texts("publisher")), None)
-    if publisher:
-        publisher = _without_trailing_place(publisher)
-
-    year_match = re.search(r"\d{4}", " ".join(texts("date")))
-
-    return Record(
-        source=source,
-        isbn=isbn,
-        title=title,
-        subtitle=subtitle,
-        author=_bnf_authors(texts("creator")),
-        publisher=publisher,
-        year=int(year_match.group()) if year_match else None,
-        language=LANGUAGES.get((texts("language") or [""])[0].lower()),
-        page_count=pages_from_extent(extent),
-        cover_url=covers.open_library_url(isbn) if isbn else None,
-        # Dublin Core names no vocabulary and carries no identifier, in either
-        # dialect: see `catalogue.uncontrolled`.
-        subjects=uncontrolled(texts("subject")),
     )
 
 
@@ -2420,11 +2524,14 @@ def _loc_carrier_is_book(record: ElementTree.Element) -> bool:
     return True
 
 
-def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
+def _loc_says_text(record: ElementTree.Element) -> bool:
+    """Whether a MODS record's `typeOfResource` is `text`, the one kind `_loc_record` reads."""
     kind = record.find(f"{_MODS}typeOfResource")
-    if kind is None or (kind.text or "").strip() != "text":
-        return None
-    if not _loc_carrier_is_book(record):
+    return kind is not None and (kind.text or "").strip() == "text"
+
+
+def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
+    if not _loc_says_text(record) or not _loc_carrier_is_book(record):
         return None
 
     titled = _loc_title(record)
@@ -2432,32 +2539,11 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
         return None
     title, subtitle = titled
 
-    extent_element = record.find(f"{_MODS}physicalDescription/{_MODS}extent")
-    extent = extent_element.text.strip() if extent_element is not None and extent_element.text else None
+    extent = _loc_text(record.find(f"{_MODS}physicalDescription/{_MODS}extent"))
     if not is_physical_book(extent, title):
         return None
 
-    isbn = next(
-        (
-            parsed
-            for element in record.findall(f"{_MODS}identifier")
-            if element.text
-            for parsed in [parse_isbn(element.text)]
-            if parsed is not None
-        ),
-        None,
-    )
-
-    years = [
-        element.text for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued") if element.text
-    ]
-    year_match = re.search(r"\d{4}", " ".join(years))
-
-    language_element = record.find(f"{_MODS}language/{_MODS}languageTerm")
-    language = (
-        LANGUAGES.get((language_element.text or "").strip().lower()) if language_element is not None else None
-    )
-
+    isbn = _loc_isbn(record)
     return Record(
         source=source,
         isbn=isbn,
@@ -2465,8 +2551,8 @@ def _loc_record(record: ElementTree.Element, *, source: str) -> Record | None:
         subtitle=subtitle,
         author=_loc_authors(record),
         publisher=_loc_publisher(record),
-        year=int(year_match.group()) if year_match else None,
-        language=language,
+        year=_loc_year(record),
+        language=_loc_language(record),
         page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn) if isbn else None,
         subjects=_loc_subjects(record),
@@ -2492,8 +2578,7 @@ def _loc_title(record: ElementTree.Element) -> tuple[str, str | None] | None:
     title_info = record.find(f"{_MODS}titleInfo")
     if title_info is None:
         return None
-    title_element = title_info.find(f"{_MODS}title")
-    title = (title_element.text or "").strip().rstrip(":;,/ ") if title_element is not None else ""
+    title = (_loc_text(title_info.find(f"{_MODS}title")) or "").rstrip(":;,/ ")
     if not title:
         return None
 
@@ -2501,19 +2586,46 @@ def _loc_title(record: ElementTree.Element) -> tuple[str, str | None] | None:
     # under the first real word. Dropping it turned "L'étranger" into
     # "étranger" and "The Hobbit" into "Hobbit", which reads as a data error
     # and stops the title matching what somebody typed.
-    non_sort = title_info.find(f"{_MODS}nonSort")
-    if non_sort is not None and non_sort.text:
-        prefix = non_sort.text.strip()
+    prefix = _loc_text(title_info.find(f"{_MODS}nonSort"))
+    if prefix is not None:
         # An elided article joins the word; a whole one takes a space.
         title = prefix + ("" if prefix.endswith("'") else " ") + title
     if is_placeholder_title(title):
         return None
+    return title, _loc_text(title_info.find(f"{_MODS}subTitle"))
 
-    subtitle_element = title_info.find(f"{_MODS}subTitle")
-    subtitle = (
-        subtitle_element.text.strip() if subtitle_element is not None and subtitle_element.text else None
+
+def _loc_text(element: ElementTree.Element | None) -> str | None:
+    """An optional MODS element's text, stripped, or None where it is absent or has none."""
+    return element.text.strip() if element is not None and element.text else None
+
+
+def _loc_isbn(record: ElementTree.Element) -> str | None:
+    """The first `identifier` that parses as an ISBN."""
+    return next(
+        (
+            parsed
+            for element in record.findall(f"{_MODS}identifier")
+            if element.text
+            for parsed in [parse_isbn(element.text)]
+            if parsed is not None
+        ),
+        None,
     )
-    return title, subtitle
+
+
+def _loc_year(record: ElementTree.Element) -> int | None:
+    """The year out of every `originInfo/dateIssued`, which is free text."""
+    years = [
+        element.text for element in record.findall(f"{_MODS}originInfo/{_MODS}dateIssued") if element.text
+    ]
+    return _year_in(" ".join(years))
+
+
+def _loc_language(record: ElementTree.Element) -> str | None:
+    """The first `languageTerm` through the shared table, or None."""
+    element = record.find(f"{_MODS}language/{_MODS}languageTerm")
+    return LANGUAGES.get((element.text or "").strip().lower()) if element is not None else None
 
 
 def _loc_authors(record: ElementTree.Element) -> str | None:
@@ -2524,10 +2636,7 @@ def _loc_authors(record: ElementTree.Element) -> str | None:
     """
     authors: list[str] = []
     for name in record.findall(f"{_MODS}name"):
-        roles = " ".join(
-            (role.text or "").strip().casefold() for role in name.findall(f"{_MODS}role/{_MODS}roleTerm")
-        )
-        if roles and "author" not in roles and "creator" not in roles:
+        if not _loc_name_wrote(name):
             continue
         part = name.find(f"{_MODS}namePart")
         if part is not None and part.text:
@@ -2535,14 +2644,20 @@ def _loc_authors(record: ElementTree.Element) -> str | None:
     return credit_line(authors)
 
 
+def _loc_name_wrote(name: ElementTree.Element) -> bool:
+    """Whether a MODS `name` is a writer: it carries no role, or an author or creator one."""
+    roles = " ".join(
+        (role.text or "").strip().casefold() for role in name.findall(f"{_MODS}role/{_MODS}roleTerm")
+    )
+    return not roles or "author" in roles or "creator" in roles
+
+
 def _loc_publisher(record: ElementTree.Element) -> str | None:
     """A MODS record's publisher, from `originInfo` or, failing that, its agent."""
     publisher_element = record.find(f"{_MODS}originInfo/{_MODS}publisher")
     if publisher_element is None:
         publisher_element = record.find(f"{_MODS}originInfo/{_MODS}agent/{_MODS}namePart")
-    return (
-        publisher_element.text.strip() if publisher_element is not None and publisher_element.text else None
-    )
+    return _loc_text(publisher_element)
 
 
 def _loc_subjects(record: ElementTree.Element) -> tuple[Subject, ...]:
@@ -2612,26 +2727,32 @@ def _loc_classifications(record: ElementTree.Element) -> list[Heading]:
     """
     found: list[Heading] = []
     for element in record.findall(f"{_MODS}classification"):
-        scheme = _LOC_AUTHORITIES.get((element.get("authority") or "").lower())
-        raw = " ".join((element.text or "").split())
-        if scheme is None or not raw:
-            continue
-        if scheme is ClassificationScheme.DDC:
-            # Through the same normaliser as the other two source paths. MODS
-            # carries the prime here too, and a `<classification>` that is not
-            # a Dewey number at all is dropped rather than stored under a
-            # scheme that cannot read it.
-            heading = ddc.parse_heading(raw)
-            if heading is None:
-                continue
-            number, label = heading
-        else:
-            # No normaliser for LCC: a call number is alphanumeric and this app
-            # has no schedule for it. The whitespace collapse above and
-            # `ClassificationIn`'s 40 character bound are the whole guard.
-            number, label = raw, None
-        found.append(Heading(scheme, number, label))
+        heading = _loc_classification(element)
+        if heading is not None:
+            found.append(heading)
     return found
+
+
+def _loc_classification(element: ElementTree.Element) -> Heading | None:
+    """One `<classification>` as a heading, or None where `_loc_classifications` drops it."""
+    scheme = _LOC_AUTHORITIES.get((element.get("authority") or "").lower())
+    raw = " ".join((element.text or "").split())
+    if scheme is None or not raw:
+        return None
+    if scheme is not ClassificationScheme.DDC:
+        # No normaliser for LCC: a call number is alphanumeric and this app
+        # has no schedule for it. The whitespace collapse above and
+        # `ClassificationIn`'s 40 character bound are the whole guard.
+        return Heading(scheme, raw)
+    # Through the same normaliser as the other two source paths. MODS
+    # carries the prime here too, and a `<classification>` that is not
+    # a Dewey number at all is dropped rather than stored under a
+    # scheme that cannot read it.
+    heading = ddc.parse_heading(raw)
+    if heading is None:
+        return None
+    number, label = heading
+    return Heading(scheme, number, label)
 
 
 #: The subject vocabulary this app reads, of the 23 the Library of Congress
@@ -2722,20 +2843,30 @@ def _loc_subject_headings(record: ElementTree.Element) -> list[Heading]:
     for element in record.findall(f"{_MODS}subject"):
         if (element.get("authority") or "").lower() != _LOC_SUBJECT_AUTHORITY:
             continue
-        parts: list[str] = []
-        for part in element:
-            words = (part.text or "").split()
-            if not words:
-                # Nested rather than absent: see the docstring. A name's parts
-                # are joined with a space because the record already writes the
-                # comma, `Süssheim, Karl,` then `1878-1947`.
-                words = [word for child in part for word in (child.text or "").split()]
-            if words:
-                parts.append(" ".join(words))
+        parts = _lcsh_parts(element)
         if not parts:
             continue
         found.append(Heading(ClassificationScheme.LCSH, _LCSH_SUBDIVISION.join(parts)))
     return found
+
+
+def _lcsh_parts(element: ElementTree.Element) -> list[str]:
+    """One `<subject>`'s parts in document order, each its own text or its children's.
+
+    Why a part may nest its text, and what reading only the first shape costs,
+    is in `_loc_subject_headings`. A part with no words either way is skipped.
+    """
+    parts: list[str] = []
+    for part in element:
+        words = (part.text or "").split()
+        if not words:
+            # Nested rather than absent. A name's parts are joined with a space
+            # because the record already writes the comma, `Süssheim, Karl,`
+            # then `1878-1947`.
+            words = [word for child in part for word in (child.text or "").split()]
+        if words:
+            parts.append(" ".join(words))
+    return parts
 
 
 # ── The SRU door ──────────────────────────────────────────────────────────────
@@ -3237,11 +3368,7 @@ def resolve(target: targets.Target) -> None:
     the invariants it can see on one row on its own. This is the half that needs
     to know what code exists.
     """
-    if (
-        target.transport is not targets.Transport.SRU
-        and target.needs_key
-        and target.secret is targets.Secret.NONE
-    ):
+    if _bespoke_without_a_credential(target):
         # **The refusal the bespoke path did not have, and it is about the row
         # rather than about either door**, which is why it is hoisted above both
         # arms instead of written into one. A bespoke row needing a credential
@@ -3255,32 +3382,47 @@ def resolve(target: targets.Target) -> None:
         # search door.
         raise ValueError(f"{target.source}: needs a credential and no bespoke door carries one")
     if target.can(Capability.ANSWERS_ISBN):
-        lookup_readers: Collection[decoders.Reader]
-        if target.transport is targets.Transport.SRU:
-            lookup_readers = _LOOKUP_READERS.keys()
-        elif target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
-            lookup_readers = _KEYED_LOOKUPS.keys()
-        else:
-            lookup_readers = _FREE_LOOKUPS.keys()
+        lookup_readers = _door_readers(target, sru=_LOOKUP_READERS, keyed=_KEYED_LOOKUPS, free=_FREE_LOOKUPS)
         if target.reader not in lookup_readers:
             raise ValueError(f"{target.source}: answers a lookup and {target.reader} reads none")
     if target.can(Capability.ANSWERS_TITLE_SEARCH):
-        readers: Collection[decoders.Reader]
-        if target.transport is targets.Transport.SRU:
-            readers = _SEARCH_READERS.keys()
-        elif target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
-            # **The same fact as the lookup arm above, and not
-            # `Capability.METERED`.** The two agree on the seeded roster and are
-            # different questions: being billed per request is not being
-            # entitled to one named source's key, and a second metered bespoke
-            # source added to the table below would have been handed Google's by
-            # arriving. That is the defect this commit closes at the lookup
-            # door, one screen away.
-            readers = _METERED_SEARCHES.keys()
-        else:
-            readers = _FREE_SEARCHES.keys()
+        readers = _door_readers(target, sru=_SEARCH_READERS, keyed=_METERED_SEARCHES, free=_FREE_SEARCHES)
         if target.reader not in readers:
             raise ValueError(f"{target.source}: answers a search and {target.reader} reads none")
+
+
+def _bespoke_without_a_credential(target: targets.Target) -> bool:
+    """Whether a row goes out of a bespoke door, needs a credential, and names no secret."""
+    return (
+        target.transport is not targets.Transport.SRU
+        and target.needs_key
+        and target.secret is targets.Secret.NONE
+    )
+
+
+def _door_readers(
+    target: targets.Target,
+    *,
+    sru: Mapping[decoders.Reader, object],
+    keyed: Mapping[decoders.Reader, object],
+    free: Mapping[decoders.Reader, object],
+) -> Collection[decoders.Reader]:
+    """The readers the door this row would go through can serve, for one capability.
+
+    One rule for both of `resolve`'s arms, given that capability's three tables:
+    the SRU door's, the one bespoke table entitled to the Google Books key, and
+    the free bespoke one.
+
+    **Keyed by the secret, not by `Capability.METERED`.** The two agree on the
+    seeded roster and are different questions: being billed per request is not
+    being entitled to one named source's key, and a second metered bespoke source
+    added to the keyed table would have been handed Google's by arriving.
+    """
+    if target.transport is targets.Transport.SRU:
+        return sru.keys()
+    if target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
+        return keyed.keys()
+    return free.keys()
 
 
 def carries_a_credential(target: targets.Target) -> bool:
@@ -3600,23 +3742,9 @@ def _relevance(match: Record, terms: list[str], prefer_language: str | None) -> 
     # Craftsmanship" score three points below a 2025 reprint with no subtitle.
     title = _normalise_words(match.title)
     searchable = title | _normalise_words(match.subtitle)
-    author = _normalise_words(match.author)
-    series = _normalise_words(match.series_name)
-
-    score = 0
-    in_title = in_author = False
-    for term in wanted:
-        title_hit = _matches_any(term, searchable)
-        author_hit = _matches_any(term, author)
-        if title_hit or author_hit:
-            score += _TERM_WEIGHT
-            in_title = in_title or title_hit
-            in_author = in_author or author_hit
-        elif _matches_any(term, series):
-            score += _SERIES_WEIGHT
-
-    if in_title and in_author:
-        score += _BOTH_HALVES_BONUS
+    score = _term_score(
+        wanted, searchable, _normalise_words(match.author), _normalise_words(match.series_name)
+    )
 
     # How much of the *title* is query, rather than how much of the query is
     # title. A long title dilutes; an exact one does not. This is what stops a
@@ -3626,6 +3754,38 @@ def _relevance(match: Record, terms: list[str], prefer_language: str | None) -> 
         covered = sum(1 for word in title if _matches_any(word, wanted))
         score += round(_PRECISION_WEIGHT * covered / len(title))
 
+    score += _standing(match, prefer_language)
+    pickable = sum(1 for name in _PICKABLE_FIELDS if getattr(match, name))
+    return (score, pickable, match.year or 0)
+
+
+def _term_score(wanted: set[str], searchable: set[str], author: set[str], series: set[str]) -> int:
+    """What the query's terms earn against one row's title, author and series.
+
+    A term found in the title or the author earns `_TERM_WEIGHT`, one found only
+    in the series earns `_SERIES_WEIGHT`, and a query that reaches both the title
+    and the author earns `_BOTH_HALVES_BONUS` on top.
+    """
+    score = 0
+    in_title = in_author = False
+    for term in wanted:
+        title_hit = _matches_any(term, searchable)
+        author_hit = _matches_any(term, author)
+        if title_hit or author_hit:
+            score += _TERM_WEIGHT
+            in_title |= title_hit
+            in_author |= author_hit
+        elif _matches_any(term, series):
+            score += _SERIES_WEIGHT
+
+    if in_title and in_author:
+        score += _BOTH_HALVES_BONUS
+    return score
+
+
+def _standing(match: Record, prefer_language: str | None) -> int:
+    """What a row's language and its catalogues add to its score, or take from it."""
+    score = 0
     if prefer_language and match.language == prefer_language:
         score += _LANGUAGE_WEIGHT
 
@@ -3636,9 +3796,7 @@ def _relevance(match: Record, terms: list[str], prefer_language: str | None) -> 
     sources = match.sources
     if sources and sources <= _SECONDARY_SOURCES:
         score -= _SECONDARY_PENALTY
-
-    pickable = sum(1 for name in _PICKABLE_FIELDS if getattr(match, name))
-    return (score, pickable, match.year or 0)
+    return score
 
 
 def _ranked(matches: list[Record], terms: list[str], prefer_language: str | None) -> list[Record]:
@@ -3785,27 +3943,7 @@ async def title_search(
     # derived from `answers_search` on the rows, so `targets.SEEDED[name]` here
     # cannot miss and `_search_one` has a reader for whatever it finds:
     # `metadata.resolve` is what refuses a row that would not.
-    # **Asked for is not the same as granted**, and the two conditions that
-    # narrow it are separate because they refuse for separate reasons.
-    #
-    # A wider roster is the only thing the longer deadline buys. Where this
-    # library has no slow catalogue enabled the two rosters are the same set, so
-    # `harder` would spend three times the wall clock on the identical fan out,
-    # and `harder` is a query parameter rather than a button: nothing makes a
-    # caller press anything.
-    #
-    # A slot is the second condition, and it is taken without waiting. See
-    # `_HARDER_AT_ONCE`.
-    harder_now = harder and bool(access.plan.searched_only_harder)
-    # `locked()` then `acquire()` is atomic here and it is worth saying why,
-    # because it reads like a race. `Semaphore.acquire` returns without
-    # suspending while a slot is free, and this is one event loop, so no task
-    # can run between the two lines. A `Lock` would read the same and buy
-    # nothing; waiting is the thing being refused, not the thing being tuned.
-    if harder_now and not _HARDER_AT_ONCE.locked():
-        await _HARDER_AT_ONCE.acquire()
-    else:
-        harder_now = False
+    harder_now = await _take_a_harder_slot(harder, access.plan)
 
     try:
         # **The roster and its budget move together, in one branch.** Two
@@ -3849,6 +3987,32 @@ async def title_search(
         tuple(roster),
         tuple(name for name in access.plan.searched_harder if name not in asked),
     )
+
+
+async def _take_a_harder_slot(harder: bool, plan: sources.Plan) -> bool:
+    """Whether this search runs harder, taking a `_HARDER_AT_ONCE` slot when it does."""
+    # **Asked for is not the same as granted**, and the two conditions that
+    # narrow it are separate because they refuse for separate reasons.
+    #
+    # A wider roster is the only thing the longer deadline buys. Where this
+    # library has no slow catalogue enabled the two rosters are the same set, so
+    # `harder` would spend three times the wall clock on the identical fan out,
+    # and `harder` is a query parameter rather than a button: nothing makes a
+    # caller press anything.
+    #
+    # A slot is the second condition, and it is taken without waiting. See
+    # `_HARDER_AT_ONCE`.
+    if not (harder and plan.searched_only_harder):
+        return False
+    # `locked()` then `acquire()` is atomic here and it is worth saying why,
+    # because it reads like a race. `Semaphore.acquire` returns without
+    # suspending while a slot is free, and this is one event loop, so no task
+    # can run between the two lines. A `Lock` would read the same and buy
+    # nothing; waiting is the thing being refused, not the thing being tuned.
+    if _HARDER_AT_ONCE.locked():
+        return False
+    await _HARDER_AT_ONCE.acquire()
+    return True
 
 
 #: The title search adapter for a bespoke door that is handed no secret.
@@ -4153,20 +4317,7 @@ def _merge_matches(matches: list[Record]) -> list[Record]:
         if not match.title:
             continue
 
-        slot = by_isbn.get(match.isbn) if match.isbn else None
-        if slot is None:
-            slot = by_work.get(work_of(match))
-
-        # A translation is not the same book. Two rows sharing a title, an
-        # author and a year but naming **different** languages are a German
-        # printing and an English one, and folding them together hides the one
-        # somebody wants. Only refused when both actually say: an unknown
-        # language is not evidence of disagreement.
-        if slot is not None:
-            languages = {rows[slot].language, match.language}
-            if None not in languages and len(languages) > 1:
-                slot = None
-
+        slot = _merge_slot(match, rows, by_isbn, by_work.get(work_of(match)))
         if slot is None:
             rows.append(match)
             register(len(rows) - 1)
@@ -4185,6 +4336,30 @@ def _merge_matches(matches: list[Record]) -> list[Record]:
         register(slot)
 
     return rows
+
+
+def _merge_slot(
+    match: Record, rows: list[Record], by_isbn: dict[str, int], work_slot: int | None
+) -> int | None:
+    """The slot `_merge_matches` folds this match into, or None for a row of its own.
+
+    By ISBN first and by work failing that; `work_slot` is the work index's
+    answer for this match, looked up by the caller, which owns the key.
+    """
+    slot = by_isbn.get(match.isbn) if match.isbn else None
+    if slot is None:
+        slot = work_slot
+
+    # A translation is not the same book. Two rows sharing a title, an
+    # author and a year but naming **different** languages are a German
+    # printing and an English one, and folding them together hides the one
+    # somebody wants. Only refused when both actually say: an unknown
+    # language is not evidence of disagreement.
+    if slot is not None:
+        languages = {rows[slot].language, match.language}
+        if None not in languages and len(languages) > 1:
+            return None
+    return slot
 
 
 # ── Other editions of one work ────────────────────────────────────────────────
@@ -4219,14 +4394,7 @@ _OPEN_LIBRARY_AUTHOR_LOOKUPS: Final = 3
 
 async def _open_library_author_names(client: httpx.AsyncClient, entries: list[Any]) -> dict[str, str]:
     """Author key to name, for the whole cluster, in at most three requests."""
-    keys: list[str] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        key = _open_library_author_key(entry.get("authors"))
-        if key is not None and key not in keys:
-            keys.append(key)
-    wanted = keys[:_OPEN_LIBRARY_AUTHOR_LOOKUPS]
+    wanted = _open_library_author_keys(entries)[:_OPEN_LIBRARY_AUTHOR_LOOKUPS]
     if not wanted:
         return {}
 
@@ -4248,6 +4416,18 @@ async def _open_library_author_names(client: httpx.AsyncClient, entries: list[An
     return names
 
 
+def _open_library_author_keys(entries: list[Any]) -> list[str]:
+    """Each distinct author key in an editions listing, in the order first named."""
+    keys: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        key = _open_library_author_key(entry.get("authors"))
+        if key is not None and key not in keys:
+            keys.append(key)
+    return keys
+
+
 def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Record:
     """One entry of an editions listing, as a Catalogue record.
 
@@ -4259,8 +4439,6 @@ def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Recor
         value for key in ("isbn_13", "isbn_10") for value in (entry.get(key) or []) if isinstance(value, str)
     ]
     isbn13 = _first_isbn13(identifiers)
-    cover_ids = entry.get("covers")
-    cover_id = cover_ids[0] if isinstance(cover_ids, list) and cover_ids else None
     author_key = _open_library_author_key(entry.get("authors"))
     publishers = entry.get("publishers")
     title = entry.get("title")
@@ -4275,20 +4453,24 @@ def _open_library_edition(entry: dict[str, Any], names: dict[str, str]) -> Recor
         description=_open_library_description(entry.get("description")),
         page_count=_open_library_pages(entry.get("number_of_pages")),
         language=_open_library_language(entry.get("languages")),
-        # By Open Library's own cover id where the entry has one, which resolves
-        # for a printing whose ISBN the cover service does not know. 75 of 129
-        # live entries carry a cover id and 69 carry an ISBN, and they are not
-        # the same 69.
-        cover_url=(
-            covers.open_library_id_url(cover_id)
-            if isinstance(cover_id, int)
-            else covers.open_library_url(isbn13)
-            if isbn13
-            else None
-        ),
+        cover_url=_open_library_edition_cover(entry, isbn13),
         subjects=uncontrolled(_open_library_subjects(entry)),
         headings=tuple(_open_library_classifications(entry)),
     )
+
+
+def _open_library_edition_cover(entry: dict[str, Any], isbn13: str | None) -> str | None:
+    """One editions entry's cover: by Open Library's own cover id, else by ISBN.
+
+    The cover id resolves for a printing whose ISBN the cover service does not
+    know. 75 of 129 live entries carry a cover id and 69 carry an ISBN, and they
+    are not the same 69.
+    """
+    cover_ids = entry.get("covers")
+    cover_id = cover_ids[0] if isinstance(cover_ids, list) and cover_ids else None
+    if isinstance(cover_id, int):
+        return covers.open_library_id_url(cover_id)
+    return covers.open_library_url(isbn13) if isbn13 else None
 
 
 async def editions(
@@ -4367,21 +4549,8 @@ async def editions(
         return []
     try:
         async with fetch.catalogue_client() as client:
-            response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{canonical}.json")
-            if response.status_code != 200:
-                return []
-            key = _open_library_work_key(_open_library_object(response).get("works"))
-            if key is None:
-                return []
-            listing = await fetch.get(
-                client,
-                f"{_OPEN_LIBRARY}{key}/editions.json",
-                params={"limit": str(_OPEN_LIBRARY_EDITIONS)},
-            )
-            if listing.status_code != 200:
-                return []
-            entries = _open_library_object(listing).get("entries")
-            if not isinstance(entries, list):
+            entries = await _open_library_cluster(client, canonical)
+            if entries is None:
                 return []
             names = await _open_library_author_names(client, entries)
     except httpx.HTTPError, ValueError:
@@ -4389,6 +4558,35 @@ async def editions(
         return []
 
     records = [_open_library_edition(entry, names) for entry in entries if isinstance(entry, dict)]
+    return _in_editions_order(records, prefer_language)[:limit]
+
+
+async def _open_library_cluster(client: httpx.AsyncClient, isbn: str) -> list[Any] | None:
+    """The editions listing of the work this ISBN belongs to, or None at any miss.
+
+    Two requests in sequence, the ISBN's edition record and then its work's
+    listing, bounded at `_OPEN_LIBRARY_EDITIONS` entries. A transport error
+    propagates to `editions`, which owns the refusal.
+    """
+    response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
+    if response.status_code != 200:
+        return None
+    key = _open_library_work_key(_open_library_object(response).get("works"))
+    if key is None:
+        return None
+    listing = await fetch.get(
+        client,
+        f"{_OPEN_LIBRARY}{key}/editions.json",
+        params={"limit": str(_OPEN_LIBRARY_EDITIONS)},
+    )
+    if listing.status_code != 200:
+        return None
+    entries = _open_library_object(listing).get("entries")
+    return entries if isinstance(entries, list) else None
+
+
+def _in_editions_order(records: list[Record], prefer_language: str | None) -> list[Record]:
+    """A cluster's rows with translations dropped, in the order `editions` documents."""
     if prefer_language:
         records = [record for record in records if record.language in (prefer_language, None)]
     records.sort(
@@ -4403,7 +4601,7 @@ async def editions(
         ),
         reverse=True,
     )
-    return records[:limit]
+    return records
 
 
 async def candidates(
@@ -4594,66 +4792,13 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
         return hit
 
     attempts: list[tuple[str, Outcome]] = []
+    together = await _lookup_together(isbn, access, attempts)
+    if together is not None:
+        return together
 
-    # `return_exceptions` is not set: every source already turns its own
-    # failures into an UNAVAILABLE outcome, so an exception escaping one of
-    # them is a bug worth seeing rather than a network condition to absorb.
-    together = access.plan.lookup_together
-    fast = await asyncio.gather(
-        *(
-            _lookup_one(
-                targets.SEEDED[name],
-                isbn,
-                access.api_key,
-                credential=access.logins.get(name),
-            )
-            for name in together
-        )
-    )
-    attempts.extend((name, result.outcome) for name, result in zip(together, fast, strict=True))
-
-    hits = [result.record for result in fast if result.found and result.record]
-    if hits:
-        merged = _merge(hits, isbn)
-        # Neither of the fast pair carries an image: they are bibliographic
-        # catalogues returning MARC and Dublin Core. The cover is resolved
-        # against the image services and **checked**, because storing an
-        # unverified guess is how a book ends up with a permanently broken
-        # cover. See covers.py.
-        merged = merged.with_cover(await covers.resolve(isbn, merged.cover_url))
-        # `merged.source` rather than a second join of the same names: folding
-        # two records already names both catalogues, and it is the same string
-        # the search path builds and the one the cache and the log carry.
-        found = Lookup(Outcome.FOUND, record=merged, source=merged.source, attempts=attempts)
-        async with _cache_lock:
-            _remember(isbn, found)
-        logger.info("Resolved %s from %s", isbn, merged.source)
-        return found
-
-    # **The tail this ISBN gets, which is not the whole tail.** A catalogue whose
-    # remit is one registration group is not asked about a book from another
-    # one: it is a round trip that cannot answer, and the tail stops at the first
-    # hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
-    # carries the measurement and the bound that keeps it from losing a book.
-    for name in access.plan.lookup_in_turn(registration_group(isbn)):
-        result = await _lookup_one(
-            targets.SEEDED[name],
-            isbn,
-            access.api_key,
-            credential=access.logins.get(name),
-        )
-        attempts.append((name, result.outcome))
-        if result.found and result.record is not None:
-            # Open Library's own record carries a cover URL and Google's
-            # carries a thumbnail from the volume record. Both are checked
-            # here too: an Open Library edition record does not guarantee the
-            # cover service has an image for it.
-            record = result.record.with_cover(await covers.resolve(isbn, result.record.cover_url))
-            found = Lookup(Outcome.FOUND, record=record, source=name, attempts=attempts)
-            async with _cache_lock:
-                _remember(isbn, found)
-            logger.info("Resolved %s from %s", isbn, name)
-            return found
+    tail = await _lookup_in_turn(isbn, access, attempts)
+    if tail is not None:
+        return tail
 
     # Asked nothing, so `_worst` has nothing to weigh: an empty `attempts` would
     # answer NOT_FOUND, which is a statement about the book rather than about
@@ -4685,3 +4830,79 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
         ", ".join(f"{name}={outcome.name.lower()}" for name, outcome in attempts),
     )
     return missed
+
+
+async def _lookup_together(isbn: str, access: Access, attempts: list[tuple[str, Outcome]]) -> Lookup | None:
+    """`lookup`'s leading sources asked at once and merged, cached, or None where none has the book.
+
+    Appends each catalogue's outcome to `attempts`, as `_lookup_in_turn` does.
+    """
+    # `return_exceptions` is not set: every source already turns its own
+    # failures into an UNAVAILABLE outcome, so an exception escaping one of
+    # them is a bug worth seeing rather than a network condition to absorb.
+    together = access.plan.lookup_together
+    fast = await asyncio.gather(
+        *(
+            _lookup_one(
+                targets.SEEDED[name],
+                isbn,
+                access.api_key,
+                credential=access.logins.get(name),
+            )
+            for name in together
+        )
+    )
+    attempts.extend((name, result.outcome) for name, result in zip(together, fast, strict=True))
+
+    hits = [result.record for result in fast if result.found and result.record]
+    if not hits:
+        return None
+    merged = _merge(hits, isbn)
+    # Neither of the fast pair carries an image: they are bibliographic
+    # catalogues returning MARC and Dublin Core. The cover is resolved
+    # against the image services and **checked**, because storing an
+    # unverified guess is how a book ends up with a permanently broken
+    # cover. See covers.py.
+    merged = merged.with_cover(await covers.resolve(isbn, merged.cover_url))
+    # `merged.source` rather than a second join of the same names: folding
+    # two records already names both catalogues, and it is the same string
+    # the search path builds and the one the cache and the log carry.
+    found = Lookup(Outcome.FOUND, record=merged, source=merged.source, attempts=attempts)
+    async with _cache_lock:
+        _remember(isbn, found)
+    logger.info("Resolved %s from %s", isbn, merged.source)
+    return found
+
+
+async def _lookup_in_turn(isbn: str, access: Access, attempts: list[tuple[str, Outcome]]) -> Lookup | None:
+    """The first hit along `lookup`'s tail, cached, or None once the tail is spent.
+
+    Appends each catalogue's outcome to `attempts`, which `lookup` goes on to
+    report when nothing answers.
+
+    **The tail this ISBN gets, which is not the whole tail.** A catalogue whose
+    remit is one registration group is not asked about a book from another
+    one: it is a round trip that cannot answer, and the tail stops at the first
+    hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
+    carries the measurement and the bound that keeps it from losing a book.
+    """
+    for name in access.plan.lookup_in_turn(registration_group(isbn)):
+        result = await _lookup_one(
+            targets.SEEDED[name],
+            isbn,
+            access.api_key,
+            credential=access.logins.get(name),
+        )
+        attempts.append((name, result.outcome))
+        if result.found and result.record is not None:
+            # Open Library's own record carries a cover URL and Google's
+            # carries a thumbnail from the volume record. Both are checked
+            # here too: an Open Library edition record does not guarantee the
+            # cover service has an image for it.
+            record = result.record.with_cover(await covers.resolve(isbn, result.record.cover_url))
+            found = Lookup(Outcome.FOUND, record=record, source=name, attempts=attempts)
+            async with _cache_lock:
+                _remember(isbn, found)
+            logger.info("Resolved %s from %s", isbn, name)
+            return found
+    return None

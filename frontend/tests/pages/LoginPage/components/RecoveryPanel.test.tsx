@@ -107,6 +107,50 @@ describe("RecoveryPanel", () => {
     );
   });
 
+  it("shows a refused request in place of the promise it would have made", () => {
+    // Both flags at once is the state a refusal leaves: the request went out,
+    // and what came back was a refusal, so the reassurance must not show.
+    renderLocalised(
+      <RecoveryPanel
+        state={state({ hasAsked: true, askError: new Error("Slow down.") })}
+        onBack={vi.fn<OnBack>()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Slow down.");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows a refused code in place of the success message", () => {
+    renderLocalised(
+      <RecoveryPanel
+        state={state({
+          hasRedeemed: true,
+          redeemError: new Error("That code is not valid."),
+        })}
+        onBack={vi.fn<OnBack>()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "That code is not valid.",
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("holds each half's button while its request is out", () => {
+    renderLocalised(
+      <RecoveryPanel
+        state={state({ isAsking: true, isRedeeming: true })}
+        onBack={vi.fn<OnBack>()}
+      />,
+    );
+
+    const waiting = screen.getAllByRole("button", { name: "Please wait..." });
+    expect(waiting).toHaveLength(2);
+    for (const button of waiting) expect(button).toBeDisabled();
+  });
+
   it("goes back to the sign in card", async () => {
     const onBack = vi.fn<OnBack>();
     renderLocalised(<RecoveryPanel state={state()} onBack={onBack} />);

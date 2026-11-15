@@ -45,7 +45,7 @@ import recognition
 import tags
 from catalogue import Record
 from database import SessionLocal
-from enums import ClassificationScheme, OwnershipStatus, ReadStatus, TagCategory
+from enums import ClassificationScheme, OwnershipStatus, ReadStatus, RecordOrigin, TagCategory
 from errors import MetAnotherChange
 from importing import (
     _MARC_RECORD_FIELDS,
@@ -490,6 +490,64 @@ class TestCreatingBooks:
         assert book.publisher == "Real Publisher"
         assert book.year == 2000
         assert book.page_count == 300
+
+
+class TestEachImporterRecordsItselfAsTheOrigin:
+    """A created Book names the import that made it, and a matched one keeps its own.
+
+    The import rather than the institution, because none of the three reads who
+    catalogued the record it carries.
+    """
+
+    def test_a_reading_history_creates_its_books_as_a_csv_import(self, db, member):
+        Import.for_member(db, member.id).apply(parse(row("New One")), create_missing=True)
+
+        book = db.query(Book).one()
+        assert (book.record_origin, book.record_modified_here) == (RecordOrigin.CSV_IMPORT, False)
+
+    def test_a_marc_file_creates_its_books_as_a_marc_import(self, db, member):
+        MarcImport.for_member(db, member.id).apply(one_marc_file(catalogued("Solaris")))
+
+        book = db.query(Book).one()
+        assert (book.record_origin, book.record_modified_here) == (RecordOrigin.MARC_IMPORT, False)
+
+    def test_a_library_server_creates_its_books_as_an_opds_import(self, db, member):
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods")])
+
+        book = db.query(Book).one()
+        assert (book.record_origin, book.record_modified_here) == (RecordOrigin.OPDS_IMPORT, False)
+
+    def test_a_gap_an_import_fills_marks_the_record_changed_and_keeps_its_origin(self, db, member):
+        db.add(
+            Book(
+                title="Small Gods",
+                added_by_user_id=member.id,
+                record_origin=RecordOrigin.DNB,
+                record_modified_here=False,
+            )
+        )
+        db.commit()
+
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods", author="Terry Pratchett")])
+
+        book = db.query(Book).one()
+        assert (book.record_origin, book.record_modified_here) == (RecordOrigin.DNB, True)
+
+    def test_a_match_that_fills_nothing_leaves_the_record_as_it_arrived(self, db, member):
+        db.add(
+            Book(
+                title="Small Gods",
+                author="Terry Pratchett",
+                added_by_user_id=member.id,
+                record_origin=RecordOrigin.DNB,
+                record_modified_here=False,
+            )
+        )
+        db.commit()
+
+        OpdsImport.for_member(db, member.id).apply([held("Small Gods", author="Terry Pratchett")])
+
+        assert db.query(Book).one().record_modified_here is False
 
 
 class TestTheTagCaps:

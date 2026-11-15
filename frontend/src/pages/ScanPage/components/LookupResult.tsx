@@ -11,7 +11,7 @@ import { refusedForTheTrash } from "../../../lib/fileLanding";
 import { useTranslation, type MessageKey } from "../../../i18n";
 import { CoverImage, LocationField, TagPicker } from "../../components";
 import { FORMAT_LABELS, FORMAT_ORDER } from "../../types";
-import type { BookDraft, PendingBook } from "../types";
+import { editedDraft, type BookDraft, type PendingBook } from "../types";
 import { useAlreadyHeldWarning } from "../hooks";
 
 interface LookupResultProps {
@@ -252,7 +252,7 @@ function ManualEntry({
         type="text"
         value={draft.title}
         onChange={(event) =>
-          onChange({ draft: { ...draft, title: event.target.value } })
+          onChange({ draft: editedDraft(draft, { title: event.target.value }) })
         }
         className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm mb-2 dark:border-paper-700"
         placeholder={t("scan.titlePlaceholder")}
@@ -271,7 +271,7 @@ function ManualEntry({
           // A cleared box is no author, which the column holds as null:
           // `""` would be a second spelling of the same absence.
           onChange({
-            draft: { ...draft, author: event.target.value || null },
+            draft: editedDraft(draft, { author: event.target.value || null }),
           })
         }
         className="w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700"

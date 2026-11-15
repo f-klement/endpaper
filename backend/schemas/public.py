@@ -57,6 +57,7 @@ from enums import (
     ClassificationScheme,
     HeadingKind,
     LinkRelationship,
+    RecordOrigin,
     TagCategory,
 )
 from schemas.tag import KnownTagKey
@@ -213,6 +214,10 @@ class PublicBookOut(BaseModel):
     #: A catalogue's online links: a fact about the object as a catalogue
     #: record, so visible exactly when the Book is.
     online_links: list[PublicOnlineLinkOut] = []
+    #: Where the record came from: a catalogue, a file, an import or a person.
+    #: Published because a catalogue that hides its sources is not a catalogue
+    #: (`docs/decisions.md`). Whether this library changed it since is not.
+    record_origin: RecordOrigin | None = None
 
     model_config = {"from_attributes": True}
 

@@ -1,9 +1,11 @@
-import type {
-  BookCreate,
-  BookIdentifierIn,
-  BookLookup,
-  BookMatch,
-  CopyCreate,
+import {
+  RecordOrigin,
+  WorkFact,
+  type BookCreate,
+  type BookIdentifierIn,
+  type BookLookup,
+  type BookMatch,
+  type CopyCreate,
 } from "../../api/generated/model";
 import { boundNumber, boundText } from "../../lib/bookBounds";
 import { normaliseLocation } from "../../lib/lastLocation";
@@ -84,6 +86,34 @@ export interface BookDraft extends BookLookup {
    * rather than every edit site remembering to clear this.
    */
   authors?: string[] | null;
+  /**
+   * Whether the member changed this record before filing it, which the server
+   * cannot see and so believes (`BookCreate.record_modified_here`).
+   *
+   * **Set by `editedDraft`, and by `enrichedDraft` where the file filled a gap
+   * in the catalogue's description**, so an edit site that skips the first
+   * files a corrected record as the catalogue's or the file's untouched.
+   */
+  record_modified_here?: boolean;
+}
+
+/**
+ * A draft with a change the member made before filing it.
+ *
+ * **The flag follows the origin**: a draft that names where it came from is
+ * that source's record changed here, and one that names none is being typed,
+ * which is the record's creation rather than a change to it.
+ */
+export function editedDraft(
+  draft: BookDraft,
+  change: Partial<BookDraft>,
+): BookDraft {
+  return {
+    ...draft,
+    ...change,
+    record_modified_here:
+      draft.record_origin != null || draft.record_modified_here === true,
+  };
 }
 
 /**
@@ -230,6 +260,9 @@ export function toScanRequest(
   return {
     ...fields,
     authors: authorsAgreeing(fields.author, fields.authors),
+    // A lookup whose leading record no catalogue on the roster answers names
+    // none, and the body then says nothing, which the server files as typed.
+    record_origin: fields.record_origin ?? undefined,
     is_private: pending.isPrivate,
     ...perCopy(pending),
     ownership: pending.ownership,
@@ -326,6 +359,12 @@ const WHO_WINS: { readonly [Field in keyof BookDraft]-?: FieldSource } = {
   suggested_tag_ids: "catalogue first",
   identifiers: "catalogue first",
   categories: "catalogue first",
+  // The catalogue's record replaces the row's, so where it answered it is the
+  // origin; a file's `file` survives only a lookup that named no catalogue.
+  record_origin: "catalogue first",
+  // The queue's one edit is a subject dropped, and the file's subjects survive
+  // the catalogue's record, so the change it records survives with them.
+  record_modified_here: "catalogue first",
   // A catalogue never answers one, so the file's list always survives, and
   // `toScanRequest` drops it where the catalogue's line replaced the file's.
   authors: "catalogue first",
@@ -339,14 +378,50 @@ function isBlank(value: BookDraft[keyof BookDraft]): boolean {
   return typeof value === "object" && value.length === 0;
 }
 
-/** Copy one field across where the catalogue left it blank. */
+/**
+ * Copy one field across where the catalogue left it blank, and say whether it
+ * did.
+ */
 function fillBlank<Field extends keyof BookDraft>(
   into: BookDraft,
   from: BookDraft,
   field: Field,
-): void {
-  if (isBlank(into[field]) && !isBlank(from[field])) into[field] = from[field];
+): boolean {
+  if (!isBlank(into[field]) || isBlank(from[field])) return false;
+  into[field] = from[field];
+  return true;
 }
+
+/**
+ * The work facts a draft has no field for, which the scan page therefore never
+ * flags. Typed as exactly that set, so a column renamed on one side only (a
+ * `WorkFact` no draft field matches, or a draft field gaining the name) fails
+ * the type check rather than silently never flagging. That holds only while
+ * `WorkFact` stays a literal union and `BookDraft` has no index signature: a
+ * widened `WorkFact` or an index signature on the draft makes `keyof BookDraft`
+ * accept any spelling, and the drift goes silent.
+ */
+const NOT_ON_A_DRAFT: {
+  readonly [Fact in Exclude<WorkFact, keyof BookDraft>]: true;
+} = {
+  // The scan page keeps no Google Books volume id.
+  google_books_id: true,
+};
+
+function isDraftField(
+  fact: WorkFact,
+): fact is Extract<WorkFact, keyof BookDraft> {
+  return !Object.hasOwn(NOT_ON_A_DRAFT, fact);
+}
+
+/**
+ * The fields that describe the work, from the generated client rather than a
+ * list here: `backend/book_columns.py` owns the partition, and the server sets
+ * the same flag when an import fills one of these.
+ */
+const WORK_FACTS: ReadonlySet<keyof BookDraft> = new Set(
+  Object.values(WorkFact).filter(isDraftField),
+);
 
 /**
  * A catalogue record for a row's ISBN, filled from what the row already said.
@@ -355,6 +430,12 @@ function fillBlank<Field extends keyof BookDraft>(
  * draft when its answer arrives, so this is `draftFromLookup` for it; a file
  * that stated its ISBN, or a name that carried one, keeps what the catalogue
  * did not answer. `WHO_WINS` is the rule per field.
+ *
+ * **A file's value filling a work fact makes the record changed here**, where
+ * the catalogue named itself as the origin: the record filed is then the
+ * catalogue's with part of its description from elsewhere. A fill beside the
+ * description (identifiers, a cover, a classification) leaves it unflagged,
+ * which is the server's rule too (`evidence.touched`).
  */
 export function enrichedDraft(
   lookup: BookLookup,
@@ -362,8 +443,13 @@ export function enrichedDraft(
 ): BookDraft {
   const enriched = draftFromLookup(lookup);
   if (own === null) return enriched;
+  const catalogued = lookup.record_origin != null;
   for (const field of Object.keys(WHO_WINS) as (keyof BookDraft)[]) {
-    if (WHO_WINS[field] === "catalogue first") fillBlank(enriched, own, field);
+    if (WHO_WINS[field] !== "catalogue first") continue;
+    const filled = fillBlank(enriched, own, field);
+    if (filled && catalogued && WORK_FACTS.has(field)) {
+      enriched.record_modified_here = true;
+    }
   }
   return enriched;
 }
@@ -476,6 +562,7 @@ export function draftFromMatch(match: BookMatch): BookDraft {
     // server writes a row each.
     classifications: match.classifications ?? [],
     suggested_tag_ids: match.suggested_tag_ids ?? [],
+    record_origin: match.record_origin,
   };
 }
 
@@ -686,6 +773,7 @@ export function draftFromFile(record: FileMetadata): BookDraft {
     // which scheme a label names is this flow's decision and what may cross the
     // wire is one door both flows pass.
     identifiers: boundIdentifiers(identifiersFromFile(record.identifiers)),
+    record_origin: RecordOrigin.file,
     notFound: true,
   };
 }
@@ -710,6 +798,7 @@ export function draftFromCalibre(book: CalibreBook): BookDraft {
     classifications: [],
     suggested_tag_ids: [],
     identifiers: boundIdentifiers(identifiersOf(book)),
+    record_origin: RecordOrigin.calibre_import,
     notFound: true,
   };
 }
@@ -742,6 +831,7 @@ export function draftFromName(clues: NameClues): BookDraft {
     // batch both already handle.
     classifications: [],
     suggested_tag_ids: [],
+    record_origin: RecordOrigin.file,
     notFound: true,
   };
 }
@@ -780,6 +870,7 @@ export function draftFromAudiobook(group: AudiobookGroup): BookDraft | null {
     author: creditLine(group.authors),
     classifications: [],
     suggested_tag_ids: [],
+    record_origin: RecordOrigin.file,
     notFound: true,
   };
 }

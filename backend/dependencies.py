@@ -490,6 +490,26 @@ def _nuls_in(value: object, loc: tuple[str | int, ...]) -> list[tuple[str | int,
     return found
 
 
+async def _nuls_in_the_body(request: Request, route: APIRoute) -> list[tuple[str | int, ...]]:
+    """Where a NUL sits in the body `route` already read: a form's text
+    fields, or a JSON body at any depth. None where the route takes no body."""
+    if route.body_field is None:
+        return []
+    if isinstance(route.body_field.field_info, params.Form):
+        form = await request.form()
+        return [
+            ("body", name) for name, value in form.multi_items() if isinstance(value, str) and "\x00" in value
+        ]
+    if not await request.body():
+        return []
+    try:
+        body = await request.json()
+    except ValueError:
+        # Not JSON: FastAPI handed the bytes to the model, which refuses them.
+        body = None
+    return _nuls_in(body, ("body",))
+
+
 async def refuse_a_nul(request: Request) -> None:
     """Refuse a NUL in any string a published route is sent, with the 422 a
     field validator's refusal gives.
@@ -521,21 +541,7 @@ async def refuse_a_nul(request: Request) -> None:
         if isinstance(value, str) and "\x00" in value
     ]
     found += [("query", name) for name, value in request.query_params.multi_items() if "\x00" in value]
-    if route.body_field is not None:
-        if isinstance(route.body_field.field_info, params.Form):
-            form = await request.form()
-            found += [
-                ("body", name)
-                for name, value in form.multi_items()
-                if isinstance(value, str) and "\x00" in value
-            ]
-        elif await request.body():
-            try:
-                body = await request.json()
-            except ValueError:
-                # Not JSON: FastAPI handed the bytes to the model, which refuses them.
-                body = None
-            found += _nuls_in(body, ("body",))
+    found += await _nuls_in_the_body(request, route)
     if found:
         raise RequestValidationError(
             [

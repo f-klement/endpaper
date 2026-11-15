@@ -1212,10 +1212,10 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
 
         client.put(
             "/api/settings",
-            # The house's fake bot id, not a realistic one:
-            # `TestNoFixtureLooksLikeACredential` forbids the realistic shape
-            # because both test trees are published and somebody else triages
-            # the scanner alert. It still satisfies `_TELEGRAM_TOKEN`.
+            # The house's fake bot id, not a realistic one: a house rule
+            # forbids the realistic shape because the backend tree is
+            # published and somebody else triages the scanner alert. It still
+            # satisfies `_TELEGRAM_TOKEN`.
             json={"telegram_bot_token": "0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL"},
             headers=admin["headers"],
         )

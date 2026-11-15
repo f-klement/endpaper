@@ -133,84 +133,14 @@ export default function Home() {
       />
 
       <div className="mt-4">
-        {library.error ? (
-          <ErrorState
-            error={library.error}
-            fallback={t("library.couldNotLoad")}
-            onRetry={library.refetch}
-          />
-        ) : !library.isLoading && library.books.length === 0 ? (
-          <EmptyState
-            icon="inbox"
-            title={t(wishlist ? "wishlist.empty" : "library.noBooks")}
-            hint={
-              wishlist
-                ? t("wishlist.emptyHint")
-                : filtered
-                  ? t("library.adjustFilters")
-                  : t("library.scanFirstBook")
-            }
-          />
-        ) : (
-          // Dimmed rather than emptied while a newer search runs. Replacing the
-          // grid with skeletons on every keystroke is the flicker this avoids.
-          <div
-            className={
-              library.isStale
-                ? "opacity-60 transition-opacity duration-150"
-                : "transition-opacity duration-150"
-            }
-            aria-busy={library.isStale}
-          >
-            {/* Selecting forces the grid: the checkbox lives on a card, and
-                neither the metadata table nor a dense list is where somebody
-                ticks twenty books off. Starting a selection therefore
-                shows the covers again, rather than offering a selection that
-                does nothing.
-
-                Tested first for that reason: it wins over the remembered view
-                whichever one that is, so a third view could not reintroduce a
-                selection with nothing to tick. */}
-            {selection.isSelecting || view.value === "grid" ? (
-              <BookGrid
-                books={library.books}
-                isLoading={library.isLoading}
-                hasMore={library.hasMore}
-                isLoadingMore={library.isLoadingMore}
-                onLoadMore={library.loadMore}
-                isSelecting={selection.isSelecting}
-                isSelected={selection.isSelected}
-                onToggleSelect={selection.toggle}
-              />
-            ) : view.value === "table" ? (
-              <>
-                {/* Above the table rather than inside it. The table scrolls
-                    sideways on a narrow screen, and a control that scrolls
-                    away from the thing it configures is one the reader has to
-                    go and find. */}
-                <ColumnPicker choice={columns} />
-                <BookTable
-                  books={library.books}
-                  columns={columns.columns}
-                  sort={library.filters.sort}
-                  onSortChange={(sort) => library.update({ sort })}
-                  isLoading={library.isLoading}
-                  hasMore={library.hasMore}
-                  isLoadingMore={library.isLoadingMore}
-                  onLoadMore={library.loadMore}
-                />
-              </>
-            ) : (
-              <BookList
-                books={library.books}
-                isLoading={library.isLoading}
-                hasMore={library.hasMore}
-                isLoadingMore={library.isLoadingMore}
-                onLoadMore={library.loadMore}
-              />
-            )}
-          </div>
-        )}
+        <LibraryResults
+          library={library}
+          view={view}
+          columns={columns}
+          selection={selection}
+          wishlist={wishlist}
+          filtered={filtered}
+        />
       </div>
 
       {selection.isSelecting && (
@@ -233,5 +163,133 @@ export default function Home() {
         />
       )}
     </Page>
+  );
+}
+
+/**
+ * What the body of the page shows: the error, the empty state, or the books.
+ *
+ * Its own component so `Home` stays the composition its docstring says it is;
+ * every value comes in from the hooks `Home` already called.
+ */
+function LibraryResults({
+  library,
+  view,
+  columns,
+  selection,
+  wishlist,
+  filtered,
+}: {
+  library: ReturnType<typeof useLibrary>;
+  view: ReturnType<typeof useViewChoice>;
+  columns: ReturnType<typeof useColumnChoice>;
+  selection: ReturnType<typeof useBookSelection>;
+  wishlist: boolean;
+  filtered: boolean;
+}) {
+  const { t } = useTranslation();
+  if (library.error)
+    return (
+      <ErrorState
+        error={library.error}
+        fallback={t("library.couldNotLoad")}
+        onRetry={library.refetch}
+      />
+    );
+  if (!library.isLoading && library.books.length === 0)
+    return (
+      <EmptyState
+        icon="inbox"
+        title={t(wishlist ? "wishlist.empty" : "library.noBooks")}
+        hint={
+          wishlist
+            ? t("wishlist.emptyHint")
+            : filtered
+              ? t("library.adjustFilters")
+              : t("library.scanFirstBook")
+        }
+      />
+    );
+  return (
+    // Dimmed rather than emptied while a newer search runs. Replacing the
+    // grid with skeletons on every keystroke is the flicker this avoids.
+    <div
+      className={
+        library.isStale
+          ? "opacity-60 transition-opacity duration-150"
+          : "transition-opacity duration-150"
+      }
+      aria-busy={library.isStale}
+    >
+      <LibraryShelf
+        library={library}
+        view={view}
+        columns={columns}
+        selection={selection}
+      />
+    </div>
+  );
+}
+
+/** The books, drawn in whichever of the three views applies. */
+function LibraryShelf({
+  library,
+  view,
+  columns,
+  selection,
+}: {
+  library: ReturnType<typeof useLibrary>;
+  view: ReturnType<typeof useViewChoice>;
+  columns: ReturnType<typeof useColumnChoice>;
+  selection: ReturnType<typeof useBookSelection>;
+}) {
+  // Selecting forces the grid: the checkbox lives on a card, and neither the
+  // metadata table nor a dense list is where somebody ticks twenty books off.
+  // Starting a selection therefore shows the covers again, rather than
+  // offering a selection that does nothing.
+  //
+  // Tested first for that reason: it wins over the remembered view whichever
+  // one that is, so a third view could not reintroduce a selection with
+  // nothing to tick.
+  if (selection.isSelecting || view.value === "grid")
+    return (
+      <BookGrid
+        books={library.books}
+        isLoading={library.isLoading}
+        hasMore={library.hasMore}
+        isLoadingMore={library.isLoadingMore}
+        onLoadMore={library.loadMore}
+        isSelecting={selection.isSelecting}
+        isSelected={selection.isSelected}
+        onToggleSelect={selection.toggle}
+      />
+    );
+  if (view.value === "table")
+    return (
+      <>
+        {/* Above the table rather than inside it. The table scrolls sideways
+            on a narrow screen, and a control that scrolls away from the thing
+            it configures is one the reader has to go and find. */}
+        <ColumnPicker choice={columns} />
+        <BookTable
+          books={library.books}
+          columns={columns.columns}
+          sort={library.filters.sort}
+          onSortChange={(sort) => library.update({ sort })}
+          isLoading={library.isLoading}
+          hasMore={library.hasMore}
+          isLoadingMore={library.isLoadingMore}
+          onLoadMore={library.loadMore}
+        />
+      </>
+    );
+  return (
+    <BookList
+      books={library.books}
+      isLoading={library.isLoading}
+      hasMore={library.hasMore}
+      isLoadingMore={library.isLoadingMore}
+      onLoadMore={library.loadMore}
+    />
   );
 }

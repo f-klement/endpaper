@@ -12,6 +12,7 @@ import {
   HeadingKind,
   LendingWillingness,
   ReadStatus,
+  RecordOrigin,
 } from "../../../../src/api/generated/model";
 import BookTable from "../../../../src/pages/Home/components/BookTable";
 import {
@@ -297,6 +298,26 @@ describe("BookTable, the cataloguer's columns", () => {
       "Stress management, Stressbewältigung",
     );
     expect(cell(/Subjects/)).not.toHaveTextContent("155.9042");
+  });
+
+  it("names the catalogue a record came from", () => {
+    renderTable({
+      books: [makeBook({ title: "Solaris", record_origin: RecordOrigin.dnb })],
+      columns: ["title", "origin"],
+    });
+
+    expect(cell(/Record source/)).toHaveTextContent("German National Library");
+  });
+
+  it("reads a record nobody recorded the origin of as unknown", () => {
+    // Every row older than the column is null, and a blank cell would read as
+    // a record with no source rather than one whose source was never asked.
+    renderTable({
+      books: [makeBook({ title: "Solaris", record_origin: null })],
+      columns: ["title", "origin"],
+    });
+
+    expect(cell(/Record source/)).toHaveTextContent("Unknown");
   });
 
   it("keeps a carrier out of the column headed Subjects", () => {

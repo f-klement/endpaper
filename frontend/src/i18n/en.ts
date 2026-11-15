@@ -635,7 +635,7 @@ export const en = {
   "settings.public.modeTitle": "Library mode",
   "settings.public.modeLabel": "Catalogue this library as a library",
   "settings.public.modeHint":
-    "Shows the call number and the subject headings, and puts ownership and reading status away. It publishes nothing.",
+    "Shows the call number, the subject headings and where each record came from, and puts ownership and reading status away. It publishes nothing.",
   "settings.public.modeRepublishes":
     "Publishing is already switched on, so turning this back on republishes the catalogue immediately.",
   "settings.public.publishTitle": "Publishing",
@@ -2107,6 +2107,18 @@ export const en = {
   "public.fact.pages": "Pages",
   "public.fact.format": "Format",
   "public.fact.series": "Series",
+  "origin.label": "Record source",
+  "origin.unknown": "Unknown",
+  "origin.manual": "Typed by hand",
+  "origin.file": "Read from the book's file",
+  "origin.csv_import": "Reading history import",
+  "origin.marc_import": "MARC import",
+  "origin.opds_import": "Library server import",
+  "origin.calibre_import": "Calibre library import",
+  "origin.store_import": "Store or device import",
+  "origin.modified.label": "Changed here",
+  "origin.modified.yes": "Yes, since it arrived",
+  "origin.modified.no": "No",
 
   // The provider list. Catalogue names are proper nouns and stay as they are in
   // both catalogues; only the sentences around them are translated.

@@ -68,7 +68,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Self
 
 from sqlalchemy import func, literal, nullslast, or_, select
-from sqlalchemy.orm import Query, Session, joinedload, selectinload
+from sqlalchemy.orm import InstrumentedAttribute, Query, Session, joinedload, selectinload
 from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 
 import filing
@@ -673,24 +673,27 @@ class Shelf:
         which is where it was and where three of these clauses carried a
         paragraph of reasoning that nothing but that handler could reach.
         """
-        shelf = self
+        shelf = self._narrowed_by_columns(filters)
+        if filters.q:
+            shelf = shelf._searching(filters.q)
+        return shelf._narrowed_by_reading(filters)._narrowed_by_subject(filters)
 
-        if filters.collection_id is not None:
-            shelf = shelf.where(Book.collection_id == filters.collection_id)
+    def _narrowed_by_columns(self, filters: BookFilters) -> Shelf:
+        """Narrowed by the filters that read a column of `books` alone."""
+        exact: tuple[tuple[InstrumentedAttribute[Any], object], ...] = (
+            (Book.collection_id, filters.collection_id),
+            (Book.ownership, filters.ownership),
+            (Book.format, filters.format),
+            (Book.lending, filters.lending),
+            (Book.series_name, filters.series),
+            (Book.location, filters.location),
+        )
+        shelf = self
+        for column, value in exact:
+            if value is not None:
+                shelf = shelf.where(column == value)
         if filters.unfiled:
             shelf = shelf.where(Book.collection_id.is_(None))
-
-        if filters.ownership is not None:
-            shelf = shelf.where(Book.ownership == filters.ownership)
-
-        if filters.format is not None:
-            shelf = shelf.where(Book.format == filters.format)
-
-        if filters.lending is not None:
-            shelf = shelf.where(Book.lending == filters.lending)
-
-        if filters.series is not None:
-            shelf = shelf.where(Book.series_name == filters.series)
 
         # One id is one bound parameter, and SQLite has a ceiling on those:
         # `SQLITE_LIMIT_VARIABLE_NUMBER`, measured per environment rather than
@@ -712,48 +715,52 @@ class Shelf:
         # that stops being true the fix is a temporary table, not a bigger IN.
         if filters.author_ids is not None:
             shelf = shelf.where(Book.id.in_(filters.author_ids))
+        return shelf
 
-        if filters.location is not None:
-            shelf = shelf.where(Book.location == filters.location)
-
-        if filters.q:
-            # **Escaped, and the escape character declared.** A reader searching
-            # for `100%` means the four characters, and an unescaped `%` in a
-            # LIKE pattern means "anything", so that search used to match every
-            # title containing `100`. `_` is the same bug one character wide.
-            #
-            # SQLite has no default LIKE escape, so `escape=` is not optional
-            # here: without it a `\%` in the pattern is a literal backslash
-            # followed by a wildcard, which is the bug again with an extra
-            # character. `sru.py` states the same rule at `_LIKE_ESCAPE` and
-            # this is the same escape, spelled once per module because a shared
-            # helper would put a search detail in a module neither owns.
-            #
-            # Found by the SRU work, which needed the rule for its own masks
-            # and noticed this door had never had it. It is a wrong answer
-            # rather than a denial of service: measured on SQLite, a pattern of
-            # 400 alternating masks over 200 rows costs the same as five.
-            escaped = filters.q
-            for special in ("\\", "%", "_"):
-                escaped = escaped.replace(special, "\\" + special)
-            like = f"%{escaped}%"
-            shelf = shelf.where(
-                or_(
-                    Book.title.ilike(like, escape="\\"),
-                    Book.author.ilike(like, escape="\\"),
-                    Book.isbn.ilike(like, escape="\\"),
-                )
+    def _searching(self, text: str) -> Shelf:
+        """Narrowed to the Books whose title, author or ISBN contains `text`."""
+        # **Escaped, and the escape character declared.** A reader searching
+        # for `100%` means the four characters, and an unescaped `%` in a
+        # LIKE pattern means "anything", so that search used to match every
+        # title containing `100`. `_` is the same bug one character wide.
+        #
+        # SQLite has no default LIKE escape, so `escape=` is not optional
+        # here: without it a `\%` in the pattern is a literal backslash
+        # followed by a wildcard, which is the bug again with an extra
+        # character. `sru.py` states the same rule at `_LIKE_ESCAPE` and
+        # this is the same escape, spelled once per module because a shared
+        # helper would put a search detail in a module neither owns.
+        #
+        # Found by the SRU work, which needed the rule for its own masks
+        # and noticed this door had never had it. It is a wrong answer
+        # rather than a denial of service: measured on SQLite, a pattern of
+        # 400 alternating masks over 200 rows costs the same as five.
+        escaped = text
+        for special in ("\\", "%", "_"):
+            escaped = escaped.replace(special, "\\" + special)
+        like = f"%{escaped}%"
+        return self.where(
+            or_(
+                Book.title.ilike(like, escape="\\"),
+                Book.author.ilike(like, escape="\\"),
+                Book.isbn.ilike(like, escape="\\"),
             )
+        )
 
+    def _narrowed_by_reading(self, filters: BookFilters) -> Shelf:
+        """Narrowed by this viewer's own reading state, rating and offers to talk."""
+        shelf = self
         if filters.status is not None:
             shelf = shelf._with_read_status(filters.status)
-
         if filters.unrated:
             shelf = shelf._unrated()
-
         if filters.discuss:
             shelf = shelf._offered_for_discussion()
+        return shelf
 
+    def _narrowed_by_subject(self, filters: BookFilters) -> Shelf:
+        """Narrowed by tags, headings and Dewey divisions."""
+        shelf = self
         for tag_id in filters.tag_ids:
             shelf = shelf.where(Book.tags.any(Tag.id == tag_id))
 

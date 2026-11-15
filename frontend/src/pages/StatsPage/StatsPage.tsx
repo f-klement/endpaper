@@ -65,6 +65,40 @@ function PurchaseTotals({ stats }: { stats: StatsOut }) {
   );
 }
 
+/**
+ * Two series the server has always sent and this page ignored, so the only
+ * question it answered was "what have we bought". Reading is the half people
+ * actually come here for.
+ */
+function ReadingSummary({ stats }: { stats: StatsOut }) {
+  const { t } = useTranslation();
+  if (stats.average_rating == null) return null;
+  const finishedTotal = (stats.finished_by_month ?? []).reduce(
+    (total, row) => total + row.count,
+    0,
+  );
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-3">
+      <div className="card p-4 text-center">
+        <p className="text-2xl font-bold text-paper-900 dark:text-paper-50">
+          {stats.average_rating.toFixed(1)}
+        </p>
+        <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
+          {t("stats.averageRating", { count: stats.rated_count ?? 0 })}
+        </p>
+      </div>
+      <div className="card p-4 text-center">
+        <p className="text-2xl font-bold text-paper-900 dark:text-paper-50">
+          {finishedTotal}
+        </p>
+        <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
+          {t("stats.finishedTotal")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function StatsPage() {
   const { t, locale } = useTranslation();
   const { stats, isLoading, error, refetch } = useStats();
@@ -83,11 +117,6 @@ export default function StatsPage() {
     );
   }
 
-  const finishedTotal = (stats.finished_by_month ?? []).reduce(
-    (total, row) => total + row.count,
-    0,
-  );
-
   return (
     <Page width="narrow">
       <PageHeader icon="chart" title={t("stats.title")} />
@@ -103,29 +132,7 @@ export default function StatsPage() {
 
       <PurchaseTotals stats={stats} />
 
-      {/* Two series the server has always sent and this page ignored, so the
-          only question it answered was "what have we bought". Reading is the
-          half people actually come here for. */}
-      {stats.average_rating != null && (
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <div className="card p-4 text-center">
-            <p className="text-2xl font-bold text-paper-900 dark:text-paper-50">
-              {stats.average_rating.toFixed(1)}
-            </p>
-            <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
-              {t("stats.averageRating", { count: stats.rated_count ?? 0 })}
-            </p>
-          </div>
-          <div className="card p-4 text-center">
-            <p className="text-2xl font-bold text-paper-900 dark:text-paper-50">
-              {finishedTotal}
-            </p>
-            <p className="text-xs text-paper-600 mt-0.5 dark:text-paper-400">
-              {t("stats.finishedTotal")}
-            </p>
-          </div>
-        </div>
-      )}
+      <ReadingSummary stats={stats} />
 
       <StatSection
         title={t("stats.finishedByMonth")}

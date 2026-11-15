@@ -116,6 +116,39 @@ describe("the title", () => {
     expect(record?.subtitle).toBe("A Novel");
   });
 
+  it("takes the first refinement of a property a file repeats", () => {
+    const record = readOpf(
+      epub3(`
+        <dc:title id="main">Dune</dc:title>
+        <dc:title id="sub">A Novel</dc:title>
+        <meta refines="#sub" property="title-type">subtitle</meta>
+        <meta refines="#sub" property="title-type">main</meta>`),
+    );
+    expect([record?.title, record?.subtitle]).toEqual(["Dune", "A Novel"]);
+  });
+
+  it("passes over an empty refinement to the one after it", () => {
+    const record = readOpf(
+      epub3(`
+        <dc:title id="main">Dune</dc:title>
+        <dc:title id="sub">A Novel</dc:title>
+        <meta refines="#sub" property="title-type"> </meta>
+        <meta refines="#sub" property="title-type">subtitle</meta>`),
+    );
+    expect(record?.subtitle).toBe("A Novel");
+  });
+
+  it("ignores a refinement whose target is not a fragment", () => {
+    // `xsub` with its first character dropped would name `sub`.
+    const record = readOpf(
+      epub3(`
+        <dc:title id="main">Dune</dc:title>
+        <dc:title id="sub">A Novel</dc:title>
+        <meta refines="xsub" property="title-type">subtitle</meta>`),
+    );
+    expect(record?.subtitle).toBeNull();
+  });
+
   it("falls back to the first title when nothing is refined", () => {
     const record = readOpf(
       epub3(`<dc:title>Dune</dc:title><dc:title>Messiah</dc:title>`),
@@ -295,6 +328,27 @@ describe("the series", () => {
         <meta refines="#boxed" property="collection-type">set</meta>
         <meta property="belongs-to-collection" id="run">Dune</meta>
         <meta refines="#run" property="collection-type">series</meta>`),
+    );
+    expect(record?.seriesName).toBe("Dune");
+  });
+
+  it("reads a collection type whatever its case", () => {
+    const record = readOpf(
+      epub3(`
+        <meta property="belongs-to-collection" id="boxed">The Boxed Set</meta>
+        <meta refines="#boxed" property="collection-type">SET</meta>
+        <meta property="belongs-to-collection" id="run">Dune</meta>
+        <meta refines="#run" property="collection-type">Series</meta>`),
+    );
+    expect(record?.seriesName).toBe("Dune");
+  });
+
+  it("prefers a collection of no declared type over a set", () => {
+    const record = readOpf(
+      epub3(`
+        <meta property="belongs-to-collection" id="boxed">The Boxed Set</meta>
+        <meta refines="#boxed" property="collection-type">set</meta>
+        <meta property="belongs-to-collection" id="run">Dune</meta>`),
     );
     expect(record?.seriesName).toBe("Dune");
   });

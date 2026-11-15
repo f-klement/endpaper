@@ -40,10 +40,7 @@ export default function ResetRequests({
   isWorking,
   actionError,
 }: ResetRequestsProps) {
-  // Three timestamps here rendered in the browser's locale rather than the
-  // app's, one date and two times, so this queue disagreed with every other
-  // screen for a member whose browser and app languages differ.
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
 
   return (
     <div className="space-y-4">
@@ -69,85 +66,113 @@ export default function ResetRequests({
       )}
 
       <ul className="space-y-3">
-        {requests.map((request) => {
-          const approved = codes[request.user_id];
-          return (
-            <li
-              key={request.user_id}
-              className="rounded-lg border border-paper-100 p-3 dark:border-paper-800"
-            >
-              <p className="text-sm font-medium text-paper-900 dark:text-paper-100">
-                {request.username}
-              </p>
-              <p className="text-xs text-paper-600 dark:text-paper-400">
-                {t("settings.resetRequestsAsked", {
-                  date: numericDate(request.requested_at, locale),
-                })}
-              </p>
-              {request.approved_by && (
-                <p className="text-xs text-paper-600 dark:text-paper-400">
-                  {t("settings.resetRequestsApprovedBy", {
-                    name: request.approved_by,
-                  })}
-                </p>
-              )}
-              {/* The queue's own copy of the expiry, which is what an admin
-                  has after a reload: the code itself lives in component state
-                  and is gone, so without this a request approved before the
-                  page was refreshed says who granted it and nothing about when
-                  it stops working. Hidden while the code is on screen, which
-                  carries the same time in its own sentence. */}
-              {request.code_expires_at && !approved && (
-                <p className="text-xs text-paper-600 dark:text-paper-400">
-                  {t("settings.resetRequestsCodeExpires", {
-                    time: clockTime(request.code_expires_at, locale),
-                  })}
-                </p>
-              )}
-
-              {approved && (
-                <div className="mt-2 rounded-lg bg-paper-50 p-3 dark:bg-paper-800">
-                  <p className="font-mono text-lg tracking-widest text-paper-900 dark:text-paper-100">
-                    {approved.code}
-                  </p>
-                  <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
-                    {/* The **served** expiry, not a lifetime written into the
-                      sentence: the server owns how long a code lives, and a
-                      string saying "an hour" is a second copy that stops being
-                      true when the constant moves. */}
-                    {t("settings.resetRequestsCodeFor", {
-                      name: request.username,
-                      time: clockTime(approved.expiresAt, locale),
-                    })}
-                  </p>
-                </div>
-              )}
-
-              <div className="mt-3 flex gap-2">
-                <Button
-                  onClick={() => onApprove(request.user_id)}
-                  disabled={isWorking}
-                  aria-label={t("settings.resetRequestsApproveFor", {
-                    name: request.username,
-                  })}
-                >
-                  {t("settings.resetRequestsApprove")}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => onDecline(request.user_id)}
-                  disabled={isWorking}
-                  aria-label={t("settings.resetRequestsDeclineFor", {
-                    name: request.username,
-                  })}
-                >
-                  {t("settings.resetRequestsDecline")}
-                </Button>
-              </div>
-            </li>
-          );
-        })}
+        {requests.map((request) => (
+          <ResetRequestRow
+            key={request.user_id}
+            request={request}
+            approved={codes[request.user_id]}
+            onApprove={onApprove}
+            onDecline={onDecline}
+            isWorking={isWorking}
+          />
+        ))}
       </ul>
     </div>
+  );
+}
+
+interface ResetRequestRowProps {
+  request: ResetRequestOut;
+  /** The code this request's approval produced, while it is on screen. */
+  approved: ApprovedCode | undefined;
+  onApprove: (userId: number) => void;
+  onDecline: (userId: number) => void;
+  isWorking: boolean;
+}
+
+/** One waiting member: when they asked, who granted it, the code, the two buttons. */
+function ResetRequestRow({
+  request,
+  approved,
+  onApprove,
+  onDecline,
+  isWorking,
+}: ResetRequestRowProps) {
+  // Three timestamps here rendered in the browser's locale rather than the
+  // app's, one date and two times, so this queue disagreed with every other
+  // screen for a member whose browser and app languages differ.
+  const { t, locale } = useTranslation();
+
+  return (
+    <li className="rounded-lg border border-paper-100 p-3 dark:border-paper-800">
+      <p className="text-sm font-medium text-paper-900 dark:text-paper-100">
+        {request.username}
+      </p>
+      <p className="text-xs text-paper-600 dark:text-paper-400">
+        {t("settings.resetRequestsAsked", {
+          date: numericDate(request.requested_at, locale),
+        })}
+      </p>
+      {request.approved_by && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("settings.resetRequestsApprovedBy", {
+            name: request.approved_by,
+          })}
+        </p>
+      )}
+      {/* The queue's own copy of the expiry, which is what an admin
+            has after a reload: the code itself lives in component state
+            and is gone, so without this a request approved before the
+            page was refreshed says who granted it and nothing about when
+            it stops working. Hidden while the code is on screen, which
+            carries the same time in its own sentence. */}
+      {request.code_expires_at && !approved && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("settings.resetRequestsCodeExpires", {
+            time: clockTime(request.code_expires_at, locale),
+          })}
+        </p>
+      )}
+
+      {approved && (
+        <div className="mt-2 rounded-lg bg-paper-50 p-3 dark:bg-paper-800">
+          <p className="font-mono text-lg tracking-widest text-paper-900 dark:text-paper-100">
+            {approved.code}
+          </p>
+          <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
+            {/* The **served** expiry, not a lifetime written into the
+                sentence: the server owns how long a code lives, and a
+                string saying "an hour" is a second copy that stops being
+                true when the constant moves. */}
+            {t("settings.resetRequestsCodeFor", {
+              name: request.username,
+              time: clockTime(approved.expiresAt, locale),
+            })}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-3 flex gap-2">
+        <Button
+          onClick={() => onApprove(request.user_id)}
+          disabled={isWorking}
+          aria-label={t("settings.resetRequestsApproveFor", {
+            name: request.username,
+          })}
+        >
+          {t("settings.resetRequestsApprove")}
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => onDecline(request.user_id)}
+          disabled={isWorking}
+          aria-label={t("settings.resetRequestsDeclineFor", {
+            name: request.username,
+          })}
+        >
+          {t("settings.resetRequestsDecline")}
+        </Button>
+      </div>
+    </li>
   );
 }

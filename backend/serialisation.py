@@ -16,6 +16,7 @@ users.
 
 import re
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased, selectinload
@@ -24,7 +25,7 @@ import ddc
 from enums import ClassificationScheme
 from lending import Loans
 from models import Book, Collection, Loan, ReadingProgress, Tag, User
-from reading import Reading, discussers
+from reading import Reading, Records, discussers
 from schemas import (
     BookColumns,
     BookOut,
@@ -400,8 +401,10 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     results: list[BookOut] = []
     for book in books:
         loan = active_loans.get(book.id)
-        user_book = user_books.get(book.id)
-        progress = latest_progress.get(book.id)
+        rating, started_at, finished_at, wants_to_discuss = _my_reading(user_books, book.id)
+        progress_page, progress_percent, progress_recorded_at = _my_progress(
+            latest_progress.get(book.id), book.page_count
+        )
 
         # **Every field named once, in one expression.** This was twelve
         # assignments onto a model built with a default for each of them, so a
@@ -422,18 +425,37 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
             # so. It also coerces back to the enum, which matters because the
             # column is a plain VARCHAR.
             my_status=user_books.status_of(book.id),
-            my_rating=user_book.rating if user_book else None,
-            my_started_at=user_book.started_at if user_book else None,
-            my_finished_at=user_book.finished_at if user_book else None,
-            my_wants_to_discuss=(bool(user_book.wants_to_discuss) if user_book else False),
-            my_progress_page=progress.page if progress else None,
-            my_progress_percent=(
-                derived_percent(progress.page, progress.percent, book.page_count) if progress else None
-            ),
-            my_progress_recorded_at=progress.recorded_at if progress else None,
+            my_rating=rating,
+            my_started_at=started_at,
+            my_finished_at=finished_at,
+            my_wants_to_discuss=wants_to_discuss,
+            my_progress_page=progress_page,
+            my_progress_percent=progress_percent,
+            my_progress_recorded_at=progress_recorded_at,
         )
         results.append(BookOut.seen_by(BookColumns.model_validate(book), viewer))
     return results
+
+
+def _my_reading(
+    user_books: Records, book_id: int
+) -> tuple[int | None, datetime | None, datetime | None, bool]:
+    """The caller's rating, start, finish and wish to talk, from their row for
+    one Book: no row is no rating, no dates and no wish."""
+    user_book = user_books.get(book_id)
+    if user_book is None:
+        return None, None, None, False
+    return user_book.rating, user_book.started_at, user_book.finished_at, bool(user_book.wants_to_discuss)
+
+
+def _my_progress(
+    progress: ReadingProgress | None, page_count: int | None
+) -> tuple[int | None, int | None, datetime | None]:
+    """The caller's latest page, percent and when it was recorded: no position
+    is three nulls, and the percent is `derived_percent`'s."""
+    if progress is None:
+        return None, None, None
+    return progress.page, derived_percent(progress.page, progress.percent, page_count), progress.recorded_at
 
 
 def book_to_out(book: Book, current_user: User, db: Session) -> BookOut:

@@ -328,6 +328,11 @@ class TestSeriesParsing:
     def test_a_parenthetical_that_is_not_a_series_is_ignored(self):
         assert _series_from_title("Some Book (Illustrated Edition)") == (None, None)
 
+    def test_a_comma_between_book_and_its_number_is_no_marker(self):
+        """`book\\s+` takes whitespace only, so the comma that separates a name
+        from its marker does not stand in for it."""
+        assert _series_from_title("Dune (Dune Chronicles book,1)") == (None, None)
+
     def test_a_half_number_survives(self):
         assert _series_from_title("Novella (Discworld #2.5)") == ("Discworld", 2.5)
 

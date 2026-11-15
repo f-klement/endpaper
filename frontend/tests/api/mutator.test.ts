@@ -113,6 +113,17 @@ describe("request headers", () => {
     expect(headers.get("Accept")).toBe("application/json");
   });
 
+  it("keeps a caller's own Content-Type", async () => {
+    const api = mockApi().on("/api/books", { body: {} });
+    await customFetch("/api/books", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: "Dune",
+    });
+    const headers = api.fetch.mock.calls[0]![1].headers as Headers;
+    expect(headers.get("Content-Type")).toBe("text/plain");
+  });
+
   it("lets a caller override Accept", async () => {
     const api = mockApi().on("/api/books", { body: [] });
     await customFetch("/api/books", { headers: { Accept: "text/plain" } });
@@ -139,6 +150,27 @@ describe("responses", () => {
       body: "Title,Author",
       headers: { "content-type": "text/csv" },
     });
+    await expect(customFetch("/api/books/export")).resolves.toBeInstanceOf(
+      Blob,
+    );
+  });
+
+  it("returns a blob for a body that names no type", async () => {
+    // Read as JSON, a body with no content-type would throw on the parse
+    // rather than reach the caller.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          type: "basic",
+          headers: new Headers(),
+          json: () => Promise.reject(new SyntaxError("not JSON")),
+          blob: () => Promise.resolve(new Blob(["Title,Author"])),
+        } as unknown as Response),
+      ),
+    );
     await expect(customFetch("/api/books/export")).resolves.toBeInstanceOf(
       Blob,
     );
@@ -220,6 +252,17 @@ describe("errors", () => {
     await expect(customFetch("/api/books")).rejects.toMatchObject({
       message: "Status 409",
       bookId: 7,
+    });
+  });
+
+  it("keeps the code saying which refusal an object detail is", async () => {
+    mockApi().on("/api/books", {
+      status: 409,
+      body: { detail: { message: "Too many files.", code: "file_ceiling" } },
+    });
+    await expect(customFetch("/api/books")).rejects.toMatchObject({
+      message: "Too many files.",
+      code: "file_ceiling",
     });
   });
 

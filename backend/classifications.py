@@ -298,14 +298,7 @@ def add_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) 
         key = _key(heading.scheme, heading.number)
         stored = existing.get(key)
         if stored is not None:
-            filled = False
-            if stored.label is None and heading.label is not None:
-                stored.label = heading.label
-                filled = True
-            if stored.kind is None and heading.kind is not None:
-                stored.kind = heading.kind
-                filled = True
-            if filled:
+            if _fill_in(stored, heading):
                 changed.append(heading.number)
             continue
         new = adds.get(key)
@@ -328,3 +321,16 @@ def add_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) 
         existing[key] = row
         changed.append(heading.number)
     return changed
+
+
+def _fill_in(stored: Classification, heading: ClassificationIn) -> bool:
+    """Give a stored heading the caption and the kind it lacks from `heading`,
+    never overwriting either, and say whether it gained one."""
+    filled = False
+    if stored.label is None and heading.label is not None:
+        stored.label = heading.label
+        filled = True
+    if stored.kind is None and heading.kind is not None:
+        stored.kind = heading.kind
+        filled = True
+    return filled

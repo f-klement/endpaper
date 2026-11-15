@@ -1,3 +1,7 @@
+import type {
+  KosyncAccountOut,
+  KosyncPasswordOut,
+} from "../../../../api/generated/model";
 import { Button, ErrorState, Spinner } from "../../../../components";
 import { useTranslation } from "../../../../i18n";
 import { numericDate } from "../../../../lib/date";
@@ -18,7 +22,7 @@ interface KosyncAccountProps {
  * is already chosen. Presentational.
  */
 export default function KosyncAccount({ state }: KosyncAccountProps) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const { account, minted } = state;
 
   if (state.isLoading) return <Spinner label={t("common.loading")} />;
@@ -34,33 +38,12 @@ export default function KosyncAccount({ state }: KosyncAccountProps) {
       <p className="text-xs text-paper-600 dark:text-paper-400">
         {t("kosync.hint")}
       </p>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-        <dt className="text-paper-600 dark:text-paper-400">
-          {t("kosync.server")}
-        </dt>
-        <dd className="font-mono break-all">{state.server}</dd>
-        <dt className="text-paper-600 dark:text-paper-400">
-          {t("kosync.username")}
-        </dt>
-        <dd className="font-mono break-all">{account.username}</dd>
-        {minted !== undefined && (
-          <>
-            <dt className="text-paper-600 dark:text-paper-400">
-              {t("kosync.password")}
-            </dt>
-            <dd className="font-mono break-all">{minted.password}</dd>
-          </>
-        )}
-      </dl>
-      <p role="status" className="text-sm text-paper-800 dark:text-paper-200">
-        {minted !== undefined
-          ? t("kosync.shownOnce")
-          : account.password_set_at == null
-            ? t("kosync.none")
-            : t("kosync.since", {
-                date: numericDate(account.password_set_at, locale),
-              })}
-      </p>
+      <Credentials
+        server={state.server}
+        username={account.username}
+        minted={minted}
+      />
+      <PasswordStatus account={account} minted={minted} />
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
@@ -93,5 +76,62 @@ export default function KosyncAccount({ state }: KosyncAccountProps) {
         />
       )}
     </div>
+  );
+}
+
+/** What a device is configured with, and the password while it is on screen. */
+function Credentials({
+  server,
+  username,
+  minted,
+}: {
+  server: string;
+  username: string;
+  minted: KosyncPasswordOut | undefined;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+      <dt className="text-paper-600 dark:text-paper-400">
+        {t("kosync.server")}
+      </dt>
+      <dd className="font-mono break-all">{server}</dd>
+      <dt className="text-paper-600 dark:text-paper-400">
+        {t("kosync.username")}
+      </dt>
+      <dd className="font-mono break-all">{username}</dd>
+      {minted !== undefined && (
+        <>
+          <dt className="text-paper-600 dark:text-paper-400">
+            {t("kosync.password")}
+          </dt>
+          <dd className="font-mono break-all">{minted.password}</dd>
+        </>
+      )}
+    </dl>
+  );
+}
+
+/** One sentence on the password: just made, never made, or made on a date. */
+function PasswordStatus({
+  account,
+  minted,
+}: {
+  account: KosyncAccountOut;
+  minted: KosyncPasswordOut | undefined;
+}) {
+  const { t, locale } = useTranslation();
+
+  return (
+    <p role="status" className="text-sm text-paper-800 dark:text-paper-200">
+      {minted !== undefined
+        ? t("kosync.shownOnce")
+        : account.password_set_at == null
+          ? t("kosync.none")
+          : t("kosync.since", {
+              date: numericDate(account.password_set_at, locale),
+            })}
+    </p>
   );
 }

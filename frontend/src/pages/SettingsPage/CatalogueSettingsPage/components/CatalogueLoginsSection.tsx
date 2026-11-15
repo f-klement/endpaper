@@ -9,7 +9,11 @@ import { ErrorState } from "../../../../components";
 import { useTranslation } from "../../../../i18n";
 import { catalogueName } from "../../../../lib/catalogueName";
 import { SettingsSection } from "../../../components";
-import { useCredentialKeyStatus, useSourceCredentials } from "../hooks";
+import {
+  type UseSourceCredentialsResult,
+  useCredentialKeyStatus,
+  useSourceCredentials,
+} from "../hooks";
 
 /**
  * A login at a catalogue that will not answer without one.
@@ -45,24 +49,8 @@ export default function CatalogueLoginsSection({
   const credentials = useSourceCredentials();
   const key = useCredentialKeyStatus();
   const [adding, setAdding] = useState("");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
 
   const rows = settings.catalogue_sources ?? [];
-  // **`?? "none"` and not a bare comparison.** The field is optional on the
-  // wire, so a browser holding a page from before it existed reads `undefined`,
-  // which is not `"none"`: the row would join `held`, fall past every arm below
-  // and draw as "A login is stored ()" with a Change button. The pair this
-  // replaced failed closed here because `has_credential` was falsy when absent.
-  //
-  // **Typed on the union, not on `string`.** A parameter of
-  // `{ credential_provenance?: string }` infers a `string` return, and the eight
-  // comparisons below then accept any literal at all: measured with this
-  // project's own `tsc`, `=== "shiped"` is TS2367 against the field and clean
-  // against a `string`. Closing the runtime hole must not open the compile time
-  // one in the same edit.
-  const provenanceOf = (row: CatalogueSourceOut): CredentialProvenance =>
-    row.credential_provenance ?? "none";
   const held = rows.filter((row) => provenanceOf(row) !== "none");
   const editing = rows.find((row) => row.source === adding);
   // A login cannot be stored without a key, and the control that makes one is
@@ -70,12 +58,6 @@ export default function CatalogueLoginsSection({
   // has to provoke, and the order is deliberate: this section is what somebody
   // came for, and the key is only interesting because of it.
   const needsKeyFirst = key !== undefined && !key.configured;
-
-  const clear = () => {
-    setAdding("");
-    setUsername("");
-    setPassword("");
-  };
 
   return (
     <SettingsSection title={t("settings.catalogueLogins")} icon="lock">
@@ -98,192 +80,291 @@ export default function CatalogueLoginsSection({
 
       <ul className="space-y-2">
         {held.map((row) => (
-          <li
+          <HeldLogin
             key={row.source}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-paper-200 px-3 py-2 dark:border-paper-700"
-          >
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">
-                {t(catalogueName(row.source))}
-              </p>
-              {provenanceOf(row) === "env" && row.credential_unreadable ? (
-                // Both true is a variable somebody set to something that is not
-                // a credential. Testing the provenance first told them it was
-                // supplied by the server and working, which is the exact
-                // reassurance this state exists to remove.
-                <p className="text-xs text-danger-700 dark:text-danger-200">
-                  {t("settings.credentialFromEnvBroken", {
-                    variable: `CATALOGUE_CREDENTIAL_${row.source.toUpperCase()}`,
-                  })}
-                </p>
-              ) : provenanceOf(row) === "env" ? (
-                <p className="text-xs text-amber-800 dark:text-amber-200">
-                  {t("settings.credentialFromEnv", {
-                    variable: `CATALOGUE_CREDENTIAL_${row.source.toUpperCase()}`,
-                  })}
-                </p>
-              ) : row.credential_unreadable ? (
-                <p className="text-xs text-amber-800 dark:text-amber-200">
-                  {t("settings.credentialUnreadable")}
-                </p>
-              ) : provenanceOf(row) === "shipped" ? (
-                // **Named rather than drawn as a stored login**, which is what
-                // `credentialSet` below would have made it: a masked username
-                // beside "a login is stored" reads as something this library
-                // typed, and an admin who believes that has no reason to enter
-                // the account they actually hold. The line is the whole of how
-                // the four levels are told apart on this screen.
-                <p className="text-xs text-paper-600 dark:text-paper-400">
-                  {t("settings.credentialShipped")}
-                </p>
-              ) : (
-                <p className="text-xs text-paper-600 dark:text-paper-400">
-                  {t("settings.credentialSet", {
-                    preview: row.credential_username_preview ?? "",
-                  })}
-                </p>
-              )}
-            </div>
-            {provenanceOf(row) !== "env" && (
-              <div className="flex gap-2">
-                {/* **Disabled without a key, exactly as the picker is.** The
-                    picker was the only guard while a keyless install had
-                    nothing in `held` at all, so this control was unreachable
-                    by accident. A shipped default puts a row in `held` on
-                    every install, and an enabled Save there is the 409 this
-                    section exists to answer before somebody provokes it. */}
-                <button
-                  type="button"
-                  disabled={needsKeyFirst}
-                  onClick={() => setAdding(row.source)}
-                  className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium hover:bg-paper-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors dark:border-paper-700 dark:hover:bg-paper-800"
-                >
-                  {t(
-                    provenanceOf(row) === "shipped"
-                      ? "settings.credentialUseOwn"
-                      : "settings.credentialChange",
-                  )}
-                </button>
-                {/* **Only where there is a row to delete.** A shipped default
-                    is a constant in this build, so Remove would either do
-                    nothing or read as a way to switch the catalogue off, which
-                    is what the provider list above is for. */}
-                {provenanceOf(row) === "stored" && (
-                  <button
-                    type="button"
-                    disabled={credentials.isWorking}
-                    onClick={() => credentials.remove(row.source)}
-                    className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
-                  >
-                    {t("settings.credentialClear")}
-                  </button>
-                )}
-              </div>
-            )}
-          </li>
+            row={row}
+            needsKeyFirst={needsKeyFirst}
+            credentials={credentials}
+            onChange={() => setAdding(row.source)}
+          />
         ))}
       </ul>
 
-      <div className="space-y-1.5">
-        <label
-          htmlFor="catalogue-login-source"
-          className="block text-xs font-medium text-paper-600 dark:text-paper-300"
-        >
-          {t("settings.credentialAdd")}
-        </label>
-        <select
-          id="catalogue-login-source"
-          value={adding}
-          disabled={needsKeyFirst}
-          onChange={(event) => setAdding(event.target.value)}
-          className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm disabled:bg-paper-50 disabled:text-paper-400 disabled:cursor-not-allowed dark:border-paper-700 dark:disabled:bg-paper-800"
-        >
-          <option value="">{t("settings.credentialAddChoose")}</option>
-          {rows
-            .filter((row) => provenanceOf(row) === "none")
-            .map((row) => (
-              <option key={row.source} value={row.source}>
-                {t(catalogueName(row.source))}
-              </option>
-            ))}
-        </select>
-        {needsKeyFirst && (
-          <p className="text-xs text-amber-800 dark:text-amber-200">
-            {t("settings.credentialNeedsKeyFirst")}
-          </p>
-        )}
-      </div>
+      <SourcePicker
+        rows={rows}
+        adding={adding}
+        needsKeyFirst={needsKeyFirst}
+        onPick={setAdding}
+      />
 
-      {editing && (
-        <div className="space-y-1.5">
-          {/* **The form names the catalogue itself.** The picker used to be the
-              label by accident: it showed the chosen row. Taking held sources
-              out of it, so that Change is the one route to editing one, left a
-              username and a password with nothing saying whose, above a picker
-              that had fallen back to "Choose a catalogue" because its value
-              matched none of its options. */}
-          <p className="text-sm font-medium">
-            {t(catalogueName(editing.source))}
-          </p>
-          <label
-            htmlFor="catalogue-login-username"
-            className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+      <LoginForm
+        editing={editing}
+        credentials={credentials}
+        onClose={() => setAdding("")}
+      />
+    </SettingsSection>
+  );
+}
+
+// **`?? "none"` and not a bare comparison.** The field is optional on the
+// wire, so a browser holding a page from before it existed reads `undefined`,
+// which is not `"none"`: the row would join `held`, fall past every arm of
+// `HeldLoginStatus` and draw as "A login is stored ()" with a Change button.
+// The pair this replaced failed closed here because `has_credential` was falsy
+// when absent.
+//
+// **Typed on the union, not on `string`.** A parameter of
+// `{ credential_provenance?: string }` infers a `string` return, and the
+// comparisons in this file then accept any literal at all: measured with this
+// project's own `tsc`, `=== "shiped"` is TS2367 against the field and clean
+// against a `string`. Closing the runtime hole must not open the compile time
+// one in the same edit.
+function provenanceOf(row: CatalogueSourceOut): CredentialProvenance {
+  return row.credential_provenance ?? "none";
+}
+
+/** One login that exists, with Change and, where there is a row, Remove. */
+function HeldLogin({
+  row,
+  needsKeyFirst,
+  credentials,
+  onChange,
+}: {
+  row: CatalogueSourceOut;
+  needsKeyFirst: boolean;
+  credentials: UseSourceCredentialsResult;
+  onChange: () => void;
+}) {
+  const { t } = useTranslation();
+  const provenance = provenanceOf(row);
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-paper-200 px-3 py-2 dark:border-paper-700">
+      <div className="space-y-0.5">
+        <p className="text-sm font-medium">{t(catalogueName(row.source))}</p>
+        <HeldLoginStatus row={row} />
+      </div>
+      {provenance !== "env" && (
+        <div className="flex gap-2">
+          {/* **Disabled without a key, exactly as the picker is.** The
+              picker was the only guard while a keyless install had
+              nothing in `held` at all, so this control was unreachable
+              by accident. A shipped default puts a row in `held` on
+              every install, and an enabled Save there is the 409 this
+              section exists to answer before somebody provokes it. */}
+          <button
+            type="button"
+            disabled={needsKeyFirst}
+            onClick={onChange}
+            className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium hover:bg-paper-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors dark:border-paper-700 dark:hover:bg-paper-800"
           >
-            {t("settings.credentialUsername")}
-          </label>
-          <input
-            id="catalogue-login-username"
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-          />
-          <label
-            htmlFor="catalogue-login-password"
-            className="block text-xs font-medium text-paper-600 dark:text-paper-300"
-          >
-            {t("settings.credentialPassword")}
-          </label>
-          <input
-            id="catalogue-login-password"
-            type="password"
-            autoComplete="off"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-          />
-          <div className="flex gap-2 pt-1">
+            {t(
+              provenance === "shipped"
+                ? "settings.credentialUseOwn"
+                : "settings.credentialChange",
+            )}
+          </button>
+          {/* **Only where there is a row to delete.** A shipped default
+              is a constant in this build, so Remove would either do
+              nothing or read as a way to switch the catalogue off, which
+              is what the provider list above is for. */}
+          {provenance === "stored" && (
             <button
               type="button"
-              disabled={
-                credentials.isWorking ||
-                username.trim() === "" ||
-                password === ""
-              }
-              onClick={() =>
-                credentials.save(
-                  editing.source,
-                  username.trim(),
-                  password,
-                  clear,
-                )
-              }
-              className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+              disabled={credentials.isWorking}
+              onClick={() => credentials.remove(row.source)}
+              className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 transition-colors dark:border-paper-700 dark:text-danger-300"
             >
-              {t("settings.credentialSave")}
+              {t("settings.credentialClear")}
             </button>
-            <button
-              type="button"
-              onClick={clear}
-              className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium dark:border-paper-700"
-            >
-              {t("common.cancel")}
-            </button>
-          </div>
+          )}
         </div>
       )}
-    </SettingsSection>
+    </li>
+  );
+}
+
+/** The line under a held login saying which of the four levels it came from. */
+function HeldLoginStatus({ row }: { row: CatalogueSourceOut }) {
+  const { t } = useTranslation();
+  const provenance = provenanceOf(row);
+  const variable = `CATALOGUE_CREDENTIAL_${row.source.toUpperCase()}`;
+  // Both true is a variable somebody set to something that is not a
+  // credential. Testing the provenance first told them it was supplied by the
+  // server and working, which is the exact reassurance this state exists to
+  // remove.
+  if (provenance === "env" && row.credential_unreadable) {
+    return (
+      <p className="text-xs text-danger-700 dark:text-danger-200">
+        {t("settings.credentialFromEnvBroken", { variable })}
+      </p>
+    );
+  }
+  if (provenance === "env") {
+    return (
+      <p className="text-xs text-amber-800 dark:text-amber-200">
+        {t("settings.credentialFromEnv", { variable })}
+      </p>
+    );
+  }
+  if (row.credential_unreadable) {
+    return (
+      <p className="text-xs text-amber-800 dark:text-amber-200">
+        {t("settings.credentialUnreadable")}
+      </p>
+    );
+  }
+  // **Named rather than drawn as a stored login**, which is what
+  // `credentialSet` below would have made it: a masked username beside "a
+  // login is stored" reads as something this library typed, and an admin who
+  // believes that has no reason to enter the account they actually hold. The
+  // line is the whole of how the four levels are told apart on this screen.
+  if (provenance === "shipped") {
+    return (
+      <p className="text-xs text-paper-600 dark:text-paper-400">
+        {t("settings.credentialShipped")}
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-paper-600 dark:text-paper-400">
+      {t("settings.credentialSet", {
+        preview: row.credential_username_preview ?? "",
+      })}
+    </p>
+  );
+}
+
+/** The picker offering every source that has no login yet. */
+function SourcePicker({
+  rows,
+  adding,
+  needsKeyFirst,
+  onPick,
+}: {
+  rows: CatalogueSourceOut[];
+  adding: string;
+  needsKeyFirst: boolean;
+  onPick: (source: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <label
+        htmlFor="catalogue-login-source"
+        className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+      >
+        {t("settings.credentialAdd")}
+      </label>
+      <select
+        id="catalogue-login-source"
+        value={adding}
+        disabled={needsKeyFirst}
+        onChange={(event) => onPick(event.target.value)}
+        className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm disabled:bg-paper-50 disabled:text-paper-400 disabled:cursor-not-allowed dark:border-paper-700 dark:disabled:bg-paper-800"
+      >
+        <option value="">{t("settings.credentialAddChoose")}</option>
+        {rows
+          .filter((row) => provenanceOf(row) === "none")
+          .map((row) => (
+            <option key={row.source} value={row.source}>
+              {t(catalogueName(row.source))}
+            </option>
+          ))}
+      </select>
+      {needsKeyFirst && (
+        <p className="text-xs text-amber-800 dark:text-amber-200">
+          {t("settings.credentialNeedsKeyFirst")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The username and password for the catalogue being added or changed.
+ *
+ * **Mounted while hidden, and drawing nothing.** It owns the two fields, and
+ * a picker moved back to "Choose a catalogue" hides the form without being a
+ * cancel: what was typed is still there when a source is picked again. Only
+ * Cancel and a save that succeeded empty them.
+ */
+function LoginForm({
+  editing,
+  credentials,
+  onClose,
+}: {
+  editing: CatalogueSourceOut | undefined;
+  credentials: UseSourceCredentialsResult;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  if (editing === undefined) return null;
+  const close = () => {
+    setUsername("");
+    setPassword("");
+    onClose();
+  };
+  return (
+    <div className="space-y-1.5">
+      {/* **The form names the catalogue itself.** The picker used to be the
+          label by accident: it showed the chosen row. Taking held sources
+          out of it, so that Change is the one route to editing one, left a
+          username and a password with nothing saying whose, above a picker
+          that had fallen back to "Choose a catalogue" because its value
+          matched none of its options. */}
+      <p className="text-sm font-medium">{t(catalogueName(editing.source))}</p>
+      <label
+        htmlFor="catalogue-login-username"
+        className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+      >
+        {t("settings.credentialUsername")}
+      </label>
+      <input
+        id="catalogue-login-username"
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        value={username}
+        onChange={(event) => setUsername(event.target.value)}
+        className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+      />
+      <label
+        htmlFor="catalogue-login-password"
+        className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+      >
+        {t("settings.credentialPassword")}
+      </label>
+      <input
+        id="catalogue-login-password"
+        type="password"
+        autoComplete="off"
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+        className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+      />
+      <div className="flex gap-2 pt-1">
+        <button
+          type="button"
+          disabled={
+            credentials.isWorking || username.trim() === "" || password === ""
+          }
+          onClick={() =>
+            credentials.save(editing.source, username.trim(), password, close)
+          }
+          className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+        >
+          {t("settings.credentialSave")}
+        </button>
+        <button
+          type="button"
+          onClick={close}
+          className="px-3 py-1.5 rounded-lg border border-paper-200 text-xs font-medium dark:border-paper-700"
+        >
+          {t("common.cancel")}
+        </button>
+      </div>
+    </div>
   );
 }

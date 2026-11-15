@@ -18,6 +18,7 @@ import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -1011,6 +1012,58 @@ def clear_metadata_cache() -> None:
     Three lookup tests failed exactly that way when the cache was added.
     """
     metadata.clear_cache()
+
+
+def caches_defined_in(module: ModuleType) -> list[Any]:
+    """Every `functools.cache` or `lru_cache` bound at the top of `module` and defined there.
+
+    **Defined there, by `__module__`**, so a cached helper a test module imported
+    from the application is never reached: emptying one would change what the
+    next test sees. A cache bound inside a class body is not reached either.
+
+    **Not a class**, though one may carry both names: what its `cache_clear`
+    does is the class's business, and it is no `functools` cache.
+    """
+    return [
+        value
+        for value in vars(module).values()
+        if getattr(value, "__module__", None) == module.__name__
+        and hasattr(value, "cache_info")
+        and hasattr(value, "cache_clear")
+        and not isinstance(value, type)
+    ]
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:
+    """Empty every test module's own caches each time the run leaves a module.
+
+    A test module caching a walk of the tree (parsed modules, every published
+    file's text, an index built from them) keeps it for as long as the worker
+    lives, because the module stays imported. Under `--dist loadfile` a worker
+    runs a module once and never returns to it, so what it cached is dead weight
+    for every later module, and the walks are among the largest objects the
+    suite builds. Under `--dist load` or `worksteal` a worker can leave a module and
+    come back to it, so the results stay right and each return pays for its walks again.
+
+    **Every collected test module's, and not only the one ending**, because a
+    module calling another's cached function fills a cache whose owner has
+    already ended, and that owner's own ending never comes again. A shared
+    helper outside the collected modules, such as `tests/sqlite_only.py`, keeps
+    its caches for the worker's life, which is what it caches for.
+
+    **On the boundary a module scoped fixture is torn down on**, `nextitem`
+    leaving the module, and **after** pytest's own teardown (`trylast`), so a
+    module fixture that reads a cache while it tears down does not fill it
+    again behind this.
+    """
+    module = getattr(item, "module", None)
+    if module is None or getattr(nextitem, "module", None) is module:
+        return
+    collected = {found for each in item.session.items if (found := getattr(each, "module", None))}
+    for test_module in collected:
+        for cached in caches_defined_in(test_module):
+            cached.cache_clear()
 
 
 #: The real `covers.resolve_and_store`, captured before the fixture below

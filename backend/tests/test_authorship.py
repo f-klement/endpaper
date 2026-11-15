@@ -1611,6 +1611,29 @@ class TestABatchIsOneTransactionOrNothing:
 
         assert sorted(book.author for book in db.query(Book).all()) == before
 
+    def test_an_author_gone_by_the_answer_is_not_found(self, db, user, monkeypatch):
+        """The race the answer guards: the Books behind a group are trashed
+        between the write and the read that answers with them."""
+        groups = self._two_groups(db, user)
+        real = Authorship._load
+        reads = 0
+
+        def emptied_after_the_write(self):
+            nonlocal reads
+            reads += 1
+            entries, aliases = real(self)
+            return (entries if reads == 1 else []), aliases
+
+        monkeypatch.setattr(Authorship, "_load", emptied_after_the_write)
+
+        with pytest.raises(AuthorNotFound):
+            Authorship.seen_by(db, user.id).merge_batch(groups, by_user_id=user.id)
+
+        # The planning step raises the same exception, so without these the
+        # test passes on a refusal before the write and the race goes unpinned.
+        assert reads == 2
+        assert db.query(AuthorAlias).count() == 4
+
     def test_a_key_naming_nobody_visible_refuses_the_whole_batch(self, db, user, other):
         shelve(db, other, "Sean P. Kane", private=True)
         groups = self._two_groups(db, user)

@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { EmptyState, ErrorState, Spinner } from "../../components";
 import { useTranslation } from "../../i18n";
 import CollectionCard from "./components/CollectionCard";
-import { useCollections } from "./hooks";
+import { useCollections, type UseCollectionsResult } from "./hooks";
 import { Page, PageHeader } from "../components";
 
 /**
@@ -30,7 +30,6 @@ export default function CollectionsPage() {
 
   if (collections.isLoading) return <Spinner label={t("common.loading")} />;
 
-  const busy = collections.isRenaming || collections.isRemoving;
   // Whichever write last failed. One line rather than three, because only one
   // of them can be in flight at a time from this page.
   const writeError =
@@ -46,26 +45,12 @@ export default function CollectionsPage() {
         {t("collections.explain")}
       </p>
 
-      <form onSubmit={submit} className="flex gap-2 mb-4">
-        <input
-          type="text"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          placeholder={t("collections.newPlaceholder")}
-          aria-label={t("collections.newName")}
-          maxLength={80}
-          className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-        />
-        <button
-          type="submit"
-          disabled={collections.isCreating || name.trim() === ""}
-          className="px-4 py-2 rounded-xl bg-accent-fill text-on-accent text-sm font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
-        >
-          {collections.isCreating
-            ? t("collections.creating")
-            : t("collections.create")}
-        </button>
-      </form>
+      <CreateForm
+        name={name}
+        onNameChange={setName}
+        onSubmit={submit}
+        isCreating={collections.isCreating}
+      />
 
       {writeError != null && (
         <div className="mb-4">
@@ -76,31 +61,82 @@ export default function CollectionsPage() {
         </div>
       )}
 
-      {collections.error != null ? (
-        <ErrorState
-          error={collections.error}
-          fallback={t("collections.couldNotLoad")}
-          onRetry={collections.refetch}
-        />
-      ) : collections.collections.length === 0 ? (
-        <EmptyState
-          icon="library"
-          title={t("collections.empty")}
-          hint={t("collections.emptyHint")}
-        />
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {collections.collections.map((collection) => (
-            <CollectionCard
-              key={collection.id}
-              collection={collection}
-              isBusy={busy}
-              onRename={collections.rename}
-              onDelete={collections.remove}
-            />
-          ))}
-        </div>
-      )}
+      <CollectionList collections={collections} />
     </Page>
+  );
+}
+
+function CreateForm({
+  name,
+  onNameChange,
+  onSubmit,
+  isCreating,
+}: {
+  name: string;
+  onNameChange: (name: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  isCreating: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <form onSubmit={onSubmit} className="flex gap-2 mb-4">
+      <input
+        type="text"
+        value={name}
+        onChange={(event) => onNameChange(event.target.value)}
+        placeholder={t("collections.newPlaceholder")}
+        aria-label={t("collections.newName")}
+        maxLength={80}
+        className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+      />
+      <button
+        type="submit"
+        disabled={isCreating || name.trim() === ""}
+        className="px-4 py-2 rounded-xl bg-accent-fill text-on-accent text-sm font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+      >
+        {isCreating ? t("collections.creating") : t("collections.create")}
+      </button>
+    </form>
+  );
+}
+
+/** The load error, the empty shelf, or a card per collection. */
+function CollectionList({
+  collections,
+}: {
+  collections: UseCollectionsResult;
+}) {
+  const { t } = useTranslation();
+  if (collections.error != null) {
+    return (
+      <ErrorState
+        error={collections.error}
+        fallback={t("collections.couldNotLoad")}
+        onRetry={collections.refetch}
+      />
+    );
+  }
+  if (collections.collections.length === 0) {
+    return (
+      <EmptyState
+        icon="library"
+        title={t("collections.empty")}
+        hint={t("collections.emptyHint")}
+      />
+    );
+  }
+  const busy = collections.isRenaming || collections.isRemoving;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {collections.collections.map((collection) => (
+        <CollectionCard
+          key={collection.id}
+          collection={collection}
+          isBusy={busy}
+          onRename={collections.rename}
+          onDelete={collections.remove}
+        />
+      ))}
+    </div>
   );
 }

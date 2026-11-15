@@ -688,6 +688,16 @@ describe("checking a book against the file beside it", () => {
     expect(checked.filled).toBe(1);
   });
 
+  it("keeps the database's index over the file's in the same series", () => {
+    const checked = crossCheck(
+      { ...A_BOOK, seriesName: "Dune Chronicles", seriesIndex: 1 },
+      { ...A_FILE, seriesName: "Dune Chronicles", seriesIndex: 2 },
+    );
+
+    expect(checked.book.seriesIndex).toBe(1);
+    expect(checked.filled).toBe(0);
+  });
+
   it("takes both when the database names no series at all", () => {
     const checked = crossCheck(A_BOOK, {
       ...A_FILE,

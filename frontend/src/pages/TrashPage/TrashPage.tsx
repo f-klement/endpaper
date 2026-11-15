@@ -30,10 +30,6 @@ import { useTrash } from "./hooks";
 export default function TrashPage({ currentUser }: { currentUser: UserOut }) {
   const { t } = useTranslation();
   const trash = useTrash();
-  const canPurge = (book: BookOut) =>
-    book.added_by == null
-      ? currentUser.is_admin
-      : book.added_by.id === currentUser.id;
 
   if (trash.isLoading) return <Spinner label={t("common.loading")} />;
 
@@ -44,27 +40,13 @@ export default function TrashPage({ currentUser }: { currentUser: UserOut }) {
         title={t("trash.title")}
         badge={trash.total > 0 && <PageCount>{trash.total}</PageCount>}
         actions={
-          (trash.books.some(canPurge) || trash.total > trash.books.length) && (
-            <Button
-              variant="secondary"
-              size="sm"
-              isLoading={trash.isEmptying}
-              onClick={() => {
-                if (
-                  confirm(
-                    t(
-                      currentUser.is_admin
-                        ? "trash.emptyAllConfirmAdmin"
-                        : "trash.emptyAllConfirm",
-                    ),
-                  )
-                )
-                  trash.empty();
-              }}
-              icon={<Icon name="trash" className="h-4 w-4" />}
-            >
-              {t("trash.emptyAll")}
-            </Button>
+          (trash.books.some((book) => mayPurge(book, currentUser)) ||
+            trash.total > trash.books.length) && (
+            <EmptyTrashButton
+              isAdmin={currentUser.is_admin}
+              isEmptying={trash.isEmptying}
+              onEmpty={trash.empty}
+            />
           )
         }
       />
@@ -92,7 +74,7 @@ export default function TrashPage({ currentUser }: { currentUser: UserOut }) {
                 key={book.id}
                 book={book}
                 isBusy={trash.busyIds.has(book.id)}
-                canPurge={canPurge(book)}
+                canPurge={mayPurge(book, currentUser)}
                 onRestore={() => trash.restore(book.id)}
                 onPurge={() => trash.purge(book.id)}
               />
@@ -101,5 +83,42 @@ export default function TrashPage({ currentUser }: { currentUser: UserOut }) {
         </>
       )}
     </Page>
+  );
+}
+
+/** Whether this member may delete the book for good, by the rule the page doc states. */
+function mayPurge(book: BookOut, currentUser: UserOut): boolean {
+  return book.added_by == null
+    ? currentUser.is_admin
+    : book.added_by.id === currentUser.id;
+}
+
+function EmptyTrashButton({
+  isAdmin,
+  isEmptying,
+  onEmpty,
+}: {
+  isAdmin: boolean;
+  isEmptying: boolean;
+  onEmpty: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      isLoading={isEmptying}
+      onClick={() => {
+        if (
+          confirm(
+            t(isAdmin ? "trash.emptyAllConfirmAdmin" : "trash.emptyAllConfirm"),
+          )
+        )
+          onEmpty();
+      }}
+      icon={<Icon name="trash" className="h-4 w-4" />}
+    >
+      {t("trash.emptyAll")}
+    </Button>
   );
 }

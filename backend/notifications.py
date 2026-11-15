@@ -226,11 +226,14 @@ def _host(url: str) -> str:
         # `idna.IDNAError`, which a name IDNA cannot encode raises, is a
         # `UnicodeError` and so one of these.
         return "unknown"
-    if not host or not all(
+    return host if _is_host_text(host) else "unknown"
+
+
+def _is_host_text(host: str) -> bool:
+    """Whether `host` is non empty and every character is one a host has, by `_HOST_PUNCTUATION`."""
+    return bool(host) and all(
         (character.isascii() and character.isalnum()) or character in _HOST_PUNCTUATION for character in host
-    ):
-        return "unknown"
-    return host
+    )
 
 
 def reminder_days(db: Session) -> int:
@@ -478,23 +481,34 @@ def render_text(digest: dict[str, Any], *, limit: int | None = None) -> str:
     ]
 
     if limit is None:
-        return "\n".join([header, "", *lines])
+        return _assembled(header, lines, 0)
+    return _fitted(header, lines, limit)
 
+
+def _assembled(header: str, kept: list[str], dropped: int) -> str:
+    """The message from its header, the entries kept, and how many were left out.
+
+    The one place the message's layout is written, because `_fitted` builds it
+    for every candidate as well as for the final text, and two spellings of the
+    layout could measure one message and send another.
+    """
+    tail = [] if dropped == 0 else ["", f"and {dropped} more."]
+    return "\n".join([header, "", *kept, *tail])
+
+
+def _fitted(header: str, lines: list[str], limit: int) -> str:
+    """As many entries as fit in `limit` UTF-16 units, then a count of the rest."""
     kept: list[str] = []
     # Rebuilt on every candidate rather than measured incrementally: the tail
     # grows as entries are dropped, so a running total is wrong by the width of
     # its own sentence exactly when the message is closest to the limit.
     for line in lines:
-        dropped = len(lines) - len(kept) - 1
-        tail = [] if dropped == 0 else ["", f"and {dropped} more."]
-        candidate = "\n".join([header, "", *kept, line, *tail])
+        candidate = _assembled(header, [*kept, line], len(lines) - len(kept) - 1)
         if _utf16_units(candidate) > limit:
             break
         kept.append(line)
 
-    dropped = len(lines) - len(kept)
-    tail = [] if dropped == 0 else ["", f"and {dropped} more."]
-    rendered = "\n".join([header, "", *kept, *tail])
+    rendered = _assembled(header, kept, len(lines) - len(kept))
     if _utf16_units(rendered) <= limit:
         return rendered
 
@@ -1166,31 +1180,45 @@ def record_run(db: Session, result: dict[str, Any], now: datetime) -> None:
         # screen draws no line for it, for the same one reason stated once.
         if not pushes_outward(sender_key):
             continue
-        sender = sender_key.value
-        previous = record.get(sender)
-        previous = previous if isinstance(previous, dict) else {}
-        if entry["sent"]:
-            record[sender] = {
-                "sent": True,
-                "reason": None,
-                "detail": None,
-                "at": now.isoformat(),
-                "failing_since": None,
-                "failures": 0,
-            }
-            continue
-        was_failing = previous.get("sent") is False
-        earlier = _parsed(previous.get("failing_since")) if was_failing else None
-        count = previous.get("failures") if was_failing else 0
-        record[sender] = {
-            "sent": False,
-            "reason": entry["reason"].value if entry["reason"] else None,
-            "detail": entry["detail"],
-            "at": now.isoformat(),
-            "failing_since": (earlier or now).isoformat(),
-            "failures": (count if isinstance(count, int) else 0) + 1,
-        }
+        record[sender_key.value] = _recorded(entry, record.get(sender_key.value), now)
     settings_store.set_json(db, SettingKey.SENDER_HEALTH, record)
+
+
+def _recorded(entry: dict[str, Any], previous: Any, now: datetime) -> dict[str, Any]:
+    """One sender's record after this run, from its outcome and its record before.
+
+    `previous` is whatever the row held, unvalidated, for the reason `_parsed`
+    gives; anything that is not a record counts as no history.
+    """
+    if entry["sent"]:
+        return {
+            "sent": True,
+            "reason": None,
+            "detail": None,
+            "at": now.isoformat(),
+            "failing_since": None,
+            "failures": 0,
+        }
+    failing_since, failures = _failing_run(previous, now)
+    return {
+        "sent": False,
+        "reason": entry["reason"].value if entry["reason"] else None,
+        "detail": entry["detail"],
+        "at": now.isoformat(),
+        "failing_since": failing_since.isoformat(),
+        "failures": failures,
+    }
+
+
+def _failing_run(previous: Any, now: datetime) -> tuple[datetime, int]:
+    """When the run of failures this one extends began, and its length counting this one.
+
+    A record that was not failing, or is not a record, starts a run now.
+    """
+    was_failing = isinstance(previous, dict) and previous.get("sent") is False
+    earlier = _parsed(previous.get("failing_since")) if was_failing else None
+    count = previous.get("failures") if was_failing else 0
+    return earlier or now, (count if isinstance(count, int) else 0) + 1
 
 
 def forget_health(db: Session, sender: OverdueSender) -> None:
@@ -1235,22 +1263,27 @@ def health(db: Session, now: datetime) -> list[dict[str, Any]]:
             continue
         if not settings_store.get_bool(db, _ENABLED_KEY[sender]):
             continue
-        stored = record.get(sender.value)
-        stored = stored if isinstance(stored, dict) else {}
-        failures = stored.get("failures")
-        entries.append(
-            {
-                "sender": sender,
-                "last_run_at": _parsed(stored.get("at")),
-                "sent": stored.get("sent") if isinstance(stored.get("sent"), bool) else None,
-                "reason": _reason(stored.get("reason")),
-                "detail": stored.get("detail") if isinstance(stored.get("detail"), str) else None,
-                "failing_since": _parsed(stored.get("failing_since")),
-                "failures": failures if isinstance(failures, int) and failures >= 0 else 0,
-                "broken": _is_broken(stored, now),
-            }
-        )
+        entries.append(_health_of(sender, record.get(sender.value), now))
     return entries
+
+
+def _health_of(sender: OverdueSender, stored: Any, now: datetime) -> dict[str, Any]:
+    """One line of `health`, from the sender's record as the row held it, unvalidated.
+
+    Anything that is not a record reads as a channel that has never run.
+    """
+    stored = stored if isinstance(stored, dict) else {}
+    failures = stored.get("failures")
+    return {
+        "sender": sender,
+        "last_run_at": _parsed(stored.get("at")),
+        "sent": stored.get("sent") if isinstance(stored.get("sent"), bool) else None,
+        "reason": _reason(stored.get("reason")),
+        "detail": stored.get("detail") if isinstance(stored.get("detail"), str) else None,
+        "failing_since": _parsed(stored.get("failing_since")),
+        "failures": failures if isinstance(failures, int) and failures >= 0 else 0,
+        "broken": _is_broken(stored, now),
+    }
 
 
 async def run_digest(db: Session) -> dict[str, Any]:
@@ -1320,6 +1353,18 @@ async def _run_digest(db: Session, now: datetime) -> dict[str, Any]:
             senders=in_app,
         )
 
+    return await _push(db, now, loans, skipped, pushing, in_app)
+
+
+async def _push(
+    db: Session,
+    now: datetime,
+    loans: list[Loan],
+    skipped: int,
+    pushing: list[OverdueSender],
+    in_app: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Send one digest of `loans` on every pushing sender, and stamp them if any delivered."""
     digest = build_digest(loans, now)
     subject = f"{len(loans)} overdue {'book' if len(loans) == 1 else 'books'}"
     pushed = [

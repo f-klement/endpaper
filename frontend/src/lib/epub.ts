@@ -99,9 +99,8 @@ const utf8 = new TextDecoder("utf-8");
 /**
  * Where `container.xml` says the package document is, or `null`.
  *
- * The first rootfile declaring the OPF media type, and the first rootfile at all
- * as a fallback: a container may list several renditions, and one that names no
- * media type is still naming the only package document it has.
+ * The container is refused here, before anything in it is read, and
+ * `rootfilePath` then chooses among what it lists.
  */
 function packagePath(xml: string): string | null {
   // The container is parsed by the same engine and is the same exposure. See
@@ -117,7 +116,17 @@ function packagePath(xml: string): string | null {
   }
   const root = document.documentElement;
   if (!root || root.localName !== "container") return null;
+  return rootfilePath(root);
+}
 
+/**
+ * The package document a container's rootfiles name, or `null`.
+ *
+ * The first rootfile declaring the OPF media type, and the first rootfile at all
+ * as a fallback: a container may list several renditions, and one that names no
+ * media type is still naming the only package document it has.
+ */
+function rootfilePath(root: Element): string | null {
   const rootfiles = [
     ...root.getElementsByTagNameNS(CONTAINER_NAMESPACE, "rootfile"),
   ];

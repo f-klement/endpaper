@@ -173,6 +173,67 @@ describe("PublicCataloguePage", () => {
     ).toBeInTheDocument();
   });
 
+  it("draws no count badge on an empty catalogue", async () => {
+    api.on(/\/api\/public\/books/, { body: page([]) });
+    renderWithProviders(<PublicCataloguePage />);
+    await screen.findByText("0 books");
+
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
+  it("says the catalogue is empty when nothing has been searched for", async () => {
+    api.on(/\/api\/public\/books/, { body: page([]) });
+    renderWithProviders(<PublicCataloguePage />);
+
+    expect(
+      await screen.findByText("This catalogue has nothing in it yet."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Try fewer words, or a different spelling."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says nothing was found only once the first page has answered", async () => {
+    let release: (() => void) | undefined;
+    api.on(
+      /\/api\/public\/books/,
+      () =>
+        new Promise<{ body: unknown }>((resolve) => {
+          release = () => resolve({ body: page([]) });
+        }),
+    );
+    renderWithProviders(<PublicCataloguePage />);
+
+    await waitFor(() => expect(release).toBeDefined());
+    expect(screen.queryByText("Nothing found")).not.toBeInTheDocument();
+
+    release?.();
+    expect(await screen.findByText("Nothing found")).toBeInTheDocument();
+  });
+
+  it("reads loading on the load more button while the next page is on its way", async () => {
+    let release: (() => void) | undefined;
+    api.on(/\/api\/public\/books/, (url: string) => {
+      if (!url.includes("page=2")) {
+        return { body: page([book(1, "Dune")], 40, 1) };
+      }
+      return new Promise<{ body: unknown }>((resolve) => {
+        release = () =>
+          resolve({ body: page([book(2, "Neuromancer")], 40, 2) });
+      });
+    });
+
+    renderWithProviders(<PublicCataloguePage />);
+    const button = await screen.findByRole("button", { name: "Show more" });
+    await userEvent.click(button);
+
+    expect(button).toHaveTextContent("Loading...");
+
+    release?.();
+    await screen.findByText("Neuromancer");
+    expect(button).toHaveTextContent("Show more");
+  });
+
   it("offers no way to load more once the last page is shown", async () => {
     renderWithProviders(<PublicCataloguePage />);
     await screen.findByText("Dune");

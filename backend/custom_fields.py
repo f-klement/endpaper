@@ -39,7 +39,7 @@ nobody can reach.
 
 from collections.abc import Collection
 from typing import NamedTuple
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from sqlalchemy.orm import Session
 
@@ -219,6 +219,27 @@ def web_link(value: str) -> str | None:
     Separate from the kind gate so a catalogue's `856 $u` (`marc_fields`) is
     held to the same seven refusals as a value a member typed.
     """
+    parse = _parsed(value)
+    if parse is None or not _linkable_authority(*parse):
+        return None
+    parsed, port = parse
+    host = _plain_host(parsed)
+    if host is None:
+        return None
+
+    # **Rebuilt, not returned as it arrived.** Returning `parsed.geturl()` gives
+    # back the string that was passed in, separators and all, which is exactly
+    # the value a browser would resolve elsewhere. Brackets go back on an IPv6
+    # host because `hostname` strips them and a bare `::1` in a netloc is not a
+    # URL. `urlsplit` has already lowercased the scheme and the host.
+    netloc = f"[{host}]" if ":" in host else host
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def _parsed(value: str) -> tuple[SplitResult, int | None] | None:
+    """`value` split, with its port, or None for a value two parsers would read apart."""
     # Before anything is parsed. Both characters make Python and a browser read
     # a **different host** out of the same string, so a value carrying one can
     # never be reconciled and is refused rather than repaired. A backslash ends
@@ -235,19 +256,26 @@ def web_link(value: str) -> str | None:
         port = parsed.port
     except ValueError:
         return None
+    return parsed, port
+
+
+def _linkable_authority(parsed: SplitResult, port: int | None) -> bool:
+    """Whether the scheme, the user information and the port are a link's."""
     if parsed.scheme not in _LINKABLE_SCHEMES:
-        return None
+        return False
     if parsed.username or parsed.password:
-        return None
+        return False
     # `urlsplit` itself refuses a port above 65535 or below zero, by raising
-    # from the attribute read above, which is why that read is inside the try
-    # rather than here. What is left for this line is **port zero**, which it
+    # from the attribute read in `_parsed`, which is why that read is inside
+    # the try rather than here. What is left for this line is **port zero**, which it
     # returns as `0`: no browser connects to it, so a link to it is a link that
     # cannot be followed. Measured, not assumed: `:0` yields `0`, `:65536`
     # raises "Port out of range", `:-1` raises "could not be cast".
-    if port == 0:
-        return None
+    return port != 0
 
+
+def _plain_host(parsed: SplitResult) -> str | None:
+    """The host with `_HOST_SEPARATORS` mapped onto `.`, or None for a malformed one."""
     host = parsed.hostname or ""
     for separator, plain in _HOST_SEPARATORS.items():
         host = host.replace(separator, plain)
@@ -278,16 +306,7 @@ def web_link(value: str) -> str | None:
         # there is ordinary and both parsers agree about it;
         # `https://calibre.example/book/12%20a` is a link.
         return None
-
-    # **Rebuilt, not returned as it arrived.** Returning `parsed.geturl()` gives
-    # back the string that was passed in, separators and all, which is exactly
-    # the value a browser would resolve elsewhere. Brackets go back on an IPv6
-    # host because `hostname` strips them and a bare `::1` in a netloc is not a
-    # URL. `urlsplit` has already lowercased the scheme and the host.
-    netloc = f"[{host}]" if ":" in host else host
-    if port is not None:
-        netloc = f"{netloc}:{port}"
-    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+    return host
 
 
 def _stored_form(kind: CustomFieldKind, value: str) -> str | None:

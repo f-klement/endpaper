@@ -1,6 +1,6 @@
 /** Tests for src/pages/BookDetail/components/ProgressPanel.tsx. */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -109,6 +109,21 @@ describe("ProgressPanel", () => {
     expect(onRecord).toHaveBeenCalledWith({ percent: 40 });
   });
 
+  it("presses the chosen unit's button and only that one", async () => {
+    const user = userEvent.setup();
+    renderPanel({ page_count: 412 });
+    const page = screen.getByRole("button", { name: "Page" });
+    const percent = screen.getByRole("button", { name: "Percent" });
+
+    expect(page).toHaveAttribute("aria-pressed", "true");
+    expect(percent).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(percent);
+
+    expect(page).toHaveAttribute("aria-pressed", "false");
+    expect(percent).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("never sends both units at once", async () => {
     // The API accepts exactly one, and the CHECK constraint behind it enforces
     // the same. The union is what stops the both-at-once request being
@@ -135,6 +150,55 @@ describe("ProgressPanel", () => {
     await user.click(screen.getByRole("button", { name: "Record progress" }));
 
     expect(onRecord).toHaveBeenCalledWith({ page: 120, minutes: 45 });
+  });
+
+  it("drops a sitting of zero minutes", async () => {
+    const user = userEvent.setup();
+    const { onRecord } = renderPanel({ page_count: 412 });
+
+    await user.type(screen.getByRole("spinbutton", { name: "Page" }), "120");
+    // Submitted past the button, since `min` on the field stops a click.
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Minutes read" }), {
+      target: { value: "0" },
+    });
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Record progress" }).closest("form")!,
+    );
+
+    expect(onRecord).toHaveBeenCalledWith({ page: 120 });
+  });
+
+  it("clears both fields once an entry is recorded", async () => {
+    const user = userEvent.setup();
+    renderPanel({ page_count: 412 });
+
+    await user.type(screen.getByRole("spinbutton", { name: "Page" }), "120");
+    await user.type(
+      screen.getByRole("spinbutton", { name: "Minutes read" }),
+      "45",
+    );
+    await user.click(screen.getByRole("button", { name: "Record progress" }));
+
+    expect(screen.getByRole("spinbutton", { name: "Page" })).toHaveValue(null);
+    expect(
+      screen.getByRole("spinbutton", { name: "Minutes read" }),
+    ).toHaveValue(null);
+  });
+
+  it("bounds a page from one and a percentage from nought to a hundred", async () => {
+    const user = userEvent.setup();
+    renderPanel({ page_count: 412 });
+
+    const page = screen.getByRole("spinbutton", { name: "Page" });
+    expect(page).toHaveAttribute("min", "1");
+    expect(page).not.toHaveAttribute("max");
+    expect(page).toHaveAttribute("placeholder", "Page reached");
+
+    await user.click(screen.getByRole("button", { name: "Percent" }));
+    const percent = screen.getByRole("spinbutton", { name: "Percent" });
+    expect(percent).toHaveAttribute("min", "0");
+    expect(percent).toHaveAttribute("max", "100");
+    expect(percent).toHaveAttribute("placeholder", "Percent read");
   });
 
   it("cannot be submitted empty", () => {

@@ -785,8 +785,38 @@ def read_manifest(data: bytes) -> dict[str, Any]:
     The bytes are the caller's, so anything the zip reader, its three
     decompressors or the JSON parser raise over them is a 400 rather than a
     500. That is a class rather than a list, for the reason at the two blind
-    arms below.
+    arms in `_manifest_bytes`.
     """
+    raw = _manifest_bytes(data)
+
+    try:
+        manifest: object = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
+        # `RecursionError` for a manifest nested past the parser's stack, which
+        # a stored entry reaches with a compression ratio of one and so passes
+        # `_reject_a_bomb`. `fetch.Fetched.json` converts the same error for a
+        # response body.
+        raise RestoreError("The backup's contents could not be read.") from error
+
+    # Valid JSON that is not an object is still not a manifest, and every read
+    # below assumes one: `[]` and `null` were an `AttributeError` here.
+    if not isinstance(manifest, dict):
+        raise RestoreError("The backup's manifest is not the shape a backup writes.")
+
+    version = manifest.get("format_version")
+    if version != FORMAT_VERSION:
+        raise RestoreError(
+            f"This backup is format {version}, and this version reads "
+            f"{FORMAT_VERSION}. Restore it with the version that wrote it."
+        )
+
+    _refuse_missing_tables(manifest.get("tables"))
+    return manifest
+
+
+def _manifest_bytes(data: bytes) -> bytes:
+    """`read_manifest`'s first half: the archive opened, its expansion bounded,
+    and the manifest entry read, each failure a `RestoreError`."""
     try:
         archive = zipfile.ZipFile(BytesIO(data))
     except Exception as error:
@@ -815,29 +845,12 @@ def read_manifest(data: bytes) -> dict[str, Any]:
         # none of them: each was a 500. Nothing in this block is ours but the
         # call, so nothing of ours is swallowed.
         raise RestoreError("The backup's contents could not be read.") from error
+    return raw
 
-    try:
-        manifest: object = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
-        # `RecursionError` for a manifest nested past the parser's stack, which
-        # a stored entry reaches with a compression ratio of one and so passes
-        # `_reject_a_bomb`. `fetch.Fetched.json` converts the same error for a
-        # response body.
-        raise RestoreError("The backup's contents could not be read.") from error
 
-    # Valid JSON that is not an object is still not a manifest, and every read
-    # below assumes one: `[]` and `null` were an `AttributeError` here.
-    if not isinstance(manifest, dict):
-        raise RestoreError("The backup's manifest is not the shape a backup writes.")
-
-    version = manifest.get("format_version")
-    if version != FORMAT_VERSION:
-        raise RestoreError(
-            f"This backup is format {version}, and this version reads "
-            f"{FORMAT_VERSION}. Restore it with the version that wrote it."
-        )
-
-    tables = manifest.get("tables")
+def _refuse_missing_tables(tables: object) -> None:
+    """`read_manifest`'s last checks: the manifest lists its tables, every
+    required one among them, and at least one account."""
     if not isinstance(tables, dict):
         raise RestoreError("The backup lists no tables.")
 
@@ -849,8 +862,6 @@ def read_manifest(data: bytes) -> dict[str, Any]:
     # to, which locks the library out of their own catalogue.
     if not tables.get("users"):
         raise RestoreError("The backup contains no accounts, so nothing could sign in.")
-
-    return manifest
 
 
 def _reject_a_bomb(archive: zipfile.ZipFile, compressed: int) -> None:
@@ -1092,20 +1103,7 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     for _name, _model, table in reversed(_TABLES):
         db.execute(delete(table))
 
-    restored: dict[str, int] = {}
-    for name, _model, table in _TABLES:
-        rows = tables.get(name) or []
-        if name == "catalogue_credentials":
-            rows = _without_household_logins(rows)
-        if rows:
-            parsers = _temporal_columns(table)
-            db.execute(table.insert(), [_parse_row(row, parsers, table) for row in rows])
-        restored[name] = len(rows)
-
-    associations = tables.get("book_tags") or []
-    if associations:
-        db.execute(book_tags.insert(), associations)
-    restored["book_tags"] = len(associations)
+    restored = _insert_rows(db, tables)
 
     # After the new settings rows, not before: the archive carries its own
     # value for this key and would otherwise restore an older epoch, which is
@@ -1137,42 +1135,50 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     # carry with it, which is the standing cost of covers living on disk.
     cover_store.clear()
 
+    _restore_covers(archive)
+
+    # Counted off the directory rather than off the loop, so the number is what
+    # is actually there rather than what this function believes it put there.
+    # The two agree while nothing removes a file behind the count, which is the
+    # property the no sweep writer in `_restore_one_cover` exists to keep.
+    restored["covers"] = len(cover_store.files())
+
+    _repair_seeded_tags(db)
+
+    logger.info("Restored a backup: %s", restored)
+    return restored
+
+
+def _insert_rows(db: Session, tables: dict[str, Any]) -> dict[str, int]:
+    """Every table's rows from the archive, inserted into the emptied database,
+    with a count per table."""
+    restored: dict[str, int] = {}
+    for name, _model, table in _TABLES:
+        rows = tables.get(name) or []
+        if name == "catalogue_credentials":
+            rows = _without_household_logins(rows)
+        if rows:
+            parsers = _temporal_columns(table)
+            db.execute(table.insert(), [_parse_row(row, parsers, table) for row in rows])
+        restored[name] = len(rows)
+
+    associations = tables.get("book_tags") or []
+    if associations:
+        db.execute(book_tags.insert(), associations)
+    restored["book_tags"] = len(associations)
+    return restored
+
+
+def _restore_covers(archive: zipfile.ZipFile) -> None:
+    """Write every cover the archive carries, declining and logging the ones
+    that cannot be written rather than raising: `restore` calls this after its
+    commit."""
     declined: list[str] = []
     for entry in archive.namelist():
         filename = _safe_cover_name(entry)
         if filename is None:
             continue
-        try:
-            body = _cover_bytes(archive, entry)
-        except Exception:  # noqa: BLE001  the breadth is the point, see below
-            # **Declined like a write that failed, for the reason below**, and
-            # blind for `read_manifest`'s: reading one entry raises eight
-            # unrelated types over a damaged archive. A cover whose bytes fail
-            # their checksum was a 500 here, with the rows restored and the
-            # covers half written. The name is logged with the rest. **The
-            # breadth has a cost `read_manifest`'s does not**: `_cover_bytes`
-            # also runs this application's own sniff, so a defect there would
-            # decline every cover with a warning rather than raise.
-            body = None
-        if body is None:
-            declined.append(filename)
-            continue
-        try:
-            # `cover_store.restore`, which is the one writer that does not sweep
-            # the other formats of a base, and the difference is a cover
-            # somebody can see. It is picked here by handing over a filename
-            # rather than a book id, so a caller cannot reach the sweeping
-            # writer from this loop by a one word edit; that function carries
-            # the whole reasoning, the lowercasing included.
-            cover_store.restore(filename, body)
-        except OSError, ValueError:
-            # **Declined, never raised.** This loop runs after `db.commit()` and
-            # after the directory was emptied, so anything escaping here is a
-            # 500 on a library whose rows are restored and whose covers are
-            # gone: the state this function promises not to produce. A zip entry
-            # may name a file with a NUL byte in it or one longer than the
-            # filesystem allows, and neither is `RestoreError`; a full disk part
-            # way through the loop is the same shape and the same answer.
+        if not _restore_one_cover(archive, entry, filename):
             declined.append(filename)
     if declined:
         # `%r` on each name, not `%s` on the join. A zip name field holds 64 KB
@@ -1183,16 +1189,43 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
             len(declined),
             ", ".join(repr(name[:120]) for name in sorted(declined)[:20]),
         )
-    # Counted off the directory rather than off the loop, so the number is what
-    # is actually there rather than what this function believes it put there.
-    # The two agree while nothing removes a file behind the count, which is the
-    # property the no sweep writer above exists to keep.
-    restored["covers"] = len(cover_store.files())
 
-    _repair_seeded_tags(db)
 
-    logger.info("Restored a backup: %s", restored)
-    return restored
+def _restore_one_cover(archive: zipfile.ZipFile, entry: str, filename: str) -> bool:
+    """One archive entry written as the cover `filename`. False where it was
+    declined: unreadable, not an image this app serves, or refused on write."""
+    try:
+        body = _cover_bytes(archive, entry)
+    except Exception:  # noqa: BLE001  the breadth is the point, see below
+        # **Declined like a write that failed, for the reason below**, and
+        # blind for `read_manifest`'s: reading one entry raises eight
+        # unrelated types over a damaged archive. A cover whose bytes fail
+        # their checksum was a 500 here, with the rows restored and the
+        # covers half written. The name is logged with the rest. **The
+        # breadth has a cost `read_manifest`'s does not**: `_cover_bytes`
+        # also runs this application's own sniff, so a defect there would
+        # decline every cover with a warning rather than raise.
+        body = None
+    if body is None:
+        return False
+    try:
+        # `cover_store.restore`, which is the one writer that does not sweep
+        # the other formats of a base, and the difference is a cover
+        # somebody can see. It is picked here by handing over a filename
+        # rather than a book id, so a caller cannot reach the sweeping
+        # writer from the cover loop by a one word edit; that function carries
+        # the whole reasoning, the lowercasing included.
+        cover_store.restore(filename, body)
+    except OSError, ValueError:
+        # **Declined, never raised.** The cover loop runs after `db.commit()` and
+        # after the directory was emptied, so anything escaping here is a
+        # 500 on a library whose rows are restored and whose covers are
+        # gone: the state this function promises not to produce. A zip entry
+        # may name a file with a NUL byte in it or one longer than the
+        # filesystem allows, and neither is `RestoreError`; a full disk part
+        # way through the loop is the same shape and the same answer.
+        return False
+    return True
 
 
 def _repair_seeded_tags(db: Session) -> None:

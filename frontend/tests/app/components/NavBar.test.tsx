@@ -204,6 +204,15 @@ describe("the menu", () => {
     );
     expect(screen.getByRole("button", { name: /kim/ })).toHaveFocus();
   });
+
+  it("stays open on any key but Escape", async () => {
+    renderNav();
+    const { user } = await openMenu();
+
+    await user.keyboard("a");
+
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+  });
 });
 
 describe("the account entries", () => {
@@ -214,6 +223,15 @@ describe("the account entries", () => {
     await user.click(menu.getByRole("menuitem", { name: "Logout" }));
 
     expect(onSignOut).toHaveBeenCalled();
+  });
+
+  it("closes the menu as it signs out", async () => {
+    renderNav();
+    const { user, menu } = await openMenu();
+
+    await user.click(menu.getByRole("menuitem", { name: "Logout" }));
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("switches account without ending the current session", async () => {
@@ -326,6 +344,19 @@ describe("export", () => {
     expect(screen.getByRole("button", { name: "txt" })).toBeInTheDocument();
   });
 
+  it("folds the format picker away when the menu closes", async () => {
+    renderNav();
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+    await user.keyboard("{Escape}");
+
+    await openMenu();
+
+    expect(
+      screen.queryByRole("button", { name: "csv" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("exports in the chosen format", async () => {
     api.on("/api/books/export", {
       body: "txt",
@@ -404,6 +435,23 @@ describe("export", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Too many attempts",
     );
+  });
+
+  it("keeps a refusal folded away with the picker", async () => {
+    api.on("/api/books/export", {
+      status: 429,
+      body: { detail: "Too many attempts. Please wait and try again." },
+    });
+    renderNav();
+    const { user, menu } = await openMenu();
+    await user.click(menu.getByRole("menuitem", { name: /Export Library/ }));
+    await user.click(screen.getByRole("button", { name: "csv" }));
+    await screen.findByRole("alert");
+    await user.keyboard("{Escape}");
+
+    await openMenu();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("keeps the format panel open so a refusal has somewhere to appear", async () => {

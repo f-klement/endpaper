@@ -156,6 +156,17 @@ _2026-10-25_
 
 - The Docker Hub page no longer claims an arm64 image: images are built for `linux/amd64` only.
 
+- The active filter indicator on the home page no longer lights for a saved collection filter that
+  the book list ignores.
+
+- **A book now records where its record came from, and whether it was changed here since.** The
+  source is a catalogue, a file, an import, or typed by hand. The cataloguer's table, the book page
+  and the public catalogue show it, and a MARC export names the cataloguing agency in `040` where
+  one can be cited. The library mode setting says it shows each record's source.
+
+- **A book added from the scan queue is recorded as changed here when you edited its subjects or
+  other details first, or when a catalogue's record was completed from the file's own details.**
+
 ## v0.21.0
 
 _2026-10-24_

@@ -31,6 +31,7 @@ import respx
 from pydantic import AliasChoices, AliasPath, BaseModel
 from sqlalchemy import BigInteger, CheckConstraint
 
+import marc
 import marc_fields
 import metadata
 import models as orm  # registers the tables on Base.metadata
@@ -47,7 +48,6 @@ from tests.corpus import (
     every_python_file,
     is_vendored,
     markdown_files,
-    project_files,
     shipped_modules,
     suite_modules,
 )
@@ -62,9 +62,7 @@ TREE_GUARDS = {
     "TestEveryDirectoryDoorWritesThroughOneFunnel": ("application_modules",),
     "TestEveryEnumColumnIsConstrainedOrExemptWithAReason": ("every_python_file",),
     "TestEveryIntParameterFromTheOutsideIsBounded": ("application_modules",),
-    "TestEveryMarkdownFileHasBalancedCodeFences": ("markdown_files",),
-    "TestNoFileUsesADashAsPunctuation": ("project_files",),
-    "TestNoFileHoldsABidirectionalControl": ("project_files",),
+    "TestTheMarkdownWalkReadsWhatTheRepositoryVersions": ("markdown_files",),
     "TestEveryNumericQueryParamIsBoundedBothWays": ("application_modules",),
     "TestEveryPythonFileCompilesWithoutAWarning": ("every_python_file",),
     "TestEveryRequestBodyRowIdIsBounded": ("application_modules",),
@@ -75,7 +73,6 @@ TREE_GUARDS = {
         "every_python_file",
     ),
     "TestNoExceptionInstanceIsShared": ("application_modules",),
-    "TestNoFixtureLooksLikeACredential": ("every_python_file",),
     "TestNoModuleHardCodesASourceOrder": ("application_modules",),
     "TestNoModuleStartsAProcessTheLinterCannotSee": ("shipped_modules",),
     "TestNothingStripsAnAssertOutOfTheImage": ("shipped_modules",),
@@ -4322,214 +4319,6 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         assert found.get("books.format") == "BookFormat"
 
 
-#: The one bot id a fixture may use. Real Telegram bot ids are eight to ten
-#: digits, so this satisfies `notifications._TELEGRAM_TOKEN` while being
-#: unmistakable to a reader and to a scanner.
-FAKE_BOT_ID = "0:"
-
-
-class TestNoFixtureLooksLikeACredential:
-    """A value that only **looks** like a secret costs the same to triage as one
-    that is, and on the public mirror somebody else does that triage.
-
-    GitHub's secret scanner flagged `test_notifications.py` for a Telegram bot
-    token: realistic bot id, realistic secret half, and shaped that way on
-    purpose because `_TELEGRAM_TOKEN` insists on the shape before the value goes
-    into a URL path. The fixture was never a live credential and that did not
-    matter, because nobody triaging an alert can tell from the outside.
-
-    Everything published is published, so this is a rule about what ships rather
-    than about what is true.
-
-    **These arms walk every Python file under `backend/`.** They walked
-    `backend/tests/` alone until 2026-09-02, and the sentence here justified that
-    by saying `suite_modules()` was what they had. `every_python_file()` landed
-    with the compile rule at the foot of this file and made that false, so the
-    scope moved rather than the excuse: the application modules and the
-    migrations ship to the mirror exactly as the fixtures do, and `models.py` is
-    as public as a fixture is. The widening was free, **99 further files and 0
-    offenders on both arms, measured 2026-09-02** with a planted token and a
-    planted address confirming the scan still sees one. That is the guard's own
-    argument three paragraphs down, applied to itself.
-
-    The class is still named for the shape it forbids rather than the tree it
-    walks, which is why the name did not move with the scope. The frontend half
-    is
-    `frontend/tests/houseRules.test.ts`, "no fixture or string carries an
-    address outside reserved space", and it walks `src/` as well as `tests/`
-    because `src/i18n/en.ts` ships a placeholder address in published source. A
-    docstring here claimed both trees for one round while checking one, which is
-    the reason that sentence is now this specific.
-
-    **The second arm is an address, and it is here because `users.email` is the
-    first column in this schema holding somebody's personal data.** A fixture
-    address is not a credential, but it ships to the same public mirror and
-    reads to a stranger as a real person's mailbox. The reserved domains exist
-    for exactly this: RFC 2606 sets aside `example.com`, `example.net`,
-    `example.org` and the `.test`, `.example`, `.invalid` and `.localhost` TLDs,
-    and nothing outside them can be told apart from somebody's actual address.
-
-    It was added while the diff that introduced the column was **already
-    green**: 25 distinct addresses across both trees and every one already
-    inside reserved space. That is the moment a guard costs nothing, and the
-    moment after it is the one where somebody has to go and change fixtures.
-    """
-
-    #: Files allowed to contain the patterns, with the reason.
-    #:
-    #: Only this file, which has to write them down in order to forbid them.
-    ALLOWED = {"tests/test_house_rules.py"}
-
-    #: The reserved names a fixture address may sit under. RFC 2606 and RFC 6761.
-    #:
-    #: **Written without leading dots and compared by `_is_reserved`, not by
-    #: `str.endswith` against this tuple.** It held both spellings, `.example.com`
-    #: and `example.com`, so that a bare `example.com` would match; the
-    #: undotted entries then made `endswith` accept **`notexample.com`**,
-    #: **`myexample.org`** and **`fakeexample.net`**, all three registrable and
-    #: all three measured. That is `grep -F ci` matching "de**ci**sion", which
-    #: this file has now made in three different guards, so the comparison is a
-    #: named method with its own fixtures rather than a call site anybody can
-    #: get subtly right.
-    RESERVED = (
-        "example.com",
-        "example.net",
-        "example.org",
-        "test",
-        "example",
-        "invalid",
-        "localhost",
-    )
-
-    def _is_reserved(self, domain: str) -> bool:
-        """Is this domain the reserved name itself, or a label under it?
-
-        A boundary comparison, so `mail.example.org` passes and
-        `notexample.com` does not. The dot is what makes it a label boundary,
-        and the equality is what still admits the bare name.
-        """
-        return any(domain == base or domain.endswith("." + base) for base in self.RESERVED)
-
-    def test_no_published_file_contains_a_realistic_bot_token(self):
-        pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
-        offenders: list[str] = []
-        paths = every_python_file()
-        # **The scope is asserted on the list this loop iterates**, not on a
-        # fresh call, which would pin the helper's reach rather than this arm's
-        # use of it. Both walks report zero today, so reverting this line to
-        # `suite_modules()` changes no verdict and silently drops the
-        # application modules and the migrations. That is the same guard, and
-        # the same reasoning, as `test_every_python_file_under_backend_compiles_clean`.
-        assert any("migrations" in path.parts for path in paths)
-        assert any(path.name == "models.py" for path in paths)
-        for path in paths:
-            relative = str(path.relative_to(BACKEND))
-            if relative in self.ALLOWED:
-                continue
-            # **Decoded explicitly, not through the locale.** `_offences` reads
-            # bytes for this reason and this arm walks the same corpus:
-            # `read_text()` uses `locale.getencoding()` and raises
-            # `UnicodeDecodeError` on a latin-1 cookied file that compiles
-            # perfectly well, which is the scan failing rather than the file.
-            # `errors="replace"` because this is looking for a shape, so a
-            # replacement character in an undecodable byte costs nothing and a
-            # traceback costs the whole run.
-            text = path.read_text(encoding="utf-8", errors="replace")
-            for number, line in enumerate(text.splitlines(), 1):
-                if pattern.search(line):
-                    offenders.append(f"{relative}:{number}")
-
-        assert not offenders, (
-            "These carry a string shaped like a live Telegram bot token, and this "
-            f"tree is published. Use {FAKE_BOT_ID!r} as the bot id: it "
-            "satisfies the validator and cannot be mistaken for a credential. "
-            f"{sorted(offenders)}"
-        )
-
-    def _addresses(self, text: str) -> list[str]:
-        """Every address-shaped string in a file.
-
-        Deliberately looser than `mailer._ADDRESS`: this is looking for what a
-        **reader** would take for an address, and a stranger triaging the public
-        mirror does not run our validator over it first.
-
-        **A backslash escape is a boundary**, because a reader takes `\\n` in a
-        string literal for a line break and not for the letter n. Without that,
-        `"import x\\n@x.decorate"` reads as the address `n@x.decorate`.
-        """
-        text = re.sub(r"\\[A-Za-z]", " ", text)
-        return re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
-
-    def test_no_published_file_carries_an_address_outside_reserved_space(self):
-        offenders: list[str] = []
-        paths = every_python_file()
-        # Pinned the same way and for the same reason as the arm above.
-        assert any("migrations" in path.parts for path in paths)
-        assert any(path.name == "models.py" for path in paths)
-        for path in paths:
-            relative = str(path.relative_to(BACKEND))
-            if relative in self.ALLOWED:
-                continue
-            # Decoded the same way and for the same reason as the arm above.
-            text = path.read_text(encoding="utf-8", errors="replace")
-            for number, line in enumerate(text.splitlines(), 1):
-                for address in self._addresses(line):
-                    domain = address.rsplit("@", 1)[1].lower()
-                    if not self._is_reserved(domain):
-                        offenders.append(f"{relative}:{number} ({address})")
-
-        assert not offenders, (
-            "These carry an address outside the domains reserved for documentation, "
-            "and this tree is published, so a stranger cannot tell them from "
-            "somebody's real mailbox. Use example.org, example.com, example.net or "
-            f"a .test / .invalid name: {sorted(offenders)}"
-        )
-
-    def test_the_rules_report_the_shapes_they_exist_for(self):
-        """A rule nothing can fail is a rule nobody notices deleting."""
-        pattern = re.compile(r"[0-9]{6,}:[A-Za-z0-9_-]{25,}")
-        assert pattern.search("123456789:AAHrealisticlookingsecrethalfhere")
-        assert not pattern.search("0:TEST-TOKEN-NOT-A-REAL-CREDENTIAL")
-
-        # The address arm, both ways. A reserved domain passes and a plausible
-        # personal one does not, which is the only distinction it draws.
-        found = self._addresses("write to kim.jones@gmail.com or sam@example.org")
-        assert found == ["kim.jones@gmail.com", "sam@example.org"]
-        # An escape ends the local part and does not join it.
-        assert self._addresses(r'"import x\n@x.decorate"') == []
-        assert self._addresses(r'"line\nkim.jones@gmail.com"') == ["kim.jones@gmail.com"]
-        assert not self._is_reserved(found[0].rsplit("@", 1)[1])
-        assert self._is_reserved(found[1].rsplit("@", 1)[1])
-
-    @pytest.mark.parametrize(
-        ("domain", "reserved"),
-        [
-            ("example.org", True),
-            ("example.com", True),
-            ("example.net", True),
-            # A label under a reserved name, which is what makes this a rule
-            # rather than a list nobody can finish.
-            ("mail.example.org", True),
-            ("sub.deep.example.test", True),
-            ("anything.invalid", True),
-            ("localhost", True),
-            ("test", True),
-            # The three that `str.endswith` against a tuple of bare names
-            # accepted. All registrable, all measured.
-            ("notexample.com", False),
-            ("myexample.org", False),
-            ("fakeexample.net", False),
-            # The same mistake one label along, and at the TLD.
-            ("example.org.evil.test.co", False),
-            ("faketest", False),
-            ("notlocalhost", False),
-            ("gmail.com", False),
-        ],
-    )
-    def test_the_reserved_check_compares_at_a_label_boundary(self, domain, reserved):
-        assert self._is_reserved(domain) is reserved
-
-
 def _label(path: Path) -> str:
     """A path to report, whether or not it is inside the backend tree.
 
@@ -5284,7 +5073,7 @@ class TestNoModuleHardCodesASourceOrder:
     exemption: it is a `frozenset` and says which sources are docked a point,
     not in what order.
 
-    Five exemptions over five names, each a deliberate table that something
+    Six exemptions over six names, each a deliberate table that something
     else pins. One name each, and the bullets are the list:
 
     * `sources.DEFAULT_ORDER`, the seeded order itself.
@@ -5331,6 +5120,8 @@ class TestNoModuleHardCodesASourceOrder:
       by surfacing nothing when its entry was dropped. What still checks that
       table is unchanged and is in `test_sources.py`: its membership,
       its spellings, and its values against the committed sample.
+    * `marc._CATALOGUING_AGENCY`, the code `040 $a` names each origin by. A
+      mapping consulted by key, `targets.SEEDED`'s case.
     * `sources.MEASURED`, what each lookup source needing no credential was
       measured to do.
       **Justified by what is checkable rather than by what is obvious.** Nothing
@@ -5381,6 +5172,10 @@ class TestNoModuleHardCodesASourceOrder:
         # `Call` has no literal behind it; the private name is gone now, and
         # `test_every_exemption_still_exists_to_be_exempted` is what said so.
         "targets.py": {"SEEDED"},
+        # Each origin's cataloguing agency code, consulted by key. Its key order
+        # is decoration, as `SEEDED`'s is, and every code is pinned by
+        # `test_marc.py::TestTheCataloguingSource`.
+        "marc.py": {"_CATALOGUING_AGENCY"},
     }
 
     def _offenders(self, paths: list[Path] | None = None) -> dict[str, set[str]]:
@@ -5522,7 +5317,7 @@ class TestNoModuleHardCodesASourceOrder:
 
     def test_every_exemption_still_exists_to_be_exempted(self):
         """An allowlist entry for a deleted constant guards nothing."""
-        owners = {"sources.py": sources, "metadata.py": metadata, "targets.py": targets}
+        owners = {"sources.py": sources, "metadata.py": metadata, "targets.py": targets, "marc.py": marc}
         for module, allowed in self.ALLOWED.items():
             for name in allowed:
                 assert hasattr(owners[module], name), (
@@ -6596,49 +6391,16 @@ def _floor_from_a_constructed_parse(root: Path, scratch: Path) -> set[Path]:
     return region - excluded
 
 
-def _fence_lines(text: str) -> list[int]:
-    """Line numbers of every fence, indented by up to three spaces as CommonMark
-    allows. Counting only column zero reports a false odd on a fence inside a
-    list."""
-    fences = []
-    for n, line in enumerate(text.splitlines(), start=1):
-        body = line.lstrip(" ")
-        # Four spaces is an indented code block, so the backticks there are
-        # content. `line[:4].lstrip()` looks equivalent and is not: at an indent
-        # of three it leaves one backtick and matches nothing.
-        if len(line) - len(body) <= 3 and body.startswith("```"):
-            fences.append(n)
-    return fences
+class TestTheMarkdownWalkReadsWhatTheRepositoryVersions:
+    """`markdown_files` walks every Markdown document the repository versions.
 
-
-class TestEveryMarkdownFileHasBalancedCodeFences:
-    """An odd number of fences renders everything after the last one as code.
-
-    Two published registers carried one on 2026-09-03, both left by a previous
-    wave folding a working draft in with its own scaffolding: `CHANGELOG.md`
-    swallowed everything below its third entry, and `docs/decisions.md`
-    everything below a `$2` decision, along with 42 lines of draft instructions
-    addressed to a main session. Nothing failed. The register that records how
-    this project makes decisions was unreadable on GitHub and the suite was
-    green, because no test read a Markdown file for its shape.
-
-    Parity is the whole check and it is deliberately not a parser. What it
-    cannot see is a fence closed in the wrong place, which renders wrongly with
-    an even count; what it catches is the one a fold leaves behind.
+    Its consumers are the published prose guards. Fence parity is the errata rule
+    `every-markdown-file-has-balanced-code-fences`, which reads git's index instead.
     """
-
-    def test_no_markdown_file_has_an_odd_number_of_fences(self) -> None:
-        repo = BACKEND.parent
-        counts = {
-            str(path.relative_to(repo)): len(_fence_lines(path.read_text(encoding="utf-8")))
-            for path in markdown_files()
-        }
-        odd = {name: n for name, n in counts.items() if n % 2}
-        assert odd == {}, f"{odd}, of {len(counts)} files walked"
 
     def test_the_walk_never_narrows_below_the_globs_it_replaced(self, tmp_path: Path) -> None:
         """Anti vacuity, as a ratchet. A walk that returned nothing would pass
-        the rule above in silence, which is the shape this repository calls an
+        every rule reading it in silence, which is the shape this repository calls an
         instrument that cannot see the failure reporting its absence, and the
         way this rule was weakest was a walk narrower than the tree rather than
         an empty one. So the floor is the two globs this replaced: whatever else
@@ -7050,30 +6812,6 @@ class TestEveryMarkdownFileHasBalancedCodeFences:
             "ignore_patterns": ["refuse_empty"],
             "is_ignored": ["is_dir"],
         }, checked
-
-    def test_an_unbalanced_fence_is_reported(self, tmp_path: Path) -> None:
-        fixture = tmp_path / "broken.md"
-        fixture.write_text("# Title\n\n```\nsome code\n```\n\nprose\n```\n")
-        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 3
-
-    def test_a_balanced_pair_is_not_reported(self, tmp_path: Path) -> None:
-        fixture = tmp_path / "fine.md"
-        fixture.write_text("# Title\n\n```bash\nls\n```\n\nprose\n")
-        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 2
-
-    def test_a_fence_indented_inside_a_list_is_counted(self, tmp_path: Path) -> None:
-        """Why the count tolerates indentation. At column zero only, this file
-        reads as one fence and fails a rule it satisfies."""
-        fixture = tmp_path / "listed.md"
-        fixture.write_text("- item\n\n   ```\n   ls\n   ```\n\n```\nx\n```\n")
-        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 4
-
-    def test_four_spaces_is_an_indented_code_block_rather_than_a_fence(self, tmp_path: Path) -> None:
-        """The other edge of the same rule: at four spaces the backticks are
-        content, so counting them would report a false odd."""
-        fixture = tmp_path / "indented.md"
-        fixture.write_text("prose\n\n    ```\n\n```\nx\n```\n")
-        assert len(_fence_lines(fixture.read_text(encoding="utf-8"))) == 2
 
 
 class TestAOneTimeCodeIsServedOnlyWhereItIsNamed:
@@ -10136,13 +9874,15 @@ def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
 #: **A row is a function, not a call**, because a byte door is a function: a
 #: second parse inside a registered door adds no row, and the row's property
 #: answers for whatever the door parses of the input it generates.
-#: `backup.py::read_manifest` holds two, both of that input. A second parse of
-#: bytes from elsewhere inside a registered door is read by eye.
+#: `backup.py::read_manifest` holds one and reaches the other through
+#: `_manifest_bytes`, both of that input. A second parse of bytes from
+#: elsewhere inside a registered door is read by eye.
 _BYTE_DOORS: Final[dict[str, str]] = {
     "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
     "metadata.py::_parsed": ("tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"),
     "opds.py::read_page": "tests/test_opds.py::TestAPageIsReadOrRefusedByName",
     "backup.py::read_manifest": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
+    "backup.py::_manifest_bytes": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
     "backup.py::restore": (
         "second round: reopens what `read_manifest` read, then reads each cover "
         "after the commit, where one it cannot read is declined alone"
@@ -11169,122 +10909,3 @@ class TestEveryDirectoryDoorWritesThroughOneFunnel:
         quiet.write_text("from models import User\n\n\ndef read(db):\n    return db.query(User)\n")
 
         assert _user_construction_sites([quiet]) == {}
-
-
-#: The en dash and the em dash, written as escapes so that this file holds neither.
-_DASHES: Final = ("\u2013", "\u2014")
-
-#: The files that match or quote a dash rather than use one: how many each holds,
-#: and why. The count is pinned, so a dash added beside a quoted one fails as a
-#: dash in any other file does. `CLAUDE.md` names the same four.
-_DASH_HOLDERS: Final = {
-    "CLAUDE.md": (3, "states the rule by quoting the characters it bans"),
-    "backend/bibliographic.py": (2, "matches an en dash in catalogue data, such as a range of years"),
-    "backend/tests/test_authority.py": (1, "a catalogue record captured as it was served"),
-    "frontend/tests/houseRules.test.ts": (2, "the frontend arm of this rule, which names the characters"),
-}
-
-#: The holders the mirror strips, which a clone of it therefore lacks.
-_STRIPPED_HOLDERS: Final = frozenset({"CLAUDE.md"})
-
-#: The tooling directory, which the mirror strips whole: a tree without it is
-#: the published one. The publish gate inside it holds the strip list.
-_TOOLING: Final = BACKEND.parent / "ci"
-
-
-def _dashes_by_file() -> dict[str, int]:
-    """How many dashes each text file holding one carries. A file that is not
-    UTF-8 is a binary and is skipped, since its bytes can spell a dash by chance."""
-    repo = BACKEND.parent
-    counts = {}
-    for path in project_files(repo):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        if n := sum(text.count(dash) for dash in _DASHES):
-            counts[str(path.relative_to(repo))] = n
-    return counts
-
-
-class TestNoFileUsesADashAsPunctuation:
-    """No en dash or em dash outside the files that match or quote one, and in
-    each of those exactly the count pinned for it.
-
-    The frontend arm reads its own source; this one reads every file the
-    repository versions outside a directory a tool owns, so backend code, the
-    documentation and the tooling are held to the rule too. It reaches neither
-    `.claude`, which no suite is sent and which the full gate checks instead,
-    nor a spaced hyphen, which in Markdown cannot be told from a list item.
-    """
-
-    def test_each_file_holds_exactly_its_pinned_count(self) -> None:
-        published = not _TOOLING.is_dir()
-        expected = {
-            name: n for name, (n, _) in _DASH_HOLDERS.items() if not (published and name in _STRIPPED_HOLDERS)
-        }
-        assert _dashes_by_file() == expected
-
-    def test_the_holders_a_mirror_lacks_are_the_ones_its_strip_list_names(self) -> None:
-        """Read from the strip list, because a published test cannot import the
-        guard that parses it: that guard is stripped too."""
-        if not _TOOLING.is_dir():
-            pytest.skip("the published tree carries no strip list")
-        gate = (_TOOLING / "make-public-tree.sh").read_text()
-        block = re.search(r'^DENY="\n(.*?)\n"', gate, re.MULTILINE | re.DOTALL)
-        assert block, "no strip list was read"
-        denied = block.group(1).split()
-        stripped = {
-            name for name in _DASH_HOLDERS if any(name == e or name.startswith(e + "/") for e in denied)
-        }
-        assert stripped == _STRIPPED_HOLDERS
-
-
-#: Unicode's `Bidi_Control` property, all twelve, written as escapes so that this
-#: file holds none: the Arabic letter mark, the left to right and right to left
-#: marks, the five embeddings and overrides, and the four isolates.
-_BIDI_CONTROLS: Final = re.compile("[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
-
-
-class TestNoFileHoldsABidirectionalControl:
-    """No file carries a raw bidirectional control character.
-
-    One renders as nothing and reorders what a reader sees after it, so a line
-    can review as one thing and run as another. A test that needs one spells it
-    as an escape, which is the same string at run time, and a captured fixture
-    spells it as its format's reference (`&#x200F;` in XML, `\\u200f` in JSON),
-    which its parser reads as the same string, so no file is exempt.
-
-    It reads what `project_files` yields: the files the repository versions
-    outside a dotted directory or one a tool owns. So it lets through every
-    dotted directory, `.claude` among them, which no suite is sent, and would
-    miss a tracked one the mirror publishes. It also lets through a file that is
-    not UTF-8, which is skipped as a binary since its bytes can spell one by
-    chance.
-    """
-
-    def test_no_file_holds_one(self) -> None:
-        repo = BACKEND.parent
-        offenders = []
-        for path in project_files(repo):
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            if _BIDI_CONTROLS.search(text):
-                offenders.append(str(path.relative_to(repo)))
-        assert offenders == []
-
-    def test_the_gate_script_greps_for_exactly_these_controls(self) -> None:
-        """The gate script spells the set in octal for `.claude`, which a regex over the
-        text cannot read, so this test decodes it.
-        """
-        script = (BACKEND.parent / "ci" / "gate.sh").read_text(encoding="utf-8")
-        leg = script.split("bidi_status=0\n", 1)[1].split("|| bidi_status=$?", 1)[0]
-        spelt = re.findall(r"printf '((?:\\\d{3})+)'", leg)
-        in_script = {
-            bytes(int(octal, 8) for octal in sequence.split("\\")[1:]).decode("utf-8") for sequence in spelt
-        }
-        in_regex = {chr(code) for code in range(0x2100) if _BIDI_CONTROLS.match(chr(code))}
-        assert len(in_regex) == 12
-        assert in_script == in_regex

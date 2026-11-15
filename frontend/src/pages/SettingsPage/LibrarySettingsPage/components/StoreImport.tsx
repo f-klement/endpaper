@@ -169,54 +169,85 @@ function StoreRow({ id, source, isImporting, onChoose }: StoreRowProps) {
         onFile={(file) => onChoose(id, file)}
       />
 
-      {source?.status === "reading" && (
+      <SourceState storeName={store.name} source={source} />
+    </div>
+  );
+}
+
+/**
+ * What this store's pick is doing, or turned out to be, and nothing before a
+ * pick is made.
+ */
+function SourceState({
+  storeName,
+  source,
+}: {
+  storeName: MessageKey;
+  source: StoreSource | undefined;
+}) {
+  const { t } = useTranslation();
+  if (source === undefined) return null;
+  switch (source.status) {
+    case "reading":
+      return (
         <p role="status" className="text-xs text-paper-600 dark:text-paper-400">
           {t("stores.reading", { file: source.fileName })}
         </p>
-      )}
-      {source?.status === "read" && (
-        <div className="text-xs text-paper-600 space-y-0.5 dark:text-paper-400">
-          <p>
-            {t("stores.sourceRead", {
-              count: source.library.books.length,
-            })}
-          </p>
-          {source.library.skipped > 0 && (
-            <p>
-              {t("stores.sourceSkipped", {
-                count: source.library.skipped,
-              })}
-            </p>
-          )}
-          {source.library.refused > 0 && (
-            <p>
-              {t("stores.sourceRefused", {
-                count: source.library.refused,
-              })}
-            </p>
-          )}
-        </div>
-      )}
-      {/* **The store is named in the sentence and not only in the heading
-          above it.** This is the one place a member meets the rule that a
-          source which cannot be read costs that source alone, and "was
-          skipped" with no name is what makes a member stop the whole import
-          to find out which one. */}
-      {source?.status === "failed" && (
+      );
+    case "read":
+      return <SourceRead library={source.library} />;
+    // **The store is named in the sentence and not only in the heading above
+    // it.** This is the one place a member meets the rule that a source which
+    // cannot be read costs that source alone, and "was skipped" with no name is
+    // what makes a member stop the whole import to find out which one.
+    case "failed":
+      return (
         <ImportAlert>
           {t("stores.sourceLost", {
-            store: t(store.name),
+            store: t(storeName),
             reason: t(STORE_FAILURES[source.failure]),
           })}
         </ImportAlert>
-      )}
-      {source?.status === "error" && (
+      );
+    case "error":
+      return (
         <ImportAlert>
           {t("stores.sourceLost", {
-            store: t(store.name),
+            store: t(storeName),
             reason: errorText(source.error, t("common.somethingWentWrong"), t),
           })}
         </ImportAlert>
+      );
+  }
+}
+
+/** What a source that read held: its books, and what it left behind. */
+function SourceRead({
+  library,
+}: {
+  library: Extract<StoreSource, { status: "read" }>["library"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="text-xs text-paper-600 space-y-0.5 dark:text-paper-400">
+      <p>
+        {t("stores.sourceRead", {
+          count: library.books.length,
+        })}
+      </p>
+      {library.skipped > 0 && (
+        <p>
+          {t("stores.sourceSkipped", {
+            count: library.skipped,
+          })}
+        </p>
+      )}
+      {library.refused > 0 && (
+        <p>
+          {t("stores.sourceRefused", {
+            count: library.refused,
+          })}
+        </p>
       )}
     </div>
   );

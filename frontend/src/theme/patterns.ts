@@ -295,24 +295,30 @@ export function measure(branch: Branch): Arc {
 
   return {
     length: total,
-    at(distance) {
-      let index = 1;
-      while (index < marks.length - 1 && marks[index]!.distance < distance) {
-        index += 1;
-      }
-      const before = marks[index - 1]!;
-      const after = marks[index]!;
-      const span = after.distance - before.distance;
-      const fraction = span > 0 ? (distance - before.distance) / span : 0;
-      // Across a segment boundary the two marks are in different cubics, and
-      // the earlier one is the later one's t=0: the endpoints are shared, so
-      // interpolating from zero is exact rather than approximate.
-      const from = before.segment === after.segment ? before.t : 0;
-      const t = from + (after.t - from) * fraction;
-      const [x, y] = pointAt(after.segment, t);
-      return { x, y, angle: angleAt(after.segment, t) };
-    },
+    at: (distance) => positionAt(marks, distance),
   };
+}
+
+/** Position and tangent `distance` along the branch `marks` sampled. */
+function positionAt(
+  marks: readonly Mark[],
+  distance: number,
+): { x: number; y: number; angle: number } {
+  let index = 1;
+  while (index < marks.length - 1 && marks[index]!.distance < distance) {
+    index += 1;
+  }
+  const before = marks[index - 1]!;
+  const after = marks[index]!;
+  const span = after.distance - before.distance;
+  const fraction = span > 0 ? (distance - before.distance) / span : 0;
+  // Across a segment boundary the two marks are in different cubics, and
+  // the earlier one is the later one's t=0: the endpoints are shared, so
+  // interpolating from zero is exact rather than approximate.
+  const from = before.segment === after.segment ? before.t : 0;
+  const t = from + (after.t - from) * fraction;
+  const [x, y] = pointAt(after.segment, t);
+  return { x, y, angle: angleAt(after.segment, t) };
 }
 
 interface GrowOptions {
@@ -417,58 +423,99 @@ function grow(
   } = options;
   const href = motifs.id(shape);
   const scales = Array.isArray(scale) ? scale : [scale];
+  const run = { spacing, lean, alternate, inset, taper, jitter };
+  return branches
+    .map((branch) => growBranch(href, scales, branch, run))
+    .join("");
+}
+
+/** A run's options once `grow` has filled in every default. */
+type Run = Required<Omit<GrowOptions, "shape" | "scale">>;
+
+/** Every placement along one branch, which is where the cycles restart. */
+function growBranch(
+  href: string,
+  scales: number[],
+  branch: Branch,
+  run: Run,
+): string {
+  const { spacing, lean, alternate, inset, taper, jitter } = run;
+  const arc = measure(branch);
+  const usable = arc.length * (1 - 2 * inset);
+  const count = Math.max(1, Math.round(usable / spacing) + 1);
+  const { origin, phase } = cycleStart(branch);
 
   const parts: string[] = [];
-
-  for (const branch of branches) {
-    const arc = measure(branch);
-    const usable = arc.length * (1 - 2 * inset);
-    const count = Math.max(1, Math.round(usable / spacing) + 1);
-    // Where the lean and scale cycles start, taken from where the branch does.
-    //
-    // The cycles used to run off a counter shared by every branch in the call,
-    // so which side a leaf leaned to depended on how many motifs happened to be
-    // emitted before it and adding one twig flipped every leaf downstream.
-    // Restarting them at zero per branch fixes that and introduces the opposite
-    // fault: congruent branches come out pixel-identical, and Willow has two
-    // serpentines that are the same curve 130px apart. Phasing from the start
-    // point separates them without making either depend on the others.
-    const origin = branch[0]?.[0] ?? [0, 0];
-    const phase = Math.floor(seed(origin[0], origin[1]) * 1024);
-
-    for (let step = 0; step < count; step += 1) {
-      const even =
-        arc.length * inset +
-        (count === 1 ? usable / 2 : (usable * step) / (count - 1));
-      // Wander from the even spacing, never past half of it: two motifs that
-      // swapped places would cross their own stem.
-      const wander = jitter
-        ? (seed(origin[0], origin[1], step) - 0.5) * jitter * spacing
-        : 0;
-      const along = Math.max(0, Math.min(arc.length, even + wander));
-      const { x, y, angle } = arc.at(along);
-      const cycle = step + phase;
-      const side = alternate && cycle % 2 === 1 ? -1 : 1;
-      // The taper runs on the even position rather than the jittered one, so
-      // moving a leaf does not also resize it.
-      const grown = count === 1 ? 1 : step / (count - 1);
-      const shrink = 1 + (taper - 1) * grown;
-      const wobble = jitter
-        ? 1 + (seed(step, origin[1], origin[0]) - 0.5) * jitter
-        : 1;
-      parts.push(
-        place(
-          href,
-          x,
-          y,
-          angle + lean * side,
-          Math.round(scales[cycle % scales.length]! * shrink * wobble * 100) /
-            100,
-        ),
-      );
-    }
+  for (let step = 0; step < count; step += 1) {
+    const even =
+      arc.length * inset +
+      (count === 1 ? usable / 2 : (usable * step) / (count - 1));
+    const { wander, wobble } = jitterAt(origin, step, jitter, spacing);
+    const along = Math.max(0, Math.min(arc.length, even + wander));
+    const { x, y, angle } = arc.at(along);
+    const cycle = step + phase;
+    const side = alternate && cycle % 2 === 1 ? -1 : 1;
+    const shrink = taperAt(step, count, taper);
+    parts.push(
+      place(
+        href,
+        x,
+        y,
+        angle + lean * side,
+        Math.round(scales[cycle % scales.length]! * shrink * wobble * 100) /
+          100,
+      ),
+    );
   }
   return parts.join("");
+}
+
+/**
+ * Where the lean and scale cycles start, taken from where the branch does.
+ *
+ * The cycles used to run off a counter shared by every branch in the call,
+ * so which side a leaf leaned to depended on how many motifs happened to be
+ * emitted before it and adding one twig flipped every leaf downstream.
+ * Restarting them at zero per branch fixes that and introduces the opposite
+ * fault: congruent branches come out pixel-identical, and Willow has two
+ * serpentines that are the same curve 130px apart. Phasing from the start
+ * point separates them without making either depend on the others.
+ */
+function cycleStart(branch: Branch): { origin: Point; phase: number } {
+  const origin = branch[0]?.[0] ?? [0, 0];
+  return { origin, phase: Math.floor(seed(origin[0], origin[1]) * 1024) };
+}
+
+/**
+ * What a run's scale is multiplied by at placement `step` of `count`: 1 at the
+ * first, `taper` at the last.
+ *
+ * The taper runs on the even position rather than the jittered one, so moving
+ * a leaf does not also resize it.
+ */
+function taperAt(step: number, count: number, taper: number): number {
+  const grown = count === 1 ? 1 : step / (count - 1);
+  return 1 + (taper - 1) * grown;
+}
+
+/**
+ * How far one placement wanders from the even spacing, and how much its size
+ * wobbles, both seeded from the branch origin and the step.
+ *
+ * Wander is never past half the spacing: two motifs that swapped places would
+ * cross their own stem.
+ */
+function jitterAt(
+  origin: Point,
+  step: number,
+  jitter: number,
+  spacing: number,
+): { wander: number; wobble: number } {
+  if (!jitter) return { wander: 0, wobble: 1 };
+  return {
+    wander: (seed(origin[0], origin[1], step) - 0.5) * jitter * spacing,
+    wobble: 1 + (seed(step, origin[1], origin[0]) - 0.5) * jitter,
+  };
 }
 
 /** A placement of one motif, for the few that are positioned deliberately. */
@@ -572,6 +619,28 @@ export function lattice(
   unit: (cell: { x: number; y: number; column: number; row: number }) => string,
   options: LatticeOptions = {},
 ): string {
+  const { columns, rows } = cellCounts(size, pitch, options);
+  const parts: string[] = [];
+  for (let column = 0; column < columns; column += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      const shift = options.stagger && row % 2 === 1 ? pitch.x / 2 : 0;
+      parts.push(
+        unit({ x: column * pitch.x + shift, y: row * pitch.y, column, row }),
+      );
+    }
+  }
+  return parts.join("");
+}
+
+/**
+ * How many columns and rows a lattice has, once both invariants on `lattice`
+ * hold. Throws where either does not.
+ */
+function cellCounts(
+  size: number | { x: number; y: number },
+  pitch: { x: number; y: number },
+  options: LatticeOptions,
+): { columns: number; rows: number } {
   // A pair rather than one number, because Asanoha's lattice is laid out in a
   // taller space than the tile and squashed into it afterwards. See the note on
   // the squash: the repeat has to be exact in the space the cells are counted
@@ -594,17 +663,7 @@ export function lattice(
       `lattice: a staggered lattice needs an even row count, not ${Math.round(rows)}`,
     );
   }
-
-  const parts: string[] = [];
-  for (let column = 0; column < Math.round(columns); column += 1) {
-    for (let row = 0; row < Math.round(rows); row += 1) {
-      const shift = options.stagger && row % 2 === 1 ? pitch.x / 2 : 0;
-      parts.push(
-        unit({ x: column * pitch.x + shift, y: row * pitch.y, column, row }),
-      );
-    }
-  }
-  return parts.join("");
+  return { columns: Math.round(columns), rows: Math.round(rows) };
 }
 
 interface RadialOptions {
@@ -830,36 +889,12 @@ export function swirl(
   // tuple already in the list. Copying the array alone fixes only the first,
   // which is why this copies the numbers out.
   const fixed: Point[] = centres.map(([x, y]) => [x, y]);
-
-  /** The offset to the nearest image, in one axis. Never more than half a tile. */
-  const nearest = (value: number): number => {
-    const inside = ((value % size) + size) % size;
-    return inside > size / 2 ? inside - size : inside;
-  };
-
-  for (const [index, centre] of fixed.entries()) {
-    for (const [other, against] of fixed.entries()) {
-      // A centre's own nearest image is one tile away, which is the check that
-      // a single centre with too long a reach has to fail.
-      const apart =
-        index === other
-          ? size
-          : Math.hypot(
-              nearest(centre[0] - against[0]),
-              nearest(centre[1] - against[1]),
-            );
-      if (apart < 2 * reach) {
-        throw new Error(
-          `swirl centres ${round(apart)}px apart overlap at reach ${reach}`,
-        );
-      }
-    }
-  }
+  refuseOverlap(fixed, reach, size);
 
   return ([x, y]) => {
     for (const centre of fixed) {
-      const ox = nearest(x - centre[0]);
-      const oy = nearest(y - centre[1]);
+      const ox = nearest(x - centre[0], size);
+      const oy = nearest(y - centre[1], size);
       const radius = Math.hypot(ox, oy);
       // At most one centre can reach a point, because the guard above made the
       // pulls disjoint. So the first one found is the only one.
@@ -875,6 +910,34 @@ export function swirl(
     }
     return [x, y];
   };
+}
+
+/** The offset to the nearest image, in one axis. Never more than half a tile. */
+function nearest(value: number, size: number): number {
+  const inside = ((value % size) + size) % size;
+  return inside > size / 2 ? inside - size : inside;
+}
+
+/** Throws where two of `swirl`'s pulls, or one and its own image, overlap. */
+function refuseOverlap(fixed: Point[], reach: number, size: number): void {
+  for (const [index, centre] of fixed.entries()) {
+    for (const [other, against] of fixed.entries()) {
+      // A centre's own nearest image is one tile away, which is the check that
+      // a single centre with too long a reach has to fail.
+      const apart =
+        index === other
+          ? size
+          : Math.hypot(
+              nearest(centre[0] - against[0], size),
+              nearest(centre[1] - against[1], size),
+            );
+      if (apart < 2 * reach) {
+        throw new Error(
+          `swirl centres ${round(apart)}px apart overlap at reach ${reach}`,
+        );
+      }
+    }
+  }
 }
 
 /**
@@ -1711,6 +1774,14 @@ function plaitSpans(rise: 1 | -1, offset: number): [number, number][] {
     gaps.push([t - half, t + half]);
   }
 
+  return spansBetween(gaps);
+}
+
+/**
+ * What is left of the band's 0 to 1 once `gaps` are taken out, overlapping
+ * gaps merged and slivers dropped.
+ */
+function spansBetween(gaps: [number, number][]): [number, number][] {
   gaps.sort((a, b) => a[0] - b[0]);
   const spans: [number, number][] = [];
   let cursor = 0;

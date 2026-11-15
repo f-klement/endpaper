@@ -1,17 +1,20 @@
 """Tests for backend/scripts/postgres_database.py.
 
-**The two functions that talk to a server are not reached here, and the split is
-deliberate.** They run where a Postgres exists: the suite's own `conftest.py`
-creates and checks its databases through them when `DATABASE_URL` names
-Postgres, and the pipeline's Postgres job runs the script's two commands. A
-SQLite run therefore leaves them unreached by design, which is what a coverage
-figure taken on SQLite shows.
+**Neither function that talks to a server meets one here.** They run where a
+Postgres exists: the suite's own `conftest.py` creates and checks its databases
+through them when `DATABASE_URL` names Postgres, and the pipeline's Postgres
+job runs the script's two commands. This suite runs on SQLite, so
+`wrong_locale` is judged here against a stand in engine answering the one row
+its query reads; what the server itself answers stays with those two callers.
 
 `_safe_name` needs no server, and it is the one that guards something: it is
 the only thing between a name and DDL that takes no bind parameter. `main`
 needs none either once those two are stood in for, and its exit status is what
 fails the pipeline's job on a database with the wrong collation.
 """
+
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 import pytest
 
@@ -73,3 +76,46 @@ class TestTheScriptsExitStatusIsWhatThePipelineReads:
     def test_a_command_it_does_not_know_is_a_usage_error(self, argv, capsys):
         assert main(argv) == 2
         assert "--assert-locale" in capsys.readouterr().err
+
+
+class TestTheLocaleCheckNamesEveryDimensionThatIsWrong:
+    """`wrong_locale` against a stand in engine whose one row is the database's locale."""
+
+    @pytest.fixture
+    def server_answering(self, monkeypatch):
+        def answer(collate: str, encoding: str) -> None:
+            row = SimpleNamespace(one=lambda: (collate, encoding))
+
+            @contextmanager
+            def connect():
+                yield SimpleNamespace(execute=lambda statement: row)
+
+            monkeypatch.setattr(
+                postgres_database,
+                "create_engine",
+                lambda url, **kwargs: SimpleNamespace(connect=connect),
+            )
+
+        return answer
+
+    def test_a_database_in_the_wanted_locale_has_nothing_wrong(self, server_answering):
+        server_answering("C", "UTF8")
+        assert postgres_database.wrong_locale("postgresql://ci@postgres/endpaper") is None
+
+    def test_a_wrong_collation_is_named_with_what_was_wanted(self, server_answering):
+        server_answering("en_US.utf8", "UTF8")
+        assert postgres_database.wrong_locale("postgresql://ci@postgres/endpaper") == (
+            "datcollate is 'en_US.utf8', wanted 'C'"
+        )
+
+    def test_a_wrong_encoding_is_named_under_the_right_collation(self, server_answering):
+        server_answering("C", "LATIN1")
+        assert postgres_database.wrong_locale("postgresql://ci@postgres/endpaper") == (
+            "encoding is 'LATIN1', wanted 'UTF8'"
+        )
+
+    def test_a_wrong_encoding_and_collation_are_both_named(self, server_answering):
+        server_answering("en_US.utf8", "LATIN1")
+        assert postgres_database.wrong_locale("postgresql://ci@postgres/endpaper") == (
+            "datcollate is 'en_US.utf8', wanted 'C'; encoding is 'LATIN1', wanted 'UTF8'"
+        )

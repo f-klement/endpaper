@@ -22,6 +22,7 @@ import evidence
 import models
 from catalogue import Record, Subject
 from categories import join_categories
+from enums import RecordOrigin
 from evidence import Policy, _apply_match, _bounded_match
 from google_books import _volume_to_fields
 from models import Book
@@ -164,8 +165,12 @@ class TestTheSignatureIsTheBound:
     #: is recognised on the shelf and Google's spelling of it is often not the
     #: library's. `isbn13` is one printing among several rather than this copy.
     #: `classifications` and `suggested_tag_ids` are not scalars and are
-    #: applied by `confirm` and by the caller respectively.
-    NOT_WRITTEN = frozenset({"source", "title", "isbn13", "classifications", "suggested_tag_ids"})
+    #: applied by `confirm` and by the caller respectively. `record_origin` is
+    #: where the candidate's record came from, and applying it to a Book that
+    #: exists does not change where that Book's record came from.
+    NOT_WRITTEN = frozenset(
+        {"source", "title", "isbn13", "classifications", "suggested_tag_ids", "record_origin"}
+    )
 
     def _names_read_off_the_match(self) -> set[str]:
         """Every field name `_apply_match` takes off its argument, from the source.
@@ -546,6 +551,40 @@ class TestARefreshWritesExactlyItsNineColumns:
         changed = evidence.apply_record(book, Record(**_ASSERTED), Policy.REFRESH)
 
         assert "cover_url" not in changed
+
+
+class TestWhatAnAppliedRecordDoesToProvenance:
+    def test_a_refresh_names_the_leading_catalogue_and_clears_the_flag(self):
+        book = Book(**_HELD, record_origin=RecordOrigin.MANUAL, record_modified_here=True)
+
+        record = Record(**{**_ASSERTED, "source": "dnb+google_books"})
+
+        evidence.apply_record(book, record, Policy.REFRESH)
+
+        assert (book.record_origin, book.record_modified_here) == (RecordOrigin.DNB, False)
+
+    def test_a_refresh_from_a_record_no_catalogue_leads_keeps_the_origin(self):
+        book = Book(**_HELD, record_origin=RecordOrigin.MANUAL, record_modified_here=False)
+
+        evidence.apply_record(book, Record(**{**_ASSERTED, "source": "marc"}), Policy.REFRESH)
+
+        assert (book.record_origin, book.record_modified_here) == (RecordOrigin.MANUAL, True)
+
+    def test_an_enrichment_that_fills_a_gap_marks_the_record_changed(self):
+        book = Book(title="Held", record_origin=RecordOrigin.DNB, record_modified_here=False)
+
+        evidence.apply_record(book, Record(source="loc", publisher="Ace"), Policy.FILL_GAPS)
+
+        assert (book.record_origin, book.record_modified_here) == (RecordOrigin.DNB, True)
+
+    def test_a_new_cover_alone_is_not_a_change_to_the_record(self):
+        book = Book(title="Held", record_modified_here=False)
+
+        record = Record(source="loc", cover_url="https://covers.openlibrary.org/b/id/1-L.jpg")
+
+        changed = evidence.apply_record(book, record, Policy.FILL_GAPS)
+
+        assert (changed, book.record_modified_here) == (["cover_url"], False)
 
 
 #: Spelled out for `_REFRESHED_NINE`'s reason. A record no Member selected

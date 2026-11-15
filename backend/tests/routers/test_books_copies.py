@@ -41,6 +41,15 @@ class TestAddingACopy:
         assert copy["author"] == "Frank Herbert"
         assert copy["isbn"] == "9780441013593"
 
+    def test_the_copy_carries_where_its_record_came_from(self, client, admin, make_book):
+        """The same record about a second object, so the same provenance."""
+        book = make_book(admin["headers"], title="Dune", record_origin="dnb")
+        client.patch(f"/api/books/{book['id']}", json={"publisher": "Ace"}, headers=admin["headers"])
+
+        copy = add_copy(client, admin["headers"], book["id"]).json()
+
+        assert (copy["record_origin"], copy["record_modified_here"]) == ("dnb", True)
+
     def test_the_copy_carries_its_own_shelf(self, client, admin, make_book):
         """The point of a row per copy: one can be in the loft and one downstairs."""
         book = make_book(admin["headers"], title="Dune", location="Living room")

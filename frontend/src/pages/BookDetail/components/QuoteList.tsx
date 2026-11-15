@@ -41,7 +41,7 @@ interface QuoteListProps {
  * constraint validation does not run outside a form, so `min`, `max` and the
  * implicit `step` of 1 were all inert there. Two consequences, both measured
  * against the code as it was: an out-of-range page reached the API and 422d
- * *after* `saveEdit` had closed the editor and thrown the edit away, and a
+ * *after* the save had closed the editor and thrown the edit away, and a
  * decimal like `12.5` fell through the `Number.isInteger` branch below and was
  * discarded in silence, which is the exact defect this comment says was
  * removed. Inside a form the step mismatch stops both before they start.
@@ -53,6 +53,156 @@ function pageOrNull(value: string): number | null {
   return Number.isInteger(parsed) ? parsed : null;
 }
 
+const FIELD_CLASS =
+  "w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700";
+
+/**
+ * One quote being corrected, seeded from the quote as stored. Mounted afresh
+ * for each quote opened, so a correction abandoned on one never seeds another.
+ *
+ * A form, not a div. `min`/`max` on the page field are only enforced by a
+ * submit, and this used to be a click handler.
+ */
+function QuoteEditForm({
+  quote,
+  onSave,
+  onCancel,
+}: {
+  quote: QuoteOut;
+  onSave: (quote: QuoteCreate) => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [editText, setEditText] = useState(quote.text);
+  const [editPage, setEditPage] = useState(
+    quote.page == null ? "" : String(quote.page),
+  );
+  const [editNote, setEditNote] = useState(quote.note ?? "");
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = editText.trim();
+    if (!trimmed) return;
+    onSave({
+      text: trimmed,
+      page: pageOrNull(editPage),
+      note: editNote.trim() || null,
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-2">
+      <textarea
+        value={editText}
+        onChange={(event) => setEditText(event.target.value)}
+        rows={3}
+        maxLength={TEXT_MAX}
+        aria-label={t("quotes.editLabel")}
+        className={`${FIELD_CLASS} resize-none`}
+      />
+      <input
+        type="number"
+        inputMode="numeric"
+        min={1}
+        max={PAGE_MAX}
+        value={editPage}
+        onChange={(event) => setEditPage(event.target.value)}
+        placeholder={t("quotes.pagePlaceholder")}
+        aria-label={t("quotes.editPageLabel")}
+        className={FIELD_CLASS}
+      />
+      <textarea
+        value={editNote}
+        onChange={(event) => setEditNote(event.target.value)}
+        rows={2}
+        maxLength={NOTE_MAX}
+        placeholder={t("quotes.notePlaceholder")}
+        aria-label={t("quotes.editNoteLabel")}
+        className={`${FIELD_CLASS} resize-none`}
+      />
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          className="px-3 py-1.5 bg-accent-fill hover:bg-accent-fill-hover text-on-accent rounded-lg text-xs font-medium"
+        >
+          {t("common.save")}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 border border-paper-200 text-paper-600 rounded-lg text-xs font-medium hover:bg-paper-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
+        >
+          {t("common.cancel")}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** One quote as read, with the controls its reader may use on it. */
+function QuoteView({
+  quote,
+  isAuthor,
+  canDelete,
+  onStartEdit,
+  onRemove,
+}: {
+  quote: QuoteOut;
+  isAuthor: boolean;
+  canDelete: boolean;
+  onStartEdit: () => void;
+  onRemove: () => void;
+}) {
+  const { t, locale } = useTranslation();
+  return (
+    <>
+      {/* A blockquote, because it is one: this is the book's text and not the
+          member's. The rule down the left is what says so at a glance, and
+          `whitespace-pre-line` keeps the line breaks of a passage of verse. */}
+      <blockquote className="border-l-2 border-accent-300 pl-3 text-sm text-paper-700 leading-relaxed whitespace-pre-line dark:border-accent-500 dark:text-paper-200">
+        {quote.text}
+      </blockquote>
+      {quote.note != null && (
+        <p className="text-sm text-paper-600 mt-2 dark:text-paper-400">
+          {quote.note}
+        </p>
+      )}
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-xs text-paper-600 dark:text-paper-400">
+          {quote.page != null && (
+            <>{t("quotes.onPage", { page: quote.page })} · </>
+          )}
+          {quote.author?.username} · {shortMonthDate(quote.created_at, locale)}
+        </span>
+        {canDelete && (
+          <div className="flex gap-2">
+            {isAuthor && (
+              <button
+                onClick={onStartEdit}
+                className="text-xs text-accent-600 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
+              >
+                {t("common.edit")}
+              </button>
+            )}
+            <button
+              onClick={onRemove}
+              // The same four tiers and the same reason as NoteList's delete:
+              // `danger-300` is not ink on a light card and `danger-600` is
+              // nearly the dark card itself, so neither the resting state nor
+              // the dark hover can be inherited. Both rungs are recomputed over
+              // every palette by `tests/theme/palettes.test.ts::the rungs a
+              // delete control cannot rest on`; no band is quoted here.
+              className="text-xs text-danger-500 hover:text-danger-600 dark:text-danger-300 dark:hover:text-danger-100"
+            >
+              {t("common.delete")}
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 /** Passages copied out of this book. Used only by BookDetail. */
 export default function QuoteList({
   quotes,
@@ -62,14 +212,11 @@ export default function QuoteList({
   onEdit,
   onRemove,
 }: QuoteListProps) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const [text, setText] = useState("");
   const [page, setPage] = useState("");
   const [note, setNote] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editText, setEditText] = useState("");
-  const [editPage, setEditPage] = useState("");
-  const [editNote, setEditNote] = useState("");
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,27 +227,6 @@ export default function QuoteList({
     setPage("");
     setNote("");
   }
-
-  function startEdit(quote: QuoteOut) {
-    setEditingId(quote.id);
-    setEditText(quote.text);
-    setEditPage(quote.page == null ? "" : String(quote.page));
-    setEditNote(quote.note ?? "");
-  }
-
-  function saveEdit(quoteId: number) {
-    const trimmed = editText.trim();
-    if (!trimmed) return;
-    onEdit(quoteId, {
-      text: trimmed,
-      page: pageOrNull(editPage),
-      note: editNote.trim() || null,
-    });
-    setEditingId(null);
-  }
-
-  const fieldClass =
-    "w-full px-3 py-2 rounded-lg border border-paper-200 text-sm dark:border-paper-700";
 
   return (
     <div>
@@ -126,109 +252,22 @@ export default function QuoteList({
               className="bg-paper-50 rounded-xl p-3 border border-paper-100 dark:bg-paper-900 dark:border-paper-800"
             >
               {editingId === quote.id ? (
-                /* A form, not a div. `min`/`max` on the page field are only
-                   enforced by a submit, and this used to be a click handler. */
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    saveEdit(quote.id);
+                <QuoteEditForm
+                  quote={quote}
+                  onSave={(fields) => {
+                    onEdit(quote.id, fields);
+                    setEditingId(null);
                   }}
-                  className="space-y-2"
-                >
-                  <textarea
-                    value={editText}
-                    onChange={(event) => setEditText(event.target.value)}
-                    rows={3}
-                    maxLength={TEXT_MAX}
-                    aria-label={t("quotes.editLabel")}
-                    className={`${fieldClass} resize-none`}
-                  />
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={PAGE_MAX}
-                    value={editPage}
-                    onChange={(event) => setEditPage(event.target.value)}
-                    placeholder={t("quotes.pagePlaceholder")}
-                    aria-label={t("quotes.editPageLabel")}
-                    className={fieldClass}
-                  />
-                  <textarea
-                    value={editNote}
-                    onChange={(event) => setEditNote(event.target.value)}
-                    rows={2}
-                    maxLength={NOTE_MAX}
-                    placeholder={t("quotes.notePlaceholder")}
-                    aria-label={t("quotes.editNoteLabel")}
-                    className={`${fieldClass} resize-none`}
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      className="px-3 py-1.5 bg-accent-fill hover:bg-accent-fill-hover text-on-accent rounded-lg text-xs font-medium"
-                    >
-                      {t("common.save")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingId(null)}
-                      className="px-3 py-1.5 border border-paper-200 text-paper-600 rounded-lg text-xs font-medium hover:bg-paper-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-                    >
-                      {t("common.cancel")}
-                    </button>
-                  </div>
-                </form>
+                  onCancel={() => setEditingId(null)}
+                />
               ) : (
-                <>
-                  {/* A blockquote, because it is one: this is the book's text
-                      and not the member's. The rule down the left is what says
-                      so at a glance, and `whitespace-pre-line` keeps the line
-                      breaks of a passage of verse. */}
-                  <blockquote className="border-l-2 border-accent-300 pl-3 text-sm text-paper-700 leading-relaxed whitespace-pre-line dark:border-accent-500 dark:text-paper-200">
-                    {quote.text}
-                  </blockquote>
-                  {quote.note != null && (
-                    <p className="text-sm text-paper-600 mt-2 dark:text-paper-400">
-                      {quote.note}
-                    </p>
-                  )}
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-xs text-paper-600 dark:text-paper-400">
-                      {quote.page != null && (
-                        <>{t("quotes.onPage", { page: quote.page })} · </>
-                      )}
-                      {quote.author?.username} ·{" "}
-                      {shortMonthDate(quote.created_at, locale)}
-                    </span>
-                    {canDelete && (
-                      <div className="flex gap-2">
-                        {isAuthor && (
-                          <button
-                            onClick={() => startEdit(quote)}
-                            className="text-xs text-accent-600 hover:text-accent-800 dark:text-accent-400 dark:hover:text-accent-300"
-                          >
-                            {t("common.edit")}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => onRemove(quote.id)}
-                          // The same four tiers and the same reason as
-                          // NoteList's delete: `danger-300` is not ink on a
-                          // light card and `danger-600` is nearly the dark card
-                          // itself, so neither the resting state nor the dark
-                          // hover can be inherited. Both rungs are recomputed
-                          // over every palette by
-                          // `tests/theme/palettes.test.ts::the rungs a delete
-                          // control cannot rest on`; no band is quoted here.
-                          className="text-xs text-danger-500 hover:text-danger-600 dark:text-danger-300 dark:hover:text-danger-100"
-                        >
-                          {t("common.delete")}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
+                <QuoteView
+                  quote={quote}
+                  isAuthor={isAuthor}
+                  canDelete={canDelete}
+                  onStartEdit={() => setEditingId(quote.id)}
+                  onRemove={() => onRemove(quote.id)}
+                />
               )}
             </div>
           );
@@ -243,7 +282,7 @@ export default function QuoteList({
           maxLength={TEXT_MAX}
           placeholder={t("quotes.placeholder")}
           aria-label={t("quotes.addLabel")}
-          className={`${fieldClass} resize-none`}
+          className={`${FIELD_CLASS} resize-none`}
         />
         <div className="flex gap-2">
           <input
@@ -255,7 +294,7 @@ export default function QuoteList({
             onChange={(event) => setPage(event.target.value)}
             placeholder={t("quotes.pagePlaceholder")}
             aria-label={t("quotes.pageLabel")}
-            className={`${fieldClass} w-28`}
+            className={`${FIELD_CLASS} w-28`}
           />
           {/* A textarea, matching the edit form. `<input type="text">` cannot
               hold a newline at all, so a remark typed here could only gain its
@@ -268,7 +307,7 @@ export default function QuoteList({
             maxLength={NOTE_MAX}
             placeholder={t("quotes.notePlaceholder")}
             aria-label={t("quotes.noteLabel")}
-            className={`${fieldClass} flex-1 resize-none`}
+            className={`${FIELD_CLASS} flex-1 resize-none`}
           />
           <button
             type="submit"

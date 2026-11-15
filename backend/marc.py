@@ -35,7 +35,7 @@ import metadata
 import xml_parse
 from authors import NAME_SEPARATOR
 from catalogue import Heading, Link, Record
-from enums import ClassificationScheme, HeadingKind, LinkRelationship
+from enums import ClassificationScheme, HeadingKind, LinkRelationship, RecordOrigin
 from marc_fields import Fields, Subfields
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -270,6 +270,56 @@ _HEADING_KIND_FIELD: Final[dict[tuple[ClassificationScheme, HeadingKind | None],
 }
 
 
+#: The code `040 $a` names each origin's cataloguing agency by.
+#:
+#: **`$a` is "MARC code or the name of the organization that created the original
+#: record"**, per the MARC21 Bibliographic specification for field `040`, which
+#: points at the MARC Code List for Organizations. The codes are that list's,
+#: looked up 2026-11-14, except the DNB's: Germany assigns its own codes, and
+#: the list's introduction says an ISIL "can be used in the same bibliographic
+#: and holdings fields that are populated by MARC organization codes", so
+#: `DE-101` is the German ISIL registry's entry for the Deutsche
+#: Nationalbibliothek.
+#:
+#: **Every absence is the rule rather than a gap.** An origin with no entry
+#: writes no `040`, since a subfield naming an agency nobody can cite is a claim
+#: nobody made:
+#:
+#: - Open Library, Google Books and K10plus each have a code, and none of them is
+#:   the agency that created the record they serve: the first two aggregate other
+#:   catalogues' and publishers' records, and K10plus is a union catalogue whose
+#:   records were made by its member libraries. Naming them in `$a` would be
+#:   false, and the catalogue that did create it is not in the answer.
+#: - Every origin that is not a catalogue was created by this library or by
+#:   whoever wrote the file, and this install has no organization code of its own.
+#:
+#: **`$d`, the modifying agency, is never written, for two reasons.** It would
+#: name this library, which has no code to name it by. And this record is a
+#: public surface: the SRU server serves `record_element` with no session, so a
+#: `$d` would publish `books.record_modified_here`, which is kept internal. An
+#: install code setting answers the first reason and not the second.
+#: `tests/routers/test_sru.py::TestTheServiceAnswersARealRequest` holds it. A
+#: cataloguer who receives a record with `$a` alone learns who made it and
+#: nothing about who changed it, which is less than the column knows and
+#: nothing that is untrue.
+_CATALOGUING_AGENCY: Final[dict[RecordOrigin, str]] = {
+    RecordOrigin.DNB: "DE-101",
+    RecordOrigin.OENB: "As",
+    RecordOrigin.NLG: "GRAtEVE",
+    RecordOrigin.NKP: "CZ-PrNK",
+    RecordOrigin.BNF: "FrPBN",
+    RecordOrigin.LOC: "DLC",
+    RecordOrigin.BNE: "SpMaBN",
+    RecordOrigin.BNA: "AR-BaBN",
+    RecordOrigin.BNU: "UY-MoBN",
+}
+
+
+def _cataloguing_agency(origin: RecordOrigin | None) -> str | None:
+    """The code `040 $a` names for this origin, or None where none is citable."""
+    return None if origin is None else _CATALOGUING_AGENCY.get(origin)
+
+
 #: Characters XML 1.0 cannot carry, whatever the encoding.
 #:
 #: **A guard on the writer rather than on the column, and it is the file's
@@ -360,6 +410,7 @@ def _record_element(book: Book) -> ElementTree.Element:
     |---|---|---|
     | `001` | `books.id` | nothing: it identifies the record in this system |
     | `020 $a` | `isbn` | `Fields.isbn` |
+    | `040 ## $a` | `record_origin`, through `_CATALOGUING_AGENCY` | nothing: an import is its own origin |
     | `041 0# $a` | `language` | `Fields.language` |
     | `050 #4 $a` | an `lcc` classification | this module's `_classifications` |
     | `082 04 $a` | a `ddc` classification | `Fields.ddc_headings` |
@@ -409,6 +460,7 @@ def _record_element(book: Book) -> ElementTree.Element:
 
     fields = [
         _datafield("020", " ", " ", [("a", book.isbn)]),
+        _datafield("040", " ", " ", [("a", _cataloguing_agency(book.record_origin))]),
         _datafield("041", "0", " ", [("a", language)]),
         *_classifications(book),
         _datafield("100", "0", " ", [("a", names[0] if names else None)]),

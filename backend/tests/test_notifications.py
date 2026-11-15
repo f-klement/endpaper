@@ -152,6 +152,7 @@ class TestTheLoggedHost:
             "https://hooks.example.org;PATHMARKER/x",
             "https://hooks.example.org PATHMARKER/x",
             "https://hooks.example.org\tPATHMARKER/x",
+            "https:///PATHMARKER",
             "https://hooks.example.org%40PATHMARKER/x",
         ],
     )
@@ -792,6 +793,15 @@ class TestRenderText:
         kept = sum(1 for line in text.splitlines() if "days overdue" in line)
         dropped = int(text.rsplit("and ", 1)[1].split(" ", 1)[0])
         assert kept + dropped == 20
+
+    def test_a_limit_exactly_the_whole_message_keeps_every_entry(self, db, lend):
+        """The last entry is measured without a tail, since keeping it drops nothing."""
+        for index in range(3):
+            lend(title=f"Book {index}")
+        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
+        whole = notifications.render_text(digest)
+
+        assert notifications.render_text(digest, limit=units(whole)) == whole
 
 
 class TestTelegram:
@@ -1844,6 +1854,12 @@ class TestReadingTheRecord:
         entry = notifications.health(configured, now())[0]
         assert entry["last_run_at"] is None
         assert entry["broken"] is False
+
+    def test_a_negative_failure_count_reads_as_zero(self, configured):
+        settings_store.set_value(
+            configured, SettingKey.SENDER_HEALTH, '{"webhook": {"sent": false, "failures": -3}}'
+        )
+        assert notifications.health(configured, now())[0]["failures"] == 0
 
     def test_a_timestamp_with_an_offset_does_not_raise(self, configured):
         """The one hostile shape that actually raised, and the one the three

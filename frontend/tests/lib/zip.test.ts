@@ -287,6 +287,31 @@ describe("a zip that cannot be trusted", () => {
     ).toBe("truncated");
   });
 
+  it("refuses a directory that ends inside an entry's name", async () => {
+    // The 46 byte fixed header and three of the seven bytes of `one.txt`. A
+    // subarray past the end clamps rather than failing, so without the bound
+    // the entry would be listed as `one`.
+    expect(
+      await failureOf(() =>
+        open({
+          entries: [{ name: "one.txt", data: "hello" }],
+          centralDirectorySize: 49,
+        }),
+      ),
+    ).toBe("truncated");
+  });
+
+  it("refuses a directory past the fixed MAX_ENTRIES * 128 byte ceiling", async () => {
+    // `too-large` and not `truncated`: the cap is checked before the end of the
+    // file, so a size past both names the cap. Without the cap the same archive
+    // reads as running past the file.
+    expect(
+      await failureOf(() =>
+        open({ ...HELLO, centralDirectorySize: 0xffff * 128 + 1 }),
+      ),
+    ).toBe("too-large");
+  });
+
   it("refuses an encrypted entry", async () => {
     expect(
       await failureOf(() =>
@@ -310,6 +335,22 @@ describe("an entry that cannot be read", () => {
     });
     expect(await failureOf(() => archive.read(archive.entries[0]!, 1024))).toBe(
       "truncated",
+    );
+  });
+
+  it("refuses one whose directory points inside the file but not at a local header", async () => {
+    const archive = await open({
+      entries: [
+        {
+          name: "one.txt",
+          data: "hello",
+          method: STORED,
+          centralHeaderOffset: 1,
+        },
+      ],
+    });
+    expect(await failureOf(() => archive.read(archive.entries[0]!, 1024))).toBe(
+      "not-a-zip",
     );
   });
 

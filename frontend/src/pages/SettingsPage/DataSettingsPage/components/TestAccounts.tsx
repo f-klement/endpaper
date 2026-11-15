@@ -63,6 +63,12 @@ export default function TestAccounts({
     onSwitch(username, password);
   }
 
+  // Opening a row closes any other, and either way the password starts empty.
+  function toggle(username: string) {
+    setSelected(selected === username ? null : username);
+    setPassword("");
+  }
+
   return (
     <div className="space-y-4">
       <p className="text-xs text-paper-600 dark:text-paper-400">
@@ -90,60 +96,16 @@ export default function TestAccounts({
 
       <ul className="space-y-2">
         {accounts.map((account) => (
-          <li
+          <TestAccountRow
             key={account.id}
-            className="border border-paper-200 rounded-xl px-3 py-2.5 dark:border-paper-800"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-paper-800 truncate dark:text-paper-100">
-                {account.username}
-              </span>
-              <Button
-                size="sm"
-                variant="secondary"
-                aria-label={t("settings.testAccountsSwitchTo", {
-                  name: account.username,
-                })}
-                onClick={() => {
-                  setSelected(
-                    selected === account.username ? null : account.username,
-                  );
-                  setPassword("");
-                }}
-              >
-                {t("settings.testAccountsSwitch")}
-              </Button>
-            </div>
-
-            {selected === account.username && (
-              <form
-                className="flex gap-2 pt-2.5"
-                onSubmit={(event) => submitSwitch(event, account.username)}
-              >
-                <label
-                  htmlFor={`switch-password-${account.id}`}
-                  className="sr-only"
-                >
-                  {t("settings.testAccountsPasswordFor", {
-                    name: account.username,
-                  })}
-                </label>
-                <input
-                  id={`switch-password-${account.id}`}
-                  type="password"
-                  className="field"
-                  autoComplete="off"
-                  required
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder={t("login.passwordPlaceholder")}
-                />
-                <Button type="submit" size="md" isLoading={isSwitching}>
-                  {t("settings.testAccountsSwitch")}
-                </Button>
-              </form>
-            )}
-          </li>
+            account={account}
+            isOpen={selected === account.username}
+            onToggle={() => toggle(account.username)}
+            password={password}
+            onPasswordChange={setPassword}
+            onSubmit={(event) => submitSwitch(event, account.username)}
+            isSwitching={isSwitching}
+          />
         ))}
       </ul>
 
@@ -232,5 +194,72 @@ export default function TestAccounts({
         />
       )}
     </div>
+  );
+}
+
+interface TestAccountRowProps {
+  account: UserOut;
+  /** Whether this row's password field is the one open. */
+  isOpen: boolean;
+  onToggle: () => void;
+  password: string;
+  onPasswordChange: (password: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  isSwitching: boolean;
+}
+
+/** One account: its name, the switch button, and the password field when open. */
+function TestAccountRow({
+  account,
+  isOpen,
+  onToggle,
+  password,
+  onPasswordChange,
+  onSubmit,
+  isSwitching,
+}: TestAccountRowProps) {
+  const { t } = useTranslation();
+
+  return (
+    <li className="border border-paper-200 rounded-xl px-3 py-2.5 dark:border-paper-800">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-sm text-paper-800 truncate dark:text-paper-100">
+          {account.username}
+        </span>
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label={t("settings.testAccountsSwitchTo", {
+            name: account.username,
+          })}
+          onClick={onToggle}
+        >
+          {t("settings.testAccountsSwitch")}
+        </Button>
+      </div>
+
+      {isOpen && (
+        <form className="flex gap-2 pt-2.5" onSubmit={onSubmit}>
+          <label htmlFor={`switch-password-${account.id}`} className="sr-only">
+            {t("settings.testAccountsPasswordFor", {
+              name: account.username,
+            })}
+          </label>
+          <input
+            id={`switch-password-${account.id}`}
+            type="password"
+            className="field"
+            autoComplete="off"
+            required
+            value={password}
+            onChange={(event) => onPasswordChange(event.target.value)}
+            placeholder={t("login.passwordPlaceholder")}
+          />
+          <Button type="submit" size="md" isLoading={isSwitching}>
+            {t("settings.testAccountsSwitch")}
+          </Button>
+        </form>
+      )}
+    </li>
   );
 }

@@ -427,6 +427,15 @@ describe("a file whose offsets do not agree with its length", () => {
     expect(verdict(await read({ recordOneAt: 0xffffff00 }))).toBe("damaged");
   });
 
+  it("refuses a record 0 that ends just past the end of the file", async () => {
+    // One byte past rather than far past: a far end is also caught by the size
+    // cap, and a slice past the end is cut short rather than refused, so this
+    // record would otherwise read whole.
+    const spec = { trailingBytes: 0, fullName: "Over", exth: [] };
+    const recordOneAt = mobiBytes(spec).length + 1;
+    expect(verdict(await read({ ...spec, recordOneAt }))).toBe("damaged");
+  });
+
   it("refuses a record 0 declaring more bytes than it will read", async () => {
     // A bound on what is allocated, taken before the slice: the file itself is
     // small and its header is what claims the megabytes. Reported as damaged

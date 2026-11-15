@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { ClassificationIn } from "./classificationIn.ts";
+import type { RecordOrigin } from "./recordOrigin.ts";
 
 /**
  * Metadata fetched for an ISBN. Nothing is persisted at this point: the
@@ -20,6 +21,7 @@ export interface BookLookup {
   language?: string | null;
   page_count?: number | null;
   publisher?: string | null;
+  record_origin?: RecordOrigin | null;
   series_index?: number | null;
   series_name?: string | null;
   subtitle?: string | null;

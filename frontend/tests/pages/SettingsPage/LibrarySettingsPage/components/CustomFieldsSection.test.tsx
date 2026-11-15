@@ -132,6 +132,36 @@ describe("CustomFieldsSection", () => {
     expect(props.onRemove).not.toHaveBeenCalled();
   });
 
+  it("renames nothing to a name of only spaces, and keeps the row open", async () => {
+    const props = renderSection();
+
+    await typeANewName("   ");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(props.onRename).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("New name for Calibre-web")).toHaveValue(
+      "   ",
+    );
+  });
+
+  it("opens the rename box holding the field's current name", async () => {
+    renderSection();
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]!);
+
+    expect(screen.getByLabelText("New name for Calibre-web")).toHaveValue(
+      "Calibre-web",
+    );
+  });
+
+  it("offers no save while a write is running", async () => {
+    renderSection({ isBusy: true });
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]!);
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
   it("closes the edit row once the server has accepted", async () => {
     renderSection();
 

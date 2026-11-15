@@ -612,26 +612,40 @@ class Authorship:
         carries, so there is nothing to follow.
         """
         entries, aliases = self._load()
-        by_key = {entry.key: entry for entry in entries}
-        reachable = by_key.keys() | {key for entry in entries for key in entry.alias_keys}
+        planned = self._batch_plan(groups, entries, aliases)
+        self._add_batch_rows(planned, aliases, by_user_id)
+        self._db.commit()
+        return AuthorBatchMergeOut(merged=self._batch_answer(planned))
+
+    @staticmethod
+    def _batch_plan(
+        groups: Sequence[AuthorMergeGroup], entries: list[AuthorEntry], aliases: list[AuthorAlias]
+    ) -> list[tuple[list[str], str]]:
+        """Each group as its sorted keys and its `keep_name`, every group checked before any is.
+
+        Raises `AuthorNotFound` or `DecisionStands` as `merge_batch` says.
+        """
+        reachable = {entry.key for entry in entries} | {key for entry in entries for key in entry.alias_keys}
         # One pass over the alias table for the whole batch, not one per group.
         index = _AliasIndex.of(aliases)
-        by_alias_key = {row.alias_key: row for row in aliases}
-
         planned: list[tuple[list[str], str]] = []
         for group in groups:
             requested = {author_key(key) for key in group.keys}
             if any(key not in reachable for key in requested):
                 raise AuthorNotFound
-            keep_key = author_key(group.keep_name)
-            if _would_repoint(index, requested, keep_key):
+            if _would_repoint(index, requested, author_key(group.keep_name)):
                 raise DecisionStands(sorted(requested))
             planned.append((sorted(requested), group.keep_name))
+        return planned
 
+    def _add_batch_rows(
+        self, planned: list[tuple[list[str], str]], aliases: list[AuthorAlias], by_user_id: int
+    ) -> None:
+        """One alias row for each planned key that carries none yet, uncommitted."""
+        by_alias_key = {row.alias_key: row for row in aliases}
         for requested_keys, keep_name in planned:
             for key in requested_keys:
-                existing = by_alias_key.get(key)
-                if existing is not None:
+                if key in by_alias_key:
                     # **Left exactly as it is, which is where this pass departs
                     # from `merge`'s deliberately.** `_would_repoint` has
                     # already proved the row names the same person, so an
@@ -653,8 +667,8 @@ class Authorship:
                 self._db.add(row)
                 by_alias_key[key] = row
 
-        self._db.commit()
-
+    def _batch_answer(self, planned: list[tuple[list[str], str]]) -> list[AuthorOut]:
+        """Each planned group's author as it reads after the commit."""
         entries, aliases = self._load()
         alias_ids = {row.alias_key: row.id for row in aliases}
         identifiers = self._identifiers_by_key()
@@ -662,13 +676,13 @@ class Authorship:
         for _requested_keys, keep_name in planned:
             entry = next((item for item in entries if item.key == author_key(keep_name)), None)
             # Unreachable while every key named an author with a visible Book,
-            # which the check above enforces. Here for the race `merge` records:
+            # which `_batch_plan` enforces. Here for the race `merge` records:
             # another Member trashing the last of those Books between the two
             # reads leaves an author with nothing to show.
             if entry is None:
                 raise AuthorNotFound
             merged.append(self._out(entry, alias_ids, identifiers))
-        return AuthorBatchMergeOut(merged=merged)
+        return merged
 
     def unmerge(self, alias_id: int) -> None:
         """Undo one merge. The spelling becomes its own author again.
@@ -777,35 +791,25 @@ class Authorship:
         # slice rather than one query per assertion. See
         # `MAX_ASSERTIONS_PER_RECORD`.
         for assertion in list(assertions)[:MAX_ASSERTIONS_PER_RECORD]:
-            key = _storable_key(assertion.name)
-            if key is None or not _storable_identifier(assertion.identifier):
-                logger.info("Dropped an unstorable authority assertion: %r", assertion)
+            key = _carried_key(assertion, carried)
+            if key is None:
                 continue
-            if key not in carried:
-                # The catalogue named somebody this Book does not credit, or
-                # spells them a way this Library did not adopt. A bound rather
-                # than a disagreement, so it is logged and not reported: there
-                # is nothing for a Member to act on and nothing was overruled.
-                logger.info(
-                    "Dropped an assertion for %r, which is not in this book's credit line",
-                    assertion.name,
-                )
-                continue
-            existing = self._identifier_row(key, assertion.scheme)
-            if existing is not None:
-                if existing.identifier != assertion.identifier:
-                    refused.append(
-                        RefusedAssertion(
-                            name=assertion.name,
-                            scheme=assertion.scheme,
-                            asserted=assertion.identifier,
-                            kept=existing.identifier,
-                            kept_provenance=AuthorityProvenance(existing.provenance),
-                        )
-                    )
-                    continue
-                stored.append(existing)
-                continue
+            outcome = self._catalogue_row(key, assertion)
+            if isinstance(outcome, RefusedAssertion):
+                refused.append(outcome)
+            else:
+                stored.append(outcome)
+        if stored:
+            self._db.commit()
+        return RecordedAssertions(stored=stored, refused=refused)
+
+    def _catalogue_row(self, key: str, assertion: AuthorityAssertion) -> AuthorIdentifier | RefusedAssertion:
+        """The row this assertion is stored as, the row that already agrees, or the refusal.
+
+        A new row is added uncommitted; `record_catalogue_assertions` commits.
+        """
+        existing = self._identifier_row(key, assertion.scheme)
+        if existing is None:
             row = AuthorIdentifier(
                 author_key=key,
                 scheme=assertion.scheme,
@@ -817,10 +821,16 @@ class Authorship:
                 created_by_user_id=None,
             )
             self._db.add(row)
-            stored.append(row)
-        if stored:
-            self._db.commit()
-        return RecordedAssertions(stored=stored, refused=refused)
+            return row
+        if existing.identifier != assertion.identifier:
+            return RefusedAssertion(
+                name=assertion.name,
+                scheme=assertion.scheme,
+                asserted=assertion.identifier,
+                kept=existing.identifier,
+                kept_provenance=AuthorityProvenance(existing.provenance),
+            )
+        return existing
 
     def confirm_identifier(
         self,
@@ -1294,6 +1304,25 @@ def _confirmable_key(entry: AuthorEntry) -> str | None:
     if not entry.spellings:
         return None
     return _storable_key(entry.spellings[0])
+
+
+def _carried_key(assertion: AuthorityAssertion, carried: set[str]) -> str | None:
+    """The key an assertion is stored under, or None, logged, when it is not stored."""
+    key = _storable_key(assertion.name)
+    if key is None or not _storable_identifier(assertion.identifier):
+        logger.info("Dropped an unstorable authority assertion: %r", assertion)
+        return None
+    if key not in carried:
+        # The catalogue named somebody this Book does not credit, or
+        # spells them a way this Library did not adopt. A bound rather
+        # than a disagreement, so it is logged and not reported: there
+        # is nothing for a Member to act on and nothing was overruled.
+        logger.info(
+            "Dropped an assertion for %r, which is not in this book's credit line",
+            assertion.name,
+        )
+        return None
+    return key
 
 
 def _storable_key(name: str) -> str | None:

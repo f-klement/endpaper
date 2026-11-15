@@ -214,7 +214,35 @@ describe("one source that cannot be read costs that source", () => {
   });
 });
 
+describe("a reader that threw", () => {
+  it("names what it threw as the reason the source was skipped", () => {
+    renderCard({
+      sources: {
+        playBooks: {
+          status: "error",
+          fileName: "takeout.zip",
+          error: new Error("a bug"),
+        },
+      },
+    });
+
+    expect(screen.getByRole("alert").textContent).toBe(
+      `${en["stores.playBooks.name"]} was skipped: a bug`,
+    );
+  });
+});
+
 describe("what a source turned out to hold", () => {
+  it("says which file a store is still reading", () => {
+    renderCard({
+      sources: { kobo: { status: "reading", fileName: "KoboReader.sqlite" } },
+    });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Reading KoboReader.sqlite...",
+    );
+  });
+
   it("reports the rows that were not this member's books", () => {
     renderCard({
       sources: {

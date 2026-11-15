@@ -778,16 +778,8 @@ def parse(stored: dict[str, Any]) -> Plan:
         # the **write**, which is `schemas.settings.MAX_CATALOGUE_SOURCES`.
         if len(seen) == len(DEFAULT_ORDER):
             break
-        if not isinstance(entry, dict):
-            continue
-        raw = entry.get("source")
-        if not isinstance(raw, str):
-            continue
-        try:
-            source = CatalogueSource(raw)
-        except ValueError:
-            continue
-        if source in seen:
+        source = _named_source(entry)
+        if source is None or source in seen:
             continue
         seen.add(source)
         # **`is True`, not truthiness, and not `is not False`.** This table
@@ -808,6 +800,19 @@ def parse(stored: dict[str, Any]) -> Plan:
     # that saved a list before it existed.
     preferences.extend(Preference(source, True) for source in DEFAULT_ORDER if source not in seen)
     return Plan(tuple(preferences))
+
+
+def _named_source(entry: object) -> CatalogueSource | None:
+    """The source a stored entry names, or None where it names none `parse` knows."""
+    if not isinstance(entry, dict):
+        return None
+    raw = entry.get("source")
+    if not isinstance(raw, str):
+        return None
+    try:
+        return CatalogueSource(raw)
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)

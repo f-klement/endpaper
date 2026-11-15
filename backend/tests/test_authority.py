@@ -1966,6 +1966,19 @@ class TestWikidataIsAFallbackAndNotAComparator:
         assert len(found) == 5
 
     @pytest.mark.asyncio
+    async def test_an_empty_statement_value_is_not_stored(self):
+        empty = dict(WIKIDATA_NATIONAL)
+        empty["P950"] = _claims_body("P950", "")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _viaf_router(mock, brief_status=403)
+            _wikidata_router(mock, national=empty)
+            found = await authority.national_identifiers(self._confirmable())
+
+        assert AuthorityScheme.BNE not in found
+        assert len(found) == 5
+
+    @pytest.mark.asyncio
     async def test_a_preferred_statement_is_read_like_a_normal_one(self):
         """The diagonal of the test above: what is skipped is `deprecated` and
         nothing else. A rank check written as "only normal" would pass every
@@ -2959,6 +2972,15 @@ class TestUnusableAnswers:
 
         assert candidate is not None
         assert candidate.wikidata_id is None
+
+    def test_a_blank_variant_name_is_dropped_and_the_rest_stripped(self):
+        record = dict(LOBID_RECORD)
+        record["variantName"] = ["   ", " Stevenson, Louis ", 7]
+
+        candidate = authority._candidate(record, certain=True)
+
+        assert candidate is not None
+        assert candidate.variants == ("Stevenson, Louis",)
 
 
 class TestAnUnusableAnswerFromAnySupplierCostsWhatItCarried:

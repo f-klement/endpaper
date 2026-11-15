@@ -383,17 +383,8 @@ function extension(name: string): string {
  * a path this reader would then report to a member as a book in their export.
  */
 function pairsIn(entries: readonly ZipEntry[]): Pair[] {
-  const groups = new Map<string, ZipEntry[]>();
-  for (const entry of entries) {
-    const key = entry.name.endsWith("/") ? null : stem(entry.name);
-    if (key === null || !isPlainPath(entry.name)) continue;
-    const group = groups.get(key);
-    if (group) group.push(entry);
-    else groups.set(key, [entry]);
-  }
-
   const pairs: Pair[] = [];
-  for (const [path, group] of groups) {
+  for (const [path, group] of groupedByStem(entries)) {
     const sidecars = group.filter((entry) => extension(entry.name) === ".html");
     const others = group.filter((entry) => extension(entry.name) !== ".html");
     // **Exactly one of each, and both halves of that are load bearing.** A zip
@@ -404,6 +395,23 @@ function pairsIn(entries: readonly ZipEntry[]): Pair[] {
     pairs.push({ path, sidecar: sidecars[0]!, book: others[0]! });
   }
   return pairs;
+}
+
+/**
+ * The file entries grouped by their path less its extension. A directory, a
+ * name with no extension and a name that walks out of its directory are in
+ * no group.
+ */
+function groupedByStem(entries: readonly ZipEntry[]): Map<string, ZipEntry[]> {
+  const groups = new Map<string, ZipEntry[]>();
+  for (const entry of entries) {
+    const key = entry.name.endsWith("/") ? null : stem(entry.name);
+    if (key === null || !isPlainPath(entry.name)) continue;
+    const group = groups.get(key);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
+  }
+  return groups;
 }
 
 /** Whether a zip path stays inside the directories it names. */
@@ -445,7 +453,31 @@ function labelled(text: string | null | undefined): string | null {
  */
 function readSidecar(html: string): Sidecar | null {
   const document = new DOMParser().parseFromString(html, "text/html");
+  const { volumeId, finished } = readMetaEntries(document);
+  if (volumeId === null) return null;
 
+  return {
+    volumeId,
+    title: boundText("title", document.querySelector("h1")?.textContent),
+    author: boundText(
+      "author",
+      labelled(document.querySelector("div.author")?.textContent),
+    ),
+    finished,
+    annotations: document.querySelectorAll("div.annotation").length,
+  };
+}
+
+/**
+ * The volume id and the reading state, out of the sidecar's metadata lines.
+ *
+ * `finished` is `true` for a line saying so, `null` for any other line that is
+ * not the volume id, and `false` where there is no such line.
+ */
+function readMetaEntries(document: Document): {
+  readonly volumeId: string | null;
+  readonly finished: boolean | null;
+} {
   let volumeId: string | null = null;
   let finished: boolean | null = false;
   for (const entry of document.querySelectorAll("div.meta-entry")) {
@@ -467,23 +499,23 @@ function readSidecar(html: string): Sidecar | null {
       volumeId ??= value;
       continue;
     }
-    // Not the volume id, so it is the sentence about reading state or one this
-    // export has that no measured one did. Either way it is not `false`.
-    if (FINISHED.test(text)) finished = true;
-    else if (text.trim() !== "" && finished === false) finished = null;
+    finished = readingState(text, finished);
   }
-  if (volumeId === null) return null;
+  return { volumeId, finished };
+}
 
-  return {
-    volumeId,
-    title: boundText("title", document.querySelector("h1")?.textContent),
-    author: boundText(
-      "author",
-      labelled(document.querySelector("div.author")?.textContent),
-    ),
-    finished,
-    annotations: document.querySelectorAll("div.annotation").length,
-  };
+/**
+ * The reading state once a metadata line that is not the volume id is read:
+ * `true` for a line saying the book is finished, otherwise `null` for any line
+ * with words on it where nothing has said so yet.
+ *
+ * Such a line is the sentence about reading state or one this export has that
+ * no measured one did. Either way it is not `false`.
+ */
+function readingState(text: string, finished: boolean | null): boolean | null {
+  if (FINISHED.test(text)) return true;
+  if (text.trim() !== "" && finished === false) return null;
+  return finished;
 }
 
 /**
@@ -567,13 +599,29 @@ export async function readTakeoutArchive(file: Blob): Promise<TakeoutReading> {
     throw error;
   }
 
-  const pairs = pairsIn(archive.entries);
-  const budget = new Budget(file.size);
+  const library = await readLibrary(archive, new Budget(file.size));
+  // **`skipped` is in the condition, and omitting it was the likely future.**
+  // The day Google moves the volume id, every pair lands in `skipped` and this
+  // would tell a member their own export is not a Takeout. The cost is stated
+  // rather than hidden: a zip holding one `a.html` beside one `a.css` now
+  // answers `ok` with an empty library where it used to answer `not-a-takeout`.
+  const { books, refused, skipped } = library;
+  if (books.length === 0 && refused.length === 0 && skipped === 0) {
+    return { ok: false, failure: "not-a-takeout" };
+  }
+  return { ok: true, library };
+}
+
+/** Every pair in the archive, read in order and charged to one budget. */
+async function readLibrary(
+  archive: ZipArchive,
+  budget: Budget,
+): Promise<TakeoutLibrary> {
   const books: TakeoutBook[] = [];
   const refused: TakeoutRefusal[] = [];
   let skipped = 0;
 
-  for (const pair of pairs) {
+  for (const pair of pairsIn(archive.entries)) {
     const sidecar = await readPairSidecar(archive, pair, budget);
     // **A pair the budget stopped this reaching is a refusal and not a skip,
     // and the difference is what a member is told.** It is a book the export
@@ -604,15 +652,7 @@ export async function readTakeoutArchive(file: Blob): Promise<TakeoutReading> {
     });
   }
 
-  // **`skipped` is in the condition, and omitting it was the likely future.**
-  // The day Google moves the volume id, every pair lands in `skipped` and this
-  // would tell a member their own export is not a Takeout. The cost is stated
-  // rather than hidden: a zip holding one `a.html` beside one `a.css` now
-  // answers `ok` with an empty library where it used to answer `not-a-takeout`.
-  if (books.length === 0 && refused.length === 0 && skipped === 0) {
-    return { ok: false, failure: "not-a-takeout" };
-  }
-  return { ok: true, library: { books, refused, skipped } };
+  return { books, refused, skipped };
 }
 
 /**

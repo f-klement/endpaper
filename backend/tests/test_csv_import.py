@@ -1055,6 +1055,23 @@ class TestOneCellCannotBuyUnboundedWork:
         [row] = parse(content).rows
         assert row.format is BookFormat.PAPERBACK
 
+    def test_the_first_format_after_the_year_is_kept(self):
+        """A later part, a format or not, does not replace it."""
+        content = (
+            b"Title\tPrimary Author\tPublication\n"
+            b"Le Grand Meaulnes\tFournier, Alain\tGallimard (1979), Paperback, Hardcover, Folio\n"
+        )
+        [row] = parse(content).rows
+        assert row.format is BookFormat.PAPERBACK
+
+    def test_a_format_word_before_the_year_is_the_publishers_name(self):
+        content = (
+            b"Title\tPrimary Author\tPublication\n"
+            b"Le Grand Meaulnes\tFournier, Alain\tDigital, Inc. (2001), Hardcover\n"
+        )
+        [row] = parse(content).rows
+        assert row.format is BookFormat.HARDCOVER
+
 
 class TestARefusalDoesNotEchoTheFileBack:
     def test_a_file_broken_on_its_first_line_is_refused_rather_than_a_500(self):

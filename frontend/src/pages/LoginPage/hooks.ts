@@ -15,6 +15,7 @@ import {
 } from "../../api/generated/endpoints/settings/settings";
 import {
   AuthMode,
+  type AuthConfigOut,
   type RegistrationOut,
   type UserOut,
 } from "../../api/generated/model";
@@ -40,6 +41,34 @@ export interface UseLoginFormResult {
   clearError: () => void;
 }
 
+/** What this deployment offers on the sign in page, read from its auth config. */
+type DeploymentPolicy = Pick<
+  UseLoginFormResult,
+  | "registrationEnabled"
+  | "isDirectoryLogin"
+  | "passwordResetEnabled"
+  | "verificationRequired"
+>;
+
+/**
+ * The deployment's answers, with a default for each while the config is absent.
+ *
+ * **The defaults are not all the same, and the asymmetry is deliberate.**
+ * Registration is assumed open until told otherwise: the backend rejects a
+ * disabled signup anyway, so a failed config fetch should not hide a working
+ * tab. Recovery and verification default to false: assuming a recovery link
+ * exists draws a control that 403s, and assuming an address is required makes a
+ * form demand a field the deployment does not want. Absent means offer less.
+ */
+function deploymentPolicy(config: AuthConfigOut | undefined): DeploymentPolicy {
+  return {
+    registrationEnabled: config?.registration_enabled ?? true,
+    isDirectoryLogin: config?.auth_mode === AuthMode.ldap,
+    passwordResetEnabled: config?.password_reset_enabled ?? false,
+    verificationRequired: config?.verification_required ?? false,
+  };
+}
+
 /**
  * Sign-in and registration.
  *
@@ -52,19 +81,7 @@ export function useLoginForm(
   const [mode, setMode] = useState<Mode>("login");
   const [dismissed, setDismissed] = useState(false);
 
-  const config = useAuthConfig();
-  // Assume open until told otherwise: the backend rejects a disabled signup
-  // anyway, so a failed config fetch should not hide a working tab.
-  const registrationEnabled = config.data?.registration_enabled ?? true;
-  const isDirectoryLogin = config.data?.auth_mode === AuthMode.ldap;
-  // **Both default to false when the config has not arrived**, unlike
-  // `registrationEnabled` above, and the asymmetry is deliberate. Assuming
-  // registration is open costs a failed request the server refuses anyway;
-  // assuming a recovery link exists draws a control that 403s, and assuming an
-  // address is required makes a form demand a field the deployment does not
-  // want. Absent means offer less.
-  const passwordResetEnabled = config.data?.password_reset_enabled ?? false;
-  const verificationRequired = config.data?.verification_required ?? false;
+  const policy = deploymentPolicy(useAuthConfig().data);
 
   const handleSuccess = (data: { user: UserOut; access_token: string }) => {
     onSuccess(data.user, data.access_token);
@@ -95,10 +112,7 @@ export function useLoginForm(
       setMode(next);
       setDismissed(true);
     },
-    registrationEnabled,
-    isDirectoryLogin,
-    passwordResetEnabled,
-    verificationRequired,
+    ...policy,
     awaitingConfirmation: register.data?.token == null && register.isSuccess,
 
     // **The address goes only to registration.** `LoginRequest` has no such

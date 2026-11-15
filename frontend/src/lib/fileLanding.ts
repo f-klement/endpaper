@@ -266,7 +266,7 @@ export async function askWhoHolds(
   questions: readonly HolderQuestion[],
   lookup: (files: AskedFileIn[]) => Promise<HoldersOut[]>,
 ): Promise<Map<string, Held | null>> {
-  const files = questions.flatMap((question) =>
+  const files: AskedFile[] = questions.flatMap((question) =>
     question.references.map((reference) => ({ question, reference })),
   );
   const answers = await lookUpHolders(
@@ -278,10 +278,31 @@ export async function askWhoHolds(
     }),
     lookup,
   );
-  type Answered = {
-    readonly reference: DigitalReferenceIn;
-    readonly answer: HolderAnswer | null | undefined;
-  };
+  const held = new Map<string, Held | null>();
+  for (const [key, ofThisBook] of answeredByKey(files, answers)) {
+    const one = heldOf(ofThisBook);
+    if (one !== undefined) held.set(key, one);
+  }
+  return held;
+}
+
+/** One file of a book to ask about, and the book it belongs to. */
+interface AskedFile {
+  readonly question: HolderQuestion;
+  readonly reference: DigitalReferenceIn;
+}
+
+/** One file of a book, and what the lookup said about it. */
+interface Answered {
+  readonly reference: DigitalReferenceIn;
+  readonly answer: HolderAnswer | null | undefined;
+}
+
+/** Each book's files with their answers, by key, in the order asked. */
+function answeredByKey(
+  files: readonly AskedFile[],
+  answers: readonly (HoldersOut | undefined)[],
+): Map<string, Answered[]> {
   const byKey = new Map<string, Answered[]>();
   files.forEach(({ question, reference }, at) => {
     const found = answers[at];
@@ -292,40 +313,57 @@ export async function askWhoHolds(
       { reference, answer },
     ]);
   });
-  const held = new Map<string, Held | null>();
-  for (const [key, ofThisBook] of byKey) {
-    const one = oneAnswer(ofThisBook.map(({ answer }) => answer));
-    if (one === undefined) continue;
-    if (one === null) {
-      held.set(key, null);
-      continue;
-    }
-    const staying = new Set(
-      ofThisBook.flatMap(({ reference, answer }) =>
-        answer?.stays ? [locationOf(reference)] : [],
-      ),
-    );
-    // **A file held by another Book stays on it.** Written onto the one
-    // chosen, it became a second reference to the same file on a second
-    // Book.
-    const elsewhere = new Map(
-      ofThisBook.flatMap(({ reference, answer }) =>
-        answer?.lands &&
-        answer.bookId !== one.bookId &&
-        !staying.has(locationOf(reference))
-          ? [[locationOf(reference), answer.bookId] as const]
-          : [],
-      ),
-    );
-    held.set(key, {
-      bookId: one.bookId,
-      lands: one.lands,
-      ...(elsewhere.size > 0 ? { elsewhere } : {}),
-      // Only on a Book the files land on: one they may not takes none.
-      ...(one.lands && staying.size > 0 ? { inAnotherFormat: staying } : {}),
-    });
-  }
-  return held;
+  return byKey;
+}
+
+/**
+ * The one `Held` a book's answered files add up to: `null` for a book none of
+ * whose files is held, `undefined` for one that was not answered.
+ */
+function heldOf(ofThisBook: readonly Answered[]): Held | null | undefined {
+  const one = oneAnswer(ofThisBook.map(({ answer }) => answer));
+  if (one == null) return one;
+  const staying = stayingOf(ofThisBook);
+  const elsewhere = elsewhereOf(ofThisBook, one, staying);
+  return {
+    bookId: one.bookId,
+    lands: one.lands,
+    ...(elsewhere.size > 0 ? { elsewhere } : {}),
+    // Only on a Book the files land on: one they may not takes none.
+    ...(one.lands && staying.size > 0 ? { inAnotherFormat: staying } : {}),
+  };
+}
+
+/** The locations of a book's files that only Books they may not land on hold. */
+function stayingOf(ofThisBook: readonly Answered[]): Set<string> {
+  return new Set(
+    ofThisBook.flatMap(({ reference, answer }) =>
+      answer?.stays ? [locationOf(reference)] : [],
+    ),
+  );
+}
+
+/**
+ * Each of a book's files that another Book holds and may take, by location,
+ * with that Book.
+ *
+ * **A file held by another Book stays on it.** Written onto the one chosen, it
+ * became a second reference to the same file on a second Book.
+ */
+function elsewhereOf(
+  ofThisBook: readonly Answered[],
+  one: HolderAnswer,
+  staying: ReadonlySet<string>,
+): Map<string, number> {
+  return new Map(
+    ofThisBook.flatMap(({ reference, answer }) =>
+      answer?.lands &&
+      answer.bookId !== one.bookId &&
+      !staying.has(locationOf(reference))
+        ? [[locationOf(reference), answer.bookId] as const]
+        : [],
+    ),
+  );
 }
 
 /**
@@ -360,9 +398,10 @@ export async function reportEach<T = DigitalReferenceIn>(
 }
 
 /**
- * What one add made of a book. Each caller maps it to its own row or count,
- * in a `switch` ending `satisfies never`, so a kind added here is a type error
- * at each caller rather than a row either page drops.
+ * What one add made of a book. Each caller maps it to its own row or count
+ * through a record keyed by every kind or a `satisfies` over the kinds it
+ * answers, so a kind added here is a type error at each caller rather than a
+ * row either page drops.
  *
  * - `added`: a new Book, with every file recorded on it but those `left`
  *   counts, whose location the server said another Book holds.
@@ -620,10 +659,31 @@ export interface LandingCounts {
 }
 
 /**
- * **A `switch` ending `satisfies never`, as each caller's is**, so a kind
- * added to `Landing` is a type error here too rather than a landing both
- * pages' counts leave out.
+ * The counts each kind of landing adds one to.
+ *
+ * **Keyed by every kind, as each caller's own mapping is exhaustive**, so a
+ * kind added to `Landing` is a missing property here, a type error rather than
+ * a landing both pages' counts leave out. `filesLeft` is not among them: it adds
+ * each landing's `left`, wherever a kind carries one.
  */
+const COUNTED_AS: {
+  readonly [Kind in Landing["kind"]]: readonly Exclude<
+    keyof LandingCounts,
+    "filesLeft"
+  >[];
+} = {
+  added: ["added"],
+  "added-unreferenced": ["added", "unreferenced"],
+  "on-holder": ["already"],
+  "other-format": ["otherFormat"],
+  "at-ceiling": ["atCeiling"],
+  // Each caller lists these as failed rows, so no count holds them.
+  tie: [],
+  "in-trash": [],
+  failed: [],
+};
+
+/** How many of a run's landings came to each count, by `COUNTED_AS`. */
 export function countLandings(landings: readonly Landing[]): LandingCounts {
   const counts = {
     added: 0,
@@ -634,34 +694,8 @@ export function countLandings(landings: readonly Landing[]): LandingCounts {
     filesLeft: 0,
   };
   for (const landing of landings) {
-    switch (landing.kind) {
-      case "added-unreferenced":
-        counts.unreferenced += 1;
-        counts.added += 1;
-        counts.filesLeft += landing.left;
-        break;
-      case "added":
-        counts.added += 1;
-        counts.filesLeft += landing.left;
-        break;
-      case "on-holder":
-        counts.already += 1;
-        counts.filesLeft += landing.left;
-        break;
-      case "other-format":
-        counts.otherFormat += 1;
-        break;
-      case "at-ceiling":
-        counts.atCeiling += 1;
-        break;
-      case "tie":
-      case "in-trash":
-      case "failed":
-        // Each caller lists these as failed rows, so no count holds them.
-        break;
-      default:
-        landing satisfies never;
-    }
+    for (const field of COUNTED_AS[landing.kind]) counts[field] += 1;
+    if ("left" in landing) counts.filesLeft += landing.left;
   }
   return counts;
 }

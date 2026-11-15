@@ -43,8 +43,8 @@
   --color-paper-300: #d8d2c8;
   /* 400 and 500 are the two rungs the light ramp had to move to hold the rung
      contract every palette is now measured against: 3.0 and 4.5 against the
-     card, from 2.35 and 3.83. Neither carries text in this mode (that is the
-     rule `houseRules.test.ts` enforces), so nothing on screen moved except
+     card, from 2.35 and 3.83. Neither carries text in this mode (a house rule
+     enforces that), so nothing on screen moved except
      disabled text, which got closer to the 3:1 that a disabled control is
      exempt from rather than further away. Both are restored to their old
      values under `:root.dark`, where they are muted text and where the old
@@ -227,7 +227,7 @@
      first, so the fields a person actually types into had the weakest focus
      indicator in the product and no fallback. They are deleted rather than
      repaired: a control with its own ring is a control that will be missed the
-     next time this one moves. `houseRules.test.ts` asserts none comes back. The
+     next time this one moves. A house rule asserts none comes back. The
      single exception is the settings toggle, whose input is `sr-only`, and it
      says so where it stands.
 

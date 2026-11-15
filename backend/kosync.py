@@ -382,20 +382,26 @@ def apply(db: Session, member_id: int, book_id: int, percentage: float, before: 
     reading = Reading.by(db, member_id)
 
     if whole > 0:
-        latest = (
-            db.query(ReadingProgress)
-            .filter(ReadingProgress.user_id == member_id, ReadingProgress.book_id == book_id)
-            .order_by(ReadingProgress.recorded_at.desc(), ReadingProgress.id.desc())
-            .first()
-        )
-        today = datetime.now(UTC).date()
-        if latest is None or (latest.recorded_at.date() != today and latest.percent != whole):
-            db.add(ReadingProgress(user_id=member_id, book_id=book_id, percent=whole))
-            if whole < _FINISHED:
-                reading.begin(book_id)
+        _log_the_move(db, member_id, book_id, whole, reading)
 
     if whole >= _FINISHED and (before is None or before < 1):
         reading.finish(book_id)
+
+
+def _log_the_move(db: Session, member_id: int, book_id: int, whole: int, reading: Reading) -> None:
+    """`apply`'s percent row: written when no row of the member's is today's
+    and the whole percent moved from their latest, beginning an unfinished Book."""
+    latest = (
+        db.query(ReadingProgress)
+        .filter(ReadingProgress.user_id == member_id, ReadingProgress.book_id == book_id)
+        .order_by(ReadingProgress.recorded_at.desc(), ReadingProgress.id.desc())
+        .first()
+    )
+    today = datetime.now(UTC).date()
+    if latest is None or (latest.recorded_at.date() != today and latest.percent != whole):
+        db.add(ReadingProgress(user_id=member_id, book_id=book_id, percent=whole))
+        if whole < _FINISHED:
+            reading.begin(book_id)
 
 
 # ── A pull ────────────────────────────────────────────────────────────────────

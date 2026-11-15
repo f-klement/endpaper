@@ -179,6 +179,54 @@ describe("the line under a catalogue", () => {
     // Anti vacuity: the sweep has to have had something to compare.
     expect(everyRow().length).toBeGreaterThan(0);
   });
+
+  it.each<[string, Partial<CatalogueSourceOut>, MessageKey]>([
+    [
+      "a missing key",
+      { needs_a_key: true, has_key: false, ready: false },
+      "providers.status.needsKey",
+    ],
+    [
+      "a key it has but cannot use",
+      { needs_a_key: true, has_key: true, ready: false },
+      "providers.status.switchedOffBelow",
+    ],
+    [
+      "a source only searched",
+      { answers_lookup: false },
+      "providers.status.searchOnly",
+    ],
+    [
+      "a source only looked up",
+      { answers_search: false },
+      "providers.status.lookupOnly",
+    ],
+    ["an enabled source below the tier", {}, "providers.status.askedAfter"],
+  ])("names %s by its own line", (_, over, line) => {
+    expect(statusOf(row(over))).toBe(line);
+  });
+
+  it("sends the field space to each line in the share it always has", () => {
+    // A condition moved from one arm of the chain to another changes a count
+    // here. Two lines with equal counts can swap unseen, which the named cases
+    // above close.
+    const counts: Partial<Record<MessageKey, number>> = {};
+    for (const line of everyRow().map(statusOf)) {
+      counts[line] = (counts[line] ?? 0) + 1;
+    }
+
+    expect(counts).toEqual({
+      "providers.status.askedAfter": 6,
+      "providers.status.askedFirst": 12,
+      "providers.status.lookupOnly": 42,
+      "providers.status.lookupOnlyRegional": 6,
+      "providers.status.needsKey": 32,
+      "providers.status.off": 24,
+      "providers.status.regional": 6,
+      "providers.status.searchOnly": 96,
+      "providers.status.switchedOffBelow": 32,
+    });
+  });
 });
 
 function row(over: Partial<CatalogueSourceOut>): CatalogueSourceOut {

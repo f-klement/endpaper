@@ -167,6 +167,13 @@ function collapse(value: string | null): string | null {
   return collapsed ? collapsed : null;
 }
 
+/** Each byte order mark and the encoding it names, in the order they are tried. */
+const BYTE_ORDER_MARKS: readonly (readonly [readonly number[], string])[] = [
+  [[0xef, 0xbb, 0xbf], "utf-8"],
+  [[0xff, 0xfe], "utf-16le"],
+  [[0xfe, 0xff], "utf-16be"],
+];
+
 /**
  * The encoding label the file declares, or `"utf-8"`.
  *
@@ -183,14 +190,20 @@ function collapse(value: string | null): string | null {
  * at all.
  */
 function declaredEncoding(raw: Uint8Array): string {
-  if (raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) return "utf-8";
-  if (raw[0] === 0xff && raw[1] === 0xfe) return "utf-16le";
-  if (raw[0] === 0xfe && raw[1] === 0xff) return "utf-16be";
+  const marked = BYTE_ORDER_MARKS.find(([mark]) =>
+    mark.every((byte, at) => raw[at] === byte),
+  );
+  return marked === undefined ? declarationIn(raw) : marked[1];
+}
 
+/** The label an XML declaration at the start of `raw` names, or `"utf-8"`. */
+function declarationIn(raw: Uint8Array): string {
   // Built by hand rather than with a `TextDecoder`, so that sniffing an
   // encoding never itself needs one that may not exist. A byte over 0x7f cannot
   // be part of a declaration in any encoding this reaches, so it becomes a
-  // space and the match simply fails.
+  // space: inside the label it fails the match, and before `encoding` it
+  // changes nothing, but beside `=` the `\s*` admits it, so the label after it
+  // is still read.
   let head = "";
   const end = Math.min(raw.length, DECLARATION_SCAN_BYTES);
   for (let at = 0; at < end; at += 1) {
@@ -486,17 +499,9 @@ export function readFb2Description(xml: string): FileMetadata | null {
   } catch {
     return null;
   }
-  // Both halves are needed. A parse error yields a document whose root is
-  // `parsererror`, and a well formed document that is not a FictionBook yields
-  // a root that is simply something else.
-  const root = document.documentElement;
-  if (!root || root.localName !== "FictionBook") return null;
-
-  const description = firstNamed(root, "description");
-  if (description === null) return null;
-  const titleInfo = firstNamed(description, "title-info");
-  if (titleInfo === null) return null;
-  const publishInfo = firstNamed(description, "publish-info");
+  const parts = descriptionParts(document);
+  if (parts === null) return null;
+  const { titleInfo, publishInfo } = parts;
 
   const identifiers = readIdentifiers(publishInfo);
   const { seriesName, seriesIndex } = readSeries(titleInfo);
@@ -518,6 +523,28 @@ export function readFb2Description(xml: string): FileMetadata | null {
     seriesName,
     seriesIndex,
   };
+}
+
+/**
+ * The `<title-info>` and `<publish-info>` of a parsed FictionBook header, or
+ * `null` where the document is not one or has no `<title-info>`.
+ */
+function descriptionParts(
+  document: Document,
+): { titleInfo: Element; publishInfo: Element | null } | null {
+  // A well formed header always has this root, since `headerDocument` closes
+  // it with `</FictionBook>`, so the check is for a parse error. Not every
+  // parser answers one with a `parsererror` root: Chrome keeps the partial tree
+  // around the error, so a document opening `<foo><description>` keeps `foo`,
+  // and without this check its description would be read as a FictionBook's.
+  const root = document.documentElement;
+  if (!root || root.localName !== "FictionBook") return null;
+
+  const description = firstNamed(root, "description");
+  if (description === null) return null;
+  const titleInfo = firstNamed(description, "title-info");
+  if (titleInfo === null) return null;
+  return { titleInfo, publishInfo: firstNamed(description, "publish-info") };
 }
 
 function firstIsbn(identifiers: readonly FileIdentifier[]): string | null {

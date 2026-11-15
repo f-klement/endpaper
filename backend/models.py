@@ -54,6 +54,7 @@ from enums import (
     OwnershipStatus,
     ReadStatus,
     ReadwiseOutcome,
+    RecordOrigin,
     TagCategory,
     member_or,
 )
@@ -1281,6 +1282,40 @@ class Book(Base):
         server_default=OwnershipStatus.OWNED.value,
         index=True,
     )
+
+    # ── Provenance of the record ─────────────────────────────────────────
+    #
+    # **Two facts, two columns, and they must not be collapsed into one.**
+    # `record_origin` answers where the record came from; `record_modified_here`
+    # answers whether anything here has touched it since. MARC21's `040`
+    # separates the original cataloguing agency (`$a`) from the modifying one
+    # (`$d`) for the same reason: a record pulled from the DNB and then hand
+    # corrected here is neither purely the DNB's nor purely this library's, and
+    # one value could say only one of the two: folding them would lose the
+    # catalogue on the first correction.
+    #
+    # **Who writes which**, and `docs/decisions.md` holds the table per site:
+    # every create path sets the origin and clears the flag; every write to a
+    # column of `book_columns.WORK_FACTS` afterwards sets the flag and keeps the
+    # origin (`evidence.touched`), whether a member typed it, an import filled a
+    # gap or a catalogue enriched it. **A refresh is the one exception**: it
+    # replaces the record from the catalogue the Book's own ISBN found, so the
+    # origin becomes that catalogue and the flag clears.
+    #
+    # **A merge keeps the survivor's origin**, since the survivor's record is
+    # the one that stays, and sets its flag when the absorb filled a work fact
+    # from a losing row. **A copy takes both from the book it copies**: it is
+    # the same record about a second object.
+    #
+    # Both nullable: every row written before the columns existed has neither,
+    # and every surface renders null as unknown rather than guessing.
+
+    #: Where the record came from. A closed set, `enums.RecordOrigin`, behind
+    #: `DegradingEnum` so a stored value nobody can name reads as unknown.
+    record_origin: Mapped[RecordOrigin | None] = mapped_column(DegradingEnum(RecordOrigin, 20), nullable=True)
+    #: Whether anything here changed the record's description since it arrived.
+    #: False at every create, true after the first change, null where unknown.
+    record_modified_here: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     added_by: Mapped[User | None] = relationship("User", back_populates="books_added")
     collection: Mapped[Collection | None] = relationship("Collection", back_populates="books")

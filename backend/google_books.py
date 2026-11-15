@@ -19,6 +19,7 @@ a store import matched by title and one matched by identifier.
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any, Final
 
 import covers
@@ -268,23 +269,31 @@ def _series_in_parentheses(title: str) -> tuple[str, str] | None:
     marker = _marker_start(body, start)
     if marker is None:
         return None
-    number = body[start:close]
     # The separators before the marker, as many as there are.
-    run = marker
-    while run > 0 and _is_separator(body[run - 1]):
-        run -= 1
+    run = _run_start(body, marker, _is_separator)
     if run == marker:
         return None
-    # The opening parenthesis: the first after the last `)` before the close.
+    name = _parenthesised_name(body, close, run, marker)
+    if name is None:
+        return None
+    return name, body[start:close]
+
+
+def _parenthesised_name(body: str, close: int, run: int, marker: int) -> str | None:
+    """The series name ending where the separators at `run` start, or None.
+
+    It runs from the first `(` after the last `)` before `close`. `marker` is
+    where the series marker after the separators starts.
+    """
     opening = body.find("(", body.rfind(")", 0, close) + 1, run)
     if opening == -1:
         return None
     if opening + 1 < run:
-        return body[opening + 1 : run], number
+        return body[opening + 1 : run]
     # The parenthesis opens straight onto the separators: the name is the
     # first of them, if one is left over for the separator.
     if marker - run >= 2:
-        return body[run], number
+        return body[run]
     return None
 
 
@@ -293,15 +302,11 @@ def _number_start(body: str, end: int) -> int | None:
 
     The number is digits, or digits, a point and digits: `[0-9]+(?:\\.[0-9]+)?`.
     """
-    start = end
-    while start > 0 and _is_ascii_digit(body[start - 1]):
-        start -= 1
+    start = _run_start(body, end, _is_ascii_digit)
     if start == end:
         return None
     if start >= 2 and body[start - 1] == "." and _is_ascii_digit(body[start - 2]):
-        start -= 1
-        while start > 0 and _is_ascii_digit(body[start - 1]):
-            start -= 1
+        start = _run_start(body, start - 1, _is_ascii_digit)
     return start
 
 
@@ -313,15 +318,27 @@ def _marker_start(body: str, at: int) -> int | None:
     """
     if at >= 1 and body[at - 1] == "#":
         return at - 1
-    spaces = at
-    while spaces > 0 and body[spaces - 1].isspace():
-        spaces -= 1
+    spaces = _run_start(body, at, str.isspace)
     if spaces < at and spaces >= 4 and _folds_to(body[spaces - 4 : spaces], "book"):
         return spaces - 4
-    point = spaces - 1 if spaces >= 1 and body[spaces - 1] == "." else spaces
+    return _bk_start(body, spaces)
+
+
+def _bk_start(body: str, at: int) -> int | None:
+    """Where a `bk` marker, with its optional point, ending at `at` starts, or None."""
+    point = at - 1 if at >= 1 and body[at - 1] == "." else at
     if point >= 2 and _folds_to(body[point - 2 : point], "bk"):
         return point - 2
     return None
+
+
+def _run_start(body: str, end: int, belongs: Callable[[str], bool]) -> int:
+    """Where the run of characters `belongs` accepts, ending at `end`, starts:
+    `end` itself where the character before it is not one."""
+    start = end
+    while start > 0 and belongs(body[start - 1]):
+        start -= 1
+    return start
 
 
 def _is_ascii_digit(character: str) -> bool:

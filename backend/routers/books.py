@@ -7,7 +7,7 @@ import csv
 import html
 import io
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import Future, wait
 from datetime import UTC, datetime
 from functools import partial
@@ -158,6 +158,7 @@ from schemas import (
     BookDetailsUpdate,
     BookDiscussUpdate,
     BookEnrichmentOut,
+    BookIdentifierIn,
     BookLookup,
     BookMatch,
     BookOut,
@@ -1834,67 +1835,14 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
     # `test_the_uuid_holder_answers_where_the_isbn_names_another_book` pins it.
     # Neither asks past the Shelf: nothing makes an identifier unique, so a
     # hidden or trashed holder answers as no Book rather than disclosing it.
-    carried = [(entry.scheme, entry.value) for entry in payload.identifiers]
-    for source, message in (
-        (recognition.Source.CALIBRE, _CALIBRE_CONFLICT),
-        (recognition.Source.STORE, _STORE_CONFLICT),
-    ):
-        match recognition.recognise_one(db, current_user.id, source, identifiers=carried):
-            case recognition.Seen(book_id=book_id):
-                _refuse(message, book_id)
-            case recognition.Tied():
-                # Two Books outside one copy group: the client acts on the id
-                # a 409 names, so naming either would pick between them.
-                _refuse(message, None)
+    _refuse_a_record_already_held(db, current_user.id, payload.identifiers)
 
     # The ISBN is asked across the whole table: it is unique there, invisible
     # rows included, so a filtered check would miss the row that is actually
     # going to collide and turn a 409 into a 500. `recognition` compares every
     # stored spelling, so a row written before canonicalisation as an ISBN-10
     # is found too.
-    match recognition.recognise_one(db, current_user.id, recognition.Source.ADD, isbn=payload.isbn):
-        case recognition.Seen(book_id=book_id):
-            _refuse(conflict, book_id)
-        case recognition.Tied() | recognition.Hidden():
-            _refuse(conflict, None)
-        case recognition.InTrash(book_ids=book_ids):
-            # **Mis-scan, delete, re-scan is the most common delete in this
-            # app**, so the caller's own trashed holder is cleared out of the
-            # way rather than reported as "already exists" for a Book they
-            # cannot see on the shelf. Purged rather than restored: restoring
-            # would hand back the record somebody had just rejected.
-            #
-            # **Another member's holder refuses the add instead**: the
-            # owner's ruling of 2026-10-17. The trash view holds every
-            # member's trashed public Books, so purging here let one member's
-            # import destroy a Book somebody else had trashed and could still
-            # restore. It is refused whichever client called, because the
-            # harm does not depend on which one did. Who may purge a holder is
-            # `_purgeable_by`, the rule both purge routes ask too, here without
-            # the admin's exception for a Book nobody added: that exception is
-            # for deleting such a Book on purpose, and an add is not a request
-            # to delete anything. Somebody
-            # else's trashed private Book never reaches this arm: it answers
-            # `Hidden` and keeps its 409.
-            #
-            # **Every holder, not the first one.** Copies made it possible for
-            # several rows to hold one ISBN, and freeing only the first was
-            # wrong in two different ways, both measured through the API: a
-            # trashed group of two answered **500** (the survivor's token was
-            # cleared as the group shrank and it re-entered the partial index
-            # just as the insert reclaimed the ISBN), and a trashed group of
-            # three answered **201** beside the two that still held the ISBN.
-            # Decided in full before anything is destroyed, which the answer
-            # being one value makes structural.
-            holders = Shelf.trashed_by(db, current_user.id).where(Book.id.in_(book_ids)).all()
-            if not all(_purgeable_by(holder, current_user, deliberate=False) for holder in holders):
-                _refuse_in_trash()
-            for holder in holders:
-                _purge(holder, db)
-            # Flushed, not committed: this function owns the transaction and
-            # commits once. Without this the DELETEs are still pending when the
-            # INSERT runs and the unique ISBN index rejects it.
-            db.flush()
+    _free_the_isbn(db, payload.isbn, current_user, conflict)
 
     fields = payload.model_dump()
     # The loop rather than one `pop` per name, so this list and the import time
@@ -1941,6 +1889,69 @@ def _create_book(payload: BookCreate, current_user: User, db: Session, conflict:
         db.commit()
         db.refresh(book)
     return book_to_out(book, current_user, db)
+
+
+def _refuse_a_record_already_held(db: Session, user_id: int, identifiers: list[BookIdentifierIn]) -> None:
+    """Refuse with 409 a create whose Calibre uuid or store identifier a visible Book carries."""
+    carried = [(entry.scheme, entry.value) for entry in identifiers]
+    for source, message in (
+        (recognition.Source.CALIBRE, _CALIBRE_CONFLICT),
+        (recognition.Source.STORE, _STORE_CONFLICT),
+    ):
+        match recognition.recognise_one(db, user_id, source, identifiers=carried):
+            case recognition.Seen(book_id=book_id):
+                _refuse(message, book_id)
+            case recognition.Tied():
+                # Two Books outside one copy group: the client acts on the id
+                # a 409 names, so naming either would pick between them.
+                _refuse(message, None)
+
+
+def _free_the_isbn(db: Session, isbn: str | None, current_user: User, conflict: str) -> None:
+    """Refuse with 409 a create whose ISBN a Book holds, or purge the caller's trashed holders of it."""
+    match recognition.recognise_one(db, current_user.id, recognition.Source.ADD, isbn=isbn):
+        case recognition.Seen(book_id=book_id):
+            _refuse(conflict, book_id)
+        case recognition.Tied() | recognition.Hidden():
+            _refuse(conflict, None)
+        case recognition.InTrash(book_ids=book_ids):
+            # **Mis-scan, delete, re-scan is the most common delete in this
+            # app**, so the caller's own trashed holder is cleared out of the
+            # way rather than reported as "already exists" for a Book they
+            # cannot see on the shelf. Purged rather than restored: restoring
+            # would hand back the record somebody had just rejected.
+            #
+            # **Another member's holder refuses the add instead**: the
+            # owner's ruling of 2026-10-17. The trash view holds every
+            # member's trashed public Books, so purging here let one member's
+            # import destroy a Book somebody else had trashed and could still
+            # restore. It is refused whichever client called, because the
+            # harm does not depend on which one did. Who may purge a holder is
+            # `_purgeable_by`, the rule both purge routes ask too, here without
+            # the admin's exception for a Book nobody added: that exception is
+            # for deleting such a Book on purpose, and an add is not a request
+            # to delete anything. Somebody
+            # else's trashed private Book never reaches this arm: it answers
+            # `Hidden` and keeps its 409.
+            #
+            # **Every holder, not the first one.** Copies made it possible for
+            # several rows to hold one ISBN, and freeing only the first was
+            # wrong in two different ways, both measured through the API: a
+            # trashed group of two answered **500** (the survivor's token was
+            # cleared as the group shrank and it re-entered the partial index
+            # just as the insert reclaimed the ISBN), and a trashed group of
+            # three answered **201** beside the two that still held the ISBN.
+            # Decided in full before anything is destroyed, which the answer
+            # being one value makes structural.
+            holders = Shelf.trashed_by(db, current_user.id).where(Book.id.in_(book_ids)).all()
+            if not all(_purgeable_by(holder, current_user, deliberate=False) for holder in holders):
+                _refuse_in_trash()
+            for holder in holders:
+                _purge(holder, db)
+            # Flushed, not committed: `_create_book` owns the transaction and
+            # commits once. Without this the DELETEs are still pending when the
+            # INSERT runs and the unique ISBN index rejects it.
+            db.flush()
 
 
 #: The 409 message for a Calibre record a visible Book already carries.
@@ -3223,33 +3234,7 @@ def merge_books(
     with 409, before anything moves. The survivor may be anybody's: it loses
     nothing, since it never overwrites a value it holds.
     """
-    if payload.keep_id not in payload.book_ids:
-        raise HTTPException(status_code=400, detail="keep_id must be one of book_ids")
-
-    books = Shelf.seen_by(db, current_user.id).where(Book.id.in_(payload.book_ids)).all()
-    found = {book.id: book for book in books}
-    if payload.keep_id not in found:
-        raise HTTPException(status_code=404, detail="Book not found")
-    if len(found) < 2:
-        raise HTTPException(status_code=400, detail="Nothing to merge into that book")
-
-    keeper = found[payload.keep_id]
-    losers = [book for book in books if book.id != keeper.id]
-
-    # Seeing a public Book is not enough to delete it. Without this a member
-    # could restore another member's trashed Book, fold it into one of their
-    # own, which carries off its owner's reading status, notes and quotes, and
-    # then purge their own. The rule is `book_for_owner`'s, not
-    # `_purgeable_by`'s: an admin may fold away any loser. That is not harmless
-    # to the loser's adder. The fold carries their rows onto the survivor, whose
-    # own adder may then trash and purge it with those rows, so an admin's
-    # merge into a Book the admin added hands the admin that purge. The owner
-    # accepted this: an admin is trusted with every member's Books.
-    if not all(owns_or_administers(loser.added_by_user_id, current_user) for loser in losers):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Only the member who added a book, or an admin, may merge it into another.",
-        )
+    keeper, losers = _merge_parties(payload, db, current_user)
 
     # Absorbing the columns and moving every child row is `folding.fold`, which
     # is also where the flushes and the ISBN release ordering live. What stays
@@ -3297,6 +3282,38 @@ def merge_books(
 
     db.refresh(keeper)
     return book_to_out(keeper, current_user, db)
+
+
+def _merge_parties(payload: MergeRequest, db: Session, current_user: User) -> tuple[Book, list[Book]]:
+    """The keeper and the losers of one merge, or the refusal that stops it before anything moves."""
+    if payload.keep_id not in payload.book_ids:
+        raise HTTPException(status_code=400, detail="keep_id must be one of book_ids")
+
+    books = Shelf.seen_by(db, current_user.id).where(Book.id.in_(payload.book_ids)).all()
+    found = {book.id: book for book in books}
+    if payload.keep_id not in found:
+        raise HTTPException(status_code=404, detail="Book not found")
+    if len(found) < 2:
+        raise HTTPException(status_code=400, detail="Nothing to merge into that book")
+
+    keeper = found[payload.keep_id]
+    losers = [book for book in books if book.id != keeper.id]
+
+    # Seeing a public Book is not enough to delete it. Without this a member
+    # could restore another member's trashed Book, fold it into one of their
+    # own, which carries off its owner's reading status, notes and quotes, and
+    # then purge their own. The rule is `book_for_owner`'s, not
+    # `_purgeable_by`'s: an admin may fold away any loser. That is not harmless
+    # to the loser's adder. The fold carries their rows onto the survivor, whose
+    # own adder may then trash and purge it with those rows, so an admin's
+    # merge into a Book the admin added hands the admin that purge. The owner
+    # accepted this: an admin is trusted with every member's Books.
+    if not all(owns_or_administers(loser.added_by_user_id, current_user) for loser in losers):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only the member who added a book, or an admin, may merge it into another.",
+        )
+    return keeper, losers
 
 
 #: The 409 for a merge Postgres aborted to break a deadlock.
@@ -3548,139 +3565,7 @@ def backfill_covers(
     batch = candidates[:MAX_BACKFILL_BOOKS]
 
     ends = deadline.in_(COVER_BACKFILL_DEADLINE_SECONDS)
-
-    def record(book: Book, url: str | None) -> _Cover:
-        """Fold one answer into its Book, and name the outcome it counts as."""
-        if url is None:
-            return "still_missing"
-        # **The guard is not about the UPDATE, which the unit of work already
-        # elides**: an assignment of an equal value emits no statement and this
-        # table has no `onupdate`, measured with a cursor listener. What it keeps
-        # out is `Book._store_covers_over_https`, which **drops** a value it finds
-        # unrenderable rather than passing it through. `resolve_and_store` answers
-        # with `supplied` when the download fails, so an unrenderable URL that
-        # `backup.restore` wrote through Core, where `@validates` does not fire,
-        # comes back here equal to the column: assigning it would null the only
-        # cover that row has and log a warning, on a run that repaired nothing.
-        # `test_a_run_that_re_resolves_an_unrenderable_stored_cover_keeps_it` fails
-        # if this goes.
-        if url != book.cover_url:
-            book.cover_url = url
-        if covers.is_local(url):
-            # Empty, because that is `on_disk` as of the candidate read: no file
-            # under this id is what made the book a candidate. A commit that
-            # fails takes the file with it. Read here, the disk would already
-            # hold this run's write; read at submission, it would still leave
-            # the download between it and the write. So another request's
-            # write since the candidate read stays the concurrency
-            # `cover_store.settle` lets through, wherever `before` is taken.
-            covers.settle(db, book.id, url, frozenset())
-            return "stored"
-        # Resolved to a remote URL this server could not download. Counted
-        # separately from "no image service has one": with no egress every book
-        # lands here, and folding it into either of the other two would report a
-        # clean no-op in exactly the situation this exists for.
-        return "unreachable"
-
-    # One outcome per book of the batch, in batch order, `None` where this run
-    # learned nothing about it: no slot came free inside the deadline, or the
-    # deadline cut before its wave was submitted.
-    outcomes: list[_Cover | None] = [None] * len(batch)
-    cut_short = False
-
-    # **Waves of `covers.MAX_CONCURRENT_FETCHES`, the deadline checked between
-    # them, rather than one `pool.map` over the batch.** Concurrent either way,
-    # because serial is one round trip per book and a thousand books at even half
-    # a second each is eight minutes of waiting. Three reasons for the waves, and
-    # the first changes an answer rather than a cost.
-    #
-    # * `next_after_id` has to be the end of the **contiguous** examined run, and
-    #   submitting in batch order a wave at a time is what makes the examined set
-    #   a prefix by construction. `pool.map` has the ordering but not the cut: it
-    #   cannot be stopped at a wall clock without abandoning the iterator, and an
-    #   abandoned fetch still writes its file, which takes the book out of the
-    #   candidate set with its row left pointing at whatever it pointed at before.
-    # * A submission is queued, not run, so submitting the whole batch at once
-    #   puts a second member's first wave behind a hundred of somebody else's
-    #   fetches. A wave never leaves more than `covers.MAX_CONCURRENT_FETCHES`
-    #   queued, so the pool's own order is a queue of waves rather than of runs.
-    # * It is what puts a cut on a wave boundary, which is the third of
-    #   `COVER_BACKFILL_DEADLINE_SECONDS`' derivations.
-    #
-    # The cost, stated rather than left to be discovered: a wave's wall clock is
-    # its slowest book, so idle slots appear where one `map` would have kept six
-    # in flight.
-    at = 0
-    while at < len(batch):
-        if deadline.left(ends) <= 0:
-            cut_short = True
-            break
-        # **Every column is read here, in this thread, and never in the pool.**
-        # The Session is not thread safe, and a lazy load or a refresh fired from
-        # a worker is a read on this handler's session from another thread. The
-        # comment this replaces claimed only the fetch ran in the pool while the
-        # `lambda` it sat on read three columns there.
-        asked: list[tuple[int, Book, Future[str | None]]] = []
-        while at < len(batch) and len(asked) < covers.MAX_CONCURRENT_FETCHES:
-            book = batch[at]
-            asked.append(
-                (
-                    at,
-                    book,
-                    covers.FETCHES_AT_ONCE.submit(
-                        covers.resolve_and_store,
-                        book.id,
-                        book.isbn,
-                        book.cover_url,
-                        budget=COVER_BACKFILL_BUDGET_SECONDS,
-                    ),
-                )
-            )
-            at += 1
-
-        # **The deadline is spent on the slot and nowhere else**, and the two
-        # spellings a reader reaches for first are both worse.
-        #
-        # A deadline on the **request** loses the answers already in hand: the
-        # fetches that finished have written their files, so abandoning their
-        # results leaves a cover behind a book id with the row still naming the
-        # remote URL it could not download, and nothing makes that book a
-        # candidate again to repair it.
-        #
-        # Cancelling a fetch in flight cannot be done at all: a thread running
-        # `covers.resolve_and_store` is not interruptible, and the file it is part
-        # way through writing is `cover_store`'s to finish. So what this waits on
-        # is only the part that is still a **queue position**, and
-        # `Future.cancel` is what distinguishes the two: true for a submission
-        # that never started, false for one that is running or done, which is then
-        # read for its answer and counted.
-        #
-        # **The wait is therefore not a bound on the wave.** A wave that has
-        # started runs to `COVER_BACKFILL_BUDGET_SECONDS`, which is the second term
-        # in the hold that constant's own comment derives.
-        wait([fetching for _, _, fetching in asked], timeout=max(deadline.left(ends), 0.0))
-
-        # **Every cancel before any read, and that ordering is the hold.** A read
-        # blocks for up to `COVER_BACKFILL_BUDGET_SECONDS` and this pool is process
-        # wide, so with the two interleaved a worker freed during the read of one
-        # offset dequeues the next one and **starts** it: its `cancel` then answers
-        # False, it is waited for from its own start, and the wave drains serially
-        # for one budget a book. Measured on a one slot stand-in, three books, a
-        # 0.1s deadline and a 0.3s fetch: **0.919s held against the 0.400s the
-        # deadline claims, the whole wave examined and the run not reporting a cut**,
-        # which at the shipped figures is `24 + 6 x 12` rather than `24 + 12`.
-        # Cancelling first makes every future still read one that had started at or
-        # before the cut, which is what `COVER_BACKFILL_DEADLINE_SECONDS`' hold is
-        # derived from, and it leaves nothing queued behind a read that raises.
-        started = [(offset, book, fetching) for offset, book, fetching in asked if not fetching.cancel()]
-        if len(started) != len(asked):
-            # A submission that never started is a book this run never examined,
-            # and so is everything after it.
-            cut_short = True
-        for offset, book, fetching in started:
-            outcomes[offset] = record(book, fetching.result())
-        if cut_short:
-            break
+    outcomes, cut_short = _walk_cover_waves(db, batch, ends)
 
     db.commit()
 
@@ -3731,6 +3616,152 @@ def backfill_covers(
         # at least 1.
         next_after_id=((batch[examined - 1].id if examined else after_id) if remaining > 0 else 0),
     )
+
+
+def _record_cover(db: Session, book: Book, url: str | None) -> _Cover:
+    """Fold one cover backfill answer into its Book, and name the outcome it counts as."""
+    if url is None:
+        return "still_missing"
+    # **The guard is not about the UPDATE, which the unit of work already
+    # elides**: an assignment of an equal value emits no statement and this
+    # table has no `onupdate`, measured with a cursor listener. What it keeps
+    # out is `Book._store_covers_over_https`, which **drops** a value it finds
+    # unrenderable rather than passing it through. `resolve_and_store` answers
+    # with `supplied` when the download fails, so an unrenderable URL that
+    # `backup.restore` wrote through Core, where `@validates` does not fire,
+    # comes back here equal to the column: assigning it would null the only
+    # cover that row has and log a warning, on a run that repaired nothing.
+    # `test_a_run_that_re_resolves_an_unrenderable_stored_cover_keeps_it` fails
+    # if this goes.
+    if url != book.cover_url:
+        book.cover_url = url
+    if covers.is_local(url):
+        # Empty, because that is `backfill_covers`' `on_disk` as of the
+        # candidate read: no file under this id is what made the book a
+        # candidate. A commit that fails takes the file with it. Read here,
+        # the disk would already hold this run's write; read at submission,
+        # it would still leave the download between it and the write. So
+        # another request's write since the candidate read stays the
+        # concurrency `cover_store.settle` lets through, wherever `before`
+        # is taken.
+        covers.settle(db, book.id, url, frozenset())
+        return "stored"
+    # Resolved to a remote URL this server could not download. Counted
+    # separately from "no image service has one": with no egress every book
+    # lands here, and folding it into either of the other two would report a
+    # clean no-op in exactly the situation this exists for.
+    return "unreachable"
+
+
+def _walk_cover_waves(db: Session, batch: list[Book], ends: float) -> tuple[list[_Cover | None], bool]:
+    """Fetch one cover backfill batch in waves, until it ends or the deadline cuts it.
+
+    Answers one outcome per book of the batch, in batch order, `None` where this
+    run learned nothing about it: no slot came free inside the deadline, or the
+    deadline cut before its wave was submitted. And whether the deadline cut it.
+    """
+    # **Waves of `covers.MAX_CONCURRENT_FETCHES`, the deadline checked between
+    # them, rather than one `pool.map` over the batch.** Concurrent either way,
+    # because serial is one round trip per book and a thousand books at even half
+    # a second each is eight minutes of waiting. Three reasons for the waves, and
+    # the first changes an answer rather than a cost.
+    #
+    # * `next_after_id` has to be the end of the **contiguous** examined run, and
+    #   submitting in batch order a wave at a time is what makes the examined set
+    #   a prefix by construction. `pool.map` has the ordering but not the cut: it
+    #   cannot be stopped at a wall clock without abandoning the iterator, and an
+    #   abandoned fetch still writes its file, which takes the book out of the
+    #   candidate set with its row left pointing at whatever it pointed at before.
+    # * A submission is queued, not run, so submitting the whole batch at once
+    #   puts a second member's first wave behind a hundred of somebody else's
+    #   fetches. A wave never leaves more than `covers.MAX_CONCURRENT_FETCHES`
+    #   queued, so the pool's own order is a queue of waves rather than of runs.
+    # * It is what puts a cut on a wave boundary, which is the third of
+    #   `COVER_BACKFILL_DEADLINE_SECONDS`' derivations.
+    #
+    # The cost, stated rather than left to be discovered: a wave's wall clock is
+    # its slowest book, so idle slots appear where one `map` would have kept six
+    # in flight.
+    outcomes: list[_Cover | None] = [None] * len(batch)
+    cut_short = False
+    at = 0
+    while at < len(batch):
+        if deadline.left(ends) <= 0:
+            cut_short = True
+            break
+        asked, at = _submit_cover_wave(batch, at)
+
+        # **The deadline is spent on the slot and nowhere else**, and the two
+        # spellings a reader reaches for first are both worse.
+        #
+        # A deadline on the **request** loses the answers already in hand: the
+        # fetches that finished have written their files, so abandoning their
+        # results leaves a cover behind a book id with the row still naming the
+        # remote URL it could not download, and nothing makes that book a
+        # candidate again to repair it.
+        #
+        # Cancelling a fetch in flight cannot be done at all: a thread running
+        # `covers.resolve_and_store` is not interruptible, and the file it is part
+        # way through writing is `cover_store`'s to finish. So what this waits on
+        # is only the part that is still a **queue position**, and
+        # `Future.cancel` is what distinguishes the two: true for a submission
+        # that never started, false for one that is running or done, which is then
+        # read for its answer and counted.
+        #
+        # **The wait is therefore not a bound on the wave.** A wave that has
+        # started runs to `COVER_BACKFILL_BUDGET_SECONDS`, which is the second term
+        # in the hold that constant's own comment derives.
+        wait([fetching for _, _, fetching in asked], timeout=max(deadline.left(ends), 0.0))
+
+        # **Every cancel before any read, and that ordering is the hold.** A read
+        # blocks for up to `COVER_BACKFILL_BUDGET_SECONDS` and this pool is process
+        # wide, so with the two interleaved a worker freed during the read of one
+        # offset dequeues the next one and **starts** it: its `cancel` then answers
+        # False, it is waited for from its own start, and the wave drains serially
+        # for one budget a book. Measured on a one slot stand-in, three books, a
+        # 0.1s deadline and a 0.3s fetch: **0.919s held against the 0.400s the
+        # deadline claims, the whole wave examined and the run not reporting a cut**,
+        # which at the shipped figures is `24 + 6 x 12` rather than `24 + 12`.
+        # Cancelling first makes every future still read one that had started at or
+        # before the cut, which is what `COVER_BACKFILL_DEADLINE_SECONDS`' hold is
+        # derived from, and it leaves nothing queued behind a read that raises.
+        started = [(offset, book, fetching) for offset, book, fetching in asked if not fetching.cancel()]
+        if len(started) != len(asked):
+            # A submission that never started is a book this run never examined,
+            # and so is everything after it.
+            cut_short = True
+        for offset, book, fetching in started:
+            outcomes[offset] = _record_cover(db, book, fetching.result())
+        if cut_short:
+            break
+    return outcomes, cut_short
+
+
+def _submit_cover_wave(batch: list[Book], at: int) -> tuple[list[tuple[int, Book, Future[str | None]]], int]:
+    """Submit the next wave of `_walk_cover_waves`, from `at`, and say where the one after it starts."""
+    # **Every column is read here, in this thread, and never in the pool.**
+    # The Session is not thread safe, and a lazy load or a refresh fired from
+    # a worker is a read on this handler's session from another thread. The
+    # comment this replaces claimed only the fetch ran in the pool while the
+    # `lambda` it sat on read three columns there.
+    asked: list[tuple[int, Book, Future[str | None]]] = []
+    while at < len(batch) and len(asked) < covers.MAX_CONCURRENT_FETCHES:
+        book = batch[at]
+        asked.append(
+            (
+                at,
+                book,
+                covers.FETCHES_AT_ONCE.submit(
+                    covers.resolve_and_store,
+                    book.id,
+                    book.isbn,
+                    book.cover_url,
+                    budget=COVER_BACKFILL_BUDGET_SECONDS,
+                ),
+            )
+        )
+        at += 1
+    return asked, at
 
 
 # ── Store identifiers ─────────────────────────────────────────────────────────
@@ -4014,186 +4045,13 @@ async def backfill_from_identifiers(
     pairs = [(book, _resolvable_volume_id(book)) for book in batch]
 
     ends = deadline.in_(IDENTIFIER_BACKFILL_DEADLINE_SECONDS)
-
-    async def resolve(volume_id: str) -> metadata.Lookup | None:
-        """One volume lookup, or `None` where no slot came free in time.
-
-        **The deadline is spent on the acquire and nowhere else**, and the two
-        spellings a reader reaches for first are both worse than no deadline.
-
-        `deadline=` threaded down to `fetch` is the shape `authority.py` uses,
-        so it is the first thing a reader of that precedent copies, and it
-        **bounds nothing here**: `deadline.left` is consulted when a request
-        starts, and a coroutine parked on `acquire` has not started one. It
-        would leave this handler's connection checked out for as long as the
-        queue is long, which is the whole reason the deadline exists, and it
-        widens three signatures to do it.
-
-        `asyncio.timeout` around the `gather` **loses the whole batch**: the
-        children that already answered are unreachable through a cancelled
-        gather, so nothing merges, nothing commits, the caller gets a 500, and
-        up to `MAX_IDENTIFIER_BACKFILL` metered requests are spent on a cursor
-        that cannot advance, so the member presses again and spends them again.
-
-        `asyncio.wait(timeout=)` cancelling the stragglers is refused for a
-        narrower reason: `for_a_batch_backfill` charges the limiter before a
-        slot is sought and a cancelled Google request is already charged, so
-        cancelling a lookup in flight spends a metered request for nothing.
-
-        **Cancelling a pending acquire leaks no slot**, which is what makes this
-        safe rather than hoped: `asyncio.Semaphore.acquire` restores the count
-        and wakes the next waiter when its own wait is cancelled. Remove the
-        timeout and a starved run holds the request and the connection open for
-        as long as somebody else's batch takes.
-        """
-        try:
-            async with asyncio.timeout(deadline.left(ends)):
-                await _BACKFILL_LOOKUPS_AT_ONCE.acquire()
-        except TimeoutError:
-            return None
-        try:
-            return await google.volume(volume_id)
-        finally:
-            _BACKFILL_LOOKUPS_AT_ONCE.release()
-
-    def store(book: Book, volume_id: str, result: metadata.Lookup) -> _Bucket:
-        """Fold one answer into its Book, and name the outcome it counts as."""
-        if result.outcome is metadata.Outcome.NOT_FOUND:
-            return "not_found"
-        if not result.found or result.record is None:
-            return "unavailable"
-        # **A volume served under another id is not proven this Book's**, and
-        # counts as Google having none, before anything is written. `evidence`
-        # would write its other columns and withhold the id, leaving the Book a
-        # candidate that reports `enriched` on every press; and those columns
-        # would commit only when some other Book of the batch enriched.
-        #
-        # **Whether Google ever does this is unmeasured**, for a merged or a
-        # canonical volume say, and the log line is how it gets measured. Where
-        # it does, those Books stay candidates reported `not_found` rather than
-        # being written.
-        if result.record.google_books_id != volume_id:
-            logger.info(
-                "Google served volume %s for requested volume %s; not written",
-                clipped(result.record.google_books_id),
-                clipped(volume_id),
-            )
-            return "not_found"
-        # Bounded inside `evidence`, exactly as for `enrich_book`: this is
-        # whatever Google answered. `apply_own_volume` rather than
-        # `apply_record`, because the candidate rule above needs
-        # `google_books_id` written and nothing else of this record's that a
-        # Member never selected.
-        evidence.apply_own_volume(book, result.record, volume_id, evidence.Policy.FILL_GAPS)
-        # A candidate has no `google_books_id`; `google_books.lookup_by_volume_id`
-        # answers only for a payload whose `id` **is a volume id**, so it is
-        # twelve characters and fits `GOOGLE_BOOKS_ID_MAX`; `evidence` writes
-        # it. An answered book whose record carries the asked id therefore
-        # always gains a field.
-        #
-        # **The middle clause is the one that has to be enforced rather than
-        # stated, and it was stated first.** With only a type check on the `id`,
-        # a sixty character one was dropped by `BookMatch` before `evidence`
-        # saw it: nothing written, the Book still a candidate, `enriched: 1` on
-        # every press for ever. Found by a design critic as the defect the
-        # removal of `unchanged` had moved one layer up.
-        return "enriched"
-
-    # One bucket per book of the batch, in batch order, `None` where this run
-    # learned nothing about it: no slot came free inside the deadline, or the
-    # deadline cut before its wave started.
-    buckets: list[_Bucket | None] = [None] * len(pairs)
-    cut_short = False
-
-    # **Waves of `IDENTIFIER_BACKFILL_CONCURRENCY` lookups, the deadline checked
-    # between them, rather than one `gather` over the whole batch.** Three
-    # reasons, and the first changes an answer rather than a cost.
-    #
-    # * `next_after_id` has to be the end of the **contiguous** examined run,
-    #   and going in batch order is what makes the examined set a prefix by
-    #   construction. Read off the order the semaphore woke its waiters it would
-    #   rest on `asyncio.Semaphore` being FIFO, which CPython is today and
-    #   promises nowhere.
-    #
-    #   **The prefix does not depend on FIFO. Fair progress under contention
-    #   does.** A second member's six waiters sit ahead of the first member's next
-    #   wave only because the wakeups are ordered; without that order, one member
-    #   pressing flat out keeps all six slots occupied, since four runs in flight
-    #   each want six of six, and everybody else's press resolves nothing while
-    #   spending one of their own six. Bounded in damage, not in reach: a starved
-    #   run answers 200, spends no metered request and leaves the cursor where it
-    #   stood, so it costs the feature rather than data, and the presser's
-    #   username is free under `AUTH_MODE=proxy`.
-    # * One `gather` over fifty books enqueues fifty acquires at once, so a
-    #   second member's run queues behind all fifty: at six at a time and
-    #   `fetch.TIMEOUT_SECONDS` each that is up to 83s of slot time, longer than
-    #   any deadline that fits inside the proxy's minute, so their batch would
-    #   resolve approximately nothing whatever this deadline's value is. A wave
-    #   never leaves more than `IDENTIFIER_BACKFILL_CONCURRENCY` pending.
-    # * It is what puts a cut on a wave boundary, which is the third of
-    #   `IDENTIFIER_BACKFILL_DEADLINE_SECONDS`' derivations.
-    #
-    # The cost, stated rather than left to be discovered: a wave's wall clock is
-    # its slowest member, so idle slots appear where one gather would have kept
-    # six in flight. `ceil(50 / 6)`, the nine waves `MAX_IDENTIFIER_BACKFILL`
-    # models this route as, is the ceiling: a batch with unresolvable rows in it
-    # runs fewer, because a wave is filled by lookup rather than by book.
-    at = 0
-    while at < len(pairs):
-        if deadline.left(ends) <= 0:
-            cut_short = True
-            break
-        # **A wave is six lookups, not six books**, and the difference is the
-        # throughput of a library this route exists for. Sliced off `pairs`
-        # instead, a wave holding k unresolvable rows ran `6 - k` requests and
-        # still spent one request's latency, so a half unresolvable library
-        # examined about half as many books per press inside the same deadline
-        # and a wholly unresolvable one spent a wave on nothing. That is not a
-        # spare case: `IdentifierBackfillOut`'s own docstring records a library
-        # whose rows are all unresolvable, because the candidate query narrows on
-        # carrying a `google_books` identifier and cannot narrow on its shape.
-        #
-        # **It costs the prefix nothing**, which is the only thing that could
-        # have refused it: the span is still contiguous in batch order and still
-        # walked in that order, so everything before the first book that got no
-        # slot still has an outcome. What it does change is that a wave's span in
-        # books is no longer six, so the nine waves `MAX_IDENTIFIER_BACKFILL`
-        # models this route as is now a ceiling rather than a count.
-        asked: list[tuple[int, Book, str]] = []
-        while at < len(pairs) and len(asked) < IDENTIFIER_BACKFILL_CONCURRENCY:
-            book, value = pairs[at]
-            if value is None:
-                # No request to make, so no slot to wait for: examined for free,
-                # exactly as it was before this route had a deadline. Marked as
-                # the walk passes it, which is what keeps the examined set
-                # contiguous while the wave is filled by lookup rather than by
-                # book.
-                buckets[at] = "unresolvable"
-            else:
-                asked.append((at, book, value))
-            at += 1
-        # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
-        # source turns its own failures into an outcome, so an exception
-        # escaping one is a bug worth seeing rather than a network condition to
-        # absorb. **Empty needs no guard here and does under `asyncio.wait`**,
-        # which raises `ValueError` on an empty set where `asyncio.gather()`
-        # returns `[]`; a library whose every row is unresolvable reaches this
-        # with nothing asked, and `metadata._within_deadline`'s docstring records
-        # that defect shipping once.
-        answers = await asyncio.gather(*(resolve(value) for _, _, value in asked))
-        for (offset, book, value), answer in zip(asked, answers, strict=True):
-            if answer is None:
-                cut_short = True
-                continue
-            buckets[offset] = store(book, value, answer)
-        if cut_short:
-            break
+    buckets, cut_short = await _walk_identifier_waves(pairs, google.volume, ends)
 
     # The unbroken examined run, which is the only thing the cursor may clear.
     #
     # **A book past the cut that did answer is still stored**, because its
     # metered request is already paid for and `evidence.apply_own_volume`
-    # writes `google_books_id` (`store` has already refused a record carrying
+    # writes `google_books_id` (`_store_volume` has already refused a record carrying
     # another id), which takes it out of the candidate set so the next
     # press does not spend another. It is counted in no bucket, so the reply
     # understates what this run did and never overstates it.
@@ -4275,6 +4133,213 @@ async def backfill_from_identifiers(
         # `remaining >= 1` and the cursor moves over the prefix rather than to 0.
         next_after_id=((batch[examined - 1].id if examined else after_id) if remaining > 0 else 0),
     )
+
+
+#: One catalogue question by one exact key, as an asking type's bound method answers it.
+#:
+#: **The bound method rather than the asking type**, because naming
+#: `catalogue_access.Enquiry` or `GoogleVolumes` outside the door, an annotation
+#: included, is what `tests/test_catalogue_access.py`'s
+#: `test_nothing_outside_the_door_builds_an_asking_type_by_hand` refuses. The
+#: handler builds the door through its named constructor and hands a helper
+#: only the question it asks.
+type _AskByKey = Callable[[str], Awaitable[metadata.Lookup]]
+
+
+async def _resolve_volume(volume: _AskByKey, volume_id: str, ends: float) -> metadata.Lookup | None:
+    """One volume lookup for `backfill_from_identifiers`, or `None` where no slot came free in time.
+
+    **The deadline is spent on the acquire and nowhere else**, and the two
+    spellings a reader reaches for first are both worse than no deadline.
+
+    `deadline=` threaded down to `fetch` is the shape `authority.py` uses,
+    so it is the first thing a reader of that precedent copies, and it
+    **bounds nothing here**: `deadline.left` is consulted when a request
+    starts, and a coroutine parked on `acquire` has not started one. It
+    would leave this handler's connection checked out for as long as the
+    queue is long, which is the whole reason the deadline exists, and it
+    widens three signatures to do it.
+
+    `asyncio.timeout` around the `gather` **loses the whole batch**: the
+    children that already answered are unreachable through a cancelled
+    gather, so nothing merges, nothing commits, the caller gets a 500, and
+    up to `MAX_IDENTIFIER_BACKFILL` metered requests are spent on a cursor
+    that cannot advance, so the member presses again and spends them again.
+
+    `asyncio.wait(timeout=)` cancelling the stragglers is refused for a
+    narrower reason: `for_a_batch_backfill` charges the limiter before a
+    slot is sought and a cancelled Google request is already charged, so
+    cancelling a lookup in flight spends a metered request for nothing.
+
+    **Cancelling a pending acquire leaks no slot**, which is what makes this
+    safe rather than hoped: `asyncio.Semaphore.acquire` restores the count
+    and wakes the next waiter when its own wait is cancelled. Remove the
+    timeout and a starved run holds the request and the connection open for
+    as long as somebody else's batch takes.
+    """
+    try:
+        async with asyncio.timeout(deadline.left(ends)):
+            await _BACKFILL_LOOKUPS_AT_ONCE.acquire()
+    except TimeoutError:
+        return None
+    try:
+        return await volume(volume_id)
+    finally:
+        _BACKFILL_LOOKUPS_AT_ONCE.release()
+
+
+def _store_volume(book: Book, volume_id: str, result: metadata.Lookup) -> _Bucket:
+    """Fold one identifier backfill answer into its Book, and name the outcome it counts as."""
+    if result.outcome is metadata.Outcome.NOT_FOUND:
+        return "not_found"
+    if not result.found or result.record is None:
+        return "unavailable"
+    # **A volume served under another id is not proven this Book's**, and
+    # counts as Google having none, before anything is written. `evidence`
+    # would write its other columns and withhold the id, leaving the Book a
+    # candidate that reports `enriched` on every press; and those columns
+    # would commit only when some other Book of the batch enriched.
+    #
+    # **Whether Google ever does this is unmeasured**, for a merged or a
+    # canonical volume say, and the log line is how it gets measured. Where
+    # it does, those Books stay candidates reported `not_found` rather than
+    # being written.
+    if result.record.google_books_id != volume_id:
+        logger.info(
+            "Google served volume %s for requested volume %s; not written",
+            clipped(result.record.google_books_id),
+            clipped(volume_id),
+        )
+        return "not_found"
+    # Bounded inside `evidence`, exactly as for `enrich_book`: this is
+    # whatever Google answered. `apply_own_volume` rather than
+    # `apply_record`, because the candidate rule above needs
+    # `google_books_id` written and nothing else of this record's that a
+    # Member never selected.
+    evidence.apply_own_volume(book, result.record, volume_id, evidence.Policy.FILL_GAPS)
+    # A candidate has no `google_books_id`; `google_books.lookup_by_volume_id`
+    # answers only for a payload whose `id` **is a volume id**, so it is
+    # twelve characters and fits `GOOGLE_BOOKS_ID_MAX`; `evidence` writes
+    # it. An answered book whose record carries the asked id therefore
+    # always gains a field.
+    #
+    # **The middle clause is the one that has to be enforced rather than
+    # stated, and it was stated first.** With only a type check on the `id`,
+    # a sixty character one was dropped by `BookMatch` before `evidence`
+    # saw it: nothing written, the Book still a candidate, `enriched: 1` on
+    # every press for ever. Found by a design critic as the defect the
+    # removal of `unchanged` had moved one layer up.
+    return "enriched"
+
+
+async def _walk_identifier_waves(
+    pairs: list[tuple[Book, str | None]], volume: _AskByKey, ends: float
+) -> tuple[list[_Bucket | None], bool]:
+    """Resolve one identifier backfill batch in waves, until it ends or the deadline cuts it.
+
+    Answers one bucket per pair, in batch order, `None` where this run learned
+    nothing about the book: no slot came free inside the deadline, or the
+    deadline cut before its wave started. And whether the deadline cut it.
+    """
+    # **Waves of `IDENTIFIER_BACKFILL_CONCURRENCY` lookups, the deadline checked
+    # between them, rather than one `gather` over the whole batch.** Three
+    # reasons, and the first changes an answer rather than a cost.
+    #
+    # * `next_after_id` has to be the end of the **contiguous** examined run,
+    #   and going in batch order is what makes the examined set a prefix by
+    #   construction. Read off the order the semaphore woke its waiters it would
+    #   rest on `asyncio.Semaphore` being FIFO, which CPython is today and
+    #   promises nowhere.
+    #
+    #   **The prefix does not depend on FIFO. Fair progress under contention
+    #   does.** A second member's six waiters sit ahead of the first member's next
+    #   wave only because the wakeups are ordered; without that order, one member
+    #   pressing flat out keeps all six slots occupied, since four runs in flight
+    #   each want six of six, and everybody else's press resolves nothing while
+    #   spending one of their own six. Bounded in damage, not in reach: a starved
+    #   run answers 200, spends no metered request and leaves the cursor where it
+    #   stood, so it costs the feature rather than data, and the presser's
+    #   username is free under `AUTH_MODE=proxy`.
+    # * One `gather` over fifty books enqueues fifty acquires at once, so a
+    #   second member's run queues behind all fifty: at six at a time and
+    #   `fetch.TIMEOUT_SECONDS` each that is up to 83s of slot time, longer than
+    #   any deadline that fits inside the proxy's minute, so their batch would
+    #   resolve approximately nothing whatever this deadline's value is. A wave
+    #   never leaves more than `IDENTIFIER_BACKFILL_CONCURRENCY` pending.
+    # * It is what puts a cut on a wave boundary, which is the third of
+    #   `IDENTIFIER_BACKFILL_DEADLINE_SECONDS`' derivations.
+    #
+    # The cost, stated rather than left to be discovered: a wave's wall clock is
+    # its slowest member, so idle slots appear where one gather would have kept
+    # six in flight. `ceil(50 / 6)`, the nine waves `MAX_IDENTIFIER_BACKFILL`
+    # models this route as, is the ceiling: a batch with unresolvable rows in it
+    # runs fewer, because a wave is filled by lookup rather than by book.
+    buckets: list[_Bucket | None] = [None] * len(pairs)
+    cut_short = False
+    at = 0
+    while at < len(pairs):
+        if deadline.left(ends) <= 0:
+            cut_short = True
+            break
+        # **A wave is six lookups, not six books**, and the difference is the
+        # throughput of a library this route exists for. Sliced off `pairs`
+        # instead, a wave holding k unresolvable rows ran `6 - k` requests and
+        # still spent one request's latency, so a half unresolvable library
+        # examined about half as many books per press inside the same deadline
+        # and a wholly unresolvable one spent a wave on nothing. That is not a
+        # spare case: `IdentifierBackfillOut`'s own docstring records a library
+        # whose rows are all unresolvable, because the candidate query narrows on
+        # carrying a `google_books` identifier and cannot narrow on its shape.
+        #
+        # **It costs the prefix nothing**, which is the only thing that could
+        # have refused it: the span is still contiguous in batch order and still
+        # walked in that order, so everything before the first book that got no
+        # slot still has an outcome. What it does change is that a wave's span in
+        # books is no longer six, so the nine waves `MAX_IDENTIFIER_BACKFILL`
+        # models this route as is now a ceiling rather than a count.
+        asked, at = _fill_identifier_wave(pairs, at, buckets)
+        # `return_exceptions` is not set, for `metadata.lookup`'s reason: every
+        # source turns its own failures into an outcome, so an exception
+        # escaping one is a bug worth seeing rather than a network condition to
+        # absorb. **Empty needs no guard here and does under `asyncio.wait`**,
+        # which raises `ValueError` on an empty set where `asyncio.gather()`
+        # returns `[]`; a library whose every row is unresolvable reaches this
+        # with nothing asked, and `metadata._within_deadline`'s docstring records
+        # that defect shipping once.
+        answers = await asyncio.gather(*(_resolve_volume(volume, value, ends) for _, _, value in asked))
+        for (offset, book, value), answer in zip(asked, answers, strict=True):
+            if answer is None:
+                cut_short = True
+                continue
+            buckets[offset] = _store_volume(book, value, answer)
+        if cut_short:
+            break
+
+    return buckets, cut_short
+
+
+def _fill_identifier_wave(
+    pairs: list[tuple[Book, str | None]], at: int, buckets: list[_Bucket | None]
+) -> tuple[list[tuple[int, Book, str]], int]:
+    """The next wave of `_walk_identifier_waves`, from `at`, and where the one after it starts.
+
+    Fills the wave by lookup rather than by book: a pair with no resolvable
+    identifier is marked `unresolvable` in `buckets` as the walk passes it.
+    """
+    asked: list[tuple[int, Book, str]] = []
+    while at < len(pairs) and len(asked) < IDENTIFIER_BACKFILL_CONCURRENCY:
+        book, value = pairs[at]
+        if value is None:
+            # No request to make, so no slot to wait for: examined for free,
+            # exactly as it was before this route had a deadline. Marked as
+            # the walk passes it, which is what keeps the examined set
+            # contiguous while the wave is filled by lookup rather than by
+            # book.
+            buckets[at] = "unresolvable"
+        else:
+            asked.append((at, book, value))
+        at += 1
+    return asked, at
 
 
 # ── Trash ─────────────────────────────────────────────────────────────────────
@@ -4758,7 +4823,8 @@ def get_book(book: BookForRead, db: DbSession, current_user: CurrentUser) -> Boo
 # that said "add another copy", and neither the index nor the duplicate finder
 # touches them.
 
-#: Facts about the **work**, which every copy of it shares. Taken from the book
+#: Facts about the **work**, which every copy of it shares, and where the record
+#: describing it came from, which is the same record. Taken from the book
 #: being copied rather than accepted from the caller: a payload that can restate
 #: them is a payload that can disagree with them, and two rows claiming to be
 #: copies of each other while naming different books is a state nothing else in
@@ -4774,7 +4840,7 @@ def get_book(book: BookForRead, db: DbSession, current_user: CurrentUser) -> Boo
 #: `enums.BookIdentifierScheme.GOOGLE_BOOKS` names this one in prose and that
 #: docstring is the column's description in `openapi.json`. Spelling it away is
 #: a client regeneration.
-_WORK_FIELDS: Final = book_columns.WORK_FACTS
+_WORK_FIELDS: Final = book_columns.COPIED_FROM_THE_BOOK
 
 
 @router.get("/{book_id}/copies", response_model=list[BookOut])
@@ -6234,64 +6300,15 @@ async def enrich_book(
     # `evidence.apply_own_volume`, neither of which writes a Classification
     # under any policy. That is ADR 0006 held by the doors rather than by this
     # handler remembering.
-    found: catalogue.Record | None = None
-    # The volume id that found `found`, if one did, which picks the door below.
-    # The door compares it with the record's own id, so a value left here by
-    # mistake on another branch writes no id.
-    own_volume: str | None = None
-    assertions: tuple[catalogue.AuthorityAssertion, ...] = ()
+    found, own_volume, assertions = await _found_by_exact_key(book, enquiry.lookup, enquiry.volume)
     recorded = RecordedAssertions(stored=[], refused=[])
-    if book.isbn:
-        result = await enquiry.lookup(book.isbn)
-        # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
-        # test for the record. This is the third consumer of a `Lookup` and the
-        # only one that writes to a Book without telling the Member why nothing
-        # happened, so it is the one that must not decide on a different
-        # question from its two siblings.
-        if result.found:
-            assert result.record is not None  # noqa: S101  narrowing, not validation
-            found = result.record
-            # **Only on this branch.** A record found by the Book's own ISBN
-            # asserts who wrote *this* Book; the title and author search below
-            # asserts who wrote something with a similar name, which is a
-            # candidate and reaches the store only through
-            # `POST /authors/identifiers`. `evidence.apply_record` writes no
-            # assertions, so the search branch has nothing to write even by
-            # mistake, which is the property ADR 0006 gets from it for
-            # Classifications.
-            #
-            # Held rather than recorded here: the write happens below
-            # `evidence.apply_record`, once the Book's credit line is final.
-            assertions = result.record.author_identifiers
-
-    if found is None:
-        # **Before the title search and after the ISBN, which is the whole
-        # ordering.** A store's own identifier is an exact key, so it outranks
-        # matching by title and author; an ISBN is an exact key the free
-        # catalogues answer to, so it outranks a metered one.
-        #
-        # A Google Play Books Takeout is the case this exists for: it carries a
-        # volume id on every book and no ISBN anywhere, so without this branch
-        # every book of an imported library is matched by its title.
-        volume_id = _resolvable_volume_id(book)
-        if volume_id is not None:
-            volume = await enquiry.volume(volume_id)
-            if volume.found:
-                assert volume.record is not None  # noqa: S101  narrowing, not validation
-                # No `assertions`, unlike the ISBN branch above. `Record.
-                # author_identifiers` is empty for every source but the DNB, so
-                # there is nothing here to record even by mistake, and
-                # `evidence.apply_own_volume` writes no Classification.
-                found = volume.record
-                own_volume = volume_id
 
     if found is None:
         # No ISBN, no resolvable store identifier, or nobody carries this
         # edition under either.
         query = " ".join(part for part in (book.title, book.author) if part)
         matches = await enquiry.search(query, limit=1)
-        if matches:
-            found = matches[0]
+        found = matches[0] if matches else None
 
     if found is None:
         return BookEnrichmentOut(
@@ -6339,6 +6356,62 @@ async def enrich_book(
         updated_fields=updated,
         found=True,
     )
+
+
+async def _found_by_exact_key(
+    book: Book, lookup: _AskByKey, volume_of: _AskByKey
+) -> tuple[catalogue.Record | None, str | None, tuple[catalogue.AuthorityAssertion, ...]]:
+    """The record `enrich_book` finds by an exact key, the ISBN before the volume id.
+
+    Answers the record, the volume id that found it where one did, and the
+    authority assertions it carries where the ISBN found it. `None` for the
+    record where neither key found one, and the route falls back on its title.
+    """
+    if book.isbn:
+        result = await lookup(book.isbn)
+        # `found`, like `lookup_isbn` and `refresh_metadata`, rather than a bare
+        # test for the record. This is the third consumer of a `Lookup` and the
+        # only one that writes to a Book without telling the Member why nothing
+        # happened, so it is the one that must not decide on a different
+        # question from its two siblings.
+        if result.found:
+            assert result.record is not None  # noqa: S101  narrowing, not validation
+            # **Only on this branch.** A record found by the Book's own ISBN
+            # asserts who wrote *this* Book; the title and author search
+            # asserts who wrote something with a similar name, which is a
+            # candidate and reaches the store only through
+            # `POST /authors/identifiers`. `evidence.apply_record` writes no
+            # assertions, so the search branch has nothing to write even by
+            # mistake, which is the property ADR 0006 gets from it for
+            # Classifications.
+            #
+            # Held rather than recorded here: the write happens below
+            # `evidence.apply_record` in `enrich_book`, once the Book's credit
+            # line is final.
+            return result.record, None, result.record.author_identifiers
+
+    # **Before the title search and after the ISBN, which is the whole
+    # ordering.** A store's own identifier is an exact key, so it outranks
+    # matching by title and author; an ISBN is an exact key the free
+    # catalogues answer to, so it outranks a metered one.
+    #
+    # A Google Play Books Takeout is the case this exists for: it carries a
+    # volume id on every book and no ISBN anywhere, so without this branch
+    # every book of an imported library is matched by its title.
+    volume_id = _resolvable_volume_id(book)
+    if volume_id is not None:
+        volume = await volume_of(volume_id)
+        if volume.found:
+            assert volume.record is not None  # noqa: S101  narrowing, not validation
+            # No assertions, unlike the ISBN branch above. `Record.
+            # author_identifiers` is empty for every source but the DNB, so
+            # there is nothing here to record even by mistake, and
+            # `evidence.apply_own_volume` writes no Classification. The volume
+            # id travels with the record because it picks the door in
+            # `enrich_book`, which compares it with the record's own id, so a
+            # value answered by mistake on another branch writes no id.
+            return volume.record, volume_id, ()
+    return None, None, ()
 
 
 @router.post("/{book_id}/enrich/apply", response_model=BookEnrichmentOut)
@@ -6505,8 +6578,13 @@ def update_book_details(
     for name in reshaped:
         fields.pop(name)
 
+    # Compared as stored, after the row's own `@validates` hooks, so a blank
+    # sent for a null is no change. Saving an untouched form must not mark the
+    # record as corrected here.
+    before = {field: getattr(book, field) for field in fields}
     for field, value in fields.items():
         setattr(book, field, value)
+    changed = [field for field in fields if getattr(book, field) != before[field]]
 
     # Paired with the pop deliberately, exactly as at the create door: a pop
     # with no write is a 200 that accepted a field and stored nothing, which is
@@ -6514,8 +6592,12 @@ def update_book_details(
     # `tests/schemas/test_book.py::TestEveryReshapedFieldIsWrittenAtTheRoute`
     # reads this function's source and holds both halves.
     if "categories" in reshaped:
-        book.categories = join_categories(payload.categories)
+        joined = join_categories(payload.categories)
+        if book.categories != joined:
+            changed.append("categories")
+        book.categories = joined
 
+    evidence.touched(book, changed)
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)

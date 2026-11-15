@@ -589,41 +589,7 @@ class Target:
     def __post_init__(self) -> None:
         if self.transport is Transport.Z3950:
             raise ValueError(f"{self.source}: no Z39.50 door yet, the transport dispatch is #129")
-        if not isinstance(self.reader, Reader):
-            # **A `StrEnum` member hashes as its own value, so a bare string is
-            # a key of a reader table exactly where its member is, and is not
-            # the member**, and this field is read
-            # under both disciplines. Every site below and in `metadata.resolve`
-            # asks membership, under which `"marc_plain"` is a MARC reader;
-            # `metadata._marc_build` asks `is`, under which it is not, and picks
-            # the other MARC reader. A row naming `"marc_plain"` would therefore
-            # be parsed by `_dnb_record`, which harvests GND headings and
-            # refuses volume slot titles, where the row asked for
-            # `_k10plus_record`: a wrong reading of every record, reported as a
-            # successful one. `main.seed_catalogue_targets` reads `.value` off
-            # the same field and would raise instead.
-            #
-            # Refused by type at the one site that writes the field, so the
-            # readers agree because the value cannot exist rather than because
-            # six spellings are kept in step. **Ahead of the two refusals below
-            # for the same reason the secret's is ahead of its own**: a refusal
-            # that reads the value has already trusted it.
-            #
-            # `Decoding.__post_init__` carries the same line, and needs its own:
-            # the `is` site reads `Decoding.reader`, and a decoding built from a
-            # file rather than from `Target.decoding` has passed no row.
-            # `ValueError` and not `TypeError` on a type test: the reason is at
-            # the matching refusal in `decoders.Decoding.__post_init__`.
-            raise ValueError(f"{self.source}: {self.reader!r} is not a Reader")  # noqa: TRY004
-        if self.reader in IMPORT_READERS:
-            # **The registry refusing the other family's parser**, which is the
-            # one rule `enums.SourceFamily` exists for and the one place a row
-            # could break it. `metadata.resolve` catches only a row that also
-            # declares a capability, so a row naming this reader and answering
-            # nothing would otherwise construct and sit in the roster.
-            raise ValueError(
-                f"{self.source}: {self.reader} belongs to the import family, which no catalogue row may name"
-            )
+        self._check_reader()
         if self.transport is Transport.SRU:
             self._check_sru()
         else:
@@ -640,6 +606,45 @@ class Target:
             # which is the rule the bespoke fields above already follow.
             raise ValueError(f"{self.source}: a shipped login on a row that needs no credential")
         self._check_secret()
+
+    def _check_reader(self) -> None:
+        """Refuses a reader that is not a `Reader`, and one of the import family."""
+        if not isinstance(self.reader, Reader):
+            # **A `StrEnum` member hashes as its own value, so a bare string is
+            # a key of a reader table exactly where its member is, and is not
+            # the member**, and this field is read
+            # under both disciplines. Every site in this class and in `metadata.resolve`
+            # asks membership, under which `"marc_plain"` is a MARC reader;
+            # `metadata._marc_build` asks `is`, under which it is not, and picks
+            # the other MARC reader. A row naming `"marc_plain"` would therefore
+            # be parsed by `_dnb_record`, which harvests GND headings and
+            # refuses volume slot titles, where the row asked for
+            # `_k10plus_record`: a wrong reading of every record, reported as a
+            # successful one. `main.seed_catalogue_targets` reads `.value` off
+            # the same field and would raise instead.
+            #
+            # Refused by type at the one site that writes the field, so the
+            # readers agree because the value cannot exist rather than because
+            # six spellings are kept in step. **Ahead of the import family refusal and
+            # the MARC knob check, which both read it, for the same reason the
+            # secret's is ahead of its own**: a refusal that reads the value has
+            # already trusted it.
+            #
+            # `Decoding.__post_init__` carries the same line, and needs its own:
+            # the `is` site reads `Decoding.reader`, and a decoding built from a
+            # file rather than from `Target.decoding` has passed no row.
+            # `ValueError` and not `TypeError` on a type test: the reason is at
+            # the matching refusal in `decoders.Decoding.__post_init__`.
+            raise ValueError(f"{self.source}: {self.reader!r} is not a Reader")  # noqa: TRY004
+        if self.reader in IMPORT_READERS:
+            # **The registry refusing the other family's parser**, which is the
+            # one rule `enums.SourceFamily` exists for and the one place a row
+            # could break it. `metadata.resolve` catches only a row that also
+            # declares a capability, so a row naming this reader and answering
+            # nothing would otherwise construct and sit in the roster.
+            raise ValueError(
+                f"{self.source}: {self.reader} belongs to the import family, which no catalogue row may name"
+            )
 
     def _check_secret(self) -> None:
         """Refuses a secret this row may not be handed, and a value that is not one."""
@@ -686,28 +691,36 @@ class Target:
         if self.query_language is None:
             raise ValueError(f"{self.source}: an SRU target needs a query language")
         if self.answers_lookup:
-            if self.lookup_records < 1:
-                raise ValueError(f"{self.source}: answers a lookup and asks for no records")
-            if self.query_language is QueryLanguage.CQL:
-                if not _INDEX.fullmatch(self.isbn_index):
-                    raise ValueError(f"{self.source}: not an index name: {self.isbn_index!r}")
-            elif type(self.isbn_attribute) is not int or self.isbn_attribute not in _USE_ATTRIBUTES:
-                # **`type(...) is not int` and not `isinstance`, and not
-                # membership alone.** `7.0 in {7}` is True, because a float
-                # compares equal to an integer, so membership admitted a value
-                # `z3950.query` then refuses at request time with `BadQuery`.
-                # That is the same rule enforced in two places and disagreeing:
-                # one arm built a row the other would not send.
-                raise ValueError(f"{self.source}: not a PQF use attribute: {self.isbn_attribute!r}")
+            self._check_sru_lookup()
         if self.answers_search:
-            if self.query_language is not QueryLanguage.CQL:
-                raise ValueError(f"{self.source}: only a CQL target can answer a search")
-            if not _INDEX.fullmatch(self.title_index):
-                raise ValueError(f"{self.source}: not an index name: {self.title_index!r}")
-            if self.title_query_shape is None:
-                raise ValueError(f"{self.source}: answers a search and names no query shape")
-            if self.search_multiplier < 1 or self.search_cap < 1:
-                raise ValueError(f"{self.source}: answers a search and asks for no records")
+            self._check_sru_search()
+
+    def _check_sru_lookup(self) -> None:
+        """Refuses an SRU lookup that asks for nothing or names no usable ISBN index."""
+        if self.lookup_records < 1:
+            raise ValueError(f"{self.source}: answers a lookup and asks for no records")
+        if self.query_language is QueryLanguage.CQL:
+            if not _INDEX.fullmatch(self.isbn_index):
+                raise ValueError(f"{self.source}: not an index name: {self.isbn_index!r}")
+        elif type(self.isbn_attribute) is not int or self.isbn_attribute not in _USE_ATTRIBUTES:
+            # **`type(...) is not int` and not `isinstance`, and not
+            # membership alone.** `7.0 in {7}` is True, because a float
+            # compares equal to an integer, so membership admitted a value
+            # `z3950.query` then refuses at request time with `BadQuery`.
+            # That is the same rule enforced in two places and disagreeing:
+            # one arm built a row the other would not send.
+            raise ValueError(f"{self.source}: not a PQF use attribute: {self.isbn_attribute!r}")
+
+    def _check_sru_search(self) -> None:
+        """Refuses an SRU search a CQL title query could not be built for."""
+        if self.query_language is not QueryLanguage.CQL:
+            raise ValueError(f"{self.source}: only a CQL target can answer a search")
+        if not _INDEX.fullmatch(self.title_index):
+            raise ValueError(f"{self.source}: not an index name: {self.title_index!r}")
+        if self.title_query_shape is None:
+            raise ValueError(f"{self.source}: answers a search and names no query shape")
+        if self.search_multiplier < 1 or self.search_cap < 1:
+            raise ValueError(f"{self.source}: answers a search and asks for no records")
 
     def _check_no_sru(self) -> None:
         """A bespoke target carries no query grammar, because it has none.

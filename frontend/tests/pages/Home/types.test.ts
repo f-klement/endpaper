@@ -10,8 +10,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BookFormat,
   BookSort,
   LendingWillingness,
+  OwnershipStatus,
   ReadStatus,
 } from "../../../src/api/generated/model";
 import {
@@ -45,6 +47,13 @@ describe("hasActiveFilters", () => {
     ["an author", { author: "ursula k le guin" }],
     ["a heading", { headings: ["lcsh:Mental health"] }],
     ["a Dewey division", { ddcDivisions: ["150"] }],
+    ["an ownership answer", { ownership: OwnershipStatus.owned }],
+    ["a series", { series: "Earthsea" }],
+    ["a location", { location: "attic" }],
+    ["a format", { format: BookFormat.audiobook }],
+    // `toParams` sends any numeric id, zero included, so the view is narrowed
+    // whenever it does.
+    ["a collection whose id is zero", { collection: 0 }],
   ])("is true with %s", (_label, overrides) => {
     expect(hasActiveFilters({ ...DEFAULT_FILTERS, ...overrides })).toBe(true);
   });
@@ -55,6 +64,30 @@ describe("hasActiveFilters", () => {
     expect(
       hasActiveFilters({ ...DEFAULT_FILTERS, sort: BookSort.newest }),
     ).toBe(false);
+  });
+
+  it.each([
+    ["text", "x"],
+    ["empty text", ""],
+  ])(
+    "does not count a stored collection of %s, which toParams does not send",
+    (_label, stored) => {
+      const filters = {
+        ...DEFAULT_FILTERS,
+        collection: stored as unknown as number,
+      };
+
+      expect(hasActiveFilters(filters)).toBe(false);
+    },
+  );
+
+  it("does not count a number in a text field, which toParams does not send", () => {
+    // `sanitiseFilters` keeps a number in any field whose default is null, so
+    // corrupted storage can carry `series: 0`; the request it makes is
+    // unfiltered, and the grid has to say so.
+    const stored = { ...DEFAULT_FILTERS, series: 0 as unknown as string };
+
+    expect(hasActiveFilters(stored)).toBe(false);
   });
 });
 

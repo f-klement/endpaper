@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 
-import type { TagOut } from "../../api/generated/model";
+import type { TagCategory, TagOut } from "../../api/generated/model";
 import { Icon } from "../../components";
 import { tagName, useTranslation } from "../../i18n";
 import {
@@ -61,8 +61,7 @@ export default function TagPicker({
   pending,
   onDelete,
 }: TagPickerProps) {
-  const { t, locale } = useTranslation();
-  const [name, setName] = useState("");
+  const { locale } = useTranslation();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const panelId = useId();
   const byCategory = groupTagsByCategory(tags, locale);
@@ -78,8 +77,11 @@ export default function TagPicker({
    * A category holding a selected tag opens itself, because a selection you
    * cannot see is worse than a long list.
    */
-  function isOpen(category: string, ids: number[]): boolean {
-    return open.has(category) || ids.some((id) => selectedIds.includes(id));
+  function isOpen(category: string, inCategory: TagOut[]): boolean {
+    return (
+      open.has(category) ||
+      inCategory.some((tag) => selectedIds.includes(tag.id))
+    );
   }
 
   function toggleCategory(category: string) {
@@ -90,166 +92,251 @@ export default function TagPicker({
     });
   }
 
-  function create() {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    onCreate?.(trimmed);
-    setName("");
-  }
-
   return (
     <div className="space-y-2.5">
       {TAG_CATEGORY_ORDER.map((category) => {
         const inCategory = byCategory[category];
         if (inCategory.length === 0) return null;
-
-        const ids = inCategory.map((tag) => tag.id);
-        const chosen = ids.filter((id) => selectedIds.includes(id)).length;
-        const expanded = isOpen(category, ids);
-
         return (
-          <div key={category}>
-            <button
-              type="button"
-              onClick={() => toggleCategory(category)}
-              aria-expanded={expanded}
-              aria-controls={`${panelId}-${category}`}
-              className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-300"
-            >
-              <Icon
-                name="chevron"
-                className={`h-3 w-3 transition-transform duration-150 ${
-                  expanded ? "rotate-90" : ""
-                }`}
-              />
-              {t(TAG_CATEGORY_LABELS[category])}{" "}
-              <span className="font-normal normal-case text-paper-600 dark:text-paper-400">
-                {chosen > 0
-                  ? t("tags.countWithChosen", {
-                      count: inCategory.length,
-                      chosen,
-                    })
-                  : t("tags.count", { count: inCategory.length })}
-              </span>
-            </button>
-
-            {expanded && (
-              <div
-                id={`${panelId}-${category}`}
-                role="group"
-                aria-label={t(TAG_CATEGORY_LABELS[category])}
-                className="mt-1 flex flex-wrap gap-1.5"
-              >
-                {inCategory.map((tag) => {
-                  const selected = selectedIds.includes(tag.id);
-                  // Only a tag the library invented can go. A seeded one
-                  // comes straight back at the next restart, so offering it
-                  // would be offering an action that undoes itself.
-                  const removable = Boolean(onDelete) && !tag.is_predefined;
-                  return (
-                    <span
-                      key={tag.id}
-                      className={`inline-flex items-center rounded-full border text-xs transition-colors ${
-                        selected
-                          ? TAG_CHIP_SELECTED
-                          : TAG_CHIP_CLASSES[category]
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onToggle(tag.id)}
-                        aria-pressed={selected}
-                        className={`px-2.5 py-1 ${removable ? "pr-1" : ""}`}
-                      >
-                        {tagName(tag, locale)}
-                      </button>
-                      {removable && (
-                        <button
-                          type="button"
-                          onClick={() => onDelete?.(tag)}
-                          aria-label={t("tags.delete", {
-                            name: tagName(tag, locale),
-                          })}
-                          className="pr-1.5 pl-0.5 opacity-60 hover:opacity-100"
-                        >
-                          <Icon name="close" className="h-3 w-3" />
-                        </button>
-                      )}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <CategoryGroup
+            key={category}
+            category={category}
+            inCategory={inCategory}
+            selectedIds={selectedIds}
+            expanded={isOpen(category, inCategory)}
+            panelId={`${panelId}-${category}`}
+            onExpand={() => toggleCategory(category)}
+            onToggle={onToggle}
+            onDelete={onDelete}
+          />
         );
       })}
 
-      {pending && pending.names.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-paper-600 dark:text-paper-400">
-            {t("tags.pending")}
-          </p>
-          {/* Always open, unlike the categories above: these are on screen
-              because somebody typed them a moment ago, and a group that
-              hides what was just typed reads as the typing having failed. */}
-          <div
-            role="group"
-            aria-label={t("tags.pending")}
-            className="mt-1 flex flex-wrap gap-1.5"
-          >
-            {pending.names.map((name) => (
-              <span
-                key={name}
-                className={`inline-flex items-center rounded-full border text-xs ${TAG_CHIP_SELECTED}`}
-              >
-                {/* The name as typed, never through `tagName`: there is no row
-                    and so no key to translate, and the catalogue has nothing
-                    to say about a word somebody invented on this form. */}
-                <span className="py-1 pl-2.5 pr-1">{name}</span>
-                <button
-                  type="button"
-                  onClick={() => pending.onForget(name)}
-                  aria-label={t("book.removeTag", { tag: name })}
-                  className="pr-1.5 pl-0.5 opacity-60 hover:opacity-100"
-                >
-                  <Icon name="close" className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      {pending && pending.names.length > 0 && <PendingGroup {...pending} />}
 
-      {onCreate && (
-        <div className="flex gap-1.5 pt-1">
-          <input
-            type="text"
-            value={name}
-            maxLength={100}
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                // The picker sits inside forms. Without this the Enter that
-                // means "add this tag" submits the book instead.
-                event.preventDefault();
-                create();
-              }
-            }}
-            placeholder={t("tags.newPlaceholder")}
-            aria-label={t("tags.newLabel")}
-            className="field h-8 flex-1 text-xs"
-          />
-          <button
-            type="button"
-            onClick={create}
-            disabled={isCreating || !name.trim()}
-            className="inline-flex items-center gap-1 rounded-lg border border-paper-200 px-2.5 text-xs font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-          >
-            <Icon name="tag" className="h-3 w-3" />
-            {t("tags.create")}
-          </button>
+      {onCreate && <CreateField onCreate={onCreate} isCreating={isCreating} />}
+    </div>
+  );
+}
+
+/** One category: its heading, which opens and closes it, and its chips. */
+function CategoryGroup({
+  category,
+  inCategory,
+  selectedIds,
+  expanded,
+  panelId,
+  onExpand,
+  onToggle,
+  onDelete,
+}: {
+  category: TagCategory;
+  inCategory: TagOut[];
+  selectedIds: number[];
+  expanded: boolean;
+  panelId: string;
+  onExpand: () => void;
+  onToggle: (tagId: number) => void;
+  onDelete?: (tag: TagOut) => void;
+}) {
+  const { t } = useTranslation();
+  const chosen = inCategory.filter((tag) =>
+    selectedIds.includes(tag.id),
+  ).length;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-paper-600 hover:text-paper-800 dark:text-paper-400 dark:hover:text-paper-300"
+      >
+        <Icon
+          name="chevron"
+          className={`h-3 w-3 transition-transform duration-150 ${
+            expanded ? "rotate-90" : ""
+          }`}
+        />
+        {t(TAG_CATEGORY_LABELS[category])}{" "}
+        <span className="font-normal normal-case text-paper-600 dark:text-paper-400">
+          {chosen > 0
+            ? t("tags.countWithChosen", {
+                count: inCategory.length,
+                chosen,
+              })
+            : t("tags.count", { count: inCategory.length })}
+        </span>
+      </button>
+
+      {expanded && (
+        <div
+          id={panelId}
+          role="group"
+          aria-label={t(TAG_CATEGORY_LABELS[category])}
+          className="mt-1 flex flex-wrap gap-1.5"
+        >
+          {inCategory.map((tag) => (
+            <TagChip
+              key={tag.id}
+              tag={tag}
+              category={category}
+              selected={selectedIds.includes(tag.id)}
+              onToggle={onToggle}
+              onDelete={onDelete}
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** One tag: the toggle, and the delete button where the tag may go. */
+function TagChip({
+  tag,
+  category,
+  selected,
+  onToggle,
+  onDelete,
+}: {
+  tag: TagOut;
+  category: TagCategory;
+  selected: boolean;
+  onToggle: (tagId: number) => void;
+  onDelete?: (tag: TagOut) => void;
+}) {
+  const { t, locale } = useTranslation();
+  // Only a tag the library invented can go. A seeded one comes straight back
+  // at the next restart, so offering it would be offering an action that
+  // undoes itself.
+  const removable = Boolean(onDelete) && !tag.is_predefined;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border text-xs transition-colors ${
+        selected ? TAG_CHIP_SELECTED : TAG_CHIP_CLASSES[category]
+      }`}
+    >
+      <button
+        type="button"
+        onClick={() => onToggle(tag.id)}
+        aria-pressed={selected}
+        className={`px-2.5 py-1 ${removable ? "pr-1" : ""}`}
+      >
+        {tagName(tag, locale)}
+      </button>
+      {removable && (
+        <button
+          type="button"
+          onClick={() => onDelete?.(tag)}
+          aria-label={t("tags.delete", {
+            name: tagName(tag, locale),
+          })}
+          className="pr-1.5 pl-0.5 opacity-60 hover:opacity-100"
+        >
+          <Icon name="close" className="h-3 w-3" />
+        </button>
+      )}
+    </span>
+  );
+}
+
+/** The names typed on this form that no tag row exists for yet. */
+function PendingGroup({
+  names,
+  onForget,
+}: {
+  names: string[];
+  onForget: (name: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-paper-600 dark:text-paper-400">
+        {t("tags.pending")}
+      </p>
+      {/* Always open, unlike the categories above: these are on screen
+          because somebody typed them a moment ago, and a group that
+          hides what was just typed reads as the typing having failed. */}
+      <div
+        role="group"
+        aria-label={t("tags.pending")}
+        className="mt-1 flex flex-wrap gap-1.5"
+      >
+        {names.map((name) => (
+          <span
+            key={name}
+            className={`inline-flex items-center rounded-full border text-xs ${TAG_CHIP_SELECTED}`}
+          >
+            {/* The name as typed, never through `tagName`: there is no row
+                and so no key to translate, and the catalogue has nothing
+                to say about a word somebody invented on this form. */}
+            <span className="py-1 pl-2.5 pr-1">{name}</span>
+            <button
+              type="button"
+              onClick={() => onForget(name)}
+              aria-label={t("book.removeTag", { tag: name })}
+              className="pr-1.5 pl-0.5 opacity-60 hover:opacity-100"
+            >
+              <Icon name="close" className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The field that invents a tag. It holds the draft name itself: nothing else
+ * in the picker reads it, and a caller passes `onCreate` always or never.
+ */
+function CreateField({
+  onCreate,
+  isCreating,
+}: {
+  onCreate: (name: string) => void;
+  isCreating: boolean;
+}) {
+  const { t } = useTranslation();
+  const [name, setName] = useState("");
+
+  function create() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onCreate(trimmed);
+    setName("");
+  }
+
+  return (
+    <div className="flex gap-1.5 pt-1">
+      <input
+        type="text"
+        value={name}
+        maxLength={100}
+        onChange={(event) => setName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            // The picker sits inside forms. Without this the Enter that
+            // means "add this tag" submits the book instead.
+            event.preventDefault();
+            create();
+          }
+        }}
+        placeholder={t("tags.newPlaceholder")}
+        aria-label={t("tags.newLabel")}
+        className="field h-8 flex-1 text-xs"
+      />
+      <button
+        type="button"
+        onClick={create}
+        disabled={isCreating || !name.trim()}
+        className="inline-flex items-center gap-1 rounded-lg border border-paper-200 px-2.5 text-xs font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-50 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
+      >
+        <Icon name="tag" className="h-3 w-3" />
+        {t("tags.create")}
+      </button>
     </div>
   );
 }

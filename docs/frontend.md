@@ -90,8 +90,8 @@ naming the shape it renders is not coupled to how that shape is fetched, and hid
 types behind a hand-written copy would mean maintaining a second description that can
 disagree with the first.
 
-`tests/houseRules.test.ts` enforces the boundary. It held with one exception before that
-test existed, a feature-flags call inline in `providers.tsx`, which is now
+A house rule enforces the boundary. It held with one exception before that
+rule existed, a feature-flags call inline in `providers.tsx`, which is now
 `useServerDefaultLocale` in `app/hooks.ts`. One exception is one more than a test can
 express.
 

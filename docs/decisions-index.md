@@ -274,7 +274,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,439 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,473 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
@@ -294,7 +294,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [The suite pod registry is untrusted, and what that bought is a bound rather than safety](decisions.md#the-suite-pod-registry-is-untrusted-and-what-that-bought-is-a-bound-rather-than-safety) | 310 |
 | An identifier two files disagree about is shown and never stored | [A member's address is served only where it is named, and never on `UserOut`](decisions.md#a-members-address-is-served-only-where-it-is-named-and-never-on-userout) | 328 |
 | An identifier two files disagree about is shown and never stored | [Who owns a member's address is a configuration lookup, not a column](decisions.md#who-owns-a-members-address-is-a-configuration-lookup-not-a-column) | 446 |
-| An identifier two files disagree about is shown and never stored | [A guard is one mechanism, because two mechanisms have a seam](decisions.md#a-guard-is-one-mechanism-because-two-mechanisms-have-a-seam) | 242 |
+| An identifier two files disagree about is shown and never stored | [A guard is one mechanism, because two mechanisms have a seam](decisions.md#a-guard-is-one-mechanism-because-two-mechanisms-have-a-seam) | 276 |
 | An identifier two files disagree about is shown and never stored | [One definition of what an address is, and it has to hold without its callers](decisions.md#one-definition-of-what-an-address-is-and-it-has-to-hold-without-its-callers) | 286 |
 | An identifier two files disagree about is shown and never stored | [The public shelf has no ownership arm, rather than a sentinel viewer](decisions.md#the-public-shelf-has-no-ownership-arm-rather-than-a-sentinel-viewer) | 249 |
 | An identifier two files disagree about is shown and never stored | [Publishing takes two switches, and the conjunction is on the server](decisions.md#publishing-takes-two-switches-and-the-conjunction-is-on-the-server) | 133 |
@@ -387,7 +387,7 @@ repeat the argument.
 | MARC21 import and export | [A finding that rests on a mechanism should say what guards that mechanism](decisions.md#a-finding-that-rests-on-a-mechanism-should-say-what-guards-that-mechanism) | 316 |
 | MARC21 import and export | [An SRU source built on PQF may not build its own query string](decisions.md#an-sru-source-built-on-pqf-may-not-build-its-own-query-string) | 417 |
 | MARC21 import and export | [A source that is not UTF-8 corrupts a shelf rather than failing a search](decisions.md#a-source-that-is-not-utf-8-corrupts-a-shelf-rather-than-failing-a-search) | 418 |
-|  | [The cataloguer's column set](decisions.md#the-cataloguers-column-set) | 1,550 |
+|  | [The cataloguer's column set](decisions.md#the-cataloguers-column-set) | 1,562 |
 | The cataloguer's column set | [The call number is Dewey and Library of Congress, the subjects are GND and LCSH](decisions.md#the-call-number-is-dewey-and-library-of-congress-the-subjects-are-gnd-and-lcsh) | 198 |
 | The cataloguer's column set | [Sorting the call number sorts the classification, never the cell](decisions.md#sorting-the-call-number-sorts-the-classification-never-the-cell) | 106 |
 | The cataloguer's column set | [There is no record status column, and the promise of one is withdrawn](decisions.md#there-is-no-record-status-column-and-the-promise-of-one-is-withdrawn) | 268 |
@@ -395,7 +395,7 @@ repeat the argument.
 | The cataloguer's column set | [The column set is per mode, in two localStorage keys](decisions.md#the-column-set-is-per-mode-in-two-localstorage-keys) | 256 |
 | The cataloguer's column set | [One table of scheme labels, because there were about to be three](decisions.md#one-table-of-scheme-labels-because-there-were-about-to-be-three) | 53 |
 | The cataloguer's column set | [A count is not a fact about a file until it says which tree it describes](decisions.md#a-count-is-not-a-fact-about-a-file-until-it-says-which-tree-it-describes) | 126 |
-| The cataloguer's column set | [A refusal belongs where somebody would go to propose it again](decisions.md#a-refusal-belongs-where-somebody-would-go-to-propose-it-again) | 75 |
+| The cataloguer's column set | [A refusal belongs where somebody would go to propose it again](decisions.md#a-refusal-belongs-where-somebody-would-go-to-propose-it-again) | 87 |
 | The cataloguer's column set | [Check the shape of a scripted edit's result, not its exit code](decisions.md#check-the-shape-of-a-scripted-edits-result-not-its-exit-code) | 83 |
 |  | [The default source order, and what an order can and cannot buy](decisions.md#the-default-source-order-and-what-an-order-can-and-cannot-buy) | 2,547 |
 | The default source order, and what an order can and cannot buy | [The first tier is a latency budget, and no order of the roster covers more](decisions.md#the-first-tier-is-a-latency-budget-and-no-order-of-the-roster-covers-more) | 226 |
@@ -727,7 +727,7 @@ repeat the argument.
 |  | [The rapid add's progress is not a live region](decisions.md#the-rapid-adds-progress-is-not-a-live-region) | 74 |
 |  | [The rule that one module writes a shelf in bulk is two assertions, not one](decisions.md#the-rule-that-one-module-writes-a-shelf-in-bulk-is-two-assertions-not-one) | 334 |
 |  | [oxlint is adopted as a ratchet, and the suppression list is two lists](decisions.md#oxlint-is-adopted-as-a-ratchet-and-the-suppression-list-is-two-lists) | 488 |
-|  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,939 |
+|  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,941 |
 |  | [The tooling tree's disciplines run in the backend suite, not in a job step](decisions.md#the-tooling-trees-disciplines-run-in-the-backend-suite-not-in-a-job-step) | 250 |
 |  | [Turning a linter on is not the same as fixing what it finds](decisions.md#turning-a-linter-on-is-not-the-same-as-fixing-what-it-finds) | 282 |
 |  | [A floor that nothing drives is not a floor](decisions.md#a-floor-that-nothing-drives-is-not-a-floor) | 164 |
@@ -741,13 +741,17 @@ repeat the argument.
 |  | [A generator is derived from the rule, and a witness beside it proves it still reaches the class](decisions.md#a-generator-is-derived-from-the-rule-and-a-witness-beside-it-proves-it-still-reaches-the-class) | 346 |
 |  | [The LIKE escaping has a property at one of its two sites, and the reason is the door in front of each](decisions.md#the-like-escaping-has-a-property-at-one-of-its-two-sites-and-the-reason-is-the-door-in-front-of-each) | 315 |
 |  | [`flip_catalogue_name` is stable on a name and not on a cell that is not one](decisions.md#flip_catalogue_name-is-stable-on-a-name-and-not-on-a-cell-that-is-not-one) | 186 |
-|  | [The structural house rules stay in the test tree, and both contract tools are refused](decisions.md#the-structural-house-rules-stay-in-the-test-tree-and-both-contract-tools-are-refused) | 1,279 |
+|  | [The structural house rules stay in the test tree, and both contract tools are refused](decisions.md#the-structural-house-rules-stay-in-the-test-tree-and-both-contract-tools-are-refused) | 1,308 |
 | The structural house rules stay in the test tree, and both contract tools are refused | [It cuts three of the four rules in half](decisions.md#it-cuts-three-of-the-four-rules-in-half) | 125 |
 | The structural house rules stay in the test tree, and both contract tools are refused | [A graph of this backend is very nearly edgeless](decisions.md#a-graph-of-this-backend-is-very-nearly-edgeless) | 286 |
 | The structural house rules stay in the test tree, and both contract tools are refused | [What does work needs the tree changed to suit the tool, and two of its three shapes are silently blind](decisions.md#what-does-work-needs-the-tree-changed-to-suit-the-tool-and-two-of-its-three-shapes-are-silently-blind) | 327 |
 | The structural house rules stay in the test tree, and both contract tools are refused | [The frontend half is refused because the contract is weaker, not because the tool will not run](decisions.md#the-frontend-half-is-refused-because-the-contract-is-weaker-not-because-the-tool-will-not-run) | 197 |
 | The structural house rules stay in the test tree, and both contract tools are refused | [The evasion everybody suspects is not the reason](decisions.md#the-evasion-everybody-suspects-is-not-the-reason) | 33 |
-| The structural house rules stay in the test tree, and both contract tools are refused | [What would change the answer](decisions.md#what-would-change-the-answer) | 92 |
+| The structural house rules stay in the test tree, and both contract tools are refused | [What would change the answer](decisions.md#what-would-change-the-answer) | 121 |
+|  | [The text rules run in errata, and the structural ones stay in the test tree](decisions.md#the-text-rules-run-in-errata-and-the-structural-ones-stay-in-the-test-tree) | 1,726 |
+| The text rules run in errata, and the structural ones stay in the test tree | [What 0.4.2 costs, against the tests it replaced](decisions.md#what-042-costs-against-the-tests-it-replaced) | 538 |
+| The text rules run in errata, and the structural ones stay in the test tree | [What the move changed in coverage](decisions.md#what-the-move-changed-in-coverage) | 342 |
+| The text rules run in errata, and the structural ones stay in the test tree | [What stays in the test tree](decisions.md#what-stays-in-the-test-tree) | 349 |
 |  | [An absence is not a verdict, and the ratchet now proves its report arrived](decisions.md#an-absence-is-not-a-verdict-and-the-ratchet-now-proves-its-report-arrived) | 1,686 |
 |  | [The publish gate's forbidden list cannot hold every node name](decisions.md#the-publish-gates-forbidden-list-cannot-hold-every-node-name) | 100 |
 |  | [A documented command is validated, not generated](decisions.md#a-documented-command-is-validated-not-generated) | 1,130 |
@@ -946,7 +950,7 @@ repeat the argument.
 |  | [A file another Book holds stays there, and the book's other files are still sent](decisions.md#a-file-another-book-holds-stays-there-and-the-books-other-files-are-still-sent) | 184 |
 |  | [A location held only by a Book the file may not land on is not sent](decisions.md#a-location-held-only-by-a-book-the-file-may-not-land-on-is-not-sent) | 106 |
 |  | [A tie has its own outcome and its own sentence, true of both cases it covers](decisions.md#a-tie-has-its-own-outcome-and-its-own-sentence-true-of-both-cases-it-covers) | 149 |
-|  | [Each caller maps a landing in an exhaustive switch](decisions.md#each-caller-maps-a-landing-in-an-exhaustive-switch) | 60 |
+|  | [Each caller maps a landing in an exhaustive switch](decisions.md#each-caller-maps-a-landing-in-an-exhaustive-switch) | 105 |
 |  | [An audiobook records no file location](decisions.md#an-audiobook-records-no-file-location) | 111 |
 |  | [A test asserting SQLite's behaviour says so, and an unmarked one fails](decisions.md#a-test-asserting-sqlites-behaviour-says-so-and-an-unmarked-one-fails) | 431 |
 |  | [A call inside a comprehension's condition is not refused by a guard](decisions.md#a-call-inside-a-comprehensions-condition-is-not-refused-by-a-guard) | 208 |
@@ -1019,4 +1023,7 @@ repeat the argument.
 |  | [A related frontend run is refused without `--isolate`, and a test that passed without the setup fails the run](decisions.md#a-related-frontend-run-is-refused-without---isolate-and-a-test-that-passed-without-the-setup-fails-the-run) | 390 |
 |  | [Resident growth on the smallest CI worker past the suite pod's spare is accepted (2026-11-12)](decisions.md#resident-growth-on-the-smallest-ci-worker-past-the-suite-pods-spare-is-accepted-2026-11-12) | 287 |
 |  | [The architecture check runs on the patch branch as well as the tag](decisions.md#the-architecture-check-runs-on-the-patch-branch-as-well-as-the-tag) | 172 |
+|  | [A record's provenance is written at every door, and the flag counts only the description](decisions.md#a-records-provenance-is-written-at-every-door-and-the-flag-counts-only-the-description) | 763 |
+|  | [MARC `040` names only an agency that can be cited](decisions.md#marc-040-names-only-an-agency-that-can-be-cited) | 321 |
+|  | [A test module's caches live as long as its tests, not as long as the worker](decisions.md#a-test-modules-caches-live-as-long-as-its-tests-not-as-long-as-the-worker) | 416 |
 <!-- index: end -->

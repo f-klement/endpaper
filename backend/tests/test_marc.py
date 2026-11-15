@@ -31,7 +31,7 @@ import marc
 import marc_fields
 import xml_parse
 from catalogue import Heading, Link
-from enums import ClassificationScheme, HeadingKind, LinkRelationship
+from enums import ClassificationScheme, HeadingKind, LinkRelationship, RecordOrigin
 from models import AUTHOR_LINE_MAX
 from tests.corpus import application_modules
 from tests.strategies import (
@@ -107,6 +107,7 @@ def a_book(**overrides):
         "classifications": [],
         "online_links": [],
         "digital_references": [],
+        "record_origin": None,
     } | overrides
     return types.SimpleNamespace(**fields)
 
@@ -436,6 +437,17 @@ class TestOnlineLinksMapBothWays:
 
         assert [link.label for link in parsed.links[0]] == ["text", "part", "note"]
 
+    def test_a_url_repeated_across_856_fields_is_one_link(self):
+        parsed = marc.read(
+            a_record(
+                datafield("245", ("a", "Stoner")),
+                datafield("856", ("u", "https://a.example/"), ("y", "first")),
+                datafield("856", ("u", "https://a.example/"), ("y", "second")),
+            )
+        )
+
+        assert parsed.links == ((Link("https://a.example/", "first"),),)
+
     @pytest.mark.parametrize(
         "url",
         [
@@ -660,6 +672,38 @@ class TestTheWriter:
         `marc_fields.Fields` is concerned, so every author after the first would
         vanish with nothing failing."""
         assert '<subfield code="4">aut</subfield>' in marc.write([a_book(author="One Writer, Two Writer")])
+
+
+class TestTheCataloguingSource:
+    """`040 $a` names the agency that made the record, and only one that can be cited."""
+
+    @pytest.mark.parametrize(
+        ("origin", "code"),
+        [
+            (RecordOrigin.DNB, "DE-101"),
+            (RecordOrigin.OENB, "As"),
+            (RecordOrigin.NLG, "GRAtEVE"),
+            (RecordOrigin.NKP, "CZ-PrNK"),
+            (RecordOrigin.BNF, "FrPBN"),
+            (RecordOrigin.LOC, "DLC"),
+            (RecordOrigin.BNE, "SpMaBN"),
+            (RecordOrigin.BNA, "AR-BaBN"),
+            (RecordOrigin.BNU, "UY-MoBN"),
+        ],
+    )
+    def test_a_national_librarys_record_names_it_by_its_code(self, origin, code):
+        """Written out rather than read off the table, so a typo in it is red."""
+        written = marc.write([a_book(record_origin=origin)])
+
+        assert f'<datafield tag="040" ind1=" " ind2=" "><subfield code="a">{code}</subfield>' in written
+
+    @pytest.mark.parametrize(
+        "origin",
+        [RecordOrigin.OPEN_LIBRARY, RecordOrigin.K10PLUS, RecordOrigin.MANUAL, None],
+    )
+    def test_an_origin_no_citable_agency_created_writes_no_040(self, origin):
+        """An aggregator did not create the record it serves, and this library has no code."""
+        assert 'tag="040"' not in marc.write([a_book(record_origin=origin)])
 
 
 class TestTheReaderRefusesAWholeFile:

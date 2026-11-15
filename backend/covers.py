@@ -415,22 +415,35 @@ def is_fetchable(url: str) -> bool:
     A URL this function cannot parse is a URL it will not fetch, which is the
     same answer as any other refusal.
     """
+    host = _fetchable_host(url)
+    return host is not None and _is_a_cover_host(host)
+
+
+def _fetchable_host(url: str) -> str | None:
+    """The lowercased host of a URL whose form `is_fetchable` admits, or None.
+
+    Holds every refusal but the allowlist, in the order `is_fetchable` gives.
+    """
     try:
         parsed = urlsplit(url)
         port = parsed.port
     except ValueError:
-        return False
+        return None
     if parsed.scheme != "https" or parsed.username or parsed.password:
-        return False
+        return None
     if port not in (None, 443):
-        return False
-    host = (parsed.hostname or "").lower()
-    # Not discharged by the loop below, though the shipped list makes it look
-    # so: an entry with no scheme has no hostname either, and would match an
-    # empty host. `test_a_url_with_no_host_is_refused_whatever_the_list_holds`.
+        return None
+    host = parsed.hostname
+    # Not discharged by `_is_a_cover_host`, though the shipped list makes it
+    # look so: an entry with no scheme has no hostname either, and would match
+    # an empty host. `test_a_url_with_no_host_is_refused_whatever_the_list_holds`.
     if not host:
-        return False
+        return None
+    return host.lower()
 
+
+def _is_a_cover_host(host: str) -> bool:
+    """Whether a host is on `COVER_HOSTS`, a wildcard entry matching subdomains only."""
     for listed in COVER_HOSTS:
         allowed = urlsplit(listed).hostname or ""
         if allowed.startswith("*."):
@@ -587,11 +600,9 @@ async def _walk[T](
     """
     hop = url
     for _ in range(MAX_REDIRECTS + 1):
-        if not is_fetchable(hop):
-            return _Stopped(_Stop.UNLISTED, hop)
-        remaining = left(deadline)
-        if remaining is not None and remaining <= 0:
-            return _Stopped(_Stop.SPENT, hop)
+        refused = _refused_before(hop, deadline)
+        if refused is not None:
+            return _Stopped(refused, hop)
         try:
             async with asyncio.timeout(_hop_seconds(deadline)):
                 async with client.stream("GET", hop) as response:
@@ -627,6 +638,29 @@ async def _walk[T](
             logger.warning("Refused a cover URL with an unusable host: %s", hop[:200])
             return _Stopped(_Stop.UNUSABLE, hop)
     return _Stopped(_Stop.LOOPED, hop)
+
+
+def _refused_before(hop: str, deadline: float | None) -> _Stop | None:
+    """Why `_walk` may not request `hop`, or None when it may.
+
+    The host is tested before the budget, so an unlisted hop is reported as
+    unlisted whatever is left of the budget.
+    """
+    if not is_fetchable(hop):
+        return _Stop.UNLISTED
+    if _spent(deadline):
+        return _Stop.SPENT
+    return None
+
+
+def _spent(deadline: float | None) -> bool:
+    """Whether a deadline was given and has passed, so no further request may start.
+
+    No deadline is never spent: that call is bounded per hop only, as
+    `resolve_and_store` says.
+    """
+    remaining = left(deadline)
+    return remaining is not None and remaining <= 0
 
 
 async def _check(client: httpx.AsyncClient, url: str, deadline: float | None = None) -> bool | None:
@@ -699,9 +733,7 @@ async def resolve(raw_isbn: str, supplied: str | None = None, deadline: float | 
     if isbn is None:
         return supplied
 
-    order = list(candidates(isbn))
-    if supplied and supplied not in order:
-        order.insert(0, supplied)
+    order = _candidate_order(isbn, supplied)
 
     unverified: str | None = None
     # One client for the whole candidate list, so the connection to a service
@@ -709,8 +741,7 @@ async def resolve(raw_isbn: str, supplied: str | None = None, deadline: float | 
     # that decide what this reaches: the address policy and `follow_redirects=False`.
     async with _client() as client:
         for url in order:
-            remaining = left(deadline)
-            if remaining is not None and remaining <= 0:
+            if _spent(deadline):
                 # Out of budget. Whatever was remembered as unverified is
                 # returned below, which is the honest answer: a candidate that
                 # could not be checked, not a candidate that failed.
@@ -726,6 +757,22 @@ async def resolve(raw_isbn: str, supplied: str | None = None, deadline: float | 
                 # cleanly, and a checked cover beats an unchecked one.
                 unverified = url
 
+    return _without_a_verified_cover(isbn, unverified)
+
+
+def _candidate_order(isbn: str, supplied: str | None) -> list[str]:
+    """The URLs `resolve` checks, in order: a supplied one first, then the guesses."""
+    order = list(candidates(isbn))
+    if supplied and supplied not in order:
+        order.insert(0, supplied)
+    return order
+
+
+def _without_a_verified_cover(isbn: str, unverified: str | None) -> str | None:
+    """How `resolve` ends when nothing verified: the unverified guess kept, or None.
+
+    Counted and logged either way, for the reason `CoverOutcome` gives.
+    """
     if unverified is not None:
         record(CoverOutcome.UNVERIFIED)
         logger.info("Kept an unverified cover for %s: %s", isbn, unverified)
@@ -1049,9 +1096,7 @@ def resolve_and_store(
     """
     deadline = None if budget is None else in_(budget)
     try:
-        candidate = None if is_local(supplied) else supplied
-        if candidate is None and isbn:
-            candidate = asyncio.run(resolve(isbn, deadline=deadline))
+        candidate = _candidate(isbn, supplied, deadline)
         if candidate is None:
             return None
 
@@ -1059,3 +1104,15 @@ def resolve_and_store(
     except Exception:
         logger.exception("Cover work failed for book %d", book_id)
         return None
+
+
+def _candidate(isbn: str | None, supplied: str | None, deadline: float | None) -> str | None:
+    """The URL `resolve_and_store` stores from: the supplied one, else what `resolve` finds.
+
+    A supplied URL naming this app is no candidate, for the reason
+    `resolve_and_store` gives, and with no ISBN there is nothing to resolve.
+    """
+    candidate = None if is_local(supplied) else supplied
+    if candidate is None and isbn:
+        candidate = asyncio.run(resolve(isbn, deadline=deadline))
+    return candidate

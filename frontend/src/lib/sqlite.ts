@@ -214,13 +214,24 @@ export async function openSqlite(
     return { ok: false, failure: "not-a-database" };
   }
 
-  let engine;
-  try {
-    engine = await (options.engine ?? defaultEngine)();
-  } catch {
-    return { ok: false, failure: "no-engine" };
-  }
+  const engine = await loadEngine(options.engine ?? defaultEngine);
+  if (engine === null) return { ok: false, failure: "no-engine" };
+  return openChecked(engine, bytes);
+}
 
+/** The compiled engine, or `null` where this browser could not load it. */
+async function loadEngine(
+  loader: SqliteEngineLoader,
+): Promise<SqlJsStatic | null> {
+  try {
+    return await loader();
+  } catch {
+    return null;
+  }
+}
+
+/** The database in `bytes`, opened and checked, or why it is not one. */
+function openChecked(engine: SqlJsStatic, bytes: Uint8Array): SqliteReading {
   // Declared outside the `try` so the catch can close it. A database that
   // opened and then failed a pragma is still holding the whole file in
   // WebAssembly memory, and the engine module is imported once and cached, so
@@ -247,31 +258,33 @@ export async function openSqlite(
     const checked = handle.exec("PRAGMA integrity_check(1)");
     if (checked[0]?.values[0]?.[0] !== "ok") throw new Error("integrity");
   } catch (error) {
-    // **Its own `try`, because this one runs on a handle that has already
-    // misbehaved.** A throw here would replace the closed failure union with an
-    // exception, so a member holding a damaged copy would be told something
-    // generic went wrong rather than that the copy is damaged.
-    try {
-      handle?.close();
-    } catch {
-      // Nothing to do with it. The tab holds the heap until it is closed, which
-      // is the outcome this whole branch exists to avoid and cannot then have.
-    }
-    // The engine says which of the two it was, and the two need different
-    // sentences: "that is not a Calibre library" against "that copy was taken
-    // while something was writing". `SQLITE_NOTADB` reports the first with this
-    // exact phrase, and everything else at this point is a file that opened and
-    // then disagreed with itself.
-    const message = error instanceof Error ? error.message : "";
-    return {
-      ok: false,
-      failure: message.includes("not a database")
-        ? "not-a-database"
-        : "damaged",
-    };
+    return { ok: false, failure: refusedOpen(handle, error) };
   }
-
   return { ok: true, database: wrap(handle) };
+}
+
+/** Close a handle that misbehaved, and say which refusal `error` was. */
+function refusedOpen(
+  handle: SqlJsDatabase | undefined,
+  error: unknown,
+): SqliteFailure {
+  // **Its own `try`, because this one runs on a handle that has already
+  // misbehaved.** A throw here would replace the closed failure union with an
+  // exception, so a member holding a damaged copy would be told something
+  // generic went wrong rather than that the copy is damaged.
+  try {
+    handle?.close();
+  } catch {
+    // Nothing to do with it. The tab holds the heap until it is closed, which
+    // is the outcome this whole branch exists to avoid and cannot then have.
+  }
+  // The engine says which of the two it was, and the two need different
+  // sentences: "that is not a Calibre library" against "that copy was taken
+  // while something was writing". `SQLITE_NOTADB` reports the first with this
+  // exact phrase, and everything else at this point is a file that opened and
+  // then disagreed with itself.
+  const message = error instanceof Error ? error.message : "";
+  return message.includes("not a database") ? "not-a-database" : "damaged";
 }
 
 /**

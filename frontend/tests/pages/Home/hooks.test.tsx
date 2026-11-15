@@ -245,6 +245,30 @@ describe("useLibrary", () => {
       ]);
     });
 
+    it("does not call the grid stale while the next page loads", async () => {
+      // Loading more is its own state, shown on the button. Dimming the rows
+      // already drawn would say they are about to change, and they are not.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let page = 0;
+      api.on(/\/api\/books\?/, async () => {
+        page += 1;
+        if (page > 1) await held;
+        return { body: makeBookPage([makeBook()], { total: 2, page }) };
+      });
+      const { result } = renderLibrary();
+      await waitFor(() => expect(result.current.hasMore).toBe(true));
+
+      act(() => result.current.loadMore());
+
+      await waitFor(() => expect(result.current.isLoadingMore).toBe(true));
+      expect(result.current.isStale).toBe(false);
+      release();
+      await waitFor(() => expect(result.current.isLoadingMore).toBe(false));
+    });
+
     it("asks for the next page number", async () => {
       api.on(/\/api\/books\?/, {
         body: makeBookPage([makeBook()], { total: 5 }),

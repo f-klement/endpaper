@@ -30,6 +30,7 @@ import {
   LENDING_LABELS,
   OWNERSHIP_LABELS,
   STATUS_LABELS,
+  originLabel,
 } from "../../types";
 
 const SKELETON_ROWS = 8;
@@ -196,6 +197,10 @@ const COLUMNS: Record<ColumnKey, Column> = {
     // and the filter panel ask too.
     render: (book) => subjectHeadings(book).map(headingText).join(", "),
   },
+  origin: {
+    sort: [],
+    render: (book, t) => t(originLabel(book.record_origin)),
+  },
   format: {
     sort: [],
     render: (book, t) => (book.format ? t(FORMAT_LABELS[book.format]) : ""),
@@ -361,7 +366,7 @@ export default function BookTable({
   isLoadingMore,
   onLoadMore,
 }: BookTableProps) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const keys = drawn(columns);
 
   if (isLoading) {
@@ -380,64 +385,14 @@ export default function BookTable({
         <table className="w-full min-w-max border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-paper-200 dark:border-paper-800">
-              {keys.map((key) => {
-                const column = COLUMNS[key];
-                const way = direction(column, sort);
-                const next = nextSort(column, sort);
-                const active = activeOption(column, sort);
-                return (
-                  <th
-                    key={key}
-                    scope="col"
-                    aria-sort={column.sort.length > 0 ? way : undefined}
-                    className={`whitespace-nowrap px-3 py-2 text-xs font-semibold text-paper-700 dark:text-paper-200 ${
-                      column.numeric ? "text-right" : ""
-                    }`}
-                  >
-                    {next === null ? (
-                      t(COLUMN_SPECS[key].label)
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => onSortChange(next)}
-                        className="inline-flex items-center gap-1 hover:text-accent-700 dark:hover:text-accent-300"
-                      >
-                        {t(COLUMN_SPECS[key].label)}
-                        {/* Which shelf is being read, where the column offers
-                            more than one. Only the call number column does,
-                            and without this the reader cannot tell a Dewey
-                            order from a Library of Congress one: the rows
-                            simply come back differently. Inside the button, so
-                            a screen reader gets it with the name rather than
-                            after the sort direction. */}
-                        {active?.scheme !== undefined && (
-                          <span className="font-normal text-paper-600 dark:text-paper-400">
-                            {t(SCHEME_LABEL[active.scheme])}
-                          </span>
-                        )}
-                        {/* Always drawn, dimmed until this column is the one
-                            ordering the list. Only six of them can be sorted,
-                            and with the chevron shown only when active the
-                            sole always-visible difference was a hover colour:
-                            the feature was there and undiscoverable.
-                            `aria-hidden` because `aria-sort` on the header
-                            already says this, in words. */}
-                        <Icon
-                          name="chevron"
-                          aria-hidden="true"
-                          className={`h-3 w-3 transition-opacity ${
-                            way === "none"
-                              ? "rotate-90 opacity-30"
-                              : way === "ascending"
-                                ? "-rotate-90"
-                                : "rotate-90"
-                          }`}
-                        />
-                      </button>
-                    )}
-                  </th>
-                );
-              })}
+              {keys.map((key) => (
+                <ColumnHeader
+                  key={key}
+                  columnKey={key}
+                  sort={sort}
+                  onSortChange={onSortChange}
+                />
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -447,26 +402,7 @@ export default function BookTable({
                 className="border-b border-paper-100 last:border-0 hover:bg-paper-50 dark:border-paper-800 dark:hover:bg-paper-800/50"
               >
                 {keys.map((key) => (
-                  <td
-                    key={key}
-                    className={`whitespace-nowrap px-3 py-1.5 text-paper-700 dark:text-paper-300 ${
-                      COLUMNS[key].numeric ? "text-right tabular-nums" : ""
-                    }`}
-                  >
-                    {/* Only the title links. A whole row of links is one
-                        destination announced once per column, and a reader
-                        copying a publisher out of a cell should not navigate. */}
-                    {key === "title" ? (
-                      <Link
-                        to={`/book/${book.id}`}
-                        className="font-medium text-accent-700 hover:underline dark:text-accent-300"
-                      >
-                        {book.title}
-                      </Link>
-                    ) : (
-                      COLUMNS[key].render(book, t, locale)
-                    )}
-                  </td>
+                  <BookCell key={key} book={book} columnKey={key} />
                 ))}
               </tr>
             ))}
@@ -486,5 +422,119 @@ export default function BookTable({
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * One column's header: its name, and where the API can order by it, the
+ * button that asks for the next order.
+ */
+function ColumnHeader({
+  columnKey,
+  sort,
+  onSortChange,
+}: {
+  columnKey: ColumnKey;
+  sort: BookSort;
+  onSortChange: (sort: BookSort) => void;
+}) {
+  const { t } = useTranslation();
+  const column = COLUMNS[columnKey];
+  const way = direction(column, sort);
+  const next = nextSort(column, sort);
+  return (
+    <th
+      scope="col"
+      aria-sort={column.sort.length > 0 ? way : undefined}
+      className={`whitespace-nowrap px-3 py-2 text-xs font-semibold text-paper-700 dark:text-paper-200 ${
+        column.numeric ? "text-right" : ""
+      }`}
+    >
+      {next === null ? (
+        t(COLUMN_SPECS[columnKey].label)
+      ) : (
+        <button
+          type="button"
+          onClick={() => onSortChange(next)}
+          className="inline-flex items-center gap-1 hover:text-accent-700 dark:hover:text-accent-300"
+        >
+          {t(COLUMN_SPECS[columnKey].label)}
+          <SortMarks active={activeOption(column, sort)} way={way} />
+        </button>
+      )}
+    </th>
+  );
+}
+
+/** What a sortable header shows after its name: the shelf, then the chevron. */
+function SortMarks({
+  active,
+  way,
+}: {
+  active: SortOption | undefined;
+  way: SortDirection | "none";
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {/* Which shelf is being read, where the column offers more than one.
+          Only the call number column does, and without this the reader cannot
+          tell a Dewey order from a Library of Congress one: the rows simply
+          come back differently. Inside the button, so a screen reader gets it
+          with the name rather than after the sort direction. */}
+      {active?.scheme !== undefined && (
+        <span className="font-normal text-paper-600 dark:text-paper-400">
+          {t(SCHEME_LABEL[active.scheme])}
+        </span>
+      )}
+      {/* Always drawn, dimmed until this column is the one ordering the list.
+          Only six of them can be sorted, and with the chevron shown only when
+          active the sole always-visible difference was a hover colour: the
+          feature was there and undiscoverable. `aria-hidden` because
+          `aria-sort` on the header already says this, in words. */}
+      <Icon
+        name="chevron"
+        aria-hidden="true"
+        className={`h-3 w-3 transition-opacity ${
+          way === "none"
+            ? "rotate-90 opacity-30"
+            : way === "ascending"
+              ? "-rotate-90"
+              : "rotate-90"
+        }`}
+      />
+    </>
+  );
+}
+
+/** One book's value in one column. */
+function BookCell({
+  book,
+  columnKey,
+}: {
+  book: BookOut;
+  columnKey: ColumnKey;
+}) {
+  const { t, locale } = useTranslation();
+  return (
+    <td
+      className={`whitespace-nowrap px-3 py-1.5 text-paper-700 dark:text-paper-300 ${
+        COLUMNS[columnKey].numeric ? "text-right tabular-nums" : ""
+      }`}
+    >
+      {/* Only the title links. A whole row of links is one destination
+          announced once per column, and a reader copying a publisher out of a
+          cell should not navigate. */}
+      {columnKey === "title" ? (
+        <Link
+          to={`/book/${book.id}`}
+          className="font-medium text-accent-700 hover:underline dark:text-accent-300"
+        >
+          {book.title}
+        </Link>
+      ) : (
+        COLUMNS[columnKey].render(book, t, locale)
+      )}
+    </td>
   );
 }

@@ -22,7 +22,7 @@ import google_books
 import isbn as isbn_utils
 import metadata
 from catalogue import AuthorityAssertion, Heading, Record, Subject, uncontrolled
-from enums import AuthorityScheme, ClassificationScheme, HeadingKind
+from enums import AuthorityScheme, ClassificationScheme, HeadingKind, RecordOrigin
 from models import DESCRIPTION_MAX, ISBN_MAX, TITLE_MAX, Book
 from schemas.book import BookCreate, BookLookup, BookMatch
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
@@ -483,6 +483,27 @@ class TestFillingOneRowFromAnother:
         following = Record(source="loc", title="X")
 
         assert leading.filled_from(following).source == "bnf+loc"
+
+    def test_the_leading_catalogue_stays_first_whatever_the_alphabet_says(self):
+        """`leading` is the origin a Book records, so sorting it in with the rest
+        would name whichever catalogue's name comes first."""
+        leading = Record(source="loc", title="X")
+
+        merged = leading.filled_from(Record(source="bnf", title="X"))
+        merged = merged.filled_from(Record(source="dnb", title="X"))
+
+        assert (merged.leading, merged.source) == ("loc", "loc+bnf+dnb")
+
+    def test_a_merged_record_carries_its_leaders_origin_to_the_client(self):
+        merged = Record(source="dnb", title="X", isbn="9783000000001").filled_from(
+            Record(source="google_books", title="X")
+        )
+
+        assert merged.as_lookup()["record_origin"] == RecordOrigin.DNB
+        assert merged.as_match()["record_origin"] == RecordOrigin.DNB
+
+    def test_a_record_no_catalogue_leads_carries_no_origin(self):
+        assert Record(source="marc", title="X").as_match()["record_origin"] is None
 
     def test_the_catalogues_behind_a_merged_row_are_readable_without_the_separator(self):
         row = Record(source="bnf", title="X").filled_from(Record(source="loc", title="X"))
@@ -1665,7 +1686,7 @@ class TestARecordCannotClaimThisAppsOwnFiles:
     def test_every_refused_field_is_one_the_type_gate_covers(self):
         """The ordering is a rule only while both tables name the same fields.
 
-        `_drop_unstorable`'s `isinstance(value, str)` arm runs for the names in
+        `_text_unstorable`'s `isinstance(value, str)` arm runs for the names in
         `_TEXT_CEILINGS` and for no others, so a field added to
         `_REFUSED_AS_OUR_OWN` alone would reach a string predicate with whatever
         somebody else's JSON put there.

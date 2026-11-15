@@ -457,6 +457,25 @@ class TestMerge:
 
         assert res.json()["publisher"] == "Chilton"
 
+    def test_a_field_absorbed_from_a_losing_row_marks_the_survivor_changed(self, client, admin, make_book):
+        """The survivor's record stays, so its origin does; what it took is a change made here."""
+        keeper = make_book(admin["headers"], title="Dune", publisher=None, record_origin="dnb")
+        loser = make_book(admin["headers"], title="Dune", publisher="Chilton", record_origin="loc")
+
+        res = merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
+
+        assert (res.json()["record_origin"], res.json()["record_modified_here"]) == ("dnb", True)
+
+    def test_a_merge_that_absorbs_only_shelf_details_leaves_the_record_as_it_arrived(
+        self, client, admin, make_book
+    ):
+        keeper = make_book(admin["headers"], title="Dune", record_origin="dnb")
+        loser = make_book(admin["headers"], title="Dune", location="Loft")
+
+        res = merge(client, admin["headers"], [keeper["id"], loser["id"]], keeper["id"])
+
+        assert res.json()["record_modified_here"] is False
+
     def test_never_overwrites_what_the_keeper_has(self, client, admin, make_book):
         """The kept row is the one a person chose."""
         keeper = make_book(admin["headers"], title="Dune", publisher="Ace")

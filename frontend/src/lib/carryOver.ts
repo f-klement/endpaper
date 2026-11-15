@@ -154,21 +154,36 @@ function accountsIn<T>(
 ): Readonly<Record<string, T>> {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return {};
-  const isBlank = (held: T) =>
-    Array.isArray(held) ? held.length === 0 : held === blank;
   return Object.fromEntries(
-    Object.entries(value).flatMap(([account, held]) => {
-      if (!ACCOUNT_KEY.test(account)) return [];
-      const accepted = accept(held);
-      if (isBlank(accepted)) return [];
-      // The door freezes the record and not what is inside it, so the tags
-      // are frozen here: a reader editing them would edit every reader's.
-      // `accept` builds a fresh array, so the caller's is never frozen.
-      return [
-        [account, Array.isArray(accepted) ? Object.freeze(accepted) : accepted],
-      ];
-    }),
+    Object.entries(value).flatMap(([account, held]) =>
+      accountEntry(account, held, accept, blank),
+    ),
   );
+}
+
+/**
+ * One account's entry for `accountsIn`, as a list of none or one: none for a
+ * key that is not an account id and for a value that is blank once accepted.
+ */
+function accountEntry<T>(
+  account: string,
+  held: unknown,
+  accept: (value: unknown) => T,
+  blank: T,
+): [string, T][] {
+  if (!ACCOUNT_KEY.test(account)) return [];
+  const accepted = accept(held);
+  if (Array.isArray(accepted) ? accepted.length === 0 : accepted === blank)
+    return [];
+  // The door freezes the record and not what is inside it, so the tags
+  // are frozen here: a reader editing them would edit every reader's.
+  // `accept` builds a fresh array, so the caller's is never frozen.
+  return [
+    [
+      account,
+      Array.isArray(accepted) ? (Object.freeze(accepted) as T) : accepted,
+    ],
+  ];
 }
 
 /**
@@ -323,27 +338,50 @@ export function withoutVanished<T extends Carried>(
   carried: Carried,
   there: StillThere,
 ): T {
-  const tags = there.tagIds;
-  const collections = there.collectionIds;
-  const tagIds = values.tagIds.filter(
-    (id) => tags === undefined || tags.has(id) || !carried.tagIds.includes(id),
+  const tagIds = keptTagIds(values.tagIds, carried.tagIds, there.tagIds);
+  const collectionId = keptCollectionId(
+    values.collectionId,
+    carried.collectionId,
+    there.collectionIds,
   );
-  // **A carried collection waits for the list, where a carried tag does not.**
-  // The collection select draws only the listed collections, so an id the
-  // list has not confirmed is drawn as "No collection". Posting it would file
-  // the book where the form said it was not, and choosing "No collection"
-  // could not clear it, being already selected. Held back rather than
-  // dropped: `values` still holds it, so it returns once the list names it.
-  const collectionId =
-    values.collectionId !== null &&
-    values.collectionId === carried.collectionId &&
-    (collections === undefined || !collections.has(values.collectionId))
-      ? null
-      : values.collectionId;
   if (
     tagIds.length === values.tagIds.length &&
     collectionId === values.collectionId
   )
     return values;
   return { ...values, tagIds, collectionId };
+}
+
+/** The form's tags less a carried one the loaded list no longer holds. */
+function keptTagIds(
+  tagIds: number[],
+  carried: readonly number[],
+  tags: ReadonlySet<number> | undefined,
+): number[] {
+  return tagIds.filter(
+    (id) => tags === undefined || tags.has(id) || !carried.includes(id),
+  );
+}
+
+/**
+ * The form's collection, or `null` while it is the carried one and the list
+ * has not named it.
+ *
+ * **A carried collection waits for the list, where a carried tag does not.**
+ * The collection select draws only the listed collections, so an id the
+ * list has not confirmed is drawn as "No collection". Posting it would file
+ * the book where the form said it was not, and choosing "No collection"
+ * could not clear it, being already selected. Held back rather than
+ * dropped: `values` still holds it, so it returns once the list names it.
+ */
+function keptCollectionId(
+  collectionId: number | null,
+  carried: number | null,
+  collections: ReadonlySet<number> | undefined,
+): number | null {
+  return collectionId !== null &&
+    collectionId === carried &&
+    (collections === undefined || !collections.has(collectionId))
+    ? null
+    : collectionId;
 }

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Button, EmptyState, ErrorState } from "../../components";
 import { LoanRow, LoanRowSkeleton, Page, PageHeader } from "../components";
 import { useTranslation } from "../../i18n";
-import { useLoans } from "./hooks";
+import { useLoans, type UseLoansResult } from "./hooks";
 
 /** Placeholder rows rendered while the list loads. */
 const SKELETON_COUNT = 3;
@@ -17,33 +17,7 @@ export default function LoansPage() {
       <PageHeader
         icon="handshake"
         title={t("loans.title")}
-        actions={
-          <>
-            <Button
-              variant={loans.overdueOnly ? "danger" : "secondary"}
-              size="sm"
-              aria-pressed={loans.overdueOnly}
-              // `danger` carries no border of its own, so the pressed state
-              // gets one here rather than losing the frame the others have.
-              className={
-                loans.overdueOnly
-                  ? "border border-danger-300 dark:border-danger-700"
-                  : ""
-              }
-              onClick={() => loans.setOverdueOnly(!loans.overdueOnly)}
-            >
-              {t("loans.overdueOnly")}
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              aria-pressed={loans.showAll}
-              onClick={() => loans.setShowAll(!loans.showAll)}
-            >
-              {loans.showAll ? t("loans.activeOnly") : t("loans.showAll")}
-            </Button>
-          </>
-        }
+        actions={<FilterButtons loans={loans} />}
       />
 
       {/* Hidden while already filtered to overdue, and the reason changed with
@@ -103,5 +77,36 @@ export default function LoansPage() {
         </div>
       )}
     </Page>
+  );
+}
+
+function FilterButtons({ loans }: { loans: UseLoansResult }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Button
+        variant={loans.overdueOnly ? "danger" : "secondary"}
+        size="sm"
+        aria-pressed={loans.overdueOnly}
+        // `danger` carries no border of its own, so the pressed state
+        // gets one here rather than losing the frame the others have.
+        className={
+          loans.overdueOnly
+            ? "border border-danger-300 dark:border-danger-700"
+            : ""
+        }
+        onClick={() => loans.setOverdueOnly(!loans.overdueOnly)}
+      >
+        {t("loans.overdueOnly")}
+      </Button>
+      <Button
+        variant="secondary"
+        size="sm"
+        aria-pressed={loans.showAll}
+        onClick={() => loans.setShowAll(!loans.showAll)}
+      >
+        {loans.showAll ? t("loans.activeOnly") : t("loans.showAll")}
+      </Button>
+    </>
   );
 }

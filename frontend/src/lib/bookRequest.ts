@@ -32,8 +32,8 @@
  *
  * **That half is not named here on purpose.** The substring test reads a
  * module's whole source, so writing the path in prose makes this file an
- * offender: it did, and `the generated client stays behind hooks.ts` caught it
- * on the merge.
+ * offender: it did, and the house rule keeping the generated client behind
+ * `hooks.ts` caught it on the merge.
  *
  * It does not see an import of this module, whose specifier carries no
  * `api/` at all. `tests/lib/fileReaders.test.ts` walks an import closure and

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   CatalogueSource,
@@ -62,29 +62,209 @@ export default function ProviderSection({
   );
   // **A module level constant, not a fresh `[]`.** `catalogue_sources` is
   // optional on the generated type, so `?? []` builds a new array on every
-  // render, the effect below depends on its identity, and the pair is an
-  // infinite render loop for any response that omits the field. The server
-  // always sends it, which is exactly what would have made this a defect
-  // nothing hit until something changed upstream.
+  // render, the effect in `useDebouncedRoster` depends on its identity, and the
+  // pair is an infinite render loop for any response that omits the field. The
+  // server always sends it, which is exactly what would have made this a
+  // defect nothing hit until something changed upstream.
   const server = settings.catalogue_sources ?? NO_SOURCES;
-  const [rows, setRows] = useState<CatalogueSourceOut[]>(server);
+  const [rows, commit] = useDebouncedRoster(server, onSave);
   const [announcement, setAnnouncement] = useState("");
-  // Which button to focus after a move, or null. **A disabled element loses
-  // focus to the body**, so the press that lands a row at either end silently
-  // ends the run: the reader presses again and nothing happens because nothing
-  // is focused. Keying rows on the source keeps the DOM node, which is
-  // necessary and not sufficient. After a move that disables the button under
-  // the finger, focus moves to the other button of the same row.
-  const [refocus, setRefocus] = useState<{
-    source: CatalogueSource;
-    direction: "up" | "down";
-  } | null>(null);
-  const buttons = useRef(new Map<string, HTMLButtonElement | null>());
+  const { buttons, refocusAfter } = useRefocus();
 
-  // The save is debounced, so a burst of four presses is one request rather
-  // than four. The pending payload is held in a ref as well as the timer,
-  // because leaving the screen mid burst has to flush rather than discard: a
-  // reorder that vanished on navigation would look like the server refusing it.
+  const move = (from: number, direction: -1 | 1) => {
+    const swap = swapped(rows, from, direction);
+    if (swap === undefined) return;
+    commit(swap.next);
+    refocusAfter(swap, direction);
+    setAnnouncement(
+      t("providers.moved", {
+        name: t(catalogueName(swap.moving.source)),
+        position: String(swap.to + 1),
+        total: String(swap.next.length),
+      }),
+    );
+  };
+
+  const setEnabled = (index: number, enabled: boolean) => {
+    const next = rows.map((row, at) =>
+      at === index ? { ...row, enabled } : row,
+    );
+    commit(next);
+  };
+
+  return (
+    <SettingsSection title={t("providers.title")} icon="search">
+      <p className="text-xs text-paper-600 dark:text-paper-400">
+        {t("providers.hint")}
+      </p>
+      <p className="text-xs text-paper-600 dark:text-paper-400">
+        {t("providers.costHint")}
+      </p>
+      {/* **Only when a row carries it.** The marking is empty on the shipped
+          roster, and a paragraph explaining a group this install has nobody in
+          reads as a setting somebody has lost. */}
+      {rows.some((row) => row.slow) && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("providers.slowLegend")}
+        </p>
+      )}
+
+      <ul className="space-y-3">
+        {rows.map((row, index) => (
+          // Keyed on the source, never the index: a key that moves with the
+          // row is what lets React keep the focused button focused across a
+          // reorder, and an index key would move focus to whatever slid into
+          // the slot.
+          <ProviderRow
+            key={row.source}
+            row={row}
+            groups={groups}
+            isFirst={index === 0}
+            isLast={index === rows.length - 1}
+            buttons={buttons}
+            onToggle={(checked) => setEnabled(index, checked)}
+            onMove={(direction) => move(index, direction)}
+          />
+        ))}
+      </ul>
+
+      {/* Polite, and outside the list, so a move is read after the button's own
+          label rather than interrupting it.
+
+          **`aria-live` without `role="status"`, deliberately.** The role implies
+          exactly this live region, so it would add nothing, and it would put a
+          second `status` on a screen that already has one: `AdminSettings`
+          renders the "Settings saved." banner with it. Two of them make the
+          banner ambiguous to anything looking for it, which a test caught
+          before a reader had to. */}
+      <p aria-live="polite" aria-atomic="true" className="sr-only">
+        {announcement}
+      </p>
+    </SettingsSection>
+  );
+}
+
+/** One source: its toggle, its status lines, and the two move buttons. */
+function ProviderRow({
+  row,
+  groups,
+  isFirst,
+  isLast,
+  buttons,
+  onToggle,
+  onMove,
+}: {
+  row: CatalogueSourceOut;
+  groups: Intl.ListFormat;
+  isFirst: boolean;
+  isLast: boolean;
+  buttons: RefocusTargets;
+  onToggle: (checked: boolean) => void;
+  onMove: (direction: -1 | 1) => void;
+}) {
+  const { t } = useTranslation();
+  const name = t(catalogueName(row.source));
+  return (
+    <li className="flex items-start gap-3 border-t border-paper-200 pt-3 first:border-0 first:pt-0 dark:border-paper-800">
+      <div className="min-w-0 flex-1">
+        <ToggleField
+          label={name}
+          hint={t(statusOf(row), {
+            groups: groups.format(row.serves_groups),
+          })}
+          checked={row.enabled}
+          disabled={false}
+          onChange={onToggle}
+        />
+        {/* **A second line rather than an eighth arm in `statusOf`.**
+            Slow co-occurs with almost every value that chain returns: a
+            slow catalogue can also need a key, sit in the leading pair, or
+            carry a regional remit. One line per row would have to swallow
+            one of those or never fire for it, which is the defect
+            `lib/providerStatus.ts` records having shipped once already.
+
+            It also says the thing the ticket asked this section for: off
+            because it is slow reads differently from off because it is
+            broken, and only if the screen says which. */}
+        {row.slow && (
+          <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
+            {t("providers.slow")}
+          </p>
+        )}
+      </div>
+      <div className="flex shrink-0 gap-1">
+        {/* **Not disabled while a save is in flight.** The local list is
+            what is drawn, the save is debounced and sends the whole
+            roster so the last one wins, and disabling every button when
+            the timer fires would take focus off the one under the
+            reader's finger in the middle of a run. */}
+        <Button
+          variant="secondary"
+          size="sm"
+          ref={(node: HTMLButtonElement | null) => {
+            buttons.current.set(`${row.source}:up`, node);
+          }}
+          disabled={isFirst}
+          aria-label={t("providers.moveUp", { name })}
+          onClick={() => onMove(-1)}
+        >
+          <Icon name="chevron" className="w-4 h-4 -rotate-90" />
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          ref={(node: HTMLButtonElement | null) => {
+            buttons.current.set(`${row.source}:down`, node);
+          }}
+          disabled={isLast}
+          aria-label={t("providers.moveDown", { name })}
+          onClick={() => onMove(1)}
+        >
+          <Icon name="chevron" className="w-4 h-4 rotate-90" />
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/** A row moved one step: the new list, the row that moved, and where to. */
+interface Swap {
+  next: CatalogueSourceOut[];
+  moving: CatalogueSourceOut;
+  to: number;
+}
+
+/** `rows` with one row moved a step, or undefined where it would leave the list. */
+function swapped(
+  rows: CatalogueSourceOut[],
+  from: number,
+  direction: -1 | 1,
+): Swap | undefined {
+  const to = from + direction;
+  if (to < 0 || to >= rows.length) return undefined;
+  const next = [...rows];
+  const moving = next[from];
+  const displaced = next[to];
+  if (moving === undefined || displaced === undefined) return undefined;
+  next[from] = displaced;
+  next[to] = moving;
+  return { next, moving, to };
+}
+
+/**
+ * The local roster, and a `commit` that draws a change at once and saves it
+ * debounced.
+ *
+ * The save is debounced, so a burst of four presses is one request rather
+ * than four. The pending payload is held in a ref as well as the timer,
+ * because leaving the screen mid burst has to flush rather than discard: a
+ * reorder that vanished on navigation would look like the server refusing it.
+ */
+function useDebouncedRoster(
+  server: CatalogueSourceOut[],
+  onSave: (data: SettingsUpdate) => void,
+): [CatalogueSourceOut[], (next: CatalogueSourceOut[]) => void] {
+  const [rows, setRows] = useState<CatalogueSourceOut[]>(server);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pending = useRef<SettingsUpdate | undefined>(undefined);
   const save = useRef(onSave);
@@ -131,153 +311,48 @@ export default function ProviderSection({
     }, SAVE_DELAY_MS);
   };
 
+  return [rows, commit];
+}
+
+/** Every move button, keyed `source:up` or `source:down`. */
+type RefocusTargets = RefObject<Map<string, HTMLButtonElement | null>>;
+
+/**
+ * Which button to focus after a move.
+ *
+ * **A disabled element loses focus to the body**, so the press that lands a
+ * row at either end silently ends the run: the reader presses again and
+ * nothing happens because nothing is focused. Keying rows on the source keeps
+ * the DOM node, which is necessary and not sufficient. After a move that
+ * disables the button under the finger, focus moves to the other button of
+ * the same row.
+ */
+function useRefocus() {
+  const [refocus, setRefocus] = useState<{
+    source: CatalogueSource;
+    direction: "up" | "down";
+  } | null>(null);
+  const buttons = useRef(new Map<string, HTMLButtonElement | null>());
+
   useEffect(() => {
     if (refocus === null) return;
     buttons.current.get(`${refocus.source}:${refocus.direction}`)?.focus();
     setRefocus(null);
   }, [refocus]);
 
-  const move = (from: number, direction: -1 | 1) => {
-    const to = from + direction;
-    if (to < 0 || to >= rows.length) return;
-    const next = [...rows];
-    const moving = next[from];
-    const displaced = next[to];
-    if (moving === undefined || displaced === undefined) return;
-    next[from] = displaced;
-    next[to] = moving;
-    commit(next);
-    // The button just pressed is about to be disabled if the row landed at an
-    // end, so hand focus to its sibling rather than letting it fall to the body.
-    const landedAtAnEnd = to === 0 || to === next.length - 1;
+  // The button just pressed is about to be disabled if the row landed at an
+  // end, so hand focus to its sibling rather than letting it fall to the body.
+  const refocusAfter = (swap: Swap, direction: -1 | 1) => {
+    const landedAtAnEnd = swap.to === 0 || swap.to === swap.next.length - 1;
     if (landedAtAnEnd) {
       setRefocus({
-        source: moving.source,
+        source: swap.moving.source,
         direction: direction === -1 ? "down" : "up",
       });
     }
-    setAnnouncement(
-      t("providers.moved", {
-        name: t(catalogueName(moving.source)),
-        position: String(to + 1),
-        total: String(next.length),
-      }),
-    );
   };
 
-  const setEnabled = (index: number, enabled: boolean) => {
-    const next = rows.map((row, at) =>
-      at === index ? { ...row, enabled } : row,
-    );
-    commit(next);
-  };
-
-  return (
-    <SettingsSection title={t("providers.title")} icon="search">
-      <p className="text-xs text-paper-600 dark:text-paper-400">
-        {t("providers.hint")}
-      </p>
-      <p className="text-xs text-paper-600 dark:text-paper-400">
-        {t("providers.costHint")}
-      </p>
-      {/* **Only when a row carries it.** The marking is empty on the shipped
-          roster, and a paragraph explaining a group this install has nobody in
-          reads as a setting somebody has lost. */}
-      {rows.some((row) => row.slow) && (
-        <p className="text-xs text-paper-600 dark:text-paper-400">
-          {t("providers.slowLegend")}
-        </p>
-      )}
-
-      <ul className="space-y-3">
-        {rows.map((row, index) => (
-          // Keyed on the source, never the index: a key that moves with the
-          // row is what lets React keep the focused button focused across a
-          // reorder, and an index key would move focus to whatever slid into
-          // the slot.
-          <li
-            key={row.source}
-            className="flex items-start gap-3 border-t border-paper-200 pt-3 first:border-0 first:pt-0 dark:border-paper-800"
-          >
-            <div className="min-w-0 flex-1">
-              <ToggleField
-                label={t(catalogueName(row.source))}
-                hint={t(statusOf(row), {
-                  groups: groups.format(row.serves_groups),
-                })}
-                checked={row.enabled}
-                disabled={false}
-                onChange={(checked) => setEnabled(index, checked)}
-              />
-              {/* **A second line rather than an eighth arm in `statusOf`.**
-                  Slow co-occurs with almost every value that chain returns: a
-                  slow catalogue can also need a key, sit in the leading pair, or
-                  carry a regional remit. One line per row would have to swallow
-                  one of those or never fire for it, which is the defect
-                  `lib/providerStatus.ts` records having shipped once already.
-
-                  It also says the thing the ticket asked this section for: off
-                  because it is slow reads differently from off because it is
-                  broken, and only if the screen says which. */}
-              {row.slow && (
-                <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
-                  {t("providers.slow")}
-                </p>
-              )}
-            </div>
-            <div className="flex shrink-0 gap-1">
-              {/* **Not disabled while a save is in flight.** The local list is
-                  what is drawn, the save is debounced and sends the whole
-                  roster so the last one wins, and disabling every button when
-                  the timer fires would take focus off the one under the
-                  reader's finger in the middle of a run. */}
-              <Button
-                variant="secondary"
-                size="sm"
-                ref={(node: HTMLButtonElement | null) => {
-                  buttons.current.set(`${row.source}:up`, node);
-                }}
-                disabled={index === 0}
-                aria-label={t("providers.moveUp", {
-                  name: t(catalogueName(row.source)),
-                })}
-                onClick={() => move(index, -1)}
-              >
-                <Icon name="chevron" className="w-4 h-4 -rotate-90" />
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                ref={(node: HTMLButtonElement | null) => {
-                  buttons.current.set(`${row.source}:down`, node);
-                }}
-                disabled={index === rows.length - 1}
-                aria-label={t("providers.moveDown", {
-                  name: t(catalogueName(row.source)),
-                })}
-                onClick={() => move(index, 1)}
-              >
-                <Icon name="chevron" className="w-4 h-4 rotate-90" />
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
-      {/* Polite, and outside the list, so a move is read after the button's own
-          label rather than interrupting it.
-
-          **`aria-live` without `role="status"`, deliberately.** The role implies
-          exactly this live region, so it would add nothing, and it would put a
-          second `status` on a screen that already has one: `AdminSettings`
-          renders the "Settings saved." banner with it. Two of them make the
-          banner ambiguous to anything looking for it, which a test caught
-          before a reader had to. */}
-      <p aria-live="polite" aria-atomic="true" className="sr-only">
-        {announcement}
-      </p>
-    </SettingsSection>
-  );
+  return { buttons, refocusAfter };
 }
 
 /**

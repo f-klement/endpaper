@@ -122,6 +122,12 @@ WITHHELD: dict[str, str] = {
     "purchase_currency": "which currency the household paid in",
     "purchased_at": "the date the household bought it",
     "purchase_source": "which shop or seller the household bought it from",
+    # ── Facts about this library's cataloguing ────────────────────────────
+    "record_modified_here": (
+        "whether this household corrected the record after it arrived, which "
+        "is its own working history. The origin beside it is published; this "
+        "stays a cataloguer's fact, owner's decision on the provenance ticket"
+    ),
     # ── Cannot be computed here, rather than must not be shown ────────────
     "copy_count": (
         "counts the copies **the caller may see**, so it takes a viewer and a "

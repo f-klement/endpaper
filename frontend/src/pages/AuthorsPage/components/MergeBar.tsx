@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 
 import type { AuthorOut } from "../../../api/generated/model";
-import { useTranslation } from "../../../i18n";
+import { useTranslation, type Translate } from "../../../i18n";
 
 interface MergeBarProps {
   selected: AuthorOut[];
@@ -36,13 +36,7 @@ export default function MergeBar({
   onClear,
 }: MergeBarProps) {
   const { t } = useTranslation();
-  const [otherName, setOtherName] = useState("");
   const keys = selected.map((author) => author.key);
-  // One selected name is a rename, and it is worth saying so: "Or a name none
-  // of them has" has no referent when there is one of them, and "Fold 1
-  // spellings into X" describes the write in a vocabulary that only makes
-  // sense for two. The write is identical; only the words change.
-  const isRename = selected.length === 1;
 
   function confirmAndMerge(keepName: string) {
     // One of the selected names is kept, so one fewer spelling moves. The
@@ -53,28 +47,6 @@ export default function MergeBar({
       confirm(t("authors.confirm", { count: keys.length - 1, name: keepName }))
     ) {
       onMerge(keys, keepName);
-    }
-  }
-
-  function submitOther(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    // Collapsed, not merely trimmed, because the server collapses internal
-    // whitespace before storing (`AuthorMergeRequest.tidy`). Sending the raw
-    // string meant "Ursula K.  Le Guin" came back as "Ursula K. Le Guin",
-    // which differs from what was typed, and the page announced that the merge
-    // had gone somewhere else when it had gone exactly where it was asked.
-    const trimmed = otherName.trim().replace(/\s+/g, " ");
-    if (!trimmed) return;
-    // A typed name keeps none of them, so every selected spelling moves.
-    const question = isRename
-      ? t("authors.renameConfirm", {
-          from: selected[0]?.name ?? "",
-          name: trimmed,
-        })
-      : t("authors.confirm", { count: keys.length, name: trimmed });
-    if (confirm(question)) {
-      onMerge(keys, trimmed);
-      setOtherName("");
     }
   }
 
@@ -98,44 +70,118 @@ export default function MergeBar({
             the merge is a name folding into itself. With one selected the
             field below is the whole action, and it is a rename. */}
         {selected.length > 1 && (
-          <div className="flex flex-wrap gap-2">
-            {selected.map((author) => (
-              <button
-                key={author.key}
-                type="button"
-                disabled={isMerging}
-                onClick={() => confirmAndMerge(author.name)}
-                className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
-              >
-                {isMerging
-                  ? t("authors.merging")
-                  : t("authors.keepNamed", { name: author.name })}
-              </button>
-            ))}
-          </div>
+          <KeepButtons
+            selected={selected}
+            isMerging={isMerging}
+            onKeep={confirmAndMerge}
+          />
         )}
 
-        <form onSubmit={submitOther} className="flex gap-2">
-          <input
-            type="text"
-            value={otherName}
-            onChange={(event) => setOtherName(event.target.value)}
-            placeholder={t("authors.otherNamePlaceholder")}
-            aria-label={t(
-              isRename ? "authors.renameName" : "authors.otherName",
-            )}
-            maxLength={300}
-            className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
-          />
-          <button
-            type="submit"
-            disabled={isMerging || otherName.trim() === ""}
-            className="px-3 py-2 rounded-xl border border-paper-200 text-xs font-medium hover:border-accent-300 disabled:opacity-40 transition-colors dark:border-paper-700"
-          >
-            {t(isRename ? "authors.rename" : "authors.mergeIntoOther")}
-          </button>
-        </form>
+        <OtherNameForm
+          selected={selected}
+          keys={keys}
+          isMerging={isMerging}
+          onMerge={onMerge}
+        />
       </div>
     </div>
   );
+}
+
+function KeepButtons({
+  selected,
+  isMerging,
+  onKeep,
+}: {
+  selected: AuthorOut[];
+  isMerging: boolean;
+  onKeep: (keepName: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap gap-2">
+      {selected.map((author) => (
+        <button
+          key={author.key}
+          type="button"
+          disabled={isMerging}
+          onClick={() => onKeep(author.name)}
+          className="px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+        >
+          {isMerging
+            ? t("authors.merging")
+            : t("authors.keepNamed", { name: author.name })}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The field for a name none of the selected spellings has, or for a rename. */
+function OtherNameForm({
+  selected,
+  keys,
+  isMerging,
+  onMerge,
+}: {
+  selected: AuthorOut[];
+  keys: string[];
+  isMerging: boolean;
+  onMerge: (keys: string[], keepName: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [otherName, setOtherName] = useState("");
+  // One selected name is a rename, and it is worth saying so: "Or a name none
+  // of them has" has no referent when there is one of them, and "Fold 1
+  // spellings into X" describes the write in a vocabulary that only makes
+  // sense for two. The write is identical; only the words change.
+  const isRename = selected.length === 1;
+
+  function submitOther(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    // Collapsed, not merely trimmed, because the server collapses internal
+    // whitespace before storing (`AuthorMergeRequest.tidy`). Sending the raw
+    // string meant "Ursula K.  Le Guin" came back as "Ursula K. Le Guin",
+    // which differs from what was typed, and the page announced that the merge
+    // had gone somewhere else when it had gone exactly where it was asked.
+    const trimmed = otherName.trim().replace(/\s+/g, " ");
+    if (!trimmed) return;
+    if (confirm(otherNameQuestion(t, selected, trimmed, isRename))) {
+      onMerge(keys, trimmed);
+      setOtherName("");
+    }
+  }
+
+  return (
+    <form onSubmit={submitOther} className="flex gap-2">
+      <input
+        type="text"
+        value={otherName}
+        onChange={(event) => setOtherName(event.target.value)}
+        placeholder={t("authors.otherNamePlaceholder")}
+        aria-label={t(isRename ? "authors.renameName" : "authors.otherName")}
+        maxLength={300}
+        className="flex-1 px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+      />
+      <button
+        type="submit"
+        disabled={isMerging || otherName.trim() === ""}
+        className="px-3 py-2 rounded-xl border border-paper-200 text-xs font-medium hover:border-accent-300 disabled:opacity-40 transition-colors dark:border-paper-700"
+      >
+        {t(isRename ? "authors.rename" : "authors.mergeIntoOther")}
+      </button>
+    </form>
+  );
+}
+
+/** A typed name keeps none of them, so every selected spelling moves. */
+function otherNameQuestion(
+  t: Translate,
+  selected: AuthorOut[],
+  name: string,
+  isRename: boolean,
+): string {
+  return isRename
+    ? t("authors.renameConfirm", { from: selected[0]?.name ?? "", name })
+    : t("authors.confirm", { count: selected.length, name });
 }

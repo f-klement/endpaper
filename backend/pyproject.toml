@@ -621,8 +621,8 @@ raises-extend-require-match-for = [
 # subprocess calls that run the suite runner and the publish gate.
 #
 # **What still covers these files, stated as what it does rather than as a
-# ranking.** `TestNoFixtureLooksLikeACredential` catches a realistic Telegram
-# bot token and an address outside reserved space; the publish gate's own
+# ranking.** Two house rules catch a realistic Telegram bot token and an
+# address outside reserved space; the publish gate's own
 # forbidden string scan catches the GitLab and GitHub access token prefixes and
 # the private key header. Neither
 # is a superset of `S105`/`S106`: a plausible API key spelled `api_key = "..."`

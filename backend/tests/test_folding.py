@@ -362,9 +362,10 @@ _SESSION_CALLS = frozenset({"all", "delete", "expire", "filter", "flush", "order
 _CLAUSE_CALLS = frozenset({"in_"})
 #: Another module's merge rule, guarded where that module's reads are.
 _DELEGATED_CALLS = frozenset({"close", "is_open", "resolve_merge"})
-#: Plain Python on values already in hand, reaching no table.
+#: Plain Python on values already in hand, reaching no table. `touched` sets a
+#: flag on the survivor, which is in hand.
 _PLAIN_CALLS = frozenset(
-    {"add", "append", "carry", "clear", "get", "getLogger", "info", "now", "replace", "values"}
+    {"add", "append", "carry", "clear", "get", "getLogger", "info", "now", "replace", "touched", "values"}
 )
 
 

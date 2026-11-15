@@ -68,8 +68,8 @@ export interface FeatureFlagsState {
  * The flags, and whether they have arrived.
  *
  * **The only place this endpoint is configured**, which is a rule with a test
- * rather than a hope: `tests/houseRules.test.ts` holds it, and holds the
- * measurement of what it prevents. Every reader below goes through here, and
+ * rather than a hope: a house rule holds it, and states the measurement of
+ * what it prevents. Every reader below goes through here, and
  * so does the one caller that needs the second half.
  *
  * `retry: false` because everything reading this renders regardless: a failure
@@ -96,8 +96,8 @@ export function useFeatureFlagsState(): FeatureFlagsState {
  * `=== true` came to sit beside each other for the same question.
  *
  * Each of them goes through `useFeatureFlagsState`, which is what keeps the
- * endpoint on one set of options. What that prevents, measured, is at the
- * guard: `tests/houseRules.test.ts`, "the feature flags query has one owner".
+ * endpoint on one set of options. What that prevents, measured, is in the
+ * reason of the house rule that keeps this endpoint configured here.
  */
 
 /** Whether a Google Books lookup will reach Google: switched on, and keyed. */

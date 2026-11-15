@@ -65,7 +65,7 @@ import recognition
 import tags
 from catalogue import Link, Record
 from database import hold_book_ceilings
-from enums import OwnershipStatus, ReadStatus
+from enums import OwnershipStatus, ReadStatus, RecordOrigin
 from errors import MetAnotherChange
 from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Note, OnlineLink
 from reading import Reading, Records
@@ -194,28 +194,17 @@ def _settle_one(
     """
     match answer:
         case recognition.Seen(book_id=book_id):
-            # Before the load, because the load is the first place a Book
-            # deleted since the index was read can fail. Not re-resolved under
-            # a lock here: that is a statement and a lock on every matched row
-            # of every import (`docs/decisions.md`, the deadlock 409).
-            if book_id not in tally.created_ids:
-                tally.loaded.add(book_id)
-            book = load(book_id)
-            tally.matched += 1
-            fill_gaps(book)
-            return book
+            return _settle_seen(book_id, tally, load=load, fill_gaps=fill_gaps)
         case recognition.Hidden() if create_missing:
             tally.unmatched_private += 1
             return None
         case recognition.InTrash():
             tally.in_trash += 1
-            if len(tally.in_trash_titles) < MAX_UNMATCHED_REPORTED:
-                tally.in_trash_titles.append(unmatched_title)
+            _report_title(tally.in_trash_titles, unmatched_title)
             return None
         case recognition.Tied():
             tally.ambiguous += 1
-            if len(tally.ambiguous_titles) < MAX_UNMATCHED_REPORTED:
-                tally.ambiguous_titles.append(unmatched_title)
+            _report_title(tally.ambiguous_titles, unmatched_title)
             return None
         case recognition.Unknown() if create_missing:
             created = create()
@@ -223,9 +212,34 @@ def _settle_one(
             tally.created_ids.add(created.id)
             return created
 
-    if len(tally.unmatched) < MAX_UNMATCHED_REPORTED:
-        tally.unmatched.append(unmatched_title)
+    _report_title(tally.unmatched, unmatched_title)
     return None
+
+
+def _settle_seen(
+    book_id: int, tally: _Tally, *, load: Callable[[int], Book], fill_gaps: Callable[[Book], None]
+) -> Book:
+    """`_settle_one`'s `Seen` row: the matched Book, loaded and gap filled."""
+    # Before the load, because the load is the first place a Book
+    # deleted since the index was read can fail. Not re-resolved under
+    # a lock here: that is a statement and a lock on every matched row
+    # of every import (`docs/decisions.md`, the deadlock 409).
+    if book_id not in tally.created_ids:
+        tally.loaded.add(book_id)
+    book = load(book_id)
+    tally.matched += 1
+    fill_gaps(book)
+    return book
+
+
+def _report_title(titles: list[str], title: str) -> None:
+    """List one row's title in a report, up to `MAX_UNMATCHED_REPORTED`.
+
+    The one home of the ceiling `_Tally` leaves to its caller: past it the
+    row is still counted, only no longer named.
+    """
+    if len(titles) < MAX_UNMATCHED_REPORTED:
+        titles.append(title)
 
 
 class Import:
@@ -362,6 +376,8 @@ class Import:
             # Marking these OWNED would assert something nobody checked, so
             # they arrive unverified and are confirmed in bulk afterwards.
             ownership=OwnershipStatus.UNKNOWN,
+            record_origin=RecordOrigin.CSV_IMPORT,
+            record_modified_here=False,
         )
         self._db.add(book)
         self._db.flush()
@@ -486,24 +502,14 @@ class Import:
         taken from another service. The import fills gaps, on the same
         principle as metadata enrichment.
         """
-        if row.status is None and row.rating is None and row.date_read is None:
-            # Nothing personal in this row. A file that is a plain book list
-            # should not leave an "unread" marker on every Book it touched.
+        if _carries_nothing_personal(row):
+            # A file that is a plain book list should not leave an "unread"
+            # marker on every Book it touched.
             return False
 
-        # **`status_of`, not `existing.status`.** A file carrying two rows for
-        # one Book (a rating on the first, a status on the second) leaves the
-        # first row's `open()` unflushed, and `find()` answers the second from
-        # the identity map, so nothing flushes in between: `status` is still
-        # None and `ReadStatus(None)` raises, taking the whole import down with
-        # it. Read before `open()`, because opening is what creates that row.
-        had_a_record = index.statuses.get(book_id) is not None
-        current = index.statuses.status_of(book_id)
+        # Read before `open()`, because opening is what creates the row.
+        changed = _changes_the_status(index.statuses, book_id, row)
         existing = index.statuses.open(book_id)
-
-        # A Book with no record is changed by getting one. One that had a
-        # record changes only if this row names a different status.
-        changed = not had_a_record or (row.status is not None and current is not row.status)
 
         if row.status is not None:
             existing.status = row.status
@@ -520,6 +526,29 @@ class Import:
             changed = True
 
         return changed
+
+
+def _carries_nothing_personal(row: csv_import.ImportRow) -> bool:
+    """Whether a row names no status, rating or finish date for its Member."""
+    return row.status is None and row.rating is None and row.date_read is None
+
+
+def _changes_the_status(statuses: Records, book_id: int, row: csv_import.ImportRow) -> bool:
+    """Whether `Import._apply_reading_record` changes this Book's status record.
+
+    A Book with no record is changed by getting one. One that had a record
+    changes only if this row names a different status.
+
+    **`status_of`, not `existing.status`.** A file carrying two rows for one
+    Book (a rating on the first, a status on the second) leaves the first
+    row's `open()` unflushed, and `find()` answers the second from the identity
+    map, so nothing flushes in between: `status` is still None and
+    `ReadStatus(None)` raises, taking the whole import down with it. So this is
+    read before `open()`, because opening is what creates that row.
+    """
+    had_a_record = statuses.get(book_id) is not None
+    current = statuses.status_of(book_id)
+    return not had_a_record or (row.status is not None and current is not row.status)
 
 
 @dataclass
@@ -827,20 +856,26 @@ def within_bounds(attribute: str, value: Any) -> Any:
     counts_entries = field is not None and admits_a_container(field.annotation)
 
     if isinstance(value, str):
-        widths = [
-            width
-            for width in (
-                getattr(Book.__table__.c[attribute].type, "length", None),
-                *(
-                    m.max_length
-                    for m in limits
-                    if isinstance(m, annotated_types.MaxLen) and not counts_entries
-                ),
-            )
-            if width is not None
-        ]
-        return value[: min(widths)] if widths else value
+        return _cut_to_width(attribute, value, limits, counts_entries=counts_entries)
+    return _within_range(value, limits)
 
+
+def _cut_to_width(attribute: str, value: str, limits: list[Any], *, counts_entries: bool) -> str:
+    """`within_bounds` for a string: cut to the narrower of the column's width
+    and the schema's `MaxLen`, the latter skipped where it counts entries."""
+    widths = [
+        width
+        for width in (
+            getattr(Book.__table__.c[attribute].type, "length", None),
+            *(m.max_length for m in limits if isinstance(m, annotated_types.MaxLen) and not counts_entries),
+        )
+        if width is not None
+    ]
+    return value[: min(widths)] if widths else value
+
+
+def _within_range(value: Any, limits: list[Any]) -> Any:
+    """`within_bounds` for a number: the value, or None outside a `Ge` or `Le`."""
     for limit in limits:
         if isinstance(limit, annotated_types.Ge) and value < limit.ge:
             return None
@@ -1078,6 +1113,10 @@ class MarcImport:
             isbn=stored.isbn,
             added_by_user_id=self._member_id,
             ownership=OwnershipStatus.UNKNOWN,
+            # The import, not the institution that catalogued it: the file's own
+            # `040` is not read, so which agency that was is not known here.
+            record_origin=RecordOrigin.MARC_IMPORT,
+            record_modified_here=False,
         )
         self._db.add(book)
         self._db.flush()
@@ -1316,6 +1355,8 @@ class OpdsImport:
             isbn=stored.isbn,
             added_by_user_id=self._member_id,
             ownership=OwnershipStatus.OWNED,
+            record_origin=RecordOrigin.OPDS_IMPORT,
+            record_modified_here=False,
         )
         self._db.add(book)
         self._db.flush()

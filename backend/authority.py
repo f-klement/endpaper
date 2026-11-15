@@ -416,29 +416,38 @@ def _candidate(record: Any, *, certain: bool) -> AuthorityCandidate | None:
         scheme=AuthorityScheme.GND,
         identifier=identifier,
         name=name.strip(),
-        variants=tuple(
-            value.strip()
-            for value in record.get("variantName") or ()
-            if isinstance(value, str) and value.strip()
-        ),
+        variants=_variants(record),
         born=_first_string(record.get("dateOfBirth")),
         died=_first_string(record.get("dateOfDeath")),
-        # `sameAs` members are objects carrying an `id`.
-        #
-        # **Restricted to `http` and `https`.** Nothing renders this yet, and
-        # the obvious rendering is a link, so the contract is being frozen now
-        # with the scheme checked rather than later with a `javascript:` URI
-        # from a third party already in the shape. The same rule
-        # `custom_fields.link_target` applies to a value a member typed, applied
-        # to one an authority file supplied.
-        same_as=tuple(
-            entry["id"]
-            for entry in record.get("sameAs") or ()
-            if isinstance(entry, dict)
-            and isinstance(entry.get("id"), str)
-            and entry["id"].lower().startswith(("http://", "https://"))
-        ),
+        same_as=_web_links(record),
         certain=certain,
+    )
+
+
+def _variants(record: dict[str, Any]) -> tuple[str, ...]:
+    """The other forms of the name a lobid record carries, stripped, blanks dropped."""
+    return tuple(
+        value.strip() for value in record.get("variantName") or () if isinstance(value, str) and value.strip()
+    )
+
+
+def _web_links(record: dict[str, Any]) -> tuple[str, ...]:
+    """The URIs a lobid record's `sameAs` members carry, web ones only.
+
+    **Restricted to `http` and `https`.** Nothing renders this yet, and the
+    obvious rendering is a link, so the contract is being frozen now with the
+    scheme checked rather than later with a `javascript:` URI from a third
+    party already in the shape. The same rule `custom_fields.link_target`
+    applies to a value a member typed, applied to one an authority file
+    supplied.
+    """
+    # `sameAs` members are objects carrying an `id`.
+    return tuple(
+        entry["id"]
+        for entry in record.get("sameAs") or ()
+        if isinstance(entry, dict)
+        and isinstance(entry.get("id"), str)
+        and entry["id"].lower().startswith(("http://", "https://"))
     )
 
 
@@ -473,6 +482,16 @@ async def _wikidata(params: dict[str, str], deadline: float | None) -> Any:
         return None
 
 
+def _reached(body: dict[str, Any], *path: str) -> Any:
+    """The value at `path` in a Wikidata answer, or None where a key on the way
+    is missing. A step holding nothing is read as an empty mapping, and one
+    holding something other than a mapping raises `AttributeError`."""
+    value: Any = body
+    for key in path:
+        value = (value or {}).get(key)
+    return value
+
+
 async def _item_for(gnd: str, deadline: float | None) -> str | None:
     """The Wikidata item whose `P227` is this GND number, found by Wikidata.
 
@@ -495,7 +514,7 @@ async def _item_for(gnd: str, deadline: float | None) -> str | None:
     )
     if not isinstance(body, dict):
         return None
-    hits = (body.get("query") or {}).get("search") or []
+    hits = _reached(body, "query", "search")
     if not hits or not isinstance(hits[0], dict):
         return None
     title = hits[0].get("title")
@@ -520,8 +539,7 @@ async def _description_of(item: str, deadline: float | None) -> str | None:
     )
     if not isinstance(body, dict):
         return None
-    entity = (body.get("entities") or {}).get(item) or {}
-    descriptions = entity.get("descriptions") or {}
+    descriptions = _reached(body, "entities", item, "descriptions") or {}
     for language in _DESCRIPTION_LANGUAGES:
         entry = descriptions.get(language)
         if isinstance(entry, dict) and isinstance(entry.get("value"), str):
@@ -562,14 +580,20 @@ async def _claims(item: str, prop: str, deadline: float | None) -> tuple[str, ..
         return ()
     found: list[str] = []
     for statement in (body.get("claims") or {}).get(prop) or []:
-        if not isinstance(statement, dict):
-            continue
-        if statement.get("rank") == "deprecated":
-            continue
-        value = ((statement.get("mainsnak") or {}).get("datavalue") or {}).get("value")
-        if isinstance(value, str) and value and value not in found:
+        value = _statement_value(statement)
+        if value is not None and value not in found:
             found.append(value)
     return tuple(found)
+
+
+def _statement_value(statement: Any) -> str | None:
+    """The string one Wikidata statement asserts, or None for a deprecated or unusable one."""
+    if not isinstance(statement, dict):
+        return None
+    if statement.get("rank") == "deprecated":
+        return None
+    value = ((statement.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+    return value if isinstance(value, str) and value else None
 
 
 async def _claim(item: str, prop: str, deadline: float | None) -> str | None:
@@ -632,17 +656,22 @@ def _disagreements(
     on the resolve branch only, alongside the `P214` one that was already there.
     A name search still buys neither: see `_cross_check`.
     """
-    found: list[Disagreement] = []
-    lobid_item = _matched(_ITEM_URI, candidate.same_as)
-    if lobid_item is not None and item is not None and lobid_item != item:
-        found.append(Disagreement(about=AuthorityScheme.WIKIDATA.value, lobid=lobid_item, wikidata=item))
-    lobid_viaf = _matched(_VIAF_URI, candidate.same_as)
-    if lobid_viaf is not None and viaf is not None and lobid_viaf != viaf:
-        found.append(Disagreement(about=AuthorityScheme.VIAF.value, lobid=lobid_viaf, wikidata=viaf))
-    lobid_isni = _matched(_ISNI_URI, candidate.same_as)
-    if lobid_isni is not None and isni is not None and lobid_isni != isni:
-        found.append(Disagreement(about=AuthorityScheme.ISNI.value, lobid=lobid_isni, wikidata=isni))
-    return tuple(found)
+    compared = (
+        _disagreement(candidate, AuthorityScheme.WIKIDATA, _ITEM_URI, item),
+        _disagreement(candidate, AuthorityScheme.VIAF, _VIAF_URI, viaf),
+        _disagreement(candidate, AuthorityScheme.ISNI, _ISNI_URI, isni),
+    )
+    return tuple(row for row in compared if row is not None)
+
+
+def _disagreement(
+    candidate: AuthorityCandidate, about: AuthorityScheme, pattern: re.Pattern[str], wikidata: str | None
+) -> Disagreement | None:
+    """One comparison of `_disagreements`, or None where the two agree or either is silent."""
+    lobid = _matched(pattern, candidate.same_as)
+    if lobid is not None and wikidata is not None and lobid != wikidata:
+        return Disagreement(about=about.value, lobid=lobid, wikidata=wikidata)
+    return None
 
 
 #: Which `sameAs` URI carries which scheme's identifier.
@@ -907,37 +936,49 @@ def _viaf_sources(cluster: Any, wanted: frozenset[str]) -> dict[str, str]:
     would grow the same way. A code seen with a second, differing value is
     parked at `None` and never grows again, which is exactly the information the
     drop rule needs and no more.
-
-    `partition` rather than `split`, because an identifier legitimately contains
-    a separator of its own: `LIH|LNB:V-174543;=BK` is one code and one number.
     """
     # None means "named twice with different values", which is the drop rule
     # holding one bit rather than a set. See the docstring: a set here is
     # unbounded in a body this module accepts.
     found: dict[str, str | None] = {}
-    data = _under(_under(cluster, "mainHeadings"), "data")
-    if isinstance(data, dict):
-        data = [data]
-    if not isinstance(data, list):
-        return {}
-    for block in data:
-        sid = _under(_under(block, "sources"), "sid")
-        if isinstance(sid, str):
-            sid = [sid]
-        if not isinstance(sid, list):
-            continue
-        for entry in sid:
-            if not isinstance(entry, str):
+    for block in _listed(_under(_under(cluster, "mainHeadings"), "data"), dict):
+        for entry in _listed(_under(_under(block, "sources"), "sid"), str):
+            named = _viaf_source(entry, wanted)
+            if named is None:
                 continue
-            code, separator, identifier = entry.partition("|")
-            code, identifier = code.strip(), identifier.strip()
-            if not separator or not code or not identifier or code not in wanted:
-                continue
+            code, identifier = named
             if code not in found:
                 found[code] = identifier
             elif found[code] != identifier:
                 found[code] = None
     return {code: value for code, value in found.items() if value is not None}
+
+
+def _listed(value: Any, single: type) -> list[Any]:
+    """A VIAF field that is a list in one block and a bare `single` in the next, as a list.
+
+    Anything else is an empty list, so a shape VIAF has not been seen to send
+    contributes nothing rather than raising. See `_viaf_sources` for the record
+    that carried both shapes at once.
+    """
+    if isinstance(value, single):
+        return [value]
+    return value if isinstance(value, list) else []
+
+
+def _viaf_source(entry: Any, wanted: frozenset[str]) -> tuple[str, str] | None:
+    """One `sid` entry as `(code, identifier)`, or None for a malformed or unwanted one.
+
+    `partition` rather than `split`, because an identifier legitimately contains
+    a separator of its own: `LIH|LNB:V-174543;=BK` is one code and one number.
+    """
+    if not isinstance(entry, str):
+        return None
+    code, separator, identifier = entry.partition("|")
+    code, identifier = code.strip(), identifier.strip()
+    if not separator or not code or not identifier or code not in wanted:
+        return None
+    return code, identifier
 
 
 async def _viaf_json(
@@ -1015,8 +1056,8 @@ async def _viaf_cluster_by_gnd(
     reviewing seat probed four names live on 2026-08-28 and could not produce
     two personal hits under one `dnb`; the only duplicates it found were
     `uniformtitlework` hits, which the filter above already drops. So the
-    evidence for the loop below is the rule, not a measurement, and that is
-    stated rather than dressed up as a bug found in the wild.
+    evidence for the loop in `_clusters_naming` is the rule, not a measurement,
+    and that is stated rather than dressed up as a bug found in the wild.
 
     The distinct `viafid` values are collected **before** being validated, so a
     second hit carrying an unusable id still counts as ambiguity. Discarding it
@@ -1029,34 +1070,47 @@ async def _viaf_cluster_by_gnd(
     _, body = await _viaf_json(client, _VIAF_AUTOSUGGEST_URL, {"query": name[:MAX_QUERY_NAME]}, deadline)
     if not isinstance(body, dict):
         return None, False
+    matched = _clusters_naming(body.get("result"), gnd)
+    if matched is None or len(matched) != 1:
+        return None, True
+    only = matched.pop()
+    return (only, True) if _VIAF_CLUSTER.match(only) else (None, True)
+
+
+def _clusters_naming(hits: Any, gnd: str) -> set[str] | None:
+    """The distinct clusters `AutoSuggest` offers as this GND number's person, read up to the second.
+
+    **None where a matching hit names its cluster in a shape that is not a
+    string**, which answers the question with nobody, whatever the hits before
+    it said. `_viaf_cluster_by_gnd` applies the one rule to what comes back.
+    """
     matched: set[str] = set()
-    for hit in body.get("result") or []:
-        if not isinstance(hit, dict):
-            continue
-        if hit.get("nametype") != "personal" or hit.get("dnb") != gnd:
+    for hit in hits or []:
+        if not _offers_the_person(hit, gnd):
             continue
         cluster = hit.get("viafid")
         if not isinstance(cluster, str):
-            return None, True
+            return None
         matched.add(cluster)
         # **Stops reading, and decides nothing.** `result` is somebody else's
         # list and two distinct clusters already answer the question, so there
         # is no reason to walk the rest. The rule itself is the single check
-        # below.
+        # in `_viaf_cluster_by_gnd`.
         #
         # This used to `return None` here, which put the rule in two places and
-        # made the check below unreachable for the case it exists for. A
-        # mutation replacing that check with `if not matched` was then
-        # **equivalent**, and survived at 166 passed: the early return was
-        # silently doing all the work. A guard whose subject is enforced
-        # somewhere else is not a guard.
+        # made that check unreachable for the case it exists for. A mutation
+        # replacing it with `if not matched` was then **equivalent**, and
+        # survived at 166 passed: the early return was silently doing all the
+        # work. A guard whose subject is enforced somewhere else is not a guard.
         if len(matched) > 1:
             logger.info("VIAF offered more than one cluster for one GND number")
             break
-    if len(matched) != 1:
-        return None, True
-    only = matched.pop()
-    return (only, True) if _VIAF_CLUSTER.match(only) else (None, True)
+    return matched
+
+
+def _offers_the_person(hit: Any, gnd: str) -> bool:
+    """Whether one `AutoSuggest` hit is a personal cluster carrying this GND number."""
+    return isinstance(hit, dict) and hit.get("nametype") == "personal" and hit.get("dnb") == gnd
 
 
 async def _viaf_cluster_sources(
@@ -1217,23 +1271,7 @@ async def national_identifiers(
     sources: dict[str, str] | None = None
     async with fetch.catalogue_client() as client:
         client.headers["accept"] = _VIAF_ACCEPT
-        cluster = _matched(_VIAF_URI, candidate.same_as)
-        # `heard` is the whole reason this is a tuple. A cluster read out of
-        # lobid's `sameAs` costs no VIAF request, so reaching this branch and
-        # coming back empty is the only place "VIAF is down" and "VIAF knows
-        # nobody by that name" have to be told apart.
-        #
-        # **False, because it means "VIAF has answered" and nothing has asked it
-        # yet.** True was the trigger line inverted, and it was reachable: a
-        # `sameAs` id is matched by `_VIAF_URI`, whose digits are unbounded,
-        # and then rejected by `_VIAF_CLUSTER`, which allows twenty. A
-        # twenty-one digit id therefore reached `elif heard: return {}` with no
-        # request made at all, which is a supply failure recorded as an answer.
-        heard = False
-        if cluster is None:
-            cluster, heard = await _viaf_cluster_by_gnd(
-                client, candidate.name, candidate.identifier, deadline
-            )
+        cluster, heard = await _cluster_for(client, candidate, deadline)
         if cluster is not None and _VIAF_CLUSTER.match(cluster):
             sources = await _viaf_cluster_sources(client, cluster, deadline, _WANTED_SOURCES)
         elif heard:
@@ -1247,6 +1285,42 @@ async def national_identifiers(
         logger.info("VIAF produced no cluster; asking Wikidata for the national files")
         return await _national_from_wikidata(candidate, deadline)
 
+    return _national_from_cluster(candidate, sources)
+
+
+async def _cluster_for(
+    client: Any, candidate: AuthorityCandidate, deadline: float | None
+) -> tuple[str | None, bool]:
+    """The VIAF cluster to read for this person, lobid's own or one asked of
+    VIAF by name, and whether VIAF has answered."""
+    cluster = _matched(_VIAF_URI, candidate.same_as)
+    # `heard` is the whole reason this is a tuple. A cluster read out of
+    # lobid's `sameAs` costs no VIAF request, so reaching this branch and
+    # coming back empty is the only place "VIAF is down" and "VIAF knows
+    # nobody by that name" have to be told apart.
+    #
+    # **A cluster lobid named returns `heard` as False, because `heard` means
+    # "VIAF has answered" and nothing has asked VIAF yet.** True there was
+    # the trigger line inverted, and it was reachable: a
+    # `sameAs` id is matched by `_VIAF_URI`, whose digits are unbounded,
+    # and then rejected by `_VIAF_CLUSTER`, which allows twenty. A
+    # twenty-one digit id therefore reached `elif heard: return {}` in
+    # `national_identifiers` with no request made at all, which is a supply
+    # failure recorded as an answer.
+    if cluster is None:
+        return await _viaf_cluster_by_gnd(client, candidate.name, candidate.identifier, deadline)
+    return cluster, False
+
+
+def _national_from_cluster(
+    candidate: AuthorityCandidate, sources: dict[str, str]
+) -> dict[AuthorityScheme, str]:
+    """The six national numbers a cluster names, once it has named the confirmed GND record back.
+
+    The second direction of the check `national_identifiers` describes: a
+    cluster found from lobid's `sameAs` or by name must carry this GND number
+    itself, or nothing it names is read.
+    """
     if sources.get(_GND_SOURCE) != candidate.identifier:
         logger.info("A VIAF cluster did not name the confirmed GND record back")
         return {}
@@ -1540,22 +1614,23 @@ async def _sitelinks(
     entities = body.get("entities")
     if not isinstance(entities, dict):
         return None
-    found: dict[str, dict[str, str]] = {}
-    for item in items:
-        entry = entities.get(item)
-        links = (entry or {}).get("sitelinks") if isinstance(entry, dict) else None
-        articles: dict[str, str] = {}
-        for link in (links or {}).values():
-            if not isinstance(link, dict):
-                continue
-            url = link.get("url")
-            if not isinstance(url, str):
-                continue
-            matched = _WIKIPEDIA_ARTICLE.match(url)
-            if matched is not None:
-                articles[matched.group(1)] = url
-        found[item] = articles
-    return found
+    return {item: _editions(entities.get(item)) for item in items}
+
+
+def _editions(entity: Any) -> dict[str, str]:
+    """One entity's Wikipedia articles as `{language: url}`, each URL checked by `_WIKIPEDIA_ARTICLE`."""
+    links = entity.get("sitelinks") if isinstance(entity, dict) else None
+    articles: dict[str, str] = {}
+    for link in (links or {}).values():
+        if not isinstance(link, dict):
+            continue
+        url = link.get("url")
+        if not isinstance(url, str):
+            continue
+        matched = _WIKIPEDIA_ARTICLE.match(url)
+        if matched is not None:
+            articles[matched.group(1)] = url
+    return articles
 
 
 def _preferred(articles: dict[str, str], prefer: tuple[str, ...]) -> tuple[str, str] | None:
@@ -1657,38 +1732,54 @@ async def wikipedia_articles(
     looked_up = wanted[:MAX_WIKIPEDIA_ITEMS]
 
     sitefilter = "|".join(f"{language}wiki" for language in prefer)
+    articles, answered = await _filtered_pass(looked_up, sitefilter, deadline)
+
+    # Its own chunk size and its own ceiling, and both are the same fault seen
+    # twice: an unfiltered entity reaches 64,449 bytes where a filtered one is
+    # about 300, so the fifty of `_ITEMS_PER_REQUEST` that is safe above is six
+    # times the response cap here. See `_UNFILTERED_ITEMS_PER_REQUEST`.
+    missing = tuple(item for item in answered if not articles.get(item))[:MAX_UNFILTERED_ITEMS]
+    articles.update(await _unfiltered_pass(missing, deadline))
+
+    return {item: _article_for(item, articles.get(item) or {}, prefer) for item in wanted}
+
+
+async def _filtered_pass(
+    items: tuple[str, ...], sitefilter: str, deadline: float | None
+) -> tuple[dict[str, dict[str, str]], list[str]]:
+    """The cheap pass of `wikipedia_articles`: its articles, and the items it answered about.
+
+    Only the items a filtered pass **answered about** may reach the unfiltered
+    one. A chunk whose request failed is not a chunk with no article.
+    """
     articles: dict[str, dict[str, str]] = {}
-    # Only the items a filtered pass **answered about** may reach the unfiltered
-    # one. A chunk whose request failed is not a chunk with no article.
     answered: list[str] = []
-    for start in range(0, len(looked_up), _ITEMS_PER_REQUEST):
-        chunk = looked_up[start : start + _ITEMS_PER_REQUEST]
+    for start in range(0, len(items), _ITEMS_PER_REQUEST):
+        chunk = items[start : start + _ITEMS_PER_REQUEST]
         found = await _sitelinks(chunk, sitefilter, deadline)
         if found is None:
             continue
         answered.extend(chunk)
         articles.update(found)
+    return articles, answered
 
-    # Its own chunk size and its own ceiling, and both are the same fault seen
-    # twice: an unfiltered entity reaches 64,449 bytes where a filtered one is
-    # about 300, so the fifty that is safe above is six times the response cap
-    # here. See `_UNFILTERED_ITEMS_PER_REQUEST`.
-    missing = tuple(item for item in answered if not articles.get(item))[:MAX_UNFILTERED_ITEMS]
-    for start in range(0, len(missing), _UNFILTERED_ITEMS_PER_REQUEST):
-        chunk = missing[start : start + _UNFILTERED_ITEMS_PER_REQUEST]
-        found = await _sitelinks(chunk, None, deadline)
+
+async def _unfiltered_pass(items: tuple[str, ...], deadline: float | None) -> dict[str, dict[str, str]]:
+    """The expensive pass of `wikipedia_articles`, at `_UNFILTERED_ITEMS_PER_REQUEST` a request."""
+    articles: dict[str, dict[str, str]] = {}
+    for start in range(0, len(items), _UNFILTERED_ITEMS_PER_REQUEST):
+        found = await _sitelinks(items[start : start + _UNFILTERED_ITEMS_PER_REQUEST], None, deadline)
         if found is not None:
             articles.update(found)
+    return articles
 
-    resolved: dict[str, WikipediaArticle] = {}
-    for item in wanted:
-        best = _preferred(articles.get(item) or {}, prefer)
-        resolved[item] = (
-            WikipediaArticle(url=best[1], language=best[0])
-            if best is not None
-            else WikipediaArticle(url=_WIKIDATA_ITEM_URL.format(item=item), language=None)
-        )
-    return resolved
+
+def _article_for(item: str, articles: dict[str, str], prefer: tuple[str, ...]) -> WikipediaArticle:
+    """The link for one person: the preferred article, or the Wikidata item page as the floor."""
+    best = _preferred(articles, prefer)
+    if best is None:
+        return WikipediaArticle(url=_WIKIDATA_ITEM_URL.format(item=item), language=None)
+    return WikipediaArticle(url=best[1], language=best[0])
 
 
 async def _lobid(

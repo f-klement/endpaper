@@ -438,28 +438,38 @@ export function readKoboLibrary(db: SqliteDatabase): KoboReading {
   let skipped = 0;
   const books: KoboBook[] = [];
   for (const row of rows) {
-    const contentId = text(row["ContentID"]);
-    const acquisition = acquisitionOf(row, present);
-    if (contentId === null || acquisition === null) {
+    const book = readBook(row, present);
+    if (book === null) {
       skipped += 1;
       continue;
     }
-    const attribution = text(row["Attribution"]);
-    const seriesName = text(row["Series"]);
-    books.push({
-      contentId,
-      title: text(row["Title"]),
-      authors: attribution === null ? [] : [attribution],
-      isbn: parseIsbn(text(row["ISBN"])),
-      publisher: text(row["Publisher"]),
-      year: readYear(row["DateCreated"]),
-      language: text(row["Language"]),
-      seriesName,
-      seriesIndex: seriesName === null ? null : readSeriesIndex(row, present),
-      format: FORMATS.get(text(row["MimeType"]) ?? "") ?? null,
-      acquisition,
-    });
+    books.push(book);
   }
 
   return { ok: true, library: { books, skipped } };
+}
+
+/**
+ * One `content` row as a book, or `null` for a row that is not one on this
+ * member's shelf, which the caller counts as skipped.
+ */
+function readBook(row: SqliteRow, present: Set<string>): KoboBook | null {
+  const contentId = text(row["ContentID"]);
+  const acquisition = acquisitionOf(row, present);
+  if (contentId === null || acquisition === null) return null;
+  const attribution = text(row["Attribution"]);
+  const seriesName = text(row["Series"]);
+  return {
+    contentId,
+    title: text(row["Title"]),
+    authors: attribution === null ? [] : [attribution],
+    isbn: parseIsbn(text(row["ISBN"])),
+    publisher: text(row["Publisher"]),
+    year: readYear(row["DateCreated"]),
+    language: text(row["Language"]),
+    seriesName,
+    seriesIndex: seriesName === null ? null : readSeriesIndex(row, present),
+    format: FORMATS.get(text(row["MimeType"]) ?? "") ?? null,
+    acquisition,
+  };
 }

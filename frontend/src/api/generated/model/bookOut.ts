@@ -14,6 +14,7 @@ import type { LoanOut } from "./loanOut.ts";
 import type { OnlineLinkOut } from "./onlineLinkOut.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
 import type { ReadStatus } from "./readStatus.ts";
+import type { RecordOrigin } from "./recordOrigin.ts";
 import type { RefusedAssertionOut } from "./refusedAssertionOut.ts";
 import type { TagOut } from "./tagOut.ts";
 import type { UserOut } from "./userOut.ts";
@@ -76,6 +77,8 @@ export interface BookOut {
   purchase_price_minor?: number | null;
   purchase_source?: string | null;
   purchased_at?: string | null;
+  record_modified_here?: boolean | null;
+  record_origin?: RecordOrigin | null;
   refused_identifiers?: RefusedAssertionOut[];
   series_index?: number | null;
   series_name?: string | null;

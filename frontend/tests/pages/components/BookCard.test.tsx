@@ -411,6 +411,28 @@ describe("BookCard fold out", () => {
       screen.queryByRole("button", { name: /Details for Dune/ }),
     ).toBeNull();
   });
+
+  it("stays open across a round trip through selection", async () => {
+    const book = detailed();
+    const { rerender } = renderCard(book);
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Details for Dune/ }));
+
+    rerender(
+      <BookCard
+        book={book}
+        isSelecting
+        onToggleSelect={vi.fn<(bookId: number) => void>()}
+      />,
+    );
+    rerender(<BookCard book={book} />);
+
+    expect(
+      screen.getByRole("button", { name: /Details for Dune/ }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Chilton")).toBeInTheDocument();
+  });
 });
 
 describe("BookCard ownership", () => {

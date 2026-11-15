@@ -33,6 +33,7 @@ import {
   draftFromLookup,
   draftFromMatch,
   draftFromName,
+  editedDraft,
   enrichedDraft,
   titlesCouldAgree,
   type BookDraft,
@@ -1304,7 +1305,7 @@ function withoutSubject(row: ScannedEntry, subject: string): ScannedEntry {
   // `boundCategories` folded the exact repeats out, so one value names
   // one chip.
   const kept = row.draft.categories?.filter((one) => one !== subject);
-  return { ...row, draft: { ...row.draft, categories: kept } };
+  return { ...row, draft: editedDraft(row.draft, { categories: kept }) };
 }
 
 /** A row offering a copy, once the copy exists. */

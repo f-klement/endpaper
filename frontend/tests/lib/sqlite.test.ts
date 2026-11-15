@@ -69,6 +69,20 @@ async function open(bytes: Uint8Array) {
   return reading.database;
 }
 
+/** An engine whose every statement throws `null` rather than an Error. */
+const engineThatThrowsNull = () =>
+  Promise.resolve({
+    Database: class {
+      exec(): never {
+        throw null;
+      }
+      export() {
+        return new Uint8Array() as Uint8Array<ArrayBuffer>;
+      }
+      close() {}
+    },
+  });
+
 describe("opening a database", () => {
   it("reads a table back by column name", async () => {
     const database = await open(
@@ -155,6 +169,23 @@ describe("opening a database", () => {
     });
   });
 
+  it("refuses bytes past the ceiling before it loads the engine", async () => {
+    // A length alone rather than 64 MiB of bytes: the size is asked first, so
+    // nothing past it may read them, and the loader throwing says it was not
+    // reached either.
+    const bytes = {
+      byteLength: MAX_DATABASE_BYTES + 1,
+    } as unknown as Uint8Array;
+
+    const reading = await openSqlite(bytes, {
+      engine: () => {
+        throw new Error("the engine was loaded after all");
+      },
+    });
+
+    expect(reading).toEqual({ ok: false, failure: "too-large" });
+  });
+
   it("closes a database it is about to refuse", async () => {
     // A file that opens and then fails a pragma is still holding all of itself
     // in WebAssembly memory, and the engine module is imported once and cached,
@@ -206,6 +237,17 @@ describe("opening a database", () => {
 
     const reading = await openSqlite(new Uint8Array([1, 2, 3]), {
       engine: engineThatCannotClose,
+    });
+
+    expect(reading).toEqual({ ok: false, failure: "damaged" });
+  });
+
+  it("answers damaged when the engine throws something that is not an Error", async () => {
+    // Only an Error's message is read for the engine's phrase. Reading
+    // `.message` off a thrown `null` would raise past the catch, and the
+    // closed failure union would become an exception.
+    const reading = await openSqlite(new Uint8Array([1, 2, 3]), {
+      engine: engineThatThrowsNull,
     });
 
     expect(reading).toEqual({ ok: false, failure: "damaged" });

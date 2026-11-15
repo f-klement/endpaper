@@ -443,12 +443,17 @@ class Lexer {
       if (byte >= 0 && SPACE.has(byte)) {
         this.at += 1;
       } else if (byte === 0x25) {
-        while (!this.end() && this.byte() !== 0x0a && this.byte() !== 0x0d) {
-          this.at += 1;
-        }
+        this.comment();
       } else {
         return;
       }
+    }
+  }
+
+  /** A comment from its `%` to the line break that ends it, which stays. */
+  private comment(): void {
+    while (!this.end() && this.byte() !== 0x0a && this.byte() !== 0x0d) {
+      this.at += 1;
     }
   }
 
@@ -484,10 +489,20 @@ class Lexer {
     if (this.end()) throw new PdfError("damaged", "object ended early");
 
     if (this.take("<<")) return this.dictionary(depth);
+    if (this.take("[")) return this.array(depth);
+    return this.scalar();
+  }
+
+  /**
+   * A value that holds no other value, by its first byte.
+   *
+   * `object` tries `<<` first, so a `<` here is a hex string and never half of
+   * a dictionary's opening.
+   */
+  private scalar(): PdfValue {
     if (this.byte() === 0x3c) return this.hexString();
     if (this.byte() === 0x28) return this.literalString();
     if (this.byte() === 0x2f) return { kind: "name", value: this.name() };
-    if (this.take("[")) return this.array(depth);
     return this.atom();
   }
 
@@ -502,15 +517,24 @@ class Lexer {
     if (token === "false") return false;
     if (token === "null") return null;
 
-    if (/^\d+$/.test(token)) {
-      const reference = this.reference(Number(token));
-      if (reference !== null) return reference;
-    }
-    if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(token)) return Number(token);
+    const value = this.numberOrReference(token);
+    if (value !== null) return value;
 
     // A keyword where a value belongs, such as `endobj` in an empty entry.
     this.at = start;
     throw new PdfError("damaged", `not a value: ${token}`);
+  }
+
+  /**
+   * The token as a number, or as the reference it opens when it is a whole
+   * number followed by `G R`, or `null` for neither.
+   */
+  private numberOrReference(token: string): PdfRef | number | null {
+    if (/^\d+$/.test(token)) {
+      const reference = this.reference(Number(token));
+      if (reference !== null) return reference;
+    }
+    return /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(token) ? Number(token) : null;
   }
 
   /**
@@ -589,20 +613,7 @@ class Lexer {
     }
     if (this.end()) throw new PdfError("damaged", "hex string ended early");
     this.at += 1;
-    // An odd digit count is padded with a zero, which the format says outright.
-    const digits = hex.length % 2 === 0 ? hex : `${hex}0`;
-    const out = new Uint8Array(digits.length / 2);
-    for (let index = 0; index < out.length; index += 1) {
-      const pair = digits.slice(index * 2, index * 2 + 2);
-      const value = parseInt(pair, 16);
-      // A non hex digit inside makes the whole string unreadable rather than
-      // silently zero: `NaN` written into a `Uint8Array` is 0, which is a byte.
-      if (Number.isNaN(value)) {
-        throw new PdfError("damaged", "hex string holds a non hex digit");
-      }
-      out[index] = value;
-    }
-    return { kind: "string", value: out };
+    return { kind: "string", value: hexBytes(hex) };
   }
 
   private literalString(): PdfString {
@@ -615,18 +626,15 @@ class Lexer {
       }
       const byte = this.byte();
       this.at += 1;
-      if (byte === 0x5c) {
-        const escaped = this.escape();
-        if (escaped !== null) out.push(escaped);
-      } else if (byte === 0x28) {
-        depth += 1;
-        out.push(byte);
-      } else if (byte === 0x29) {
-        depth -= 1;
-        if (depth === 0) return { kind: "string", value: new Uint8Array(out) };
+      // `escape` consumes the byte after a backslash, so an escaped
+      // parenthesis never reaches `nesting` and moves no depth.
+      depth += nesting(byte);
+      if (depth === 0) return { kind: "string", value: new Uint8Array(out) };
+      if (byte !== 0x5c) {
         out.push(byte);
       } else {
-        out.push(byte);
+        const escaped = this.escape();
+        if (escaped !== null) out.push(escaped);
       }
     }
     throw new PdfError("damaged", "string ended early");
@@ -641,18 +649,22 @@ class Lexer {
     this.at += 1;
     const simple = SIMPLE_ESCAPES.get(escaped);
     if (simple !== undefined) return simple;
-    if (escaped >= 0x30 && escaped <= 0x37) return this.octal(escaped);
-    if (escaped === 0x0d) {
-      // A backslash before a line break is a continuation and adds nothing.
-      if (this.byte() === 0x0a) this.at += 1;
-      return null;
-    }
-    // Same, for the other line ending.
-    if (escaped === 0x0a) return null;
+    if (isOctalDigit(escaped)) return this.octal(escaped);
+    if (escaped === 0x0d || escaped === 0x0a) return this.continuation(escaped);
     if (escaped < 0) {
       throw new PdfError("damaged", "string ended inside an escape");
     }
     return escaped;
+  }
+
+  /**
+   * A backslash before a line break, whose break is already consumed: a
+   * continuation, which stands for nothing. A CR LF pair is one break, so its
+   * LF is consumed too rather than read as a byte of the string.
+   */
+  private continuation(ending: number): null {
+    if (ending === 0x0d && this.byte() === 0x0a) this.at += 1;
+    return null;
   }
 
   /**
@@ -663,12 +675,45 @@ class Lexer {
     let code = first - 0x30;
     for (let digit = 0; digit < 2; digit += 1) {
       const next = this.byte();
-      if (next < 0x30 || next > 0x37) break;
+      if (!isOctalDigit(next)) break;
       code = code * 8 + (next - 0x30);
       this.at += 1;
     }
     return code & 0xff;
   }
+}
+
+/** Whether a byte is `0` to `7`; `-1`, the end of the buffer, is not. */
+function isOctalDigit(byte: number): boolean {
+  return byte >= 0x30 && byte <= 0x37;
+}
+
+/**
+ * How one byte of a literal string moves its parenthesis depth: the format
+ * lets a string hold balanced parentheses unescaped.
+ */
+function nesting(byte: number): number {
+  if (byte === 0x28) return 1;
+  return byte === 0x29 ? -1 : 0;
+}
+
+/**
+ * A hex string's digits, whitespace already dropped, as the bytes they spell.
+ * An odd digit count is padded with a zero, which the format says outright.
+ */
+function hexBytes(hex: string): Uint8Array {
+  // Checked whole, before `parseInt` sees a pair: it reads `6Z` as 6 and `-1`
+  // as -1, which a `Uint8Array` stores as 255, so a per pair `NaN` test lets a
+  // damaged string through as wrong text.
+  if (!/^[0-9A-Fa-f]*$/.test(hex)) {
+    throw new PdfError("damaged", "hex string holds a non hex digit");
+  }
+  const digits = hex.length % 2 === 0 ? hex : `${hex}0`;
+  const out = new Uint8Array(digits.length / 2);
+  for (let index = 0; index < out.length; index += 1) {
+    out[index] = parseInt(digits.slice(index * 2, index * 2 + 2), 16);
+  }
+  return out;
 }
 
 /**
@@ -1227,13 +1272,16 @@ function fieldWidths(
 ): readonly [number, number, number] | null {
   const widths = dictionary.entries.get("W");
   if (!isArray(widths)) return null;
-  const w = widths.items.map((item) =>
-    typeof item === "number" && Number.isInteger(item) && item >= 0 && item <= 8
-      ? item
-      : -1,
-  );
+  const w = widths.items.map((item) => (isFieldWidth(item) ? item : -1));
   if (w.length !== 3 || w.some((width) => width < 0)) return null;
   return [w[0]!, w[1]!, w[2]!];
+}
+
+/** Whether one `/W` member is a width a row can have: a whole 0 to 8. */
+function isFieldWidth(item: PdfValue): item is number {
+  return (
+    typeof item === "number" && Number.isInteger(item) && item >= 0 && item <= 8
+  );
 }
 
 /**
@@ -1458,7 +1506,19 @@ class Document {
     // crafted file costs to read is not.
     if (record === 0) return dictionary;
 
-    const index = indexRuns(dictionary);
+    this.streamRuns(data, w, indexRuns(dictionary));
+    return dictionary;
+  }
+
+  /**
+   * Every `/Index` run of a cross reference stream in turn, each starting
+   * where the one before it ended, until a run that is not a whole number.
+   */
+  private streamRuns(
+    data: Uint8Array,
+    w: readonly [number, number, number],
+    index: readonly number[],
+  ): void {
     let cursor = 0;
     for (let pair = 0; pair + 1 < index.length; pair += 2) {
       const first = index[pair]!;
@@ -1466,7 +1526,6 @@ class Document {
       if (!streamRunIsReal(first, count)) break;
       cursor = this.streamRun(data, w, first, count, cursor);
     }
-    return dictionary;
   }
 
   /**

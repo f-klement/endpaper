@@ -49,6 +49,11 @@ export function isFiltered(row: CatalogueSourceOut): boolean {
  * placed below the `asked_first` test. See this module's own docstring.
  */
 export function statusOf(row: CatalogueSourceOut): MessageKey {
+  return keyStatus(row) ?? reachStatus(row) ?? positionStatus(row);
+}
+
+/** The key arm, first because it is the likeliest answer to "why not". */
+function keyStatus(row: CatalogueSourceOut): MessageKey | null {
   // **Two causes, not one.** A source that needs a key and has none wants a
   // key; one that has the key and still is not ready is switched off in its own
   // card below, and telling that library to add a key it already has is the
@@ -58,6 +63,11 @@ export function statusOf(row: CatalogueSourceOut): MessageKey {
       ? "providers.status.switchedOffBelow"
       : "providers.status.needsKey";
   }
+  return null;
+}
+
+/** The two "this question, not that one" arms. */
+function reachStatus(row: CatalogueSourceOut): MessageKey | null {
   if (!row.answers_lookup) return "providers.status.searchOnly";
   // **The mirror of the line above, and it was missing until the Czech
   // catalogue became the first source to need it.** `answers_search` has been
@@ -75,6 +85,11 @@ export function statusOf(row: CatalogueSourceOut): MessageKey {
       ? "providers.status.lookupOnlyRegional"
       : "providers.status.lookupOnly";
   }
+  return null;
+}
+
+/** Where the row sits in the order, once it answers both questions. */
+function positionStatus(row: CatalogueSourceOut): MessageKey {
   // **Before the regional line and not after it**, because the leading tier is
   // asked about every ISBN whatever a source's remit: `metadata.lookup` filters
   // only the sources asked one at a time. A source a household has promoted into

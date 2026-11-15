@@ -46,16 +46,7 @@ export default function SelectionBar({
   onRun,
   onDone,
 }: SelectionBarProps) {
-  const { t, locale } = useTranslation();
-  // Grouped and then flattened, which is the order the endpoint already sends
-  // (category, then name) with one difference that matters here: inside a
-  // category the sort is on the name being **printed**. On the stored names,
-  // Anthology, Comics and Fiction would list as Anthologie, Comics,
-  // Belletristik: alphabetical in a language the reader is not looking at.
-  const byCategory = groupTagsByCategory(tags, locale);
-  const orderedTags = TAG_CATEGORY_ORDER.flatMap(
-    (category) => byCategory[category],
-  );
+  const { t } = useTranslation();
   // The extra verbs are behind a disclosure. Marking a shelf is the common
   // case and deserves the primary buttons; deleting forty books is not, and
   // should not sit one mis-tap away from them.
@@ -134,112 +125,13 @@ export default function SelectionBar({
         </div>
 
         {showMore && (
-          <div className="space-y-2 border-t border-paper-100 pt-2 dark:border-paper-800">
-            <div className="flex flex-wrap gap-2">
-              <select
-                aria-label={t("bulk.setStatus")}
-                defaultValue=""
-                disabled={cannotAct}
-                onChange={(event) => {
-                  if (event.target.value) {
-                    onRun(BulkAction.set_status, event.target.value);
-                    event.target.value = "";
-                  }
-                }}
-                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
-              >
-                <option value="">{t("bulk.setStatus")}</option>
-                {Object.values(ReadStatus).map((value) => (
-                  <option key={value} value={value}>
-                    {t(`status.${value}`)}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                aria-label={t("bulk.addTag")}
-                defaultValue=""
-                disabled={cannotAct}
-                onChange={(event) => {
-                  if (event.target.value) {
-                    onRun(BulkAction.add_tag, Number(event.target.value));
-                    event.target.value = "";
-                  }
-                }}
-                className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
-              >
-                <option value="">{t("bulk.addTag")}</option>
-                {orderedTags.map((tag) => (
-                  <option key={tag.id} value={tag.id}>
-                    {tagName(tag, locale)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Only once a library has made one. An empty picker offering
-                only "take these out of every collection" is a control for a
-                state that cannot exist yet. */}
-            {collections.length > 0 && (
-              <select
-                aria-label={t("bulk.setCollection")}
-                defaultValue=""
-                disabled={cannotAct}
-                onChange={(event) => {
-                  if (event.target.value) {
-                    // The empty string is the placeholder, so clearing needs a
-                    // value of its own: the API reads null as "unfile these".
-                    onRun(
-                      BulkAction.set_collection,
-                      event.target.value === "none"
-                        ? ""
-                        : Number(event.target.value),
-                    );
-                    event.target.value = "";
-                  }
-                }}
-                className="w-full px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
-              >
-                <option value="">{t("bulk.setCollection")}</option>
-                {collections.map((collection) => (
-                  <option key={collection.id} value={collection.id}>
-                    {collection.name}
-                  </option>
-                ))}
-                <option value="none">{t("bulk.clearCollection")}</option>
-              </select>
-            )}
-
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={cannotAct}
-                onClick={() => {
-                  const place = prompt(t("bulk.locationPrompt"));
-                  // null is cancel; an empty string is a deliberate clear, and
-                  // the two must not be conflated.
-                  if (place !== null) onRun(BulkAction.set_location, place);
-                }}
-                className="flex-1 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-40 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-              >
-                {t("bulk.setLocation")}
-              </button>
-              <button
-                type="button"
-                disabled={cannotAct}
-                onClick={() => {
-                  if (
-                    confirm(t("bulk.deleteConfirm", { count: selectedCount }))
-                  ) {
-                    onRun(BulkAction.delete);
-                  }
-                }}
-                className="flex-1 py-1.5 rounded-lg border border-danger-300 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 dark:border-danger-700 dark:text-danger-300"
-              >
-                {t("bulk.delete")}
-              </button>
-            </div>
-          </div>
+          <MoreActions
+            selectedCount={selectedCount}
+            cannotAct={cannotAct}
+            tags={tags}
+            collections={collections}
+            onRun={onRun}
+          />
         )}
 
         {error != null && (
@@ -265,5 +157,160 @@ export default function SelectionBar({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The verbs behind the disclosure: status, tag, collection, location, delete.
+ *
+ * Mounted only while the disclosure is open, so the tag order below is worked
+ * out only then.
+ */
+function MoreActions({
+  selectedCount,
+  cannotAct,
+  tags,
+  collections,
+  onRun,
+}: {
+  selectedCount: number;
+  cannotAct: boolean;
+  tags: TagOut[];
+  collections: CollectionOut[];
+  onRun: SelectionBarProps["onRun"];
+}) {
+  const { t, locale } = useTranslation();
+  // Grouped and then flattened, which is the order the endpoint already sends
+  // (category, then name) with one difference that matters here: inside a
+  // category the sort is on the name being **printed**. On the stored names,
+  // Anthology, Comics and Fiction would list as Anthologie, Comics,
+  // Belletristik: alphabetical in a language the reader is not looking at.
+  const byCategory = groupTagsByCategory(tags, locale);
+  const orderedTags = TAG_CATEGORY_ORDER.flatMap(
+    (category) => byCategory[category],
+  );
+
+  return (
+    <div className="space-y-2 border-t border-paper-100 pt-2 dark:border-paper-800">
+      <div className="flex flex-wrap gap-2">
+        <select
+          aria-label={t("bulk.setStatus")}
+          defaultValue=""
+          disabled={cannotAct}
+          onChange={(event) => {
+            if (event.target.value) {
+              onRun(BulkAction.set_status, event.target.value);
+              event.target.value = "";
+            }
+          }}
+          className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
+        >
+          <option value="">{t("bulk.setStatus")}</option>
+          {Object.values(ReadStatus).map((value) => (
+            <option key={value} value={value}>
+              {t(`status.${value}`)}
+            </option>
+          ))}
+        </select>
+
+        <select
+          aria-label={t("bulk.addTag")}
+          defaultValue=""
+          disabled={cannotAct}
+          onChange={(event) => {
+            if (event.target.value) {
+              onRun(BulkAction.add_tag, Number(event.target.value));
+              event.target.value = "";
+            }
+          }}
+          className="flex-1 min-w-32 px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
+        >
+          <option value="">{t("bulk.addTag")}</option>
+          {orderedTags.map((tag) => (
+            <option key={tag.id} value={tag.id}>
+              {tagName(tag, locale)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <CollectionSelect
+        cannotAct={cannotAct}
+        collections={collections}
+        onRun={onRun}
+      />
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={cannotAct}
+          onClick={() => {
+            const place = prompt(t("bulk.locationPrompt"));
+            // null is cancel; an empty string is a deliberate clear, and
+            // the two must not be conflated.
+            if (place !== null) onRun(BulkAction.set_location, place);
+          }}
+          className="flex-1 py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-40 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
+        >
+          {t("bulk.setLocation")}
+        </button>
+        <button
+          type="button"
+          disabled={cannotAct}
+          onClick={() => {
+            if (confirm(t("bulk.deleteConfirm", { count: selectedCount }))) {
+              onRun(BulkAction.delete);
+            }
+          }}
+          className="flex-1 py-1.5 rounded-lg border border-danger-300 text-xs font-medium text-danger-600 hover:bg-danger-100 disabled:opacity-40 dark:border-danger-700 dark:text-danger-300"
+        >
+          {t("bulk.delete")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Moves the selection into one collection, or out of every one. */
+function CollectionSelect({
+  cannotAct,
+  collections,
+  onRun,
+}: {
+  cannotAct: boolean;
+  collections: CollectionOut[];
+  onRun: SelectionBarProps["onRun"];
+}) {
+  const { t } = useTranslation();
+  // Only once a library has made one. An empty picker offering only "take
+  // these out of every collection" is a control for a state that cannot exist
+  // yet.
+  if (collections.length === 0) return null;
+  return (
+    <select
+      aria-label={t("bulk.setCollection")}
+      defaultValue=""
+      disabled={cannotAct}
+      onChange={(event) => {
+        if (event.target.value) {
+          // The empty string is the placeholder, so clearing needs a
+          // value of its own: the API reads null as "unfile these".
+          onRun(
+            BulkAction.set_collection,
+            event.target.value === "none" ? "" : Number(event.target.value),
+          );
+          event.target.value = "";
+        }
+      }}
+      className="w-full px-2 py-1.5 rounded-lg border border-paper-200 text-xs bg-paper-0 disabled:opacity-40 dark:border-paper-700 dark:bg-paper-900"
+    >
+      <option value="">{t("bulk.setCollection")}</option>
+      {collections.map((collection) => (
+        <option key={collection.id} value={collection.id}>
+          {collection.name}
+        </option>
+      ))}
+      <option value="none">{t("bulk.clearCollection")}</option>
+    </select>
   );
 }

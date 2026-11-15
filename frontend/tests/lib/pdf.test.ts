@@ -259,6 +259,12 @@ describe("the text a string carries", () => {
     expect(verdict(reading)).toBe("read: Think Bayes (2nd)");
   });
 
+  it("reads a string that holds balanced parentheses unescaped", async () => {
+    const reading = await read(withInfo("/Title (Think Bayes (2nd))"));
+
+    expect(verdict(reading)).toBe("read: Think Bayes (2nd)");
+  });
+
   it("reads an octal escape", async () => {
     const reading = await read(withInfo("/Title (Caf\\351)"));
 
@@ -561,6 +567,96 @@ describe("an array longer than anything real", () => {
   });
 });
 
+/**
+ * A title held by reference in object 3, packed alone in an object stream,
+ * so `body` is the last thing the stream's lexer sees before its end. A
+ * member that throws costs only itself, so a refused title reads as null.
+ */
+async function titledBy(body: string) {
+  return read(
+    await streamPdf(
+      [
+        object(1, "<< /Title 3 0 R >>"),
+        object(2, "<< /Type /Catalog >>"),
+        object(3, body),
+      ],
+      "/Info 1 0 R /Root 2 0 R",
+      { packed: [[3]] },
+    ),
+  );
+}
+
+describe("a value the lexer has to read whole", () => {
+  it("reads true and false where a value belongs", async () => {
+    // A plain object, where a value the lexer cannot read fails the file.
+    const reading = await read(
+      withInfo("/Title (Emma) /Trapped true /Marked false"),
+    );
+
+    expect(verdict(reading)).toBe("read: Emma");
+  });
+
+  it("ends a comment at a lone CR", async () => {
+    // Classic Mac line endings: a comment run on to the next LF would take the
+    // title with it.
+    const reading = await read(withInfo("% written on a Mac\r/Title (Emma)"));
+
+    expect(verdict(reading)).toBe("read: Emma");
+  });
+
+  it("pads a hex string's odd last digit with a zero", async () => {
+    // `5` alone is 0x50, a P; dropping it would leave a trailing space.
+    const reading = await read(withInfo("/Title <456D6D61205>"));
+
+    expect(verdict(reading)).toBe("read: Emma P");
+  });
+
+  it("refuses a hex string that holds a non hex digit", async () => {
+    // Read as zero, the pair would come out of `clean` as a space.
+    const reading = await read(withInfo("/Title <456DZZ61>"));
+
+    expect(verdict(reading)).toBe("damaged");
+  });
+
+  it.each([
+    ["a non hex second digit", "<456D6Z61>"],
+    ["a sign opening a pair", "<456D-161>"],
+  ])("refuses a hex string whose pair holds %s", async (_, body) => {
+    // `parseInt` stops at the first byte it cannot read, so `6Z` is 6 and
+    // `-1` is -1, which a `Uint8Array` stores as 255.
+    const reading = await read(withInfo(`/Title ${body}`));
+
+    expect(verdict(reading)).toBe("damaged");
+  });
+
+  it("reads a hex string with whitespace between its digits", async () => {
+    // The format allows whitespace anywhere among the digits.
+    const reading = await read(withInfo("/Title <45 6D\n6D\t6\r1\f>"));
+
+    expect(verdict(reading)).toBe("read: Emma");
+  });
+
+  it("reads a title held by reference, so the refusals below are the lexer's", async () => {
+    expect(verdict(await titledBy("<456D6D61>"))).toBe("read: Emma");
+  });
+
+  it.each([
+    ["a hex string", "<456D6D61"],
+    ["a literal string", "(Emma"],
+  ])("refuses %s cut off by the end of its stream", async (_, body) => {
+    expect(verdict(await titledBy(body))).toBe("read: null");
+  });
+
+  it.each([
+    ["a hex string", `<${"45".repeat(4 * 1024 * 1024 + 1)}>`],
+    ["a literal string", `(${"E".repeat(8 * 1024 * 1024 + 2)})`],
+  ])("refuses %s longer than anything real", async (_, body) => {
+    // Inside an object stream, because a plain object is read through a 64 kB
+    // window that ends a string long before the 8 MB bound could.
+    expect(verdict(await titledBy(body))).toBe("read: null");
+  });
+});
+
 describe("a cross reference this reader has to follow", () => {
   const objects = [
     object(1, "<< /Title (Learning Spark) /Author (Jules S. Damji) >>"),
@@ -592,6 +688,32 @@ describe("a cross reference this reader has to follow", () => {
     expect(
       verdict(await read(await streamPdf(objects, trailer, { packed: [[1]] }))),
     ).toBe("read: Learning Spark");
+  });
+
+  it.each([
+    ["that is not where the table says", "3 0 obj", "3 0 jbo"],
+    [
+      "under a filter this reader does not undo",
+      /(\/ObjStm[^>]*)\/FlateDecode/,
+      "$1/FlateDecodX",
+    ],
+    ["whose /N is not a number", "/N 1 ", "/N() "],
+  ])("reads no member out of an object stream %s", async (_, from, to) => {
+    // Each rewrite keeps every byte offset, so the cross reference still
+    // points at the stream and only the stream itself is unreadable.
+    const whole = await streamPdf(objects, trailer, { packed: [[1]] });
+
+    expect(verdict(await read(rewritten(whole, from, to)))).toBe("read: null");
+  });
+
+  it("reads no member out of an object stream whose head is not a dictionary", async () => {
+    // The head is blanked to a number of its own length, so `stream` still
+    // follows it and the stream's bytes are found; only the head is wrong.
+    const whole = await streamPdf(objects, trailer, { packed: [[1]] });
+    const head = /<< \/Type \/ObjStm[^>]*>>/.exec(text(whole))![0];
+    const bytes = rewritten(whole, head, "1".padEnd(head.length));
+
+    expect(verdict(await read(bytes))).toBe("read: null");
   });
 
   it("follows a hybrid file's /XRefStm before its /Prev", async () => {
@@ -885,6 +1007,20 @@ describe("a cross reference stream's own layout", () => {
       await plain(),
       "/W [1 4 2]",
       "/Index [0 2.5] /W [1 4 2]",
+    );
+
+    expect(verdict(await read(bytes))).toBe("not-a-pdf");
+  });
+
+  it("reads no run after one that is not a whole number", async () => {
+    // The run after it covers every row, so stepping over the bad run rather
+    // than stopping at it would find the title.
+    const whole = await plain();
+    const size = Number(/\/Size (\d+)/.exec(text(whole))![1]);
+    const bytes = rewritten(
+      whole,
+      "/W [1 4 2]",
+      `/Index [0 2.5 0 ${size}] /W [1 4 2]`,
     );
 
     expect(verdict(await read(bytes))).toBe("not-a-pdf");

@@ -45,6 +45,7 @@ const RECORD = {
   classifications: [
     { scheme: "ddc", number: "813.54", label: "American fiction" },
   ],
+  record_origin: "loc",
 };
 
 beforeEach(() => {
@@ -70,6 +71,22 @@ describe("PublicBookPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Dune" }),
     ).toBeInTheDocument();
+  });
+
+  it("draws the subtitle, the credit, the tags and the description", async () => {
+    api.on(/\/api\/public\/books\/12/, {
+      body: {
+        ...RECORD,
+        subtitle: "Book One",
+        tags: [{ id: 3, name: "Space opera", category: "custom", key: null }],
+      },
+    });
+    render();
+
+    expect(await screen.findByText("Book One")).toBeInTheDocument();
+    expect(screen.getByText("by Frank Herbert")).toBeInTheDocument();
+    expect(screen.getByText("Space opera")).toBeInTheDocument();
+    expect(screen.getByText("A desert planet.")).toBeInTheDocument();
   });
 
   it("reads the bibliographic facts as pairs", async () => {
@@ -161,6 +178,7 @@ describe("publicFacts", () => {
       ["Pages", "412"],
       ["Format", "Paperback"],
       ["Series", "Dune 1"],
+      ["Record source", "Library of Congress"],
     ]);
   });
 
@@ -174,14 +192,28 @@ describe("publicFacts", () => {
         page_count: undefined,
         format: null,
         series_name: null,
+        record_origin: null,
       }),
-    ).toEqual([]);
+    ).toEqual([["Record source", "Unknown"]]);
+  });
+
+  it("names the origin of a record nobody recorded as unknown, not absent", () => {
+    // Every row older than the column is null; leaving the line out would read
+    // as a record with no source rather than one whose source was never asked.
+    expect(factsOf({ record_origin: null })).toContainEqual([
+      "Record source",
+      "Unknown",
+    ]);
   });
 
   it("leaves out a year of zero, which is no year a book can be stored with", () => {
     const facts = factsOf({ year: 0 });
 
     expect(facts.map(([label]) => label)).not.toContain("Year");
+  });
+
+  it("lists a page count of zero rather than leaving it out", () => {
+    expect(factsOf({ page_count: 0 })).toContainEqual(["Pages", "0"]);
   });
 
   it("names a series without a number when it has none", () => {

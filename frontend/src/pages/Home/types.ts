@@ -141,21 +141,44 @@ export const SORT_OPTIONS: { label: MessageKey; value: BookSort }[] = [
   { label: "sort.series", value: BookSort.series },
 ];
 
+/**
+ * Every field but `sort`, which changes the order and not the set.
+ *
+ * Read off `DEFAULT_FILTERS` rather than written out, so a new filter
+ * counts as narrowing by existing, the way `sanitiseFilters` covers it.
+ */
+const NARROWING_FIELDS = (
+  Object.keys(DEFAULT_FILTERS) as (keyof BookFilters)[]
+).filter((field) => field !== "sort");
+
 /** True when the grid is showing a narrowed view rather than everything. */
 export function hasActiveFilters(filters: BookFilters): boolean {
-  return Boolean(
-    filters.query ||
-    filters.status ||
-    filters.ownership ||
-    filters.series ||
-    filters.author ||
-    filters.location ||
-    filters.format ||
-    filters.lending ||
-    filters.collection !== null ||
-    filters.discuss ||
-    filters.tagIds.length ||
-    filters.headings.length ||
-    filters.ddcDivisions.length,
+  return NARROWING_FIELDS.some((field) =>
+    field === "collection"
+      ? sendsCollection(filters.collection)
+      : narrows(filters[field]),
   );
+}
+
+/**
+ * Whether `toParams` sends this collection: a numeric id, zero included, or
+ * `"unfiled"`. Stored text that is neither is not sent, so it narrows nothing.
+ */
+function sendsCollection(collection: BookFilters["collection"]): boolean {
+  return typeof collection === "number" || collection === "unfiled";
+}
+
+/**
+ * Whether one field's value narrows the view: a text field when it holds
+ * something, a list when it holds anything.
+ *
+ * `collection` is asked by its caller instead, because its id narrows even at
+ * zero. **A number elsewhere does not narrow**: `sanitiseFilters` lets one into
+ * any field whose default is null, and `toParams` sends those fields only when
+ * truthy, so counting a stored `series: 0` here would call an unfiltered
+ * request filtered.
+ */
+function narrows(value: BookFilters[keyof BookFilters]): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return Boolean(value);
 }

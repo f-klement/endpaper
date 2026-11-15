@@ -66,19 +66,7 @@ export default function AddressField({
   const unchanged = trimmed === (member.email ?? "");
 
   if (!member.editable) {
-    return (
-      <div>
-        <p className="text-sm font-medium text-paper-900 dark:text-paper-100">
-          {label}
-        </p>
-        <p className="text-sm text-paper-700 dark:text-paper-300">
-          {member.email ?? t("account.email.none")}
-        </p>
-        <p className="text-xs text-paper-600 dark:text-paper-400">
-          {t("account.email.fromDirectory")}
-        </p>
-      </div>
-    );
+    return <ReadOnlyAddress label={label} email={member.email} />;
   }
 
   return (
@@ -108,16 +96,60 @@ export default function AddressField({
       <Button type="submit" disabled={disabled || unchanged}>
         {t("common.save")}
       </Button>
-      {/* **Gated on the draft as well as on the saved value**, or a member
-          giving their first address reads "None set." underneath what they
-          have just typed and not yet saved. */}
-      {member.email == null && trimmed === "" && (
-        <p className="w-full text-xs text-paper-600 dark:text-paper-400">
-          {member.from_directory
-            ? t("account.email.noneFromDirectory")
-            : t("account.email.none")}
-        </p>
-      )}
+      <NoAddressNote member={member} trimmed={trimmed} />
     </form>
+  );
+}
+
+/** An address the directory owns, drawn as text with where to change it. */
+function ReadOnlyAddress({
+  label,
+  email,
+}: {
+  label: string;
+  email: string | null | undefined;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div>
+      <p className="text-sm font-medium text-paper-900 dark:text-paper-100">
+        {label}
+      </p>
+      <p className="text-sm text-paper-700 dark:text-paper-300">
+        {email ?? t("account.email.none")}
+      </p>
+      <p className="text-xs text-paper-600 dark:text-paper-400">
+        {t("account.email.fromDirectory")}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The sentence under an editable field with no address in it.
+ *
+ * **Gated on the draft as well as on the saved value**, or a member giving
+ * their first address reads "None set." underneath what they have just typed
+ * and not yet saved.
+ */
+function NoAddressNote({
+  member,
+  trimmed,
+}: {
+  member: MemberEmailOut;
+  /** The draft as it would be saved. */
+  trimmed: string;
+}) {
+  const { t } = useTranslation();
+
+  if (member.email != null || trimmed !== "") return null;
+
+  return (
+    <p className="w-full text-xs text-paper-600 dark:text-paper-400">
+      {member.from_directory
+        ? t("account.email.noneFromDirectory")
+        : t("account.email.none")}
+    </p>
   );
 }

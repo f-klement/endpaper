@@ -127,6 +127,13 @@ book cannot be added twice under its ISBN-10 and ISBN-13 spellings. An ISBN that
 check digit is rejected rather than stored: a misread barcode produces an entry that can
 never be matched against any metadata source.
 
+`record_origin` and `record_modified_here` are the record's provenance: which catalogue, file
+or import it came from, and whether anything here has changed its description since. Two
+columns rather than one, because MARC's `040` keeps the original cataloguing agency apart from
+the modifying one, and a hand corrected national library record is neither purely theirs nor
+purely this library's. Who writes each is on `models.Book`; both are null on a row older than
+them, which every surface shows as unknown. The origin is published, the flag is not.
+
 `ownership` records whether a copy is **physically on the shelf**: `owned`, `not_owned` or
 `unknown`. It is deliberately **not** the same axis as read status. See below.
 

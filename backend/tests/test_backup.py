@@ -623,6 +623,8 @@ class TestRefusingABadArchive:
         assert "not an Endpaper backup" in res.json()["detail"]
 
     def test_a_zip_with_no_manifest(self, client, admin):
+        """Refused as missing its manifest, not as unreadable, which is what
+        the blind arm after the `KeyError` one would say."""
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
             archive.writestr("something.txt", "hello")
@@ -634,6 +636,7 @@ class TestRefusingABadArchive:
             headers=admin["headers"],
         )
         assert res.status_code == 400
+        assert f"has no {backup.MANIFEST_NAME}" in res.json()["detail"]
 
     def test_a_format_from_another_version(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
@@ -663,6 +666,21 @@ class TestRefusingABadArchive:
         )
         assert res.status_code == 400
         assert "no accounts" in res.json()["detail"]
+
+    def test_an_archive_listing_no_tables(self, client, admin, library):
+        """Without the shape check the table reads below raise `TypeError`, a 500."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        del manifest["tables"]
+
+        res = client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", rewrite(data, manifest), "application/zip")},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 400
+        assert "lists no tables" in res.json()["detail"]
 
     def test_a_missing_table(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
@@ -1514,6 +1532,28 @@ class TestADecompressionBomb:
 
         db.expire_all()
         assert db.query(Book).count() == before
+
+    def test_no_entry_is_opened_before_the_bomb_is_refused(self, monkeypatch):
+        """The manifest is an entry too, and opening one is what inflates it.
+
+        The other cases here put the bomb in a cover, so a manifest read moved
+        above the check still ends in the same refusal. `ZipFile.read` goes
+        through `ZipFile.open`, so spying on `open` sees either spelling.
+        """
+        bomb = self._bomb({}, 2 * self._CHUNK)
+        opened: list[str] = []
+        real_open = zipfile.ZipFile.open
+
+        def spy(archive, name, *args, **kwargs):
+            opened.append(name if isinstance(name, str) else name.filename)
+            return real_open(archive, name, *args, **kwargs)
+
+        monkeypatch.setattr(zipfile.ZipFile, "open", spy)
+
+        with pytest.raises(RestoreError):
+            backup.read_manifest(bomb)
+
+        assert opened == []
 
     def test_an_ordinary_backup_is_not_mistaken_for_one(self, client, admin, library):
         data = client.get("/api/backup", headers=admin["headers"]).content
@@ -2407,6 +2447,15 @@ class TestARestoreWritesOnlyAnImage:
             self._restored_with(client, admin, library, {"covers/9.jpg": b"nope"})
 
         assert "9.jpg" in caplog.text
+
+    def test_an_entry_that_is_not_a_cover_is_passed_over_rather_than_declined(
+        self, client, admin, library, covers_dir, caplog
+    ):
+        """The manifest and a stray file are not covers, so no decline names them."""
+        with caplog.at_level("WARNING", logger="endpaper.backup"):
+            self._restored_with(client, admin, library, {"notes.txt": b"hello"})
+
+        assert not [r for r in caplog.records if r.name == "endpaper.backup"]
 
     def test_a_declined_name_cannot_write_its_own_line_into_the_log(
         self, client, admin, library, covers_dir, caplog

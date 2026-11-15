@@ -137,6 +137,18 @@ describe("readCarried", () => {
     expect(readCarried(ME).collectionId).toBeNull();
   });
 
+  it("drops a stored key that names no account when it next writes", () => {
+    localStorage.setItem(
+      "carryOver.collection",
+      JSON.stringify({ "01": 3, x: 3, [SOMEBODY_ELSE]: 3 }),
+    );
+    rememberCarried(ME, { collectionId: 4 });
+    expect(JSON.parse(localStorage.getItem("carryOver.collection")!)).toEqual({
+      [ME]: 4,
+      [SOMEBODY_ELSE]: 3,
+    });
+  });
+
   it("drops a stored tag that is not a row id", () => {
     localStorage.setItem(
       "carryOver.tags",

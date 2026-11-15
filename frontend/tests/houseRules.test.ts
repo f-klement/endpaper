@@ -117,150 +117,6 @@ function sourcesAsImported(): [string, string][] {
   return entries().map(([path, source]) => [`../src/${path}`, source]);
 }
 
-/**
- * Whether a module may call the generated client: a file named exactly
- * `hooks.ts`, in any folder. A name merely ending in it, such as `myhooks.ts`,
- * is not one, and an honest author could reach for that name.
- *
- * **Known evasions, both admitted:** a `hooks.ts` under `components/` or
- * `lib/`, which rule 4 and the layout forbid but this does not; and a new
- * module under `src/api/` re-exporting from `endpoints`, since every `api/`
- * path is skipped, which would make every importer of it a client caller.
- */
-function mayCallTheClient(path: string): boolean {
-  return path.split("/").at(-1) === "hooks.ts";
-}
-
-describe("the generated client stays behind hooks.ts", () => {
-  it("refuses a name that only ends in hooks.ts", () => {
-    // The arm below holds the other half: every `hooks.ts` in the tree that
-    // calls the client is still admitted.
-    expect(mayCallTheClient("pages/Home/myhooks.ts")).toBe(false);
-    expect(mayCallTheClient("pages/Home/hooks.ts")).toBe(true);
-  });
-
-  it("is imported by nothing else", () => {
-    // The single indirection is what stops a regeneration rippling through
-    // every component. Types are a different matter and are imported freely:
-    // `api/generated/model` is a description of the API, not a call to it.
-    const offenders = entries()
-      .filter(([path]) => !path.startsWith("api/"))
-      .filter(([, source]) => source.includes("api/generated/endpoints"))
-      .map(([path]) => path)
-      .filter((path) => !mayCallTheClient(path));
-
-    expect(offenders).toEqual([]);
-  });
-
-  it("reads the source tree at all", () => {
-    // **A floor used to stand here, and a floor is not an arming check.**
-    // Fifty, against a corpus of several hundred, left a narrowing room to
-    // drop every page and clear it anyway. The corpus now comes
-    // from `tests/sourceModules.ts`, which refuses one that is not the tree
-    // and throws rather than answering a short one, so what this arm has
-    // left to say is that the refusal is reached from here.
-    expect(() => entries()).not.toThrow();
-  });
-});
-
-/**
- * One endpoint, one set of options.
- *
- * The rule above is not this rule, and the difference is what let this one
- * break. That one asks whether the generated client is reached from a
- * `hooks.ts`; the flags query was called from five of them, all passing, while
- * three inherited `MAX_RETRIES` for a request the shell had decided not to
- * retry. All five share a query key, so which observer mounted first decided
- * the options for every one of them.
- *
- * Per endpoint rather than a rule about every endpoint, because most have one
- * caller and need no owner. This one is read by the shell, the login page, the
- * scanner and the book page, which is what makes an owner worth a test.
- */
-describe("the feature flags query has one owner", () => {
-  const OWNER = "app/hooks.ts";
-  const GENERATED = "api/generated/endpoints/settings/settings";
-
-  /**
-   * Every way the generated client exposes this endpoint, less the one that is
-   * not a configuration.
-   *
-   * **Matching one name is what a first draft of this did, and two evasions
-   * walked past it.** Orval emits six identifiers per operation, and
-   * `useQuery({...getGetFeatureFlagsQueryOptions(), retry: 5})` reintroduces
-   * the exact defect this rule exists for, in a `hooks.ts`, while naming
-   * nothing the rule was watching. So the match is the operation rather than
-   * the hook: every one of the six carries `etFeatureFlags`.
-   *
-   * **The query key is struck out first, because invalidating is not
-   * configuring.** `pages/SettingsPage/hooks.ts` invalidates by it after a
-   * settings write, which is a caller that has to know the key and must not
-   * own the options. Struck out by text rather than allowed by path, so the
-   * exemption belongs to the identifier and not to a file.
-   *
-   * **Three residuals, stated rather than coded around**, all one root: this
-   * matches text over a whole file rather than code. `setQueryDefaults` keyed
-   * off the query key alone would configure the query and name nothing this
-   * matches. A hand rolled `useQuery` on `/api/settings/features` is a second
-   * reader of the same endpoint and is invisible here. And a comment naming
-   * the owner by identifier is an offender, which is the opposite of what this
-   * repository asks of a cross reference: measured, so point at
-   * `app/hooks.ts` by file rather than by hook name.
-   *
-   * Matching the path as well was measured and refused: it turns the clean
-   * tree red at `pages/ScanPage/hooks.ts`, which names the path in a comment.
-   * Closing any of the three properly means matching code rather than text.
-   */
-  function configures(source: string): boolean {
-    return /[Gg]etFeatureFlags/.test(
-      source.split("getGetFeatureFlagsQueryKey").join(""),
-    );
-  }
-
-  it("is configured nowhere but there", () => {
-    const offenders = entries()
-      // The generated module, which declares the operation rather than calling
-      // it. `api/generated/` and not `api/`: `api/mutator.ts` and
-      // `api/query-client.ts` are hand written, and excluding them by accident
-      // is a second evasion that passed.
-      .filter(([path]) => !path.startsWith("api/generated/"))
-      .filter(([path]) => path !== OWNER)
-      .filter(([, source]) => configures(source))
-      .map(([path]) => path);
-
-    expect(offenders).toEqual([]);
-  });
-
-  it("is configured there, so the rule above is not vacuous", () => {
-    // **Through the same predicate the rule is spelled with**, which is the
-    // only thing that catches the way this rule dies: a regenerated client
-    // names the operation something else, `configures` then matches nothing in
-    // the tree, and "no offenders" reads exactly like a rule being kept.
-    //
-    // Asserting the import path instead does not catch it, and that was
-    // measured rather than reasoned: the owner can keep importing this module
-    // while nothing in it matches any more.
-    const owner = entries().find(([path]) => path === OWNER);
-    expect(owner && configures(owner[1])).toBe(true);
-    expect(owner?.[1]).toContain(`from "../${GENERATED}"`);
-  });
-
-  it("leaves the caller that invalidates by key alone", () => {
-    // The boundary the strike-out draws, asserted from both sides so it cannot
-    // be satisfied by refusing everything or by allowing it.
-    expect(configures('import { getGetFeatureFlagsQueryKey } from "x";')).toBe(
-      false,
-    );
-    expect(configures("useGetFeatureFlags({ query: { retry: 5 } })")).toBe(
-      true,
-    );
-    expect(
-      configures("useQuery({ ...getGetFeatureFlagsQueryOptions(), retry: 5 })"),
-    ).toBe(true);
-    expect(configures("getFeatureFlags()")).toBe(true);
-  });
-});
-
 /** The generated model this tree is given for the public flags endpoint. */
 const FLAGS_MODEL = "api/generated/model/featureFlagsOut.ts";
 
@@ -272,8 +128,8 @@ const REACHES_THE_FLAGS = ["useFeatureFlagsState", "FeatureFlagsOut"];
  *
  * **Read off the parse rather than the text**, so a field named only in a
  * comment is not a reader. That is the whole difference between this and the
- * rule above it, which says so in its own docstring and pays for it in three
- * residuals.
+ * house rule that keeps the flags query in `app/hooks.ts`, which matches text
+ * and pays for it in three residuals.
  *
  * **Deliberately one flat set rather than member accesses alone.** A reader
  * writes `flags?.library_mode`, `const { library_mode } = flags`,
@@ -417,8 +273,9 @@ describe("every feature flag has a reader", () => {
 
   it("does not take a flag named in a comment for a reader", () => {
     // The claim `namesIn` is written on, asserted rather than trusted: this is
-    // the whole difference between this rule and the one above it, and it
-    // holds only for as long as the names come off the parse.
+    // the whole difference between this rule and the house rule keeping the
+    // flags query in `app/hooks.ts`, and it holds only for as long as the names
+    // come off the parse.
     const mentions: [string, string][] = [
       ["app/hooks.ts", "useFeatureFlagsState(); // library_mode"],
       ["app/hooks.ts", "useFeatureFlagsState(); /* library_mode */"],
@@ -453,103 +310,6 @@ describe("every feature flag has a reader", () => {
     expect(unreadAmong(["google_books_enabled"], settings)).toEqual([
       "google_books_enabled",
     ]);
-  });
-});
-
-describe("nothing hand-written lives under the assets directory", () => {
-  // The invariant behind the backend's cache policy, which gives everything in
-  // `assets/` a year with `immutable` and everything else `no-cache`. That is
-  // safe only because Vite emits `assets/` and every name in it carries a
-  // content hash. Vite also copies `public/` into the build verbatim, so a file
-  // at `public/assets/anything` would land there unhashed and be pinned in
-  // every reader's browser for a year, with no way to bust it short of a
-  // rename: the exact failure the header exists to prevent, inverted.
-  //
-  // Asserted rather than commented, because the rule is about a directory
-  // nobody has a reason to create and would therefore be created by somebody
-  // who never read the comment. Backend side: `main.cache_control_for`.
-  // Lazy and untyped on purpose: only the keys are wanted, and an eager raw
-  // glob would inline every icon in `public/` into this test file as a string.
-  const PUBLIC = import.meta.glob("../public/**/*");
-
-  it("has no public/assets", () => {
-    const offenders = Object.keys(PUBLIC).filter((path) =>
-      path.startsWith("../public/assets/"),
-    );
-    expect(offenders).toEqual([]);
-  });
-
-  it("reads public/ at all", () => {
-    // A glob that matched nothing would make the test above pass for ever.
-    expect(Object.keys(PUBLIC).length).toBeGreaterThan(0);
-  });
-});
-
-describe("paper-400 and paper-500 are not text in light mode", () => {
-  it("appears nowhere in the source", () => {
-    // Measured against the card they sit on: 2.35:1 and 3.83:1, where AA wants
-    // 4.5. Both pass in dark, on a dark card, which is why nobody noticed: a
-    // light surface admits fewer legible grey tiers than a dark one, and the
-    // app was treating the ramp as symmetric. Muted text is `paper-600` in
-    // light and `paper-400` in dark.
-    //
-    // Retiring the two as text is also what lets three upstream palettes ship
-    // verbatim later: as decoration the step has to clear 3.0, not 4.5.
-    //
-    // `disabled:` is the exemption, and the only one. WCAG 1.4.3 does not apply
-    // to an inactive control, and a disabled field that reads as strongly as a
-    // live one is worse than a faint one.
-    //
-    // `index.css` is not covered, and no longer because it cannot be: the glob
-    // above is TypeScript, while `tests/theme/palettes.test.ts` reads the
-    // stylesheets as text and could do the same here. It holds exactly one of
-    // these tokens, on `.field:disabled`, which is the exemption, so a second
-    // glob would buy an assertion about a line that is already allowed.
-    const offenders = entries().flatMap(([path, source]) =>
-      [...source.matchAll(/[\w:./[\]-]*text-paper-[45]00/g)]
-        .map((match) => match[0])
-        .filter(
-          (token) => !token.includes("dark:") && !token.includes("disabled:"),
-        )
-        .map((token) => `${path}: ${token}`),
-    );
-
-    expect(offenders).toEqual([]);
-  });
-});
-
-describe("no control draws its own focus ring", () => {
-  it("appears nowhere in the source", () => {
-    // There is one ring, in `index.css`, and a control that brings its own is a
-    // control that gets missed the next time that one moves. Twenty-one of them
-    // did: `focus:ring-accent-400` measures 2.24:1 against the page where WCAG
-    // 1.4.11 wants 3:1, and sixteen killed the browser default with
-    // `focus:outline-none` first, so the text fields had the weakest focus
-    // indicator in the app and nothing underneath it.
-    //
-    // `focus-visible:` as well as `focus:`, and arbitrary values, because the
-    // shared rule *is* `:focus-visible`: the next person repairing a control
-    // reaches for that spelling first, and for `ring-[3px]` second. Two shapes
-    // are deliberately out of scope, both of which stop looking like a focus
-    // ring at all: `focus:[box-shadow:...]`, which is a raw property rather than
-    // a ring utility, and a bare `outline-none`, which removes the outline in
-    // every state rather than on focus and belongs to a rule about outlines.
-    //
-    // `peer-focus-visible:` is exempt and is the settings toggle: its input is
-    // `sr-only`, so the shared ring lands on something with no size and the
-    // visible track has to draw its own.
-    const offenders = entries().flatMap(([path, source]) =>
-      [
-        ...source.matchAll(
-          /[\w:./[\]-]*focus(-visible)?:(outline-none|ring-[\w./#%[\]-]+)/g,
-        ),
-      ]
-        .map((match) => match[0])
-        .filter((token) => !token.includes("peer-focus-visible:"))
-        .map((token) => `${path}: ${token}`),
-    );
-
-    expect(offenders).toEqual([]);
   });
 });
 
@@ -3252,11 +3012,10 @@ describe("a tag reaches a reader through tagName", () => {
 });
 
 describe("no fixture or string carries an address outside reserved space", () => {
-  // The frontend half of
-  // `backend/tests/test_house_rules.py::TestNoFixtureLooksLikeACredential`.
-  // That arm walks the backend test tree only, and its own reason for existing
-  // is that **both** trees are published: this repository mirrors `src/`,
-  // `tests/` and `docs/` to public GitHub. `src/i18n/en.ts` ships a placeholder
+  // The frontend half of the backend's rule that no fixture carries an address
+  // outside reserved space. That rule reads the backend tree only, and its reason
+  // is that the tree it reads is published. So is this one: this repository
+  // mirrors `src/`, `tests/` and `docs/` to public GitHub. `src/i18n/en.ts` ships a placeholder
   // address in published source, which the backend rule cannot see at all.
   //
   // RFC 2606 reserves `example.com`, `example.net` and `example.org`, and RFC
@@ -11917,28 +11676,5 @@ describe("the property generator never reaches the application", () => {
     );
     expect(all.has("react")).toBe(true);
     expect(all.has("./pdf")).toBe(true);
-  });
-
-  it("is refused by the build as well, by what the bundler loads and emits", () => {
-    // **The other half, held by its text**: the configuration is read rather
-    // than run, because no test here builds. The refusal is the plugin, built
-    // only, ahead of every other, matching the path a load resolves to; named
-    // in the worker build too, which never sees the page's plugins; and
-    // checking every chunk's modules and every asset's sources as emitted,
-    // which is where a `new URL` asset arrives without a load. Each line here
-    // is a half that went green with every other guard, measured.
-    expect(viteConfig).toContain("withoutTheGenerator(),\n    react(),");
-    expect(viteConfig).toMatch(/apply: "build",\n\s+enforce: "pre",/);
-    expect(viteConfig).toContain(
-      "worker: { plugins: () => [withoutTheGenerator()] },",
-    );
-    expect(viteConfig).toMatch(
-      /generateBundle\(_options, bundle\) \{\n\s+for \(const output of Object\.values\(bundle\)\) \{\n\s+const sources =\n\s+output\.type === "chunk" \? output\.moduleIds : output\.originalFileNames;/,
-    );
-    // Anchored at the start, which an emitted asset's root relative source
-    // name needs: the unanchored pattern let one through, measured.
-    expect(viteConfig).toContain(
-      "const GENERATOR =\n  /(?:^|[\\\\/])node_modules",
-    );
   });
 });

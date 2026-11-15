@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -149,11 +149,10 @@ export default function BookCard({
   onToggleSelect,
 }: BookCardProps) {
   const { t, locale } = useTranslation();
+  // Held here rather than in `FoldOut`, which unmounts while selecting: an
+  // open fold out stays open across a round trip through selection.
   const [isOpen, setIsOpen] = useState(false);
 
-  const status = book.my_status ?? ReadStatus.unread;
-  const isUnconfirmed = book.ownership === OwnershipStatus.unknown;
-  const wantsDiscussion = (book.discuss_with ?? []).length > 0;
   const tags = book.tags ?? [];
   const shown = facePills(tags);
   const hidden = tags.filter((tag) => !shown.includes(tag));
@@ -161,129 +160,20 @@ export default function BookCard({
 
   const face = (
     <>
-      <div className="aspect-[2/3] bg-paper-100 relative overflow-hidden dark:bg-paper-800">
-        {/* A cover fails more often than it looks, and a broken-image icon
-            reads as a bug in our app rather than a gap in a catalogue. */}
-        <CoverImage
-          src={book.cover_url}
-          alt={book.title}
-          loading="lazy"
-          className="w-full h-full object-cover bg-gradient-to-br from-accent-100 to-accent-200"
-        />
-
-        {isSelecting && (
-          <div
-            aria-hidden="true"
-            className={`absolute top-1.5 left-1.5 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
-              isSelected
-                ? "bg-accent-fill border-accent-fill text-on-accent"
-                : "bg-paper-0/90 border-paper-300 text-transparent"
-            }`}
-          >
-            <Icon name="check" className="w-3.5 h-3.5" strokeWidth={2.5} />
-          </div>
-        )}
-
-        {/* Ownership is shown only when it is in doubt. A badge on every owned
-            book would be noise on the overwhelming majority of the grid. */}
-        {isUnconfirmed && (
-          <div className="absolute bottom-1.5 left-1.5 bg-amber-500/90 text-white text-xs font-medium px-1.5 py-0.5 rounded-full">
-            {t("ownership.unknown")}
-          </div>
-        )}
-
-        {book.active_loan && (
-          <div className="absolute top-1.5 right-1.5 bg-orange-500 text-white text-xs font-medium px-1.5 py-0.5 rounded-full">
-            {t("library.loaned")}
-          </div>
-        )}
-
-        {/* On the face of the card, not in the fold out. The offer exists to
-            be noticed by somebody browsing, and a marker that needs a click to
-            find is a marker only the person who set it ever sees. Bottom
-            right, which is the one corner nothing else uses: ownership takes
-            bottom left and a loan takes top right. */}
-        {wantsDiscussion && (
-          <div className="absolute bottom-1.5 right-1.5 bg-accent-fill text-on-accent text-xs font-medium px-1.5 py-0.5 rounded-full">
-            {t("discuss.badge")}
-          </div>
-        )}
-      </div>
-      <div className="p-2.5">
-        <h3 className="font-semibold text-sm leading-tight line-clamp-2 mb-0.5">
-          {book.title}
-        </h3>
-        {book.author && (
-          <p className="text-xs text-paper-600 truncate dark:text-paper-400">
-            {book.author}
-          </p>
-        )}
-        <div className="flex flex-wrap gap-1 mt-1.5">
-          <span
-            className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[status]}`}
-          >
-            {t(STATUS_LABELS[status])}
-          </span>
-          {/* Only when there is more than one, and on the face rather than in
-              the fold out. Two copies are two rows and the grid draws both, so
-              without this the shelf looks like a catalogue that has
-              double-added something, which is the one reading this feature
-              must not produce. The paper ramp, not a semantic colour: owning a
-              spare paperback is neither a warning nor an achievement.
-              `paper-800` on `paper-200`, the pair the `did_not_finish` pill
-              already uses and the only one of that ramp measured over 4.5:1 on
-              every palette. **That pair's home is the `did_not_finish` row of
-              `STATUS_STYLES` in `pages/types.ts`, and it is measured there
-              rather than here.** Borrowed and deliberately not imported: a
-              copy count is not a reading status, and importing one into the
-              other would join two surfaces that only happen to agree. */}
-          {(book.copy_count ?? 1) > 1 && (
-            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200">
-              {t("copies.badge", { count: book.copy_count ?? 1 })}
-            </span>
-          )}
-          {shown.map((tag) => (
-            <span
-              key={tag.id}
-              className={`text-xs px-2 py-0.5 rounded-full font-medium ${TAG_PILL_CLASSES[tag.category]}`}
-            >
-              {tagName(tag, locale)}
-            </span>
-          ))}
-        </div>
-      </div>
+      <Cover book={book} isSelecting={isSelecting} isSelected={isSelected} />
+      <Caption book={book} pills={shown} />
     </>
   );
 
-  // A button, not a link with its navigation suppressed: while selecting, the
-  // card genuinely is a checkbox, and it should be announced and behave like
-  // one rather than like a link that mysteriously goes nowhere.
-  //
-  // No fold out in this mode, and that is not an omission. A button inside a
-  // button is invalid for the same reason a button inside a link is, and
-  // somebody ticking twenty boxes is not reading page counts.
   if (isSelecting) {
     return (
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={isSelected}
-        aria-label={book.title}
-        onClick={() => onToggleSelect?.(book.id)}
-        className={`card overflow-hidden block w-full text-left ${
-          isSelected
-            ? // The ring is what says "selected" on a card whose contents are
-              // unchanged, so it has to clear the 3:1 that WCAG 1.4.11 asks of
-              // a non-text indicator. `accent-400/50` composited to 1.52:1 over
-              // the card. This is the focus ring's own step at full opacity:
-              // 3.09:1 on the light page and 5.98:1 on the dark one, and every
-              // palette holds that rung to the same floor.
-              "border-accent-500 ring-2 ring-accent-500"
-            : ""
-        }`}
+      <SelectableCard
+        book={book}
+        isSelected={isSelected}
+        onToggleSelect={onToggleSelect}
       >
         {face}
-      </button>
+      </SelectableCard>
     );
   }
 
@@ -294,48 +184,237 @@ export default function BookCard({
       </Link>
 
       {facts.length > 0 && (
-        <>
-          <button
-            type="button"
-            aria-expanded={isOpen}
-            // No `aria-controls`, deliberately. The panel is rendered only when
-            // open, which is right (25 hidden definition lists per page is real
-            // DOM nobody asked for), and ARIA requires the reference to resolve
-            // to an element that is in the document. A dangling id is worse
-            // than none: `aria-expanded` plus DOM adjacency already says what
-            // this button does, and every screen reader announces it.
-            // Named after the book, not just "Details": a grid of 25 identical
-            // buttons is unusable from a screen reader's control list.
-            aria-label={t("card.detailsFor", { title: book.title })}
-            onClick={() => setIsOpen((open) => !open)}
-            className="flex w-full items-center justify-between gap-1 border-t border-paper-200 px-2.5 py-1.5 text-xs font-medium text-paper-600 transition-colors hover:bg-paper-100 hover:text-paper-800 dark:border-paper-800 dark:text-paper-400 dark:hover:bg-paper-800 dark:hover:text-paper-100"
-          >
-            <span aria-hidden="true">{t("card.details")}</span>
-            <Icon
-              name="chevron"
-              className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
-            />
-          </button>
-
-          {/* Rendered only when open rather than hidden with CSS: a closed card
-              is the common case, and 25 hidden definition lists per page is
-              real DOM for something nobody has asked to see. */}
-          {isOpen && (
-            <dl className="space-y-1 border-t border-paper-100 px-2.5 py-2 text-xs dark:border-paper-800">
-              {facts.map((fact) => (
-                <div key={fact.label} className="flex gap-2">
-                  <dt className="shrink-0 text-paper-600 dark:text-paper-400">
-                    {t(fact.label)}
-                  </dt>
-                  <dd className="ml-auto text-right text-paper-800 dark:text-paper-200">
-                    {fact.value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </>
+        <FoldOut
+          title={book.title}
+          facts={facts}
+          isOpen={isOpen}
+          onToggle={() => setIsOpen((open) => !open)}
+        />
       )}
     </div>
+  );
+}
+
+/** The cover and the badges laid over its corners. */
+function Cover({
+  book,
+  isSelecting,
+  isSelected,
+}: {
+  book: BookOut;
+  isSelecting: boolean;
+  isSelected: boolean;
+}) {
+  const { t } = useTranslation();
+  const isUnconfirmed = book.ownership === OwnershipStatus.unknown;
+  const wantsDiscussion = (book.discuss_with ?? []).length > 0;
+
+  return (
+    <div className="aspect-[2/3] bg-paper-100 relative overflow-hidden dark:bg-paper-800">
+      {/* A cover fails more often than it looks, and a broken-image icon
+          reads as a bug in our app rather than a gap in a catalogue. */}
+      <CoverImage
+        src={book.cover_url}
+        alt={book.title}
+        loading="lazy"
+        className="w-full h-full object-cover bg-gradient-to-br from-accent-100 to-accent-200"
+      />
+
+      {isSelecting && (
+        <div
+          aria-hidden="true"
+          className={`absolute top-1.5 left-1.5 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold ${
+            isSelected
+              ? "bg-accent-fill border-accent-fill text-on-accent"
+              : "bg-paper-0/90 border-paper-300 text-transparent"
+          }`}
+        >
+          <Icon name="check" className="w-3.5 h-3.5" strokeWidth={2.5} />
+        </div>
+      )}
+
+      {/* Ownership is shown only when it is in doubt. A badge on every owned
+          book would be noise on the overwhelming majority of the grid. */}
+      {isUnconfirmed && (
+        <div className="absolute bottom-1.5 left-1.5 bg-amber-500/90 text-white text-xs font-medium px-1.5 py-0.5 rounded-full">
+          {t("ownership.unknown")}
+        </div>
+      )}
+
+      {book.active_loan && (
+        <div className="absolute top-1.5 right-1.5 bg-orange-500 text-white text-xs font-medium px-1.5 py-0.5 rounded-full">
+          {t("library.loaned")}
+        </div>
+      )}
+
+      {/* On the face of the card, not in the fold out. The offer exists to
+          be noticed by somebody browsing, and a marker that needs a click to
+          find is a marker only the person who set it ever sees. Bottom
+          right, which is the one corner nothing else uses: ownership takes
+          bottom left and a loan takes top right. */}
+      {wantsDiscussion && (
+        <div className="absolute bottom-1.5 right-1.5 bg-accent-fill text-on-accent text-xs font-medium px-1.5 py-0.5 rounded-full">
+          {t("discuss.badge")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Title, author, and the pills under them: status, copies, face tags. */
+function Caption({ book, pills }: { book: BookOut; pills: TagOut[] }) {
+  const { t, locale } = useTranslation();
+  const status = book.my_status ?? ReadStatus.unread;
+  const copies = book.copy_count ?? 1;
+
+  return (
+    <div className="p-2.5">
+      <h3 className="font-semibold text-sm leading-tight line-clamp-2 mb-0.5">
+        {book.title}
+      </h3>
+      {book.author && (
+        <p className="text-xs text-paper-600 truncate dark:text-paper-400">
+          {book.author}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1 mt-1.5">
+        <span
+          className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLES[status]}`}
+        >
+          {t(STATUS_LABELS[status])}
+        </span>
+        {/* Only when there is more than one, and on the face rather than in
+            the fold out. Two copies are two rows and the grid draws both, so
+            without this the shelf looks like a catalogue that has
+            double-added something, which is the one reading this feature
+            must not produce. The paper ramp, not a semantic colour: owning a
+            spare paperback is neither a warning nor an achievement.
+            `paper-800` on `paper-200`, the pair the `did_not_finish` pill
+            already uses and the only one of that ramp measured over 4.5:1 on
+            every palette. **That pair's home is the `did_not_finish` row of
+            `STATUS_STYLES` in `pages/types.ts`, and it is measured there
+            rather than here.** Borrowed and deliberately not imported: a
+            copy count is not a reading status, and importing one into the
+            other would join two surfaces that only happen to agree. */}
+        {copies > 1 && (
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-paper-200 text-paper-800 dark:bg-paper-800 dark:text-paper-200">
+            {t("copies.badge", { count: copies })}
+          </span>
+        )}
+        {pills.map((tag) => (
+          <span
+            key={tag.id}
+            className={`text-xs px-2 py-0.5 rounded-full font-medium ${TAG_PILL_CLASSES[tag.category]}`}
+          >
+            {tagName(tag, locale)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The card while selecting.
+ *
+ * A button, not a link with its navigation suppressed: while selecting, the
+ * card genuinely is a checkbox, and it should be announced and behave like
+ * one rather than like a link that mysteriously goes nowhere.
+ *
+ * No fold out in this mode, and that is not an omission. A button inside a
+ * button is invalid for the same reason a button inside a link is, and
+ * somebody ticking twenty boxes is not reading page counts.
+ */
+function SelectableCard({
+  book,
+  isSelected,
+  onToggleSelect,
+  children,
+}: {
+  book: BookOut;
+  isSelected: boolean;
+  onToggleSelect?: (bookId: number) => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={isSelected}
+      aria-label={book.title}
+      onClick={() => onToggleSelect?.(book.id)}
+      className={`card overflow-hidden block w-full text-left ${
+        isSelected
+          ? // The ring is what says "selected" on a card whose contents are
+            // unchanged, so it has to clear the 3:1 that WCAG 1.4.11 asks of
+            // a non-text indicator. `accent-400/50` composited to 1.52:1 over
+            // the card. This is the focus ring's own step at full opacity:
+            // 3.09:1 on the light page and 5.98:1 on the dark one, and every
+            // palette holds that rung to the same floor.
+            "border-accent-500 ring-2 ring-accent-500"
+          : ""
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** The details toggle under the link, and the facts it opens. */
+function FoldOut({
+  title,
+  facts,
+  isOpen,
+  onToggle,
+}: {
+  title: string;
+  facts: Fact[];
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        // No `aria-controls`, deliberately. The panel is rendered only when
+        // open, which is right (25 hidden definition lists per page is real
+        // DOM nobody asked for), and ARIA requires the reference to resolve
+        // to an element that is in the document. A dangling id is worse
+        // than none: `aria-expanded` plus DOM adjacency already says what
+        // this button does, and every screen reader announces it.
+        // Named after the book, not just "Details": a grid of 25 identical
+        // buttons is unusable from a screen reader's control list.
+        aria-label={t("card.detailsFor", { title })}
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-1 border-t border-paper-200 px-2.5 py-1.5 text-xs font-medium text-paper-600 transition-colors hover:bg-paper-100 hover:text-paper-800 dark:border-paper-800 dark:text-paper-400 dark:hover:bg-paper-800 dark:hover:text-paper-100"
+      >
+        <span aria-hidden="true">{t("card.details")}</span>
+        <Icon
+          name="chevron"
+          className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`}
+        />
+      </button>
+
+      {/* Rendered only when open rather than hidden with CSS: a closed card
+          is the common case, and 25 hidden definition lists per page is
+          real DOM for something nobody has asked to see. */}
+      {isOpen && (
+        <dl className="space-y-1 border-t border-paper-100 px-2.5 py-2 text-xs dark:border-paper-800">
+          {facts.map((fact) => (
+            <div key={fact.label} className="flex gap-2">
+              <dt className="shrink-0 text-paper-600 dark:text-paper-400">
+                {t(fact.label)}
+              </dt>
+              <dd className="ml-auto text-right text-paper-800 dark:text-paper-200">
+                {fact.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </>
   );
 }

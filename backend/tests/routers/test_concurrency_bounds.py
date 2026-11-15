@@ -1,4 +1,4 @@
-"""No route handler builds its own concurrency bound.
+"""No function of the route layer builds its own concurrency bound.
 
 A bound built inside a handler body bounds one call, and every bound in this
 application defends something the pod owns: `fetch.MAX_RESPONSE_BYTES`' sixteen
@@ -63,18 +63,27 @@ a handler is refused. The union of the two is deliberate: a resolution that
 replaced the terminal name rather than joining it would accept
 `from asyncio import Queue as Semaphore`, which the name alone refuses.
 
+Arm one reads **every function** of a route module, not only its handlers,
+because a handler's work sits in the private helpers beside it:
+`_walk_identifier_waves` and `_walk_cover_waves` hold the two wave loops. The
+cost: a route module may not build a bound once for the process inside a
+function either, a cached factory or a builder called at import, nor give a
+class of its own an executor as `z3950.Association` does. Each of those belongs
+at module level or in the module owning the resource, as
+`covers.FETCHES_AT_ONCE` is.
+
 ## What goes past all three, stated rather than bounded
 
 The mechanism in each case, and no claim about how much is out there: every seat
 that has tried to bound one of these in this repository succeeded at measuring
 something and failed at bounding it.
 
-* **A bound built one function away, a `Depends(...)` callable among them.** Arm
-  one reads the calls inside a handler's own tree, `ast.walk` included, so a
-  helper the handler calls is invisible however the helper builds it, and so is a
-  callable FastAPI calls per request on the handler's behalf, which is per request
-  exactly as a handler body is. Extending the population to the callables a
-  handler's signature names would examine nothing here: measured 2026-09-26, 34
+* **A bound built in another module, a `Depends(...)` callable among them.** Arm
+  one reads every function of the route layer, so a helper beside a handler is
+  read and a helper in another module is invisible however it builds the bound,
+  and so is a callable FastAPI calls per request on the handler's behalf, which
+  is per request exactly as a handler body is. Extending the population to the
+  callables a handler's signature names would examine nothing here: measured 2026-09-26, 34
   `Depends(...)` sites in `backend/routers/`, none naming a function defined in
   the route layer, because the per request dependencies are `Annotated` aliases in
   `dependencies.py` and the one route layer callable,
@@ -123,7 +132,7 @@ well: that arm's subject is `routers/books.py`, so a bound another module holds 
 neither a second candidate for it to choose between nor anything it can see. What
 holds the cover route's own bound and its deadline is
 `tests/routers/test_books_cover_backfill.py`, and arm one here is what keeps the
-construction out of the handler.
+construction out of the handler and the helpers beside it.
 """
 
 import ast
@@ -156,7 +165,7 @@ CONCURRENCY_MODULES: Final = (
     "anyio",
 )
 
-#: The primitives a route handler may not construct, by the name the callee
+#: The primitives no function of the route layer may construct, by the name the callee
 #: resolves to and by the name written at the call site. Pinned by
 #: `test_the_primitive_set_is_every_one_this_backend_constructs` against a second
 #: derivation, so it cannot quietly fall short of the tree.
@@ -165,7 +174,7 @@ PRIMITIVES: Final = frozenset({"Semaphore", "ThreadPoolExecutor"})
 #: Classes of a concurrency module this backend constructs that **ration
 #: nothing**, name to the reason it is not a bound. They satisfy the pin below
 #: without arming the rule above, where adding one to `PRIMITIVES` instead would
-#: make arm one refuse a per request one in a handler, which is legitimate.
+#: make arm one refuse a per request one in the route layer, which is legitimate.
 #:
 #: **`Lock` was in `PRIMITIVES` for one round and that was a false refusal.** A
 #: lock has no capacity to hand out: it orders one holder's own tasks, so a per
@@ -506,7 +515,7 @@ def _built_to(module: ModuleType, name: str) -> int:
 
 
 class TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest:
-    def test_no_route_handler_constructs_a_concurrency_primitive(self) -> None:
+    def test_no_function_of_the_route_layer_constructs_a_concurrency_primitive(self) -> None:
         offenders: list[str] = []
         examined: set[tuple[str, str]] = set()
 
@@ -516,9 +525,13 @@ class TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest:
             for node in ast.walk(tree):
                 if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                     continue
-                if not _is_route_handler(node):
-                    continue
-                examined.add((str(path.relative_to(BACKEND)), node.name))
+                # **Every function is read and only handlers are counted.** A
+                # handler's work sits in private helpers beside it, the two wave
+                # loops among them, so reading handlers alone reads neither loop.
+                # Counting helpers into `examined` would make the population
+                # equality below red on every one of them.
+                if _is_route_handler(node):
+                    examined.add((str(path.relative_to(BACKEND)), node.name))
                 for name, line in _constructions(node, PRIMITIVES, imported):
                     offenders.append(f"{path.name}:{line} {node.name} builds a {name}")
 
@@ -553,8 +566,8 @@ class TestEveryConcurrencyBoundIsBuiltOnceForThePodAndNotPerRequest:
             f"traversal of a module, has lost something: {len(examined)} examined"
         )
         assert offenders == [], (
-            "a bound built inside a handler is built once per call, and every "
-            f"ceiling these defend belongs to one pod: {offenders}"
+            "a bound built inside a function of the route layer is built once per "
+            f"call, and every ceiling these defend belongs to one pod: {offenders}"
         )
 
     def test_the_primitive_set_is_every_one_this_backend_constructs(self) -> None:

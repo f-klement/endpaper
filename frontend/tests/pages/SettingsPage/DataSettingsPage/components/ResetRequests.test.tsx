@@ -169,6 +169,25 @@ describe("ResetRequests", () => {
     ).toBeInTheDocument();
   });
 
+  it("leaves the queue's expiry out while the code is on screen", () => {
+    // The code's own sentence carries the same time, so the row says it once.
+    draw({
+      requests: [
+        {
+          ...request,
+          approved_at: "2026-09-06T10:30:00Z",
+          approved_by: "sam",
+          code_expires_at: "2026-09-06T11:30:00Z",
+        },
+      ],
+      codes: {
+        7: { code: "ABCD-EFGH-JKLM", expiresAt: "2026-09-06T11:30:00Z" },
+      },
+    });
+
+    expect(screen.queryByText(/The code stops working at/)).toBeNull();
+  });
+
   it("says who approved a request that has already been granted", () => {
     // The code cannot be shown again, so this is the only thing the queue can
     // say about a request an admin has already dealt with.
@@ -185,6 +204,18 @@ describe("ResetRequests", () => {
     draw({ requests: [] });
 
     expect(screen.getByText("Nobody is waiting.")).toBeInTheDocument();
+  });
+
+  it("holds both buttons while a request is working", () => {
+    // A second click while an approval is in flight would mint a second code.
+    draw({ isWorking: true });
+
+    expect(
+      screen.getByRole("button", { name: "Approve a reset for kim" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Decline the reset for kim" }),
+    ).toBeDisabled();
   });
 
   it("approves and declines by member id", async () => {

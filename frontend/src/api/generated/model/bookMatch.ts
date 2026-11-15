@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { ClassificationIn } from "./classificationIn.ts";
+import type { RecordOrigin } from "./recordOrigin.ts";
 
 /**
  * One candidate from a free-text search, for picking the right edition.
@@ -55,6 +56,7 @@ export interface BookMatch {
   language?: string | null;
   page_count?: number | null;
   publisher?: string | null;
+  record_origin?: RecordOrigin | null;
   series_index?: number | null;
   series_name?: string | null;
   /** @maxLength 120 */

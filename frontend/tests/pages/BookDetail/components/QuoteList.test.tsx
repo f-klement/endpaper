@@ -117,6 +117,46 @@ describe("QuoteList", () => {
     });
   });
 
+  it("keeps the stored remark and an absent page through an edit", async () => {
+    const { onEdit } = renderList([
+      makeQuote({ id: 7, user_id: 1, text: "Typo", page: null, note: "Wry" }),
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Edit the page the quote is on")).toHaveValue(
+      null,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onEdit).toHaveBeenCalledWith(7, {
+      text: "Typo",
+      page: null,
+      note: "Wry",
+    });
+  });
+
+  it("closes the editor once an edit is saved", async () => {
+    renderList([makeQuote({ id: 7, user_id: 1, text: "Typo" })]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.queryByLabelText("Edit quote")).not.toBeInTheDocument();
+  });
+
+  it("keeps the editor open when the passage is emptied", async () => {
+    const { onEdit } = renderList([
+      makeQuote({ id: 7, user_id: 1, text: "Typo" }),
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.clear(screen.getByLabelText("Edit quote"));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Edit quote")).toBeInTheDocument();
+  });
+
   it("does not save when the edit is cancelled", async () => {
     // Cancel sits inside the edit `<form>` now, so without `type="button"` it
     // defaults to submit and cancelling would save.
@@ -163,6 +203,14 @@ describe("QuoteList", () => {
   it("lets an admin delete somebody else's quote", () => {
     renderList([makeQuote({ user_id: 99 })], { id: 1, is_admin: true });
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("removes the quote whose delete is pressed", async () => {
+    const { onRemove } = renderList([makeQuote({ id: 7, user_id: 1 })]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(onRemove).toHaveBeenCalledWith(7);
   });
 
   it("offers a member no delete on somebody else's quote", () => {

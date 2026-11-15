@@ -11,12 +11,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type BookDetailsUpdate,
+  type BookOut,
   LendingWillingness,
 } from "../../../../src/api/generated/model";
 import LoanPanel, {
   type Borrower,
 } from "../../../../src/pages/BookDetail/components/LoanPanel";
-import { makeBook, makeUser, resetIds } from "../../../factories";
+import { makeBook, makeLoan, makeUser, resetIds } from "../../../factories";
 import { renderLocalised } from "../../../utils";
 
 beforeEach(resetIds);
@@ -164,5 +165,35 @@ describe("lending any other book", () => {
       null,
       false,
     );
+  });
+});
+
+describe("a loan and its return", () => {
+  it("keeps the borrower picked before the loan once it is returned", async () => {
+    const book = makeBook();
+    const member = makeUser({ id: 9, username: "ana" });
+    function panel(active_loan: BookOut["active_loan"]) {
+      return (
+        <LoanPanel
+          book={{ ...book, active_loan }}
+          members={[member]}
+          isBusy={false}
+          isSavingDetails={false}
+          onSaveLending={vi.fn<(fields: BookDetailsUpdate) => void>()}
+          onLend={vi.fn<
+            (borrower: Borrower, dueAt: string | null, ack: boolean) => void
+          >()}
+          onMarkReturned={vi.fn<(loanId: number) => void>()}
+        />
+      );
+    }
+    const { rerender } = renderLocalised(panel(null));
+    await pickBorrower();
+
+    rerender(panel(makeLoan()));
+    expect(screen.queryByLabelText("Loan to")).not.toBeInTheDocument();
+    rerender(panel(null));
+
+    expect(screen.getByLabelText("Loan to")).toHaveValue("9");
   });
 });

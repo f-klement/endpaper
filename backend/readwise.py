@@ -42,7 +42,7 @@ import logging
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Final
+from typing import Any, Final
 
 import anyio
 import httpx
@@ -209,21 +209,26 @@ def _highlight(raw: object) -> ReadwiseHighlight | None:
     if ident is None:
         return None
     text = _clean(raw.get("text"))
-    location = _id(raw.get("location"))
-    page = (
-        location
-        if raw.get("location_type") == "page"
-        and location is not None
-        and location <= MAX_PAGE_NUMBER_IN_A_BOOK
-        else None
-    )
     return ReadwiseHighlight(
         id=ident,
         deleted=raw.get("is_deleted") is True,
         text=text if text is not None and len(text) <= HIGHLIGHT_TEXT_MAX else None,
         note=_clean(raw.get("note"), HIGHLIGHT_NOTE_MAX),
-        page=page,
+        page=_page_number(raw),
         highlighted_at=_instant(raw.get("highlighted_at")) or _instant(raw.get("created_at")),
+    )
+
+
+def _page_number(raw: dict[Any, Any]) -> int | None:
+    """The page a highlight is on, where Readwise locates it by page and the
+    number could be one in a book."""
+    location = _id(raw.get("location"))
+    return (
+        location
+        if raw.get("location_type") == "page"
+        and location is not None
+        and location <= MAX_PAGE_NUMBER_IN_A_BOOK
+        else None
     )
 
 
@@ -394,16 +399,7 @@ def _apply_once(
         # Deletions first, whatever the category: a highlight deleted under a
         # book deleted whole, or under one moved out of `books`, is removed.
         # A moved book's live highlights stay, and its mapping row went above.
-        _delete(
-            db,
-            member_id,
-            [
-                mark.id
-                for mark in entry.highlights
-                if (entry.deleted or mark.deleted) and mark.id not in alive
-            ],
-            counts,
-        )
+        _delete(db, member_id, _gone(entry, alive), counts)
         if book_id is not None:
             live = [
                 mark for mark in entry.highlights if not mark.deleted and writers.get(mark.id) == position
@@ -411,6 +407,12 @@ def _apply_once(
             _write(db, member_id, book_id, live, counts)
     db.commit()
     return newly
+
+
+def _gone(entry: ReadwiseEntry, alive: set[int]) -> list[int]:
+    """The highlights `entry` deletes, itself deleted or each one deleted, less
+    those live under another book of the page (`_alive`)."""
+    return [mark.id for mark in entry.highlights if (entry.deleted or mark.deleted) and mark.id not in alive]
 
 
 def _alive(page: Page) -> set[int]:
@@ -457,14 +459,27 @@ def _placed(
         db.add(row)
     row.title, row.author, row.asin = entry.title, entry.author, entry.asin
     if not index.sees(row.book_id):
-        row.book_id = _matched(index, entry.asin, entry.title, entry.author)
-        if row.book_id is not None and not whole:
-            # Kept as state rather than inferred from `book_id`, which is
-            # committed with this page: a pull stopping before the re-ask
-            # ends would otherwise leave the older highlights unasked for.
-            row.whole_pending = True
-            newly.add(entry.user_book_id)
+        _match_again(row, entry, index, newly, whole=whole)
     return row.book_id
+
+
+def _match_again(
+    row: ReadwiseBook,
+    entry: ReadwiseEntry,
+    index: recognition.Index,
+    newly: set[int],
+    *,
+    whole: bool,
+) -> None:
+    """Match a row whose Book is gone or unseen, and mark it `whole_pending`
+    where only part of its history is on this page."""
+    row.book_id = _matched(index, entry.asin, entry.title, entry.author)
+    if row.book_id is not None and not whole:
+        # Kept as state rather than inferred from `book_id`, which is
+        # committed with this page: a pull stopping before the re-ask
+        # ends would otherwise leave the older highlights unasked for.
+        row.whole_pending = True
+        newly.add(entry.user_book_id)
 
 
 def _writers(
@@ -482,13 +497,7 @@ def _writers(
     would meet the unique index at commit. Listed twice on one Book, the
     later entry writes it, as `_entry` keeps the later of an id listed twice.
     """
-    listed: dict[int, dict[int, int]] = {}
-    for position, (entry, book_id) in enumerate(placed):
-        if book_id is None:
-            continue
-        for mark in entry.highlights:
-            if not mark.deleted:
-                listed.setdefault(mark.id, {})[book_id] = position
+    listed = _listed(placed)
     held = highlights.holders(
         db,
         member_id,
@@ -503,6 +512,19 @@ def _writers(
         else:
             counts.skipped += 1
     return writers
+
+
+def _listed(placed: Sequence[tuple[ReadwiseEntry, int | None]]) -> dict[int, dict[int, int]]:
+    """Each live highlight the page places on a Book, with the position of the
+    entry listing it under each Book, the later entry winning."""
+    listed: dict[int, dict[int, int]] = {}
+    for position, (entry, book_id) in enumerate(placed):
+        if book_id is None:
+            continue
+        for mark in entry.highlights:
+            if not mark.deleted:
+                listed.setdefault(mark.id, {})[book_id] = position
+    return listed
 
 
 def _rematched(db: Session, member_id: int, index: recognition.Index) -> set[int]:

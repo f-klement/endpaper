@@ -32,6 +32,7 @@ from sqlalchemy import Table
 from sqlalchemy.orm import Session
 
 import custom_fields
+import evidence
 import file_references
 import lending
 import reading
@@ -466,8 +467,10 @@ def _absorb_fields(keeper: Book, losers: Sequence[Book], isbn: str | None) -> No
     the time this runs, so the value cannot be read back off them. See the
     ordering in `fold`.
     """
+    filled: list[str] = []
     if keeper.isbn is None and isbn is not None:
         keeper.isbn = isbn
+        filled.append("isbn")
 
     for field in FILLABLE_FROM_ANOTHER_ROW:
         if getattr(keeper, field) is not None:
@@ -476,7 +479,12 @@ def _absorb_fields(keeper: Book, losers: Sequence[Book], isbn: str | None) -> No
             value = getattr(loser, field)
             if value is not None:
                 setattr(keeper, field, value)
+                filled.append(field)
                 break
+
+    # The survivor keeps its own origin, since its record is the one that stays;
+    # a work fact taken from a losing row is a change made here.
+    evidence.touched(keeper, filled)
 
 
 # ── The door ──────────────────────────────────────────────────────────────────

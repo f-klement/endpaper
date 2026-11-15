@@ -1338,6 +1338,9 @@ class TestACredentialNeverLeavesTheOriginItWasSetFor:
     def test_it_does_not_go_to_another_port(self, credential):
         assert credential.header_for("https://catalogue.example:8443/sru") == {}
 
+    def test_nor_to_the_other_schemes_default_port(self, credential):
+        assert credential.header_for("https://catalogue.example:80/sru") == {}
+
     @pytest.mark.parametrize("port", ["8_080", "99999", "65536", "-1"])
     def test_nor_to_a_port_only_one_url_parser_understands(self, credential, port):
         """The arm this guard's own first test picked around.
@@ -1355,6 +1358,9 @@ class TestACredentialNeverLeavesTheOriginItWasSetFor:
         """Stated as a test, because a second parser is a hole by construction."""
         assert credentials.origin_of("https://a.test:8_080/x") == "https://a.test:8080"
         assert httpx.URL("https://a.test:8_080/x").port == 8080
+
+    def test_a_scheme_with_no_known_default_port_is_compared_as_written(self):
+        assert credentials.origin_of("ftp://a.test/x") == "ftp://a.test"
 
     def test_an_address_that_cannot_be_parsed_binds_nothing(self):
         assert credentials.origin_of("https://") == ""
@@ -2644,6 +2650,30 @@ class TestAnAppSettingIsSealedForItsOwnName:
         other = credentials.phrase_to_key(credentials.generate_phrase())
         with pytest.raises(credentials.WrongKeyGeneration):
             credentials.unseal_setting(other, "mail_password", envelope)
+
+
+class TestAMemberLoginIsRefusedBeforeItIsOpened:
+    """`unseal_member_login` refuses an envelope it cannot read before it tries the key."""
+
+    ORIGIN = "https://readwise.io"
+
+    @pytest.mark.parametrize(
+        "reshape",
+        [
+            pytest.param(lambda envelope: envelope.rsplit(".", 1)[0], id="three parts"),
+            pytest.param(lambda envelope: "v1" + envelope[envelope.index(".") :], id="another version"),
+        ],
+    )
+    def test_an_envelope_of_another_shape_is_unreadable(self, encryption_key, reshape):
+        envelope = credentials.seal_member_login(encryption_key, "readwise", 1, self.ORIGIN, "t0ken")
+        with pytest.raises(credentials.UnreadableCredential, match="not in a known format"):
+            credentials.unseal_member_login(encryption_key, "readwise", 1, self.ORIGIN, reshape(envelope))
+
+    def test_under_another_key_it_says_the_key_changed(self, encryption_key):
+        envelope = credentials.seal_member_login(encryption_key, "readwise", 1, self.ORIGIN, "t0ken")
+        other = credentials.phrase_to_key(credentials.generate_phrase())
+        with pytest.raises(credentials.WrongKeyGeneration):
+            credentials.unseal_member_login(other, "readwise", 1, self.ORIGIN, envelope)
 
 
 class TestASealedSettingIsCountedWhenItIsStranded:

@@ -38,33 +38,7 @@ export default function LoginForm({
   return (
     <div className="bg-paper-0 rounded-2xl shadow-sm border border-paper-100 p-6 dark:bg-paper-900 dark:border-paper-800">
       {registrationEnabled && (
-        <div className="flex mb-5 gap-1 p-1 bg-paper-100 rounded-lg dark:bg-paper-800">
-          {(["login", "register"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => onModeChange(option)}
-              // The tab and the submit button below show the same words, so
-              // without this a screen reader announces two identical "Sign
-              // In" buttons and neither says which one switches the form.
-              aria-label={
-                option === "login"
-                  ? t("login.switchToSignIn")
-                  : t("login.switchToRegister")
-              }
-              aria-pressed={mode === option}
-              className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                mode === option
-                  ? "bg-paper-0 shadow-sm text-paper-900 dark:bg-paper-800 dark:text-paper-100"
-                  : "text-paper-600 dark:text-paper-400"
-              }`}
-            >
-              {option === "login"
-                ? t("login.signIn")
-                : t("login.createAccount")}
-            </button>
-          ))}
-        </div>
+        <ModeTabs mode={mode} onModeChange={onModeChange} />
       )}
 
       <form onSubmit={handleSubmit} className="space-y-3">
@@ -168,6 +142,44 @@ export default function LoginForm({
               : t("login.createAccount")}
         </button>
       </form>
+    </div>
+  );
+}
+
+interface ModeTabsProps {
+  mode: Mode;
+  onModeChange: (mode: Mode) => void;
+}
+
+/** The switch between signing in and creating an account. */
+function ModeTabs({ mode, onModeChange }: ModeTabsProps) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex mb-5 gap-1 p-1 bg-paper-100 rounded-lg dark:bg-paper-800">
+      {(["login", "register"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onModeChange(option)}
+          // The tab and the submit button below show the same words, so
+          // without this a screen reader announces two identical "Sign
+          // In" buttons and neither says which one switches the form.
+          aria-label={
+            option === "login"
+              ? t("login.switchToSignIn")
+              : t("login.switchToRegister")
+          }
+          aria-pressed={mode === option}
+          className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+            mode === option
+              ? "bg-paper-0 shadow-sm text-paper-900 dark:bg-paper-800 dark:text-paper-100"
+              : "text-paper-600 dark:text-paper-400"
+          }`}
+        >
+          {option === "login" ? t("login.signIn") : t("login.createAccount")}
+        </button>
+      ))}
     </div>
   );
 }

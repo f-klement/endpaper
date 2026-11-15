@@ -40,15 +40,18 @@ has a consequence: `added_at` into `WORK_IDENTITY` puts it in `WORK_FACTS`, so a
 new copy carries the parent's added at date and sorts as though it was filed
 then, and the suite still reports `7615 passed`.
 
-The other four change **none** of the three doors: `id` and `added_at` into
+The other four change **none** of the doors: `id` and `added_at` into
 `COPY_STANDING`, `copy_group` and `ownership` into `ROW_KEEPING`. That they are
 observable by nothing is a derivation rather than a sample: the only names any
-module that is not a test reads are `WORK_DETAIL`, `WORK_FACTS` and
-`FILLABLE_FROM_ANOTHER_ROW`, so a move leaving all three intact cannot change
-what any writer does. **That premise is an arm, not a date**:
-`test_nothing_outside_the_tests_reaches_past_those_three_names` goes red the day
-a module starts reading a fourth name, which is what would turn these four into
-observable moves.
+module that is not a test reads are `WORK_DETAIL`, `WORK_FACTS`,
+`COPIED_FROM_THE_BOOK` and `FILLABLE_FROM_ANOTHER_ROW`, so a move leaving all
+four intact cannot change what any writer does. **That premise is an arm, not a
+date**: `test_nothing_outside_the_tests_reaches_past_those_names` goes red the
+day a module starts reading a fifth name, which is what would turn these four
+into observable moves.
+
+**These figures were measured over six cells**, before `RECORD_PROVENANCE`
+made seven, so the moves into and out of that cell are in none of them.
 
 **No move that reaches `is_private`, `added_by_user_id` or `deleted_at` is among
 them.** All fifteen are caught, by `test_the_visibility_rule_owns_its_columns`
@@ -88,8 +91,10 @@ WORK = set(book_columns.WORK_IDENTITY + book_columns.WORK_DETAIL + book_columns.
 #: The only `book_columns` names a module that is not a test may read.
 #:
 #: `WORK_DETAIL` is here because it is a cell two record writers walk directly;
-#: the other two are the doors. Everything else is this module's own vocabulary.
-REACHABLE: Final = frozenset({"WORK_DETAIL", "WORK_FACTS", "FILLABLE_FROM_ANOTHER_ROW"})
+#: the other three are the doors. Everything else is this module's own vocabulary.
+REACHABLE: Final = frozenset(
+    {"WORK_DETAIL", "WORK_FACTS", "COPIED_FROM_THE_BOOK", "FILLABLE_FROM_ANOTHER_ROW"}
+)
 
 
 def _columns() -> list[str]:
@@ -350,8 +355,13 @@ class TestEachCellIsDerivableFromSomethingThatIsNotItself:
         by name rather than by absence: the model carries `isbn13`, because what
         a catalogue answers with is one printing and this row is one copy. The
         equality this arm deliberately does not assert would fail on that alone.
+
+        **`record_origin` is carried and not asserted**: it says which catalogue
+        the row is, for a draft filed through `BookCreate`, and no writer applies
+        it to a Book that exists (`evidence.touched`). Named rather than its cell
+        excluded, so a work fact moved into `RECORD_PROVENANCE` still fails here.
         """
-        asserted = set(BookMatch.model_fields) & set(_columns())
+        asserted = set(BookMatch.model_fields) & set(_columns()) - {"record_origin"}
 
         assert asserted <= WORK, f"{sorted(asserted - WORK)} are not work facts"
 
@@ -507,21 +517,23 @@ class TestTheDoorsAreWhatTheWritersWalk:
             for walked in _sets_walked_by(folding, "_absorb_fields")
         )
 
-    def test_a_copy_takes_the_work_facts(self):
+    def test_a_copy_takes_the_work_facts_and_the_records_provenance(self):
         import routers.books
 
-        assert any(walked is book_columns.WORK_FACTS for walked in _sets_walked_by(routers.books, "add_copy"))
+        walked = _sets_walked_by(routers.books, "add_copy")
+
+        assert any(each is book_columns.COPIED_FROM_THE_BOOK for each in walked)
 
     def test_enrichment_fills_the_work_detail(self):
         import evidence
 
         assert any(walked is book_columns.WORK_DETAIL for walked in _sets_walked_by(evidence, "_apply_match"))
 
-    def test_nothing_outside_the_tests_reaches_past_those_three_names(self):
+    def test_nothing_outside_the_tests_reaches_past_those_names(self):
         """The four inert moves in this module's docstring rest on this arm.
 
-        A move that leaves `WORK_DETAIL`, `WORK_FACTS` and
-        `FILLABLE_FROM_ANOTHER_ROW` intact changes nothing any writer does, and
+        A move that leaves `REACHABLE`'s names intact changes nothing any
+        writer does, and
         that holds only while those are the only names read outside the tests. A
         module that started reading `COPY_STANDING` would turn four documented
         inert moves into observable ones with nothing going red; this is what

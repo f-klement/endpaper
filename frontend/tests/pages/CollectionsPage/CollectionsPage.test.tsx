@@ -58,6 +58,36 @@ describe("CollectionsPage", () => {
     });
   });
 
+  it("holds the add button and says so while the new collection is sent", async () => {
+    let release: (() => void) | undefined;
+    api.on("/api/collections", { body: [] });
+    api.on(
+      "/api/collections",
+      () =>
+        new Promise<{ body: unknown }>((resolve) => {
+          release = () => resolve({ body: makeCollection() });
+        }),
+      "POST",
+    );
+    renderWithProviders(<CollectionsPage />);
+    await screen.findByText("No collections yet");
+
+    await userEvent.type(screen.getByLabelText("Name"), "Sold");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Add collection" }),
+    );
+
+    const adding = await screen.findByRole("button", { name: "Adding..." });
+    expect(adding).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Name"), "Lent");
+    expect(adding).toBeDisabled();
+
+    release?.();
+    expect(
+      await screen.findByRole("button", { name: "Add collection" }),
+    ).toBeInTheDocument();
+  });
+
   it("refuses to send a name of only spaces", async () => {
     api.on("/api/collections", { body: [] });
     renderWithProviders(<CollectionsPage />);
@@ -149,6 +179,33 @@ describe("CollectionsPage", () => {
 
     expect(confirm.mock.calls[0]?.[0]).toContain("214");
     expect(api.lastCall("/api/collections/7", "DELETE")).toBeDefined();
+  });
+
+  it("holds every card's actions while a delete is in flight", async () => {
+    let release: (() => void) | undefined;
+    api.on("/api/collections", {
+      body: [makeCollection({ id: 7, name: "Ebooks" })],
+    });
+    api.on(
+      /\/api\/collections\/7$/,
+      () =>
+        new Promise<{ status: number }>((resolve) => {
+          release = () => resolve({ status: 204 });
+        }),
+      "DELETE",
+    );
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderWithProviders(<CollectionsPage />);
+    await screen.findByText("Ebooks");
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled(),
+    );
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+
+    release?.();
   });
 
   it("says when a member is not allowed to delete one", async () => {

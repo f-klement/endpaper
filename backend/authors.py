@@ -43,7 +43,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
@@ -751,21 +751,13 @@ def _edges_on_initials(
             buckets[words[-1]].append((key, words[0][0], abbreviated))
 
     edges: list[_Edge] = []
-    for candidates in buckets.values():
-        if len(candidates) > MAX_BUCKET:
-            continue
-        for index, (key, initial, abbreviated) in enumerate(candidates):
-            for other_key, other_initial, other_abbreviated in candidates[index + 1 :]:
-                if not budget.spend():
-                    return edges
-                if initial != other_initial:
-                    continue
-                # One side abbreviated is what keeps two different people with
-                # the same surname and the same initial out of each other's
-                # groups.
-                if not (abbreviated or other_abbreviated):
-                    continue
-                edges.append((key, other_key, SuggestionReason.INITIALS))
+    for (key, initial, abbreviated), (other_key, other_initial, other_abbreviated) in _pairs_within(
+        buckets.values(), budget
+    ):
+        # One side abbreviated is what keeps two different people with the
+        # same surname and the same initial out of each other's groups.
+        if initial == other_initial and (abbreviated or other_abbreviated):
+            edges.append((key, other_key, SuggestionReason.INITIALS))
     return edges
 
 
@@ -800,24 +792,34 @@ def _edges_on_fragments(
             buckets[token].append(key)
 
     edges: list[_Edge] = []
-    for keys in buckets.values():
-        if len(keys) > MAX_BUCKET:
-            continue
-        for index, key in enumerate(keys):
-            for other in keys[index + 1 :]:
-                if not budget.spend():
-                    return edges
-                # A pair sharing two words is compared twice, and that is
-                # cheaper than remembering it. The set that used to dedupe here
-                # was sized by distinct pairs **across every bucket**, which is
-                # where the memory went: 347.5 MB at 3,200 names. A repeated
-                # comparison costs one subset test and a duplicate edge, and
-                # the union below is idempotent.
-                left, right = words[key], words[other]
-                shorter, longer = (left, right) if len(left) < len(right) else (right, left)
-                if len(shorter) >= 2 and shorter < longer:
-                    edges.append((key, other, SuggestionReason.FRAGMENT))
+    for key, other in _pairs_within(buckets.values(), budget):
+        # A pair sharing two words is compared twice, and that is cheaper than
+        # remembering it. The set that used to dedupe here was sized by
+        # distinct pairs **across every bucket**, which is where the memory
+        # went: 347.5 MB at 3,200 names. A repeated comparison costs one subset
+        # test and a duplicate edge, and the union below is idempotent.
+        left, right = words[key], words[other]
+        shorter, longer = (left, right) if len(left) < len(right) else (right, left)
+        if len(shorter) >= 2 and shorter < longer:
+            edges.append((key, other, SuggestionReason.FRAGMENT))
     return edges
+
+
+def _pairs_within[T](buckets: Iterable[list[T]], budget: _Budget) -> Iterator[tuple[T, T]]:
+    """Every pair inside each bucket, one comparison spent per pair.
+
+    A bucket past `MAX_BUCKET` is skipped whole, since the pairs inside one are
+    quadratic and a member fills the bucket by typing. The pairs stop, mid
+    bucket, the moment `budget` is spent, and a rule keeps the edges it found.
+    """
+    for bucket in buckets:
+        if len(bucket) > MAX_BUCKET:
+            continue
+        for index, one in enumerate(bucket):
+            for other in bucket[index + 1 :]:
+                if not budget.spend():
+                    return
+                yield one, other
 
 
 @dataclass(frozen=True, slots=True)

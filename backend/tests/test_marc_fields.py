@@ -523,6 +523,17 @@ class TestWhichAddedEntryWroteTheBook:
 
         assert fields.authors() == "Ann Goldstein"
 
+    def test_an_author_field_with_no_dollar_a_credits_nobody_and_raises_nothing(self):
+        """Catalogue data is remote input: without the check, indexing a missing
+        `$a` would raise a `KeyError` out of the reader rather than read no author."""
+        fields = self._fields(
+            '<datafield tag="100" ind1="1" ind2=" "><subfield code="d">1900</subfield></datafield>',
+            '<datafield tag="700" ind1="1" ind2=" "><subfield code="d">1900</subfield>'
+            '<subfield code="4">aut</subfield></datafield>',
+        )
+
+        assert fields.authors() is None
+
     def test_a_uri_naming_a_translator_is_still_refused(self):
         """The arm that says the URI is read for what it means rather than
         refused for how it is spelled."""
@@ -704,6 +715,13 @@ class TestTheCarrierDecides:
     )
     def test_the_record_states_its_own_carrier(self, leader, controls, expected):
         assert marc_fields._marc_carrier_is_book(_carrier_record(leader, **controls)) is expected
+
+    def test_a_field_one_past_the_position_it_is_read_at_still_decides(self):
+        leader = "00000nk"
+        form_of_item = "0" * 23 + "o"
+
+        assert marc_fields._marc_carrier_is_book(_carrier_record(leader)) is False
+        assert marc_fields._marc_carrier_is_book(_carrier_record(**{"008": form_of_item})) is False
 
     def test_a_control_field_is_read_raw_and_never_through_marc_text(self):
         """The blanks in an 008 are data, and collapsing them moves position 23.

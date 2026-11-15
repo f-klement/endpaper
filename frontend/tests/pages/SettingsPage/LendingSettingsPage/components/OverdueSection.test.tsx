@@ -259,6 +259,11 @@ describe("OverdueSection", () => {
     expect(seen.size).toBe(Object.values(OverdueNotifyReason).length);
   });
 
+  it("says nothing was sent for a failed run that carries no reason", () => {
+    renderSection({}, { sendResult: { sent: false, loans: 0, reason: null } });
+    expect(screen.getByRole("status")).toHaveTextContent("Nothing was sent.");
+  });
+
   it("names how many private books were held back", () => {
     renderSection(
       {},
@@ -371,6 +376,22 @@ describe("the per channel rows", () => {
     expect(row.textContent).not.toMatch(/below/i);
   });
 
+  it("says a channel sent nothing when its row carries no reason", () => {
+    withSenders([
+      {
+        sender: OverdueSender.webhook,
+        sent: false,
+        loans: 1,
+        skipped_private: 0,
+        reason: null,
+      },
+    ]);
+
+    expect(screen.getByRole("listitem")).toHaveTextContent(
+      "Webhook: nothing was sent.",
+    );
+  });
+
   it("renders no list when nothing was attempted", () => {
     renderSection(
       {},
@@ -385,6 +406,7 @@ describe("the per channel rows", () => {
       },
     );
 
+    expect(screen.queryByRole("list")).toBeNull();
     expect(screen.queryByRole("listitem")).toBeNull();
   });
 

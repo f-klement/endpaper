@@ -431,6 +431,12 @@ class TestTheBoundsAreRefusedWithADiagnostic:
         response = respond(db, operation="searchRetrieve", query="(" * depth + "dog" + ")" * depth)
         assert diagnostic_of(response) is None
 
+    def test_nesting_one_past_the_bound_is_refused(self, db):
+        depth = sru.MAX_NESTING_DEPTH + 1
+        response = respond(db, operation="searchRetrieve", query="(" * depth + "dog" + ")" * depth)
+        assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES
+        assert details_of(response) == f"at most {sru.MAX_NESTING_DEPTH} deep"
+
     def test_more_search_clauses_than_the_bound_is_refused(self, db):
         query = " and ".join(f"dc.title=t{n}" for n in range(sru.MAX_CLAUSES + 1))
         response = respond(db, operation="searchRetrieve", query=query)
@@ -1612,6 +1618,17 @@ class TestAnIntegerTheCatalogueCannotHoldIsRefusedRatherThanRaised:
         assert details is not None
         assert details.startswith("startRecord is outside")
 
+    def test_a_start_record_of_zero_is_below_the_range(self, db, shelf):
+        response = respond(db, query="Chartreuse", startRecord="0")
+        assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_PARAMETER_VALUE
+        assert details_of(response) == f"startRecord is outside 1 to {sru.SQLITE_MAX_INTEGER}"
+
+    def test_a_start_record_sent_twice_is_refused(self, db, shelf):
+        query_string = "query=Chartreuse&startRecord=1&startRecord=2"
+        response = ElementTree.fromstring(sru.respond(query_string, db, SERVER))
+        assert diagnostic_of(response) == sru.Diagnostic.UNSUPPORTED_PARAMETER_VALUE
+        assert details_of(response) == "startRecord was sent twice"
+
 
 class TestSortingIsRefusedInBothSpellings:
     """SRU 1.2 moved sorting out of the parameters and into CQL.
@@ -1741,6 +1758,10 @@ class TestMaskingMeansWhatTheClientMeant:
         for `100%` means a per cent sign; an unescaped pattern would match the
         book beside it too."""
         assert self._titles(db, 'dc.title="100%"') == {"Discount 100% Cotton"}
+
+    def test_a_masked_word_ends_where_the_whitespace_is(self, db, books):
+        """`any` is over words, so `Wind*` and `Cotton` are two, not one masked pattern."""
+        assert self._titles(db, 'dc.title any "Wind* Cotton"') == {"Discount 100% Cotton", "The Windmill"}
 
     def test_a_literal_underscore_is_not_a_wildcard(self, db, admin):
         db.add_all(
@@ -2402,6 +2423,14 @@ class TestAMalformedQueryIsRefusedByName:
     def test_a_closing_parenthesis_with_nothing_open_is_refused(self):
         assert _diagnostic_of(")dog") is sru.Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES
 
+    def test_a_term_ending_in_a_backslash_is_a_syntax_error(self):
+        assert _diagnostic_of("dog\\") is sru.Diagnostic.QUERY_SYNTAX_ERROR
+
+    def test_the_first_refusal_in_a_term_wins_over_a_bad_escape_after_it(self):
+        """The escapes are resolved as the walk reaches them, so a term is refused
+        for the first thing wrong with it, read left to right."""
+        assert _diagnostic_of("dog^\\q") is sru.Diagnostic.ANCHORING_NOT_SUPPORTED
+
     def test_a_bare_index_name_means_the_index_it_abbreviates(self, db, shelf):
         bare = respond(db, query="title = Chartreuse")
         assert diagnostic_of(bare) is None
@@ -2418,6 +2447,14 @@ class TestAMalformedQueryIsRefusedByName:
     def test_a_masked_term_on_a_numeric_index_is_refused(self, db, shelf):
         response = respond(db, query="dc.date = 19*")
         assert diagnostic_of(response) == sru.Diagnostic.TERM_IN_INVALID_FORMAT
+
+    def test_an_anchor_past_the_mask_bound_is_refused_as_an_anchor(self):
+        assert _diagnostic_of("dc.title=" + "*" * sru.MAX_MASKS_IN_A_TERM + "^") is (
+            sru.Diagnostic.ANCHORING_NOT_SUPPORTED
+        )
+
+    def test_a_quoted_index_name_is_not_an_index(self):
+        assert _diagnostic_of('"dc.title" = dog') is sru.Diagnostic.UNSUPPORTED_INDEX
 
 
 @pytest.mark.property

@@ -308,3 +308,59 @@ describe("a blank note", () => {
     expect(screen.getByLabelText("Edit note")).toBeInTheDocument();
   });
 });
+
+/** One note of the reader's own, with the two callbacks a rewording or a removal reaches. */
+function renderOwn(note: ReturnType<typeof makeNote>) {
+  const onEdit = vi.fn<(noteId: number, content: string) => void>();
+  const onRemove = vi.fn<(noteId: number) => void>();
+  renderLocalised(
+    <NoteList
+      notes={[note]}
+      currentUser={READER}
+      isAdding={false}
+      onAdd={vi.fn<(content: string) => void>()}
+      onEdit={onEdit}
+      onRemove={onRemove}
+    />,
+  );
+  return { onEdit, onRemove };
+}
+
+describe("rewording and removing a note", () => {
+  it("opens the editor on the note's own words", () => {
+    renderOwn(makeNote({ user_id: READER.id, content: "First go" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Edit note")).toHaveValue("First go");
+  });
+
+  it("saves the new words trimmed and closes the editor", () => {
+    const note = makeNote({ user_id: READER.id });
+    const { onEdit } = renderOwn(note);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Edit note"), {
+      target: { value: "  Second go  " },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onEdit).toHaveBeenCalledWith(note.id, "Second go");
+    expect(screen.queryByLabelText("Edit note")).not.toBeInTheDocument();
+  });
+
+  it("saves nothing when the rewording is cancelled", () => {
+    const { onEdit } = renderOwn(makeNote({ user_id: READER.id }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Edit note")).not.toBeInTheDocument();
+  });
+
+  it("removes the note whose delete is pressed", () => {
+    const note = makeNote({ user_id: READER.id });
+    const { onRemove } = renderOwn(note);
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onRemove).toHaveBeenCalledWith(note.id);
+  });
+});

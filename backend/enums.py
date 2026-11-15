@@ -1038,6 +1038,72 @@ class CatalogueSource(StrEnum):
     BNU = "bnu"
 
 
+# A member per `CatalogueSource` is checked below the class rather than
+# generated: a `StrEnum` cannot extend another, and a functional `StrEnum(...)`
+# call is a type mypy cannot read members off. No migration for a new member:
+# the column is a plain `String(20)` behind `models.DegradingEnum`.
+class RecordOrigin(StrEnum):
+    """Where a Book's record came from: a catalogue, a file, an import, or a person.
+
+    **A closed set rather than a free string**, so every surface can label each
+    value and a stored value nobody can name degrades to unknown rather than
+    arriving on screen untranslated. Every `CatalogueSource` is a member under
+    its own value; the rest are the origins that are not a catalogue.
+
+    **Where the record came from, never whether it was changed since.** That is
+    `books.record_modified_here`, and why the two are two columns is on
+    `models.Book`.
+    """
+
+    OPEN_LIBRARY = "open_library"
+    GOOGLE_BOOKS = "google_books"
+    DNB = "dnb"
+    K10PLUS = "k10plus"
+    OENB = "oenb"
+    NLG = "nlg"
+    NKP = "nkp"
+    BNF = "bnf"
+    LOC = "loc"
+    BNE = "bne"
+    BNA = "bna"
+    BNU = "bnu"
+    #: Typed by a member, or sent by a client that named no other origin.
+    MANUAL = "manual"
+    #: Read off the book's own file, or its name, on the scan page.
+    FILE = "file"
+    #: A reading history export, `importing.Import`.
+    CSV_IMPORT = "csv_import"
+    #: Another institution's MARCXML file, `importing.MarcImport`.
+    MARC_IMPORT = "marc_import"
+    #: A member's own library server, `importing.OpdsImport`.
+    OPDS_IMPORT = "opds_import"
+    #: A Calibre library read in the browser.
+    CALIBRE_IMPORT = "calibre_import"
+    #: A store's export or a reading device's database, read in the browser.
+    STORE_IMPORT = "store_import"
+
+    @classmethod
+    def of_catalogue(cls, name: str) -> RecordOrigin | None:
+        """The origin a catalogue's record carries, or None for a name no catalogue has.
+
+        A name rather than a `CatalogueSource`, because `catalogue.Record.leading`
+        is a string: a record a test or a file reader labels `marc` is no
+        catalogue's, and answers None rather than raising.
+        """
+        return cls(name) if name in set(CatalogueSource) else None
+
+
+#: Refused at import, for `book_columns._MISFILED`'s reason: a catalogue added to
+#: the roster without an origin of its own would answer a lookup whose record
+#: then reads as coming from nowhere.
+_SOURCES_WITHOUT_AN_ORIGIN = set(map(str, CatalogueSource)) - set(map(str, RecordOrigin))
+if _SOURCES_WITHOUT_AN_ORIGIN:
+    raise RuntimeError(
+        "Every CatalogueSource is a RecordOrigin under the same value, and these "
+        f"are not: {sorted(_SOURCES_WITHOUT_AN_ORIGIN)}. Add each to RecordOrigin."
+    )
+
+
 class SourceFamily(StrEnum):
     """Which kind of thing a source is, and there are two of them.
 

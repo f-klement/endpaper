@@ -4,9 +4,9 @@
  * **Two readers, two sets.** `catalogueMode.ts` owns which two readers, and
  * this is what each wants from a table: who is willing to lend what, what it
  * cost and who has read it, against where a book files on a shelf, what
- * published schemes say it is about, and whether the record itself is
- * finished. Half of each set is noise to the other, which is what the ticket
- * means by a list that is half irrelevant.
+ * published schemes say it is about, and where the record came from. Half of
+ * each set is noise to the other, which is what the ticket means by a list
+ * that is half irrelevant.
  *
  * **This is a view configuration, not a second table.** The table renders
  * whatever `COLUMN_KEYS` order it is handed; nothing here knows how a cell is
@@ -35,8 +35,8 @@ import { declareScopedPreference } from "./preference";
 /**
  * Every column the table can draw, in the order it draws them.
  *
- * **The order is the household's existing table with two columns inserted into
- * it**, rather than an order chosen fresh. Those two are not offered in
+ * **The order is the household's existing table with three columns inserted into
+ * it**, rather than an order chosen fresh. Those three are not offered in
  * household mode at all, so filtering them out reproduces today's table column
  * for column, and this ticket does not rearrange anybody's catalogue.
  */
@@ -48,6 +48,7 @@ export const COLUMN_KEYS = [
   "publisher",
   "callNumber",
   "classification",
+  "origin",
   "format",
   "condition",
   "lending",
@@ -128,6 +129,11 @@ export const COLUMN_SPECS: Record<ColumnKey, ColumnSpec> = {
   },
   classification: {
     label: "field.classification",
+    offeredTo: CATALOGUER,
+    defaultIn: CATALOGUER,
+  },
+  origin: {
+    label: "origin.label",
     offeredTo: CATALOGUER,
     defaultIn: CATALOGUER,
   },

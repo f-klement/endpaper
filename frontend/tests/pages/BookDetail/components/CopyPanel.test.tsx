@@ -106,6 +106,54 @@ describe("CopyPanel", () => {
     );
   });
 
+  it("sends every field left empty as null, and a shop trimmed", async () => {
+    const onSave = renderPanel();
+    const user = userEvent.setup();
+
+    fireEvent.change(screen.getByLabelText("Bought from"), {
+      target: { value: "  Oxfam  " },
+    });
+    await user.click(screen.getByRole("button", { name: "Save copy details" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      format: null,
+      condition: null,
+      purchase_price_minor: null,
+      purchase_currency: null,
+      purchased_at: null,
+      purchase_source: "Oxfam",
+    });
+  });
+
+  it("sends the day the copy was bought", async () => {
+    const onSave = renderPanel();
+    const user = userEvent.setup();
+
+    fireEvent.change(screen.getByLabelText("Bought on"), {
+      target: { value: "2026-03-01" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save copy details" }));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ purchased_at: "2026-03-01" }),
+    );
+  });
+
+  it.each([
+    ["Format", "paperback"],
+    ["Condition", "good"],
+    ["Price paid", "12.99"],
+    ["Currency", "EUR"],
+    ["Bought on", "2026-03-01"],
+    ["Bought from", "Oxfam"],
+  ])("can be saved once %s alone changes", (label, value) => {
+    renderPanel();
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    expect(
+      screen.getByRole("button", { name: "Save copy details" }),
+    ).toBeEnabled();
+  });
+
   it("cannot be saved until something changes", () => {
     renderPanel();
     expect(

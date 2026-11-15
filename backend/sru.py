@@ -51,10 +51,10 @@ untrusted path at all.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from enum import Enum, IntEnum, auto
-from typing import Any, Final
+from typing import Any, Final, NoReturn
 from urllib.parse import parse_qs
 from xml.etree import ElementTree
 
@@ -441,20 +441,33 @@ class Term:
         """
         words: list[tuple[Piece, ...]] = []
         current: list[Piece] = []
-        for piece in self.pieces:
-            if isinstance(piece, Mask):
+        for piece in self._with_breaks():
+            if piece is not None:
                 current.append(piece)
                 continue
-            for index, chunk in enumerate(_WHITESPACE.split(piece)):
-                if index:
-                    if current:
-                        words.append(tuple(current))
-                    current = []
-                if chunk:
-                    current.append(chunk)
+            if current:
+                words.append(tuple(current))
+            current = []
         if current:
             words.append(tuple(current))
         return tuple(Term(word) for word in words)
+
+    def _with_breaks(self) -> Iterator[Piece | None]:
+        """The pieces with each literal split on whitespace, None where whitespace was.
+
+        Only a literal can hold whitespace, so a mask passes through whole. The
+        empty runs a split leaves at either end of a literal are dropped and its
+        breaks are kept, so a word ends wherever whitespace was.
+        """
+        for piece in self.pieces:
+            if isinstance(piece, Mask):
+                yield piece
+                continue
+            for index, chunk in enumerate(_WHITESPACE.split(piece)):
+                if index:
+                    yield None
+                if chunk:
+                    yield chunk
 
 
 @dataclass(frozen=True, slots=True)
@@ -533,6 +546,20 @@ def _tokenise(query: str) -> list[_Token]:
     Bounded by `MAX_QUERY_CHARS` before a character is looked at, so the number
     of tokens is bounded too and nothing below has to count them.
     """
+    _refuse_unscannable(query)
+    tokens: list[_Token] = []
+    position = 0
+    while position < len(query):
+        if query[position].isspace():
+            position += 1
+            continue
+        token, position = _next_token(query, position, tokens)
+        tokens.append(token)
+    return tokens
+
+
+def _refuse_unscannable(query: str) -> None:
+    """Refuse a query too long to scan, or one carrying a control character."""
     if len(query) > MAX_QUERY_CHARS:
         raise SruError(
             Diagnostic.TOO_MANY_CHARACTERS_IN_QUERY,
@@ -546,57 +573,53 @@ def _tokenise(query: str) -> list[_Token]:
         if not character.isprintable() and character not in "\t\r\n":
             raise SruError(Diagnostic.QUERY_SYNTAX_ERROR, "a control character")
 
-    tokens: list[_Token] = []
-    position = 0
-    length = len(query)
-    while position < length:
-        character = query[position]
-        if character.isspace():
-            position += 1
-            continue
-        if character == "(":
-            tokens.append(_Token(_Kind.OPEN, "("))
-            position += 1
-            continue
-        if character == ")":
-            tokens.append(_Token(_Kind.CLOSE, ")"))
-            position += 1
-            continue
-        if character == "/":
-            # **A sort spec carries its modifiers on a `/` too, and that `/`
-            # reaches here before a parser exists.** So the `sortby` arm in
-            # `_Parser.parse` covers only the bare spelling, and CQL 1.2's
-            # ordinary one, `sortby dc.date/ascending`, was answered 20: wrong
-            # twice over, since it is not a relation modifier and the client
-            # asked for sorting.
-            #
-            # Looking back for a bare `sortby` is what distinguishes the two,
-            # and it is exact rather than approximate: a quoted `"sortby"` is a
-            # QUOTED token and cannot match, so a search for that word is still
-            # a search, and `dc.title =/rel dog` has no earlier `sortby` and
-            # still gets 20.
-            #
-            # This is the round's own lesson landing on the round's own fix: the
-            # first version pinned the one spelling a review named, and an
-            # example is not a family.
-            if any(token.kind is _Kind.WORD and token.text.lower() == "sortby" for token in tokens):
-                raise SruError(Diagnostic.SORT_NOT_SUPPORTED, "sortby")
-            raise SruError(Diagnostic.UNSUPPORTED_RELATION_MODIFIER, "no relation modifiers")
-        if character == '"':
-            text, position = _scan_quoted(query, position)
-            tokens.append(_Token(_Kind.QUOTED, text))
-            continue
-        symbol = next(
-            (candidate for candidate in _RELATION_SYMBOLS if query.startswith(candidate, position)),
-            None,
-        )
-        if symbol is not None:
-            tokens.append(_Token(_Kind.RELATION, symbol))
-            position += len(symbol)
-            continue
-        text, position = _scan_word(query, position)
-        tokens.append(_Token(_Kind.WORD, text))
-    return tokens
+
+#: The two characters that are a token on their own.
+_PARENTHESES: Final = {"(": _Kind.OPEN, ")": _Kind.CLOSE}
+
+
+def _next_token(query: str, position: int, tokens: Sequence[_Token]) -> tuple[_Token, int]:
+    """The token starting at `position`, which is not whitespace, and where it ends.
+
+    `tokens` is what came before it, read only by the refusal of a `/`.
+    """
+    character = query[position]
+    if character in _PARENTHESES:
+        return _Token(_PARENTHESES[character], character), position + 1
+    if character == "/":
+        _refuse_slash(tokens)
+    if character == '"':
+        text, position = _scan_quoted(query, position)
+        return _Token(_Kind.QUOTED, text), position
+    symbol = next(
+        (candidate for candidate in _RELATION_SYMBOLS if query.startswith(candidate, position)),
+        None,
+    )
+    if symbol is not None:
+        return _Token(_Kind.RELATION, symbol), position + len(symbol)
+    text, position = _scan_word(query, position)
+    return _Token(_Kind.WORD, text), position
+
+
+def _refuse_slash(tokens: Sequence[_Token]) -> NoReturn:
+    """Refuse a `/`: as a sort spec's modifier after `sortby`, as a relation modifier otherwise."""
+    # **A sort spec carries its modifiers on a `/` too, and that `/` reaches
+    # here before a parser exists.** So the `sortby` arm in `_Parser.parse`
+    # covers only the bare spelling, and CQL 1.2's ordinary one,
+    # `sortby dc.date/ascending`, was answered 20: wrong twice over, since it
+    # is not a relation modifier and the client asked for sorting.
+    #
+    # Looking back for a bare `sortby` is what distinguishes the two, and it is
+    # exact rather than approximate: a quoted `"sortby"` is a QUOTED token and
+    # cannot match, so a search for that word is still a search, and
+    # `dc.title =/rel dog` has no earlier `sortby` and still gets 20.
+    #
+    # This is the round's own lesson landing on the round's own fix: the first
+    # version pinned the one spelling a review named, and an example is not a
+    # family.
+    if any(token.kind is _Kind.WORD and token.text.lower() == "sortby" for token in tokens):
+        raise SruError(Diagnostic.SORT_NOT_SUPPORTED, "sortby")
+    raise SruError(Diagnostic.UNSUPPORTED_RELATION_MODIFIER, "no relation modifiers")
 
 
 def _scan_quoted(query: str, position: int) -> tuple[str, int]:
@@ -640,40 +663,64 @@ def _pieces(raw: str) -> Term:
     pieces: list[Piece] = []
     literal: list[str] = []
     masks = 0
-    position = 0
-    while position < len(raw):
-        character = raw[position]
-        if character == "\\":
-            if position + 1 >= len(raw):
-                raise SruError(Diagnostic.QUERY_SYNTAX_ERROR, "a term ends with a backslash")
-            escaped = raw[position + 1]
-            if escaped not in _ESCAPABLE:
-                raise SruError(Diagnostic.NON_SPECIAL_CHARACTER_ESCAPED, f"\\{escaped}")
-            literal.append(escaped)
-            position += 2
+    for character, escaped in _unescaped(raw):
+        if escaped or character not in "*?^":
+            literal.append(character)
             continue
-        if character == "^":
-            raise SruError(Diagnostic.ANCHORING_NOT_SUPPORTED, "^")
-        if character in "*?":
-            if literal:
-                pieces.append("".join(literal))
-                literal = []
-            masks += 1
-            if masks > MAX_MASKS_IN_A_TERM:
-                raise SruError(
-                    Diagnostic.TOO_MANY_MASKING_CHARACTERS,
-                    f"at most {MAX_MASKS_IN_A_TERM} per term",
-                )
-            pieces.append(Mask.ANY_STRING if character == "*" else Mask.ANY_CHAR)
-            position += 1
-            continue
-        literal.append(character)
-        position += 1
+        if literal:
+            pieces.append("".join(literal))
+            literal = []
+        masks += 1
+        pieces.append(_mask(character, masks))
     if literal:
         pieces.append("".join(literal))
     if not pieces:
         raise SruError(Diagnostic.EMPTY_TERM, "a term with nothing in it")
     return Term(tuple(pieces))
+
+
+def _unescaped(raw: str) -> Iterator[tuple[str, bool]]:
+    """Each character of a raw term, and whether a backslash escaped it.
+
+    A generator, so a bad escape is refused only when the walk reaches it, and a
+    refusal earlier in the term still wins.
+    """
+    position = 0
+    while position < len(raw):
+        if raw[position] != "\\":
+            yield raw[position], False
+            position += 1
+            continue
+        if position + 1 >= len(raw):
+            raise SruError(Diagnostic.QUERY_SYNTAX_ERROR, "a term ends with a backslash")
+        escaped = raw[position + 1]
+        if escaped not in _ESCAPABLE:
+            raise SruError(Diagnostic.NON_SPECIAL_CHARACTER_ESCAPED, f"\\{escaped}")
+        yield escaped, True
+        position += 2
+
+
+def _mask(character: str, masks: int) -> Mask:
+    """The mask `*` or `?` stands for, as the term's `masks`th, or a refusal.
+
+    **`^` is refused before the count**, so an anchor past the mask bound is
+    named as an anchor rather than as one mask too many.
+    """
+    if character == "^":
+        raise SruError(Diagnostic.ANCHORING_NOT_SUPPORTED, "^")
+    if masks > MAX_MASKS_IN_A_TERM:
+        raise SruError(
+            Diagnostic.TOO_MANY_MASKING_CHARACTERS,
+            f"at most {MAX_MASKS_IN_A_TERM} per term",
+        )
+    return Mask.ANY_STRING if character == "*" else Mask.ANY_CHAR
+
+
+def _index_name(token: _Token) -> str:
+    """The index a clause names before its relation, lowercased, or the refusal of one that is no index."""
+    if token.kind is not _Kind.WORD or not _INDEX_NAME.fullmatch(token.text):
+        raise SruError(Diagnostic.UNSUPPORTED_INDEX, _safe(token.text) or "an index")
+    return token.text.lower()
 
 
 class _Parser:
@@ -740,20 +787,7 @@ class _Parser:
         if token.kind is _Kind.CLOSE:
             raise SruError(Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES, "an unmatched )")
         if token.kind is _Kind.OPEN:
-            # **The depth bound is here and nowhere else.** One frame of this
-            # method per level, so a bound checked after the parse is a bound
-            # checked after the RecursionError.
-            if depth + 1 > MAX_NESTING_DEPTH:
-                raise SruError(
-                    Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES,
-                    f"at most {MAX_NESTING_DEPTH} deep",
-                )
-            node = self._query(depth + 1)
-            closing = self._peek()
-            if closing is None or closing.kind is not _Kind.CLOSE:
-                raise SruError(Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES, "an unclosed (")
-            self._position += 1
-            return node
+            return self._group(depth)
         if token.kind is _Kind.RELATION:
             raise SruError(Diagnostic.QUERY_SYNTAX_ERROR, "a relation with nothing before it")
 
@@ -761,10 +795,28 @@ class _Parser:
         if relation is None:
             index, relation, raw = "", "=", token.text
         else:
-            if token.kind is not _Kind.WORD or not _INDEX_NAME.fullmatch(token.text):
-                raise SruError(Diagnostic.UNSUPPORTED_INDEX, _safe(token.text) or "an index")
-            index, raw = token.text.lower(), term_token.text
+            index, raw = _index_name(token), term_token.text
+        return self._counted(index, relation, raw)
 
+    def _group(self, depth: int) -> Node:
+        """The query inside a `(` already taken, and its `)`."""
+        # **The depth bound is here and nowhere else.** Every level of nesting
+        # recurses through here, `_clause` to `_group` to `_query`, so a bound
+        # checked after the parse is a bound checked after the RecursionError.
+        if depth + 1 > MAX_NESTING_DEPTH:
+            raise SruError(
+                Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES,
+                f"at most {MAX_NESTING_DEPTH} deep",
+            )
+        node = self._query(depth + 1)
+        closing = self._peek()
+        if closing is None or closing.kind is not _Kind.CLOSE:
+            raise SruError(Diagnostic.UNSUPPORTED_USE_OF_PARENTHESES, "an unclosed (")
+        self._position += 1
+        return node
+
+    def _counted(self, index: str, relation: str, raw: str) -> Clause:
+        """One search clause, counted against the query's clause bound and its term's word bound."""
         self._clauses += 1
         if self._clauses > MAX_CLAUSES:
             raise SruError(
@@ -1493,7 +1545,20 @@ def _check_schema(parameters: dict[str, list[str]]) -> None:
 def _read_request(query_string: str) -> _Request:
     """The query string as a validated request, or the diagnostic for why not."""
     parameters = parse_qs(query_string, keep_blank_values=True)
+    operation = _operation(parameters)
+    _refuse_unknown_parameters(parameters, operation)
+    version = _single(parameters["version"], "version") if "version" in parameters else DEFAULT_VERSION
+    if version not in SUPPORTED_VERSIONS:
+        raise SruError(Diagnostic.UNSUPPORTED_VERSION, _safe(version))
+    _check_packing(parameters)
+    if operation == "explain":
+        return _Request("explain", version, "", 1, 0)
+    _check_schema(parameters)
+    return _search_request(parameters, version)
 
+
+def _operation(parameters: dict[str, list[str]]) -> str:
+    """The operation asked for, or the refusal of one this server does not answer."""
     # **An absent `operation` is `searchRetrieve` when a `query` came with it,
     # and `explain` otherwise.** That is SRU 2.0's rule applied to 1.2, where the
     # parameter is nominally mandatory. Clients omit it, and a request carrying a
@@ -1506,7 +1571,11 @@ def _read_request(query_string: str) -> _Request:
     )
     if operation not in ("explain", "searchRetrieve"):
         raise SruError(Diagnostic.UNSUPPORTED_OPERATION, _safe(operation))
+    return operation
 
+
+def _refuse_unknown_parameters(parameters: dict[str, list[str]], operation: str) -> None:
+    """Refuse the first parameter `operation` does not take, an `x-` extension aside."""
     allowed = _SEARCH_PARAMETERS if operation == "searchRetrieve" else _EXPLAIN_PARAMETERS
     for name in parameters:
         if name.startswith("x-"):
@@ -1517,42 +1586,28 @@ def _read_request(query_string: str) -> _Request:
                 _safe(name),
             )
 
-    version = _single(parameters["version"], "version") if "version" in parameters else DEFAULT_VERSION
-    if version not in SUPPORTED_VERSIONS:
-        raise SruError(Diagnostic.UNSUPPORTED_VERSION, _safe(version))
 
-    _check_packing(parameters)
-
-    if operation == "explain":
-        return _Request("explain", version, "", 1, 0)
-
-    _check_schema(parameters)
-
+def _search_request(parameters: dict[str, list[str]], version: str) -> _Request:
+    """A `searchRetrieve` request, once the checks every operation shares have passed."""
     if "query" not in parameters:
         raise SruError(Diagnostic.MANDATORY_PARAMETER_NOT_SUPPLIED, "query")
     query = _single(parameters["query"], "query")
     if not query.strip():
         raise SruError(Diagnostic.MANDATORY_PARAMETER_NOT_SUPPLIED, "query")
-
-    start = (
-        _bounded_int(_single(parameters["startRecord"], "startRecord"), "startRecord", minimum=1)
-        if "startRecord" in parameters
-        else 1
-    )
-    wanted = (
-        _bounded_int(
-            _single(parameters["maximumRecords"], "maximumRecords"),
-            "maximumRecords",
-            minimum=0,
-        )
-        if "maximumRecords" in parameters
-        else DEFAULT_RECORDS
-    )
+    start = _optional_int(parameters, "startRecord", default=1, minimum=1)
+    wanted = _optional_int(parameters, "maximumRecords", default=DEFAULT_RECORDS, minimum=0)
     # **Clamped, not refused.** A client asking for a thousand records gets
     # fifty and a `numberOfRecords` telling it how many there were, which is how
     # SRU paging works. Refusing would make a reasonable client's first request
     # fail for a reason it has no way to have known.
     return _Request("searchRetrieve", version, query, start, min(wanted, MAX_RECORDS))
+
+
+def _optional_int(parameters: dict[str, list[str]], name: str, *, default: int, minimum: int) -> int:
+    """The integer parameter `name` through `_bounded_int`, or `default` when it was not sent."""
+    if name not in parameters:
+        return default
+    return _bounded_int(_single(parameters[name], name), name, minimum=minimum)
 
 
 # ── The responses ────────────────────────────────────────────────────────────

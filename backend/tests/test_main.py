@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+import book_columns
 import credentials
 import errors
 import main
@@ -732,3 +733,11 @@ class TestAStartWithAKeySealsWhatWasWrittenWithout:
         main.seal_plaintext_secrets()
         db.expire_all()
         assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.MAIL_PASSWORD))
+
+
+class TestTheWorkFactsReachTheClient:
+    def test_the_schema_names_each_work_fact_book_columns_holds(self):
+        """The scan page decides which filled field changes a record from this set."""
+        assert main.app.openapi()["components"]["schemas"]["WorkFact"]["enum"] == list(
+            book_columns.WORK_FACTS
+        )

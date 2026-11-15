@@ -39,7 +39,7 @@ from xml.sax.saxutils import escape
 import covers
 from categories import join_categories
 from custom_fields import web_link
-from enums import AuthorityScheme, ClassificationScheme, HeadingKind, LinkRelationship
+from enums import AuthorityScheme, ClassificationScheme, HeadingKind, LinkRelationship, RecordOrigin
 from models import (
     AUTHOR_LINE_MAX,
     COVER_URL_MAX,
@@ -464,41 +464,49 @@ def _drop_unstorable(record: Record) -> list[str]:
     dropped: list[str] = []
     for name, ceiling in _TEXT_CEILINGS.items():
         value = getattr(record, name)
-        if value is None:
-            continue
-        if not isinstance(value, str):
-            object.__setattr__(record, name, None)
-            dropped.append(name)
-            continue
-        rewrite = _AS_STORED.get(name)
-        stored = rewrite(value) if rewrite is not None else value
-        if stored is not None and len(stored) > ceiling:
+        if value is not None and _text_unstorable(name, value, ceiling):
             object.__setattr__(record, name, None)
             dropped.append(name)
     for name, (low, high) in _NUMBER_RANGES.items():
         value = getattr(record, name)
-        if value is None:
-            continue
-        # **The same gate as the loop above, and it was missing here for one
-        # round.** A fix that gated half of this function was the shape this
-        # file's own rules name, better in the dimension it was designed for and
-        # silently weaker in one nobody re-checked. The docstring carries the
-        # measurement for both arms and what the drop costs.
-        #
-        # **Where it is reached from**, which is why the gate is here and not in
-        # one adapter: `google_books._volume_to_fields` passes `pageCount`
-        # through raw, and `_open_library_search` passes `first_publish_year`
-        # into a `Record` built **outside** its own `try`, so a raise there is
-        # a 500 on the title search rather than one source's rows.
-        #
-        # **`bool` is excluded deliberately, and it is a judgement rather than
-        # a type error.** `isinstance(True, int)` is true and `1 <= True` holds,
-        # so a JSON `true` in `pageCount` stored as a page count of 1: a number
-        # this application invented from a value that was not one.
-        if not isinstance(value, int | float) or isinstance(value, bool) or not low <= value <= high:
+        if value is not None and _number_unstorable(value, low, high):
             object.__setattr__(record, name, None)
             dropped.append(name)
     return dropped
+
+
+def _text_unstorable(name: str, value: object, ceiling: int) -> bool:
+    """Whether a text field's value is not a string, or is wider than its
+    column once `_AS_STORED` has rewritten it."""
+    if not isinstance(value, str):
+        return True
+    rewrite = _AS_STORED.get(name)
+    stored = rewrite(value) if rewrite is not None else value
+    return stored is not None and len(stored) > ceiling
+
+
+def _number_unstorable(value: object, low: float, high: float) -> bool:
+    """Whether a numeric field's value is not a number, or falls outside its
+    column's range.
+
+    **The same gate as `_text_unstorable`, and it was missing here for one
+    round.** A fix that gated half of `_drop_unstorable` was the shape this
+    file's own rules name, better in the dimension it was designed for and
+    silently weaker in one nobody re-checked. `_text_unstorable`'s docstring
+    carries the measurement for both arms and what the drop costs.
+
+    **Where it is reached from**, which is why the gate is here and not in one
+    adapter: `google_books._volume_to_fields` passes `pageCount` through raw,
+    and `_open_library_search` passes `first_publish_year` into a `Record`
+    built **outside** its own `try`, so a raise there is a 500 on the title
+    search rather than one source's rows.
+
+    **`bool` is excluded deliberately, and it is a judgement rather than a
+    type error.** `isinstance(True, int)` is true and `1 <= True` holds, so a
+    JSON `true` in `pageCount` stored as a page count of 1: a number this
+    application invented from a value that was not one.
+    """
+    return not isinstance(value, int | float) or isinstance(value, bool) or not low <= value <= high
 
 
 def _drop_claimed_as_ours(record: Record) -> list[str]:
@@ -776,6 +784,16 @@ class Record:
         return frozenset(part for part in self.source.split(_SOURCE_JOIN) if part)
 
     @property
+    def leading(self) -> str:
+        """The catalogue describing the book, where several answered: the origin.
+
+        `filled_from` keeps it first in `source` and sorts only the catalogues
+        that filled its gaps, so a record stays one catalogue's description with
+        others' fields in the holes, and `books.record_origin` names that one.
+        """
+        return self.source.split(_SOURCE_JOIN, 1)[0]
+
+    @property
     def subject_labels(self) -> list[str]:
         """The subject words, each once, in order. What a reader is shown.
 
@@ -830,7 +848,11 @@ class Record:
             changes["headings"] = other.headings
         if not self.author_identifiers:
             changes["author_identifiers"] = other.author_identifiers
-        changes["source"] = _SOURCE_JOIN.join(sorted(self.sources | other.sources))
+        # The leader first and the rest sorted, so `leading` answers which
+        # catalogue's description this is. Sorting the leader in with the rest
+        # lost it, and the origin a Book records would then be alphabetical.
+        lead = [self.leading] if self.leading else []
+        changes["source"] = _SOURCE_JOIN.join([*lead, *sorted((self.sources | other.sources) - set(lead))])
         return dataclasses.replace(self, **changes)
 
     def merged_with(self, other: Record) -> Record:
@@ -1007,6 +1029,7 @@ class Record:
             "series_index": self.series_index,
             "language": self.language,
             "page_count": self.page_count,
+            "record_origin": RecordOrigin.of_catalogue(self.leading),
         }
 
     def as_match(self) -> dict[str, Any]:
@@ -1053,6 +1076,7 @@ class Record:
             "isbn13": self.isbn,
             "series_name": self.series_name,
             "series_index": self.series_index,
+            "record_origin": RecordOrigin.of_catalogue(self.leading),
         }
 
 

@@ -1,11 +1,13 @@
 """The Readwise pull's own rules, below the routes: reading a page, a page
-written again after losing a race, the token's seal, and who the daily job is
-due for.
+written again after losing a race, the token's seal, who the daily job is due
+for, and the ticker that runs it.
 
 What a pull writes is reached through the routes, in
 `tests/routers/test_readwise.py`.
 """
 
+import asyncio
+import logging
 from datetime import datetime, timedelta
 
 import pytest
@@ -18,11 +20,13 @@ from database import SessionLocal
 from enums import HighlightSource
 from models import (
     HIGHLIGHT_TEXT_MAX,
+    MAX_PAGE_NUMBER_IN_A_BOOK,
     MEMBER_LOGIN_ENVELOPE_MAX_BYTES,
     READWISE_TOKEN_MAX,
     DeletedHighlight,
     Highlight,
     MemberLogin,
+    ReadwiseBook,
 )
 
 
@@ -91,6 +95,25 @@ class TestReadingAPage:
         )
 
         assert page.entries[0].highlights[0].highlighted_at == datetime(2026, 3, 1, 21, 15, 9)
+
+    @pytest.mark.parametrize(
+        ("location_type", "location", "page"),
+        [
+            ("page", 12, 12),
+            ("order", 12, None),
+            ("page", MAX_PAGE_NUMBER_IN_A_BOOK, MAX_PAGE_NUMBER_IN_A_BOOK),
+            ("page", MAX_PAGE_NUMBER_IN_A_BOOK + 1, None),
+        ],
+        ids=["page", "not_a_page", "the_last_page", "past_the_last_page"],
+    )
+    def test_a_location_is_a_page_only_where_readwise_says_page_and_a_book_could_hold_it(
+        self, location_type, location, page
+    ):
+        mark = {"id": 1, "text": "x", "location_type": location_type, "location": location}
+
+        page_read = readwise.read_page({"results": [_entry(highlights=[mark])]})
+
+        assert page_read.entries[0].highlights[0].page == page
 
 
 class TestAPageThatLostARace:
@@ -196,6 +219,66 @@ class TestAPageListingOneHighlightUnderTwoBooks:
         assert (counts.created, counts.skipped) == (1, 0)
         assert [row.text for row in db.query(Highlight)] == ["later"]
 
+    def test_a_highlight_deleted_under_one_book_is_written_under_the_other(self, db, member, make_book):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        children = make_book(member["headers"], title="Children of Dune", author="Frank Herbert")["id"]
+        member_id = member["user"]["id"]
+        moved = (
+            _entry(user_book_id=7, title="Dune", highlights=[self.PASSAGE | {"is_deleted": True}]),
+            _entry(user_book_id=8, title="Children of Dune", highlights=[self.PASSAGE]),
+        )
+
+        counts = self._apply(db, member_id, *moved)
+
+        assert (counts.created, counts.skipped) == (1, 0)
+        assert [row.book_id for row in db.query(Highlight)] == [children]
+
+    def test_a_listing_under_a_book_nothing_matches_does_not_contest_it(self, db, member, make_book):
+        dune = make_book(member["headers"], title="Dune", author="Frank Herbert")["id"]
+        member_id = member["user"]["id"]
+        both = (
+            _entry(user_book_id=7, title="Dune", highlights=[self.PASSAGE]),
+            _entry(user_book_id=8, title="A Book Nobody Owns", highlights=[self.PASSAGE]),
+        )
+
+        counts = self._apply(db, member_id, *both)
+
+        assert (counts.created, counts.skipped) == (1, 0)
+        assert [row.book_id for row in db.query(Highlight)] == [dune]
+
+
+class TestABookDeletedAtReadwise:
+    def test_takes_its_live_highlights_with_it(self, db, member, make_book):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+        apply = TestAPageListingOneHighlightUnderTwoBooks._apply
+        apply(db, member_id, _entry(highlights=[{"id": 9, "text": "first"}]))
+
+        counts = apply(db, member_id, _entry(is_deleted=True, highlights=[{"id": 9, "text": "first"}]))
+
+        assert (counts.deleted, db.query(Highlight).count()) == (1, 0)
+
+
+class TestABookMatchedForTheFirstTime:
+    """Only a page listing part of a book's history leaves it to be asked for
+    whole."""
+
+    @pytest.mark.parametrize(("whole", "asked_again"), [(True, False), (False, True)])
+    def test_is_asked_for_again_only_from_an_incremental_page(
+        self, db, member, make_book, whole, asked_again
+    ):
+        make_book(member["headers"], title="Dune", author="Frank Herbert")
+        member_id = member["user"]["id"]
+        page = readwise.read_page({"results": [_entry(highlights=[{"id": 9, "text": "first"}])]})
+        index = readwise.build_index(db, member_id)
+
+        newly = readwise.apply_page(db, member_id, page, index, readwise.Counts(), whole=whole)
+
+        assert (newly, db.query(ReadwiseBook.whole_pending).scalar()) == (
+            {7} if asked_again else set(),
+            asked_again,
+        )
+
 
 class TestAPageListingOneHighlightLiveAndDeleted:
     """The page is one answer: a highlight live under one of its books is not
@@ -271,6 +354,27 @@ class TestWhoTheDailyJobIsDueFor:
         db.commit()
 
         assert readwise.due(db, now) == [admin["user"]["id"], member["user"]["id"]]
+
+
+async def test_a_failed_pass_is_logged_and_the_ticker_looks_again(monkeypatch, caplog):
+    """A raise escaping the loop would end the task for the life of the
+    container. The second pass ends the loop here with a cancellation, which is
+    what stopping it looks like."""
+    passes: list[int] = []
+
+    async def run_due() -> int:
+        passes.append(len(passes))
+        if len(passes) == 1:
+            raise RuntimeError("the first pass broke")
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(readwise, "TICK_SECONDS", 0)
+    monkeypatch.setattr(readwise, "run_due", run_due)
+    with caplog.at_level(logging.ERROR), pytest.raises(asyncio.CancelledError):
+        await readwise.ticker()
+
+    assert passes == [0, 1]
+    assert "The Readwise ticker failed a pass" in caplog.text
 
 
 class TestTheEnvelopeCeilingIsOnBytes:

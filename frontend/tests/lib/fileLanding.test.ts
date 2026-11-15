@@ -77,6 +77,61 @@ describe("asking which Book already holds a file", () => {
 
     expect(FILES_PER_LOOKUP).toBe(boundOf(files, "maxItems"));
   });
+
+  it("sends no file elsewhere whose location only a print copy holds", async () => {
+    // `Dune.pdf` sits where a paperback's reference is and its bytes are on
+    // ebook 5, so it may land on 5 by fingerprint. Its location stays with the
+    // paperback, and the server refuses it on 5 as it would on 9.
+    const held = await askWhoHolds(
+      [
+        {
+          key: "dune",
+          references: [at("Dune.epub"), at("Dune.pdf")],
+          format: BookFormat.ebook,
+        },
+      ],
+      async (files) =>
+        files.map((file) => ({
+          holders:
+            file.relative_path === "Dune.pdf"
+              ? [
+                  holder({ book_id: 3, format: BookFormat.paperback }),
+                  holder({
+                    book_id: 5,
+                    format: BookFormat.ebook,
+                    same_location: false,
+                  }),
+                ]
+              : [holder({ book_id: 9, format: BookFormat.ebook })],
+        })),
+    );
+
+    expect(held.get("dune")).toEqual({
+      bookId: 9,
+      lands: true,
+      inAnotherFormat: new Set([JSON.stringify(["Books", "Dune.pdf"])]),
+    });
+  });
+
+  it("names no file in another format for a book held only by a print copy", async () => {
+    // Nothing is sent to a Book the files may not land on, so there is no
+    // file there to hold back.
+    const held = await askWhoHolds(
+      [
+        {
+          key: "dune",
+          references: [at("Dune.epub")],
+          format: BookFormat.ebook,
+        },
+      ],
+      async (files) =>
+        files.map(() => ({
+          holders: [holder({ book_id: 3, format: BookFormat.paperback })],
+        })),
+    );
+
+    expect(held.get("dune")).toEqual({ bookId: 3, lands: false });
+  });
 });
 
 describe("reportEach", () => {
@@ -246,5 +301,30 @@ describe("landing one book", () => {
     ]);
     expect(landing).toEqual({ kind: "added", left: 1 });
     expect(countLandings([landing]).filesLeft).toBe(1);
+  });
+});
+
+describe("counting a run's landings", () => {
+  it("counts each kind once where it belongs and every file left", () => {
+    expect(
+      countLandings([
+        { kind: "added", left: 1 },
+        { kind: "added-unreferenced", left: 2 },
+        { kind: "on-holder", left: 4 },
+        { kind: "other-format", holderId: 7 },
+        { kind: "at-ceiling" },
+        { kind: "at-ceiling" },
+        { kind: "tie", thrown: null },
+        { kind: "in-trash", thrown: null },
+        { kind: "failed", thrown: null },
+      ]),
+    ).toEqual({
+      added: 2,
+      unreferenced: 1,
+      already: 1,
+      otherFormat: 1,
+      atCeiling: 2,
+      filesLeft: 7,
+    });
   });
 });

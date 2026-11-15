@@ -3,22 +3,27 @@
 `tests/test_sru.py` drives `sru.respond` and owns everything the protocol does.
 What is left here is the four things a route decides and a function over a query
 string cannot: whether the endpoint exists at all, how fast a stranger may ask,
-what the response is labelled as, and whether a crawler is invited.
+what the response is labelled as, and whether a crawler is invited. One more is
+about what the door publishes: a record changed here does not say so.
 
 Every test drives the API with **no `Authorization` header**, which is the point
 of the module under test.
 """
 
+from xml.etree import ElementTree
+
 import pytest
 from fastapi.routing import APIRoute
 
 import settings_store
-from enums import SettingKey
+from enums import RecordOrigin, SettingKey
 from main import app, iter_api_routes
 from models import Book
 from ratelimit import PUBLIC_CATALOGUE_LIMIT
 from routers.public import public_reader
 from routers.sru import SRU_PREFIX, server_for
+
+MARC_SLIM = "http://www.loc.gov/MARC21/slim"
 
 
 def _publish(db, *, mode: bool = True, published: bool = True, indexed: bool = False):
@@ -206,6 +211,23 @@ class TestTheServiceAnswersARealRequest:
         body = client.get(SRU_PREFIX, params={"operation": "searchRetrieve", "query": "Windmill"}).text
         assert "http://www.loc.gov/MARC21/slim" in body
         assert "Chartreuse Windmill" in body
+
+    def test_a_record_changed_here_is_served_without_saying_so(self, client, db, book):
+        """`record_modified_here` is internal, and this response needs no session.
+
+        Read off the served `040` rather than off `marc.write`, because the
+        publication is the leak: a `$d` written for an install code would reach
+        every stranger through this door.
+        """
+        row = db.get(Book, book)
+        row.record_origin, row.record_modified_here = RecordOrigin.DNB, True
+        db.commit()
+        _publish(db)
+        body = client.get(SRU_PREFIX, params={"operation": "searchRetrieve", "query": "Windmill"}).text
+
+        field = ElementTree.fromstring(body).find(f".//{{{MARC_SLIM}}}datafield[@tag='040']")
+        assert field is not None, body
+        assert [sub.get("code") for sub in field] == ["a"]
 
     @pytest.mark.parametrize(
         "params",

@@ -112,7 +112,7 @@ the ticket asks for a library rather than a spider.
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
@@ -495,7 +495,12 @@ def read_page(body: str, decoding: Decoding = DECODING) -> Page:
         raise FeedUnreadable(f"That address did not answer with a feed: {error}") from error
     if root.tag != f"{ATOM}feed":
         raise FeedUnreadable("That address answered with XML that is not an Atom feed.")
+    records, not_held = _held_records(root, decoding)
+    return Page(records=records, not_held=not_held, next_href=_next_href(root))
 
+
+def _held_records(root: ElementTree.Element, decoding: Decoding) -> tuple[tuple[Record, ...], int]:
+    """The records a feed's held entries decode to, and how many entries were not held."""
     records: list[Record] = []
     not_held = 0
     for entry in root.findall(f"{ATOM}entry"):
@@ -512,14 +517,15 @@ def read_page(body: str, decoding: Decoding = DECODING) -> Page:
         record = READERS[decoding.reader](entry, decoding)
         if record is not None:
             records.append(record)
+    return tuple(records), not_held
 
-    next_href = None
+
+def _next_href(root: ElementTree.Element) -> str | None:
+    """The first `<link rel="next">` `href` exactly as the feed wrote it, or None."""
     for link in root.findall(f"{ATOM}link"):
         if (link.get("rel") or "") == "next":
-            next_href = (link.get("href") or "").strip() or None
-            break
-
-    return Page(records=tuple(records), not_held=not_held, next_href=next_href)
+            return (link.get("href") or "").strip() or None
+    return None
 
 
 def _next_page(here: str, href: str, origin: str) -> str:
@@ -646,25 +652,9 @@ async def holdings(
     answer differently on the second call, and because no test in this tree may
     make a real lookup.
     """
-    if not is_fetchable(base_url):
-        raise UnusableAddress(
-            "That is not an address this server will fetch. An OPDS feed is an "
-            "http or https address carrying no username or password."
-        )
-    origin = origin_of(base_url)
-    if not origin:
-        # `is_fetchable` parses with `urlsplit` and this parses with `httpx.URL`,
-        # and the two disagree on ports written with an underscore and on some
-        # IDN forms: see `credentials.origin_of`. An address only one of them can
-        # read binds no credential and pins no origin, so it is refused here
-        # rather than walked with an origin of "".
-        raise UnusableAddress("That address cannot be used as a server's identity.")
-
+    origin = _feed_origin(base_url)
     ends = in_(deadline_seconds)
-    found: list[Record] = []
-    not_held = 0
-    pages = 0
-    truncated = False
+    walk = _Walk(max_pages=max_pages, max_entries=max_entries, ends=ends)
     seen: set[str] = set()
     target: str | None = base_url
 
@@ -675,13 +665,7 @@ async def holdings(
     # address. Swapping this line for `catalogue_client` puts the range refusal
     # back to nothing while every other bound still reads as present.
     async with fetch.pinned_client(fetch.HOUSEHOLD_ADDRESSES, resolver=resolver) as client:
-        while target is not None:
-            if pages >= max_pages or len(found) >= max_entries:
-                truncated = True
-                break
-            if left(ends) <= 0:
-                truncated = True
-                break
+        while target is not None and not walk.spent():
             seen.add(target)
 
             answer = await _fetch_page(
@@ -701,23 +685,74 @@ async def holdings(
             )
 
             page = read_page(answer.text)
-            pages += 1
-            not_held += page.not_held
-            taken = page.records[: max_entries - len(found)]
-            found.extend(taken)
-            if len(taken) < len(page.records):
-                truncated = True
+            walk.take(page)
+            target = _following(target, page, origin, seen)
 
-            if page.next_href is None:
-                break
-            following = _next_page(target, page.next_href, origin)
-            if following in seen:
-                break
-            target = following
+    return walk.holdings()
 
-    return Holdings(
-        records=tuple(found),
-        pages_read=pages,
-        not_held=not_held,
-        truncated=truncated,
-    )
+
+def _feed_origin(base_url: str) -> str:
+    """The origin a walk from `base_url` is held to, or the refusal of that address."""
+    if not is_fetchable(base_url):
+        raise UnusableAddress(
+            "That is not an address this server will fetch. An OPDS feed is an "
+            "http or https address carrying no username or password."
+        )
+    origin = origin_of(base_url)
+    if not origin:
+        # `is_fetchable` parses with `urlsplit` and this parses with `httpx.URL`,
+        # and the two disagree on ports written with an underscore and on some
+        # IDN forms: see `credentials.origin_of`. An address only one of them can
+        # read binds no credential and pins no origin, so it is refused here
+        # rather than walked with an origin of "".
+        raise UnusableAddress("That address cannot be used as a server's identity.")
+    return origin
+
+
+@dataclass
+class _Walk:
+    """What one walk of one feed has found so far, and the caps it spends."""
+
+    max_pages: int
+    max_entries: int
+    ends: float
+    found: list[Record] = field(default_factory=list)
+    not_held: int = 0
+    pages: int = 0
+    truncated: bool = False
+
+    def spent(self) -> bool:
+        """Whether a cap or the deadline stops the walk before the next page.
+
+        Marks the walk truncated when it does: the feed had a next page and
+        this walk will not read it.
+        """
+        if self.pages >= self.max_pages or len(self.found) >= self.max_entries or left(self.ends) <= 0:
+            self.truncated = True
+            return True
+        return False
+
+    def take(self, page: Page) -> None:
+        """Counts one page in, keeping no more records than `max_entries` allows."""
+        self.pages += 1
+        self.not_held += page.not_held
+        taken = page.records[: self.max_entries - len(self.found)]
+        self.found.extend(taken)
+        if len(taken) < len(page.records):
+            self.truncated = True
+
+    def holdings(self) -> Holdings:
+        return Holdings(
+            records=tuple(self.found),
+            pages_read=self.pages,
+            not_held=self.not_held,
+            truncated=self.truncated,
+        )
+
+
+def _following(here: str, page: Page, origin: str, seen: set[str]) -> str | None:
+    """The next page to read after `here`, or None when the feed ends or loops."""
+    if page.next_href is None:
+        return None
+    following = _next_page(here, page.next_href, origin)
+    return None if following in seen else following

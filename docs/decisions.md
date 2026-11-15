@@ -6329,6 +6329,9 @@ Measured over the whole app: 87 models, carriers exactly `['EmailUpdate', 'Membe
 mechanisms meet, that is where the hole is.** The fix to an enumerating guard is structural,
 and when it is the right fix it deletes code.
 
+The text rules took one such seam on knowingly, for a tool that reads them: "The text rules run
+in errata, and the structural ones stay in the test tree" says where it is.
+
 ### One definition of what an address is, and it has to hold without its callers
 
 `mailer.looks_like_address` and `mailer.MAX_ADDRESS` are now the single rule, used by the
@@ -8679,9 +8682,10 @@ both parties are right.
 
 ### A refusal belongs where somebody would go to propose it again
 
-`settings_store.library_mode`'s docstring records that there is no record status
-column, that "record status" never had a definition, and that **both** attempted
-derivations were refused and why. That is the file a person opens when they want
+`settings_store.library_mode`'s docstring holds the refusal and nothing of its
+history: that there is no record status column, that **both** derivations of one
+were refused, and why, with the record's source (`books.record_origin`) named as
+what a cataloguer wants there. That is the file a person opens when they want
 to know what library mode does, so it is where a proposal to add such a column
 would start. A refusal recorded only in a changelog or a merge request is a
 refusal the next person re-litigates from scratch.
@@ -17259,8 +17263,8 @@ arrive loudly wrong here and somebody would add a thirteenth entry. `select` sti
 family, so a new rule is on in application code either way; only the test tree differs.
 
 **What still covers those files, stated as what it does rather than as a ranking.**
-`TestNoFixtureLooksLikeACredential` catches a realistic Telegram bot token and an address
-outside reserved space; the publish gate's own forbidden string scan catches the GitLab and
+Two house rules catch a realistic Telegram bot token and an address outside reserved
+space; the publish gate's own forbidden string scan catches the GitLab and
 GitHub access token prefixes and the private key header. **Neither is a superset of `S105`/`S106`**: a plausible API key spelled
 `api_key = "..."` fires the rule and matches neither arm. There is no such value in the tree
 today, and the first draft of this paragraph called the pair "sharper than the rule", which
@@ -17753,6 +17757,144 @@ match catches; a release supporting TypeScript 7 changes the price and not the a
 backend half needs the application to be a package imported by its own name, at which point a
 graph has internal edges and a layering becomes expressible. That is a change to every module
 in it, and it is not bought by three rules.
+
+The rules that are text alone, rather than structure, have since moved to errata: "The text
+rules run in errata, and the structural ones stay in the test tree".
+
+## The text rules run in errata, and the structural ones stay in the test tree
+
+On 2026-11-11 the owner reopened two settled entries for a measured trial, "The structural
+house rules stay in the test tree, and both contract tools are refused" and "A guard is one
+mechanism, because two mechanisms have a seam". On 2026-11-14 the owner adopted the trial
+with both of its lots, on errata 0.4.2, and moved no further test.
+
+**A rule that is a regex or a count over files, or two files agreeing, is an errata rule with a
+witness; a rule that reads an AST, imports the application or runs anything stays in the test
+tree.** Each errata rule names witnesses, fixtures that plant its failure, and a run fails when
+a witness holds, so a rule that cannot fail does not pass. The cases a rule must leave alone
+are checks of their own over committed case files, sharing the rule's pattern and assert.
+
+| Rule | Replaced |
+|---|---|
+| no file uses a dash as punctuation, with its pinned count per holder | TestNoFileUsesADashAsPunctuation in `backend/tests/test_house_rules.py`, both arms |
+| no file holds a bidirectional control | TestNoFileHoldsABidirectionalControl, its tree arm |
+| no backend file holds a realistic bot token | the token arm of TestNoFixtureLooksLikeACredential |
+| no backend file carries an address outside reserved space | the address arm, its two self tests and 15 parametrised cases |
+| every Markdown file has balanced code fences | the parity arm and the fence counter's four self tests |
+| the generated client is called only from a hooks file | three arms of `frontend/tests/houseRules.test.ts` |
+| the feature flags query is configured only in `frontend/src/app/hooks.ts` | three arms |
+| nothing lives under the public assets directory | two arms |
+| `paper-400` and `paper-500` are not light mode text | one arm |
+| no control draws its own focus ring | one arm |
+| the build refuses the property generator, by five spellings in `frontend/vite.config.ts` | one arm |
+
+The rules run in the cheapest pipeline job holding the tree, `autopatch:selftest:git`, with
+`--fail-on-skip`, on `main`, merge requests, tags and patch branches. The binary is pinned by
+version and by the sum its release publishes, checked before anything is unpacked. The mirror
+push, the release build and the `latest` promotion each hold a hard need on that job, as they
+do on the backend suite, because a red rule in a job no publisher needs reds the pipeline
+after the mirror push has gone out. The local gate runs that job's steps.
+
+**The mirror does not carry the rules.** Their configuration and fixtures are stripped with
+the job that runs them, because a witness holds on purpose what its rule refuses: a dash, a
+bidirectional control, a string shaped like a bot token. So the published test files no
+longer state these eleven rules.
+
+### What 0.4.2 costs, against the tests it replaced
+
+Measured 2026-11-14 on one worker node other than builder, every figure on that node unless it
+says otherwise, errata's pod under a one core quota with two cores visible, each side three runs
+or more, before the binary skip below was added:
+
+| | errata 0.4.2 | the tests it replaced |
+|---|---|---|
+| the backend lot, 8 checks and 13 witnesses | 0.58 to 0.67 s, whole process | 3.61 to 3.90 s of pytest call time |
+| the frontend lot, 9 checks and 19 witnesses | 0.25 to 0.34 s, whole process | 132 to 148 ms of vitest test time |
+| both lots, 17 checks and 32 witnesses | 0.77 to 0.84 s | |
+| the pipeline's download and checksum | 0.98 to 1.05 s | |
+
+So the backend lot is about six times faster than pytest and the frontend lot about twice as
+slow as vitest, whose figure excludes reading the source, done once at import. On errata
+0.4.0 the same check took 7.00 s on that node and the frontend lot ran 9.5 times slower than
+vitest; the backend lot, measured on builder, ran 1.8 times slower than pytest. **The cost was
+the regex automaton, not overhead**: start, configuration and git's index took about 10 ms, and a
+pattern with no literal prefix walked every byte of every file, once per rule. 0.4.2 searches
+near a literal every match needs, reads each file once for every rule naming it, and runs
+rules concurrently. The bot token rule is the slowest check left, at 0.46 to 0.49 s: its
+pattern starts with a digit class and its only literal is a colon. On this one core quota a
+second worker made the check a little slower, 0.83 to 0.88 s against 0.75 to 0.78 s with one.
+
+**The binary skip costs about 0.2 s on the same node.** The 18 checks and 34 witnesses took
+1.49 to 1.66 s against 1.18 to 1.45 s for the tree before it, three runs each in one pod,
+interleaved; those runs wrote a JUnit report, which the table's did not, and read higher. In
+JUnit time the dash rule took 0.63 to 0.64 s against 0.32 to 0.51 s, and the bidi rule 0.55
+to 0.58 s against 0.32 to 0.49 s. Its first form searched
+every file from its start for the first character that does not decode, and the check took
+6.7 s or more: with no literal prefix the pattern walks every byte, in both rules. The skip
+now starts at a dash or a control, which errata finds by its literal, and stops at the end of
+that line.
+
+**A failed rule names its offenders.** On a false `all` over an extractor, 0.4.2 prints only
+the offending values. One unclosed fence planted in `docs/testing.md` printed 17 lines, naming
+the file and its nine fences, where 0.4.0 printed 165 lines holding every fence in the tree;
+one planted address went from 201 lines to 1. A parity rule cannot say which fence is the open
+one. A rule over a handful of values, such as the dash rule's `file:line` list, reports as well
+as the test it replaced or better.
+
+### What the move changed in coverage
+
+errata reads git's index, so in the pipeline the dash and bidirectional control rules now
+read `.claude`, which the suite runner never ships, and the local gate keeps its own grep for
+it. They skip a file in which a byte that is not UTF-8 follows a dash or a control on its
+line, since a binary's bytes can spell either by chance; the tests skipped every file that
+is not UTF-8. Two case files holding both, one whose first such byte comes after 64 KiB of
+text, fail the run if the skip is lost. A rule no longer reads an untracked file, and the fence rule no longer
+depends on the Markdown walk's ignore file reading.
+
+On the adopted tree under 0.4.2, one failure planted for each of the 17 checks, the eleven
+rules and their six case checks, failed the run by that check alone, with every witness still
+holding. The review of the trial had found five losses, each closed and each closure failing
+the run by the witness or case written for it:
+
+| Loss | Closed by |
+|---|---|
+| An address after an escaped dot, digit or `_ % + -`, as in a regex fixture, was missed where the old test caught it | the escape alternative takes any local part character, and a witness plants one |
+| No witness pinned a rule's scope, so narrowing the backend glob to its tests, or the Markdown glob to `docs/`, stayed green | the token witness sits in a migration, an address witness in `backend/models.py`, the open fence in a root `CHANGELOG.md` |
+| The cases that must stay green (`\n@x.decorate` is no address, every reserved name passes, a fence in a list counts) had gone | a positive check per case file |
+| `example.org.evil.test.co` was dropped, so an assert gaining a prefix match stayed green | a witness for it |
+| The job did not run on a tag, where the backend suite did | a tag rule on the job |
+
+### What stays in the test tree
+
+**The octal spelling.** The local gate greps `.claude` for the twelve bidirectional controls,
+spelt in octal; errata cannot decode octal, so an internal pytest test holds that spelling to
+the rule's class. That is two mechanisms meeting, the seam the second settled entry warns
+about, and the move added it.
+
+**The comment stripped house rules.** The tag name rule, the book file readers' network rule
+and the two cache rules match code with its comments stripped. 0.4.2 can skip comments, and
+all four held on the tree that way, two of them only that way, but none moved: they ran in
+0.81 to 1.16 s of errata against 626 to 631 ms of vitest; the network rule's lookahead has no
+RE2 spelling; the comment lexer misreads JSX text holding a URL or an apostrophe, which the
+parse does not; and the book file describe would split across two mechanisms. The dark hover
+and dark ink rules join class strings and match inside each, a two stage match one regex
+cannot state.
+
+**Every other candidate.** A census of the backend tests and a grep of the frontend found no
+test pinning a real toolchain or image version. The tests asserting a constant's literal value
+cost microseconds each and each says why it asserts the literal. The Renovate rule tests walk
+nested rules in order, which errata cannot express, and a file whose arms would split stays
+whole.
+
+**The fixtures meet the tree's other guards.** The Python witnesses are linted, type checked
+and compiled as tooling, so the bidirectional control plant lives in Markdown, the dash holders
+carry em dashes (ruff flags an en dash as confusable), and the token plant avoids a name the
+hardcoded password rule reads. A witness is a planted defect, so every other guard that reads
+the tree will find the next one.
+
+**Lines.** The backend lot removed 395 test lines and added 281 for the same rules, plus 114
+of machinery a first rule pays once. The frontend lot removed 268 and added 311, five of its
+fixtures being copies of `frontend/vite.config.ts`, one per spelling.
 
 ## An absence is not a verdict, and the ratchet now proves its report arrived
 
@@ -23523,10 +23665,14 @@ set, so the store card is unchanged.
 
 ## Each caller maps a landing in an exhaustive switch
 
-Both callers end their `switch (landing.kind)` with `landing satisfies never`, and so does
-`countLandings`, which both pages' counts come from, so a new kind is a type error at each
-rather than a row or a count either page drops. Measured: one planted kind gives `TS1360` at
-both callers; the same kind answered in both callers gives it in `countLandings`.
+Each caller makes a new kind of `Landing` a type error rather than a row or a count it
+drops: the Scan page through a record keyed by every kind (`REFUSAL_FOR_LANDING`), the
+Settings import by ending its `switch` with `landing.kind satisfies Landed`, and
+`countLandings`, which both pages' counts come from, through `COUNTED_AS`, keyed the same
+way. `filesLeft` is added from any landing carrying `left`, so a new kind with a `left` is
+counted there without a choice at that site; `COUNTED_AS` still forces a visit for the other
+five counts. Measured: one planted kind gives `TS2741` at both records and `TS1360` in the
+Settings import.
 
 ## An audiobook records no file location
 
@@ -25314,3 +25460,142 @@ tags again. Run on the patch branch as well, the refusal arrives in the pipeline
 release waits on before it tags, and the night pages instead. The rule protects from the
 first tag that carries it: an older base tag's branch runs its own pipeline file. The check
 stays off pushes to main, where the document may lag a docstring until the next release.
+
+## A record's provenance is written at every door, and the flag counts only the description
+
+**Two columns on `books`, `record_origin` and `record_modified_here`**, by the owner's decision
+on the provenance ticket: origin answers where the record came from, the flag whether anything
+here touched it since. The column comment on `models.Book` says why they are two.
+
+**Every door, as the census found them.** Creation sites: `grep -rnE
+"(^|[^A-Za-z_.])Book\(" backend --include=*.py | grep -v tests/`, five. Change sites: the
+assignments and `setattr` calls on a `books` work column outside the tests, plus the callers of
+`evidence`'s four doors.
+
+| Site | Origin | Flag |
+|---|---|---|
+| `POST /api/books` and `/scan` (`_create_book`) | the body's `record_origin`, `manual` when absent | the body's `record_modified_here`, false when absent |
+| `POST /{id}/copies` | the copied book's | the copied book's |
+| CSV import create | `csv_import` | false |
+| MARC import create | `marc_import` (the file's own `040` is not read) | false |
+| OPDS import create | `opds_import` | false |
+| `PATCH /{id}` | kept | set when a work fact changed as stored |
+| any importer's gap fill on a matched Book | kept | set when a work fact was filled |
+| `POST /{id}/enrich`, `/enrich/apply`, the identifier backfill | kept | set when a work fact was written |
+| `PUT /{id}/refresh` | the catalogue leading the record | cleared |
+| `PUT /{id}/refresh`, leader off the roster | kept | set when a work fact was written |
+| `POST /merge` (survivor) | the survivor's | set when the absorb filled a work fact |
+| `backup.restore` | as archived | as archived |
+
+**A work fact is `book_columns.WORK_FACTS`**: the description. A cover, a heading, an
+identifier or a shelf detail does not set the flag, since none is what `040 $d` says was
+modified. `evidence.touched` is the one rule every changing site calls.
+
+**A refresh is the wholesale replacement the ruling names.** It rewrites the description from
+the record the Book's own ISBN found, so the origin becomes that record's leading catalogue
+and the flag clears. A record whose leader is no catalogue on the roster names no origin, so
+that refresh is an ordinary change rather than an origin erased (`evidence._replaced`).
+Enrichment under `FILL_GAPS` or `OVERWRITE` keeps the origin and sets the flag. What a refresh
+leaves alone (categories, the series fields, the Google id) is not re-attributed, which is the
+cost of calling it wholesale.
+
+**Which catalogue a merged record came from is its leader.** `Record.filled_from` now keeps the
+leading catalogue first in `source` and sorts only the ones that filled its gaps, so
+`Record.leading` names the catalogue whose description it is. Before, the joined source was
+sorted whole and the leader was lost.
+
+**The client states the origin and the flag on `POST /api/books`, and is believed.** The
+server cannot see a lookup, or an edit, that happened in the browser. A member who can type
+the whole record can as well say where it came from; what the body cannot do is name a value
+outside `RecordOrigin`. A draft from a lookup or a picked candidate carries the catalogue, one
+read from a file `file`, a Calibre library `calibre_import`, a store export `store_import`.
+**A draft the member changed before filing it arrives flagged**: every edit site on the scan
+page goes through `editedDraft`, which sets the flag on a draft naming an origin. A draft
+naming none is being typed, which is the record's creation, so it files unflagged.
+**So does a catalogue's record whose description a file filled**: the rapid queue's
+`enrichedDraft` takes the catalogue's record and fills its blanks from the row's file, and
+where a filled field is a work fact and the lookup named its catalogue, the draft is flagged.
+That is the server's rule for an import's gap fill (`evidence.touched`), applied in the
+browser because only the browser sees the fill.
+
+**The browser reads which fields are work facts from the generated client, never from a list
+of its own.** `main.openapi_with_work_facts` publishes `book_columns.WORK_FACTS` as the
+closed set `WorkFact`; no route takes or answers one, so FastAPI would publish nothing.
+A TypeScript copy would drift from the partition, and "any fill" instead would flag every
+file row, since a file always supplies `identifiers`, which is not a work fact. The work
+fact rule is not free of the same pull: a file row carrying subjects is nearly always
+flagged, since `categories` is a work fact no lookup answers, so a file's subjects fill
+a blank that no lookup fills. A lookup
+naming no catalogue leaves the file's origin in place and flags nothing.
+
+## MARC `040` names only an agency that can be cited
+
+`040 $a` is "MARC code or the name of the organization that created the original record"
+(MARC21 Bibliographic, field 040). The codes are the MARC Code List for Organizations', each
+found on 2026-11-14 by an organization name search of
+https://www.loc.gov/marc/organizations/org-search.php (that database's record id beside each).
+The DNB's is its ISIL: the German ISIL agency states that a German ISIL is also the MARC
+organization code, and LC's list carries no German codes
+(https://isil.staatsbibliothek-berlin.de/en/vergabe/marc-orgcode); `DE-101` is the Deutsche
+Nationalbibliothek at https://lobid.org/organisations/DE-101.
+
+| Origin | `$a` | Source |
+|---|---|---|
+| DNB | `DE-101` | German ISIL registry |
+| ÖNB | `As` | MARC Code List, record 15823, "Österreichische Nationalbibliothek", Wien |
+| National Library of Greece | `GRAtEVE` | MARC Code List, record 34193 |
+| Czech National Library | `CZ-PrNK` | MARC Code List, record 19193 |
+| BnF | `FrPBN` | MARC Code List, record 15493 |
+| Library of Congress | `DLC` | MARC Code List, record 2035 |
+| BNE | `SpMaBN` | MARC Code List, record 15566 |
+| Biblioteca Nacional Argentina | `AR-BaBN` | MARC Code List, record 10899 |
+| Biblioteca Nacional del Uruguay | `UY-MoBN` | MARC Code List, record 47567 |
+
+**No `040` for Open Library, Google Books or K10plus**: none created the record it serves. Two
+aggregate other catalogues' and publishers' records, and K10plus is a union catalogue of its
+member libraries' records. **No `040` for a non catalogue origin either**, and **never a
+`$d`**: both would name this library, and an install has no organization code. **A `$d` would
+also publish the flag**: the SRU server serves this record with no session, and
+`record_modified_here` is internal by the owner's decision, so an install code setting would
+answer only the first reason. So `record_modified_here` reaches no subfield; a receiver learns
+who made a record and nothing about who changed it, which is less than the column knows and
+nothing untrue.
+
+## A test module's caches live as long as its tests, not as long as the worker
+
+**Decision.** `pytest_runtest_teardown` in `backend/tests/conftest.py` empties every
+`functools.cache` and `lru_cache` defined at the top of a collected test module each time the
+run leaves a module. A shared helper outside the collected modules, such as
+`tests/sqlite_only.py`, keeps its caches for the worker's life.
+
+**Why.** Several guards cache a walk of the tree: every application module parsed, every
+published file's text, an index built from them. The module stays imported, so the cache
+outlived its tests, and under `--dist loadfile` a worker never returns to a module. Whichever
+worker drew those modules carried them to the end of the run. A module calling another's
+cached function refilled a cache whose owner had already ended, which is why the hook empties
+every collected module's caches rather than only the ending one's.
+
+**Measured** in the suite runner's 2Gi pod on one node, base 1e2f4201 against 5b5ee57e, two
+runs each side, as `python -m pytest -p <probe plugin> -n 3 <files>`. The files were the 95
+test files and single cases that a `--tree-guards` run selected for the record provenance
+branch, which changed 566f8ed4..1e2f4201. The probe plugin was scratch and is not committed,
+so these readings cannot be rerun as written. It read each worker's RSS and pymalloc's bytes
+in allocated blocks at the end of the run:
+
+| | worst worker RSS | sum of worker RSS | sum of live Python heap |
+|---|---|---|---|
+| before | 478, 413 MiB | 1146, 1186 MiB | 620, 625 MiB |
+| after | 368, 378 MiB | 1083, 1075 MiB | 556, 553 MiB |
+
+Emptying the caches at the end of a base run freed 49 to 59 MiB and 300,000 to 320,000
+objects in one worker of each run, and 0 to 19 MiB in each of the others, depending on which
+modules a worker drew.
+
+**What still accretes, and why it stays.** A worker starts at about 148 MiB of live Python heap
+and ends at 168 to 203 MiB with this change: imports a later module brings in, SQLAlchemy's
+compiled statement cache (bounded per engine), pydantic and FastAPI models built on first use,
+and pytest's terminal reporter keeping every `TestReport` (three per test, 4 to 6 MiB per
+worker). Each is bounded or pytest's own. RSS also keeps pymalloc arenas a fragmented heap
+cannot hand back. Anonymous memory outside pymalloc, read as RssAnon less one MiB per arena,
+grew by roughly 10 to 72 MiB per worker across these runs; this measurement does not
+attribute it.

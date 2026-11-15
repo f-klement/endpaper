@@ -83,6 +83,32 @@ describe("TestAccounts", () => {
     expect(props.onSwitch).toHaveBeenCalledWith("tester", "pw12345678");
   });
 
+  it("closes the password field when its account is chosen again", async () => {
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(screen.getByRole("button", { name: "Switch to tester" }));
+    await user.click(screen.getByRole("button", { name: "Switch to tester" }));
+
+    expect(screen.queryByLabelText("Password for tester")).toBeNull();
+  });
+
+  it("opens the password field for the chosen account alone", async () => {
+    renderSection({
+      accounts: [
+        makeUser({ username: "tester" }),
+        makeUser({ username: "reader" }),
+      ],
+    });
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Switch to tester" }));
+
+    expect(screen.getByLabelText("Password for tester")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Password for reader")).toBeNull();
+  });
+
   it("never keeps the password from one account to the next", async () => {
     const user = userEvent.setup();
     renderSection({

@@ -29,6 +29,7 @@ Reading a highlight out is the router's, under `highlight_visible_to`.
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
@@ -46,6 +47,9 @@ _LOOKUP_CHUNK = 500
 #: per concurrent writer of the same keys it can lose to; KOReader sets the
 #: bound, since its client sends a member's picked sidecars at once.
 _ATTEMPTS = 5
+
+#: What `write` did with one mark it did not leave deleted, by `ImportCounts` field.
+_Outcome = Literal["created", "updated", "unchanged"]
 
 
 @dataclass(frozen=True)
@@ -191,51 +195,71 @@ def write(
     # matching no row, which `settled` retries, or no write at all.
     gone = deleted_keys(db, member_id, source, keys)
 
-    created = updated = unchanged = left_deleted = 0
+    counts = {"created": 0, "updated": 0, "unchanged": 0, "left_deleted": 0}
     for key, mark in marks.items():
         if key in gone or mark.former_key in gone:
-            left_deleted += 1
-            continue
-        fields: dict[str, object] = {
-            "book_id": book_id,
-            "text": mark.text,
-            "note": mark.note,
-            "chapter": mark.chapter,
-            "page": mark.page,
-            "highlighted_at": mark.highlighted_at,
-        }
-        row = held.get(key)
-        if row is None and mark.former_key is not None and mark.former_key in held:
-            row = held[mark.former_key]
-            row.source_key = key
-        if row is None:
-            db.add(Highlight(user_id=member_id, source=source, source_key=key, **fields))
-            created += 1
-            continue
-        private = row.book_id != book_id or len(mark.text) > QUOTE_TEXT_MAX
-        if private:
-            fields["is_shared"] = False
-        if any(getattr(row, name) != value for name, value in fields.items()):
-            if private:
-                # Written whatever the read said. The flush sets only what
-                # differs from the row as loaded, so a row read private and
-                # shared by its author since would keep that share, on the new
-                # Book or past the ceiling. This statement also takes the row,
-                # so a share arriving after it waits. Only on a row being
-                # written anyway: a move changes its Book and a lengthening its
-                # text, and an unchanged long passage cannot have been shared.
-                db.execute(
-                    update(Highlight)
-                    .where(Highlight.id == row.id)
-                    .values(is_shared=False)
-                    .execution_options(synchronize_session=False)
-                )
-            for name, value in fields.items():
-                setattr(row, name, value)
-            updated += 1
+            counts["left_deleted"] += 1
         else:
-            unchanged += 1
-    return ImportCounts(created=created, updated=updated, unchanged=unchanged, left_deleted=left_deleted)
+            counts[_write_mark(db, member_id, source, book_id, key, mark, held)] += 1
+    return ImportCounts(**counts)
+
+
+def _write_mark(
+    db: Session,
+    member_id: int,
+    source: HighlightSource,
+    book_id: int,
+    key: str,
+    mark: Mark,
+    held: Mapping[str, Highlight],
+) -> _Outcome:
+    """Create, re-key or update the one row `mark` names, and say which.
+
+    `held` is `write`'s lookup by key and is not queried again here; a row found
+    under the former key takes the new one.
+    """
+    fields: dict[str, object] = {
+        "book_id": book_id,
+        "text": mark.text,
+        "note": mark.note,
+        "chapter": mark.chapter,
+        "page": mark.page,
+        "highlighted_at": mark.highlighted_at,
+    }
+    row = held.get(key)
+    if row is None and mark.former_key is not None and mark.former_key in held:
+        row = held[mark.former_key]
+        row.source_key = key
+    if row is None:
+        db.add(Highlight(user_id=member_id, source=source, source_key=key, **fields))
+        return "created"
+    private = row.book_id != book_id or len(mark.text) > QUOTE_TEXT_MAX
+    if private:
+        fields["is_shared"] = False
+    return "updated" if _update_row(db, row, fields, private=private) else "unchanged"
+
+
+def _update_row(db: Session, row: Highlight, fields: Mapping[str, object], *, private: bool) -> bool:
+    """Write `fields` onto `row` where any differs, and say whether one did."""
+    if not any(getattr(row, name) != value for name, value in fields.items()):
+        return False
+    if private:
+        # Written whatever the read said. The flush sets only what differs
+        # from the row as loaded, so a row read private and shared by its
+        # author since would keep that share, on the new Book or past the
+        # ceiling. This statement also takes the row, so a share arriving after
+        # it waits. Only on a row being written anyway: a move changes its Book
+        # and a lengthening its text, and an unchanged long passage cannot have
+        # been shared.
+        db.execute(
+            update(Highlight)
+            .where(Highlight.id == row.id)
+            .values(is_shared=False)
+            .execution_options(synchronize_session=False)
+        )
+    for name, value in fields.items():
+        setattr(row, name, value)
+    return True
 
 
 def remove(db: Session, member_id: int, source: HighlightSource, keys: Sequence[str]) -> int:

@@ -380,6 +380,28 @@ class TestANulIsRefusedWhereverAPublishedRouteTakesText:
 
         assert passed == [], "\n".join(passed)
 
+    def test_a_form_text_field_carrying_a_nul_is_refused_by_its_location(self, client) -> None:
+        """Every form the schema publishes takes a file alone, so the walk above
+        sends no form text; a text field sent beside the file is read all the
+        same."""
+        res = client.post(
+            "/api/imports/csv", data={"note": WITH_A_NUL}, files={"file": ("books.csv", b"title\n")}
+        )
+
+        assert res.status_code == 422
+        assert res.json()["detail"] == [
+            {"type": "value_error", "loc": ["body", "note"], "msg": f"Value error, {NUL_REFUSED}"}
+        ]
+
+    def test_a_body_that_is_not_json_is_left_to_the_route_s_own_refusal(self, client) -> None:
+        """FastAPI refuses a body declared JSON that does not parse before any
+        dependency runs, so the body that reaches this one undeclared is the
+        one to send."""
+        res = client.post("/auth/login", content=b"{not json", headers={"Content-Type": "text/plain"})
+
+        assert res.status_code == 422
+        assert all(entry["type"] != "value_error" for entry in res.json()["detail"])
+
     def test_a_nul_nested_past_the_recursion_limit_is_refused_by_its_location(self, client) -> None:
         """`json.loads` parses a body nested past Python's recursion limit, and a
         recursive walk of it raised `RecursionError` before any session was asked

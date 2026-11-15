@@ -212,27 +212,48 @@ function normalise(value: string): string {
 function distinctArtists(files: readonly AudioFileNaming[]): string[] {
   const authors: string[] = [];
   for (const file of files) {
-    for (const artist of file.tags?.artists ?? []) {
-      const value = artist.trim();
-      if (value === "" || authors.length >= MAX_AUTHORS) continue;
-      if (!authors.some((seen) => normalise(seen) === normalise(value))) {
-        authors.push(value);
-      }
-    }
+    for (const artist of file.tags?.artists ?? []) addArtist(authors, artist);
   }
   return authors;
+}
+
+/**
+ * Add one tagged artist to `authors`, trimmed, unless it is blank, the list is
+ * full, or it is already there under another spelling.
+ */
+function addArtist(authors: string[], artist: string): void {
+  const value = artist.trim();
+  if (value === "" || authors.length >= MAX_AUTHORS) return;
+  if (!authors.some((seen) => normalise(seen) === normalise(value))) {
+    authors.push(value);
+  }
 }
 
 function describe(files: AudioFileNaming[], by: GroupedBy): AudiobookGroup {
   return {
     files,
     by,
-    album: files.find((file) => file.tags?.album)?.tags?.album ?? null,
+    album: firstAlbum(files),
     authors: distinctArtists(files),
     // Only where the group is one file. A chapter file's own title is the
     // chapter, and "Chapter 1" is a worse name for a book than its folder.
     title: files.length === 1 ? (files[0]!.tags?.title ?? null) : null,
   };
+}
+
+/**
+ * The album the first file naming one spells, or `null`.
+ *
+ * **Naming one is `identityOf`'s test, through `normalise`.** A tag of only
+ * spaces or control characters names no album there, so it names none here.
+ * Otherwise a lone file carrying one loses its own title, because
+ * `draftFromAudiobook` takes the album over the title.
+ */
+function firstAlbum(files: AudioFileNaming[]): string | null {
+  return (
+    files.find((file) => normalise(file.tags?.album ?? "") !== "")?.tags
+      ?.album ?? null
+  );
 }
 
 /**

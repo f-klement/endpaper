@@ -14,6 +14,9 @@ definitions of empty between them. This module is the one place that decides:
   `apply_own_volume`), never what a row claims about the Library;
 - **bounding**: a record is held to `BookMatch` field by field before it writes;
 - **cover precedence**: a cover a Member uploaded outranks any remote one;
+- **what an applied record does to provenance**: `touched` sets
+  `books.record_modified_here` when a work fact changed, and a refresh, which
+  replaces the record, names its catalogue as the origin instead;
 - **whether Classifications cross**: only through a door a Member's choice
   opened, which is ADR 0006 held by which door a caller can reach. `confirm`
   is the door for a record a Member selected, and `confirm_file_headings` for
@@ -26,7 +29,7 @@ commit. Ownership on an OPDS sync stays with `importing`, because its gap is
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
 from typing import Any, Final
 
@@ -37,6 +40,7 @@ import book_columns
 import covers
 from catalogue import Heading, Record
 from classifications import add_headings, bounded_headings
+from enums import RecordOrigin
 from logvalues import clipped
 from models import Book, blank_as_none
 from schemas import BookMatch
@@ -103,6 +107,9 @@ _CLEARED_BY_REFRESH: Final = frozenset(
 #: because it has its own precedence and no importer fetches one.
 _FILLABLE: Final = frozenset(book_columns.WORK_DETAIL) | {"format"}
 
+#: The columns whose change `touched` counts: the record's description.
+_DESCRIPTION: Final = frozenset(book_columns.WORK_FACTS)
+
 
 def is_empty(value: object) -> bool:
     """Whether a value is absent: None or a blank string, for every policy.
@@ -133,6 +140,7 @@ def apply_record(book: Book, record: Record, policy: Policy) -> list[str]:
         changed = _write(book, {name: getattr(record, name) for name in REFRESHED}, policy)
         if _write_cover(book, record.cover_url, policy):
             changed.append("cover_url")
+        _replaced(book, record, changed)
         return changed
     return _apply_match(book, _unselected(record, SELECTED_ONLY), policy)
 
@@ -205,7 +213,45 @@ def fill_gaps(book: Book, values: Mapping[str, object]) -> list[str]:
     unfillable = set(values) - _FILLABLE
     if unfillable:
         raise ValueError(f"No imported file may fill {sorted(unfillable)}")
-    return _write(book, values, Policy.FILL_GAPS)
+    changed = _write(book, values, Policy.FILL_GAPS)
+    touched(book, changed)
+    return changed
+
+
+def touched(book: Book, changed: Iterable[str]) -> None:
+    """Mark `book`'s record as changed here when `changed` names a work fact.
+
+    The one rule every writer after the create shares: the edit route, the
+    importers' gap fill, enrichment and a merge's absorb. Who changed it does
+    not matter, a member or a catalogue answering a request made here; what
+    the flag answers is whether the record is still as it arrived. The origin
+    is kept, because the record still came from there (`models.Book`).
+
+    **A work fact, never the cover or a child row.** `book_columns.WORK_FACTS`
+    is the record's description; a cover is an image beside it and a heading or
+    identifier is a row of its own, and neither is what MARC's `040 $d` says
+    was modified.
+    """
+    if _DESCRIPTION.intersection(changed):
+        book.record_modified_here = True
+
+
+def _replaced(book: Book, record: Record, changed: list[str]) -> None:
+    """What a refresh does to provenance: the record is now the catalogue's.
+
+    A refresh rewrites the description from the record the Book's own ISBN
+    found, so the origin becomes the catalogue leading that record and the flag
+    clears, changed or not: what the row describes is now that record. **A
+    record no catalogue on the roster leads** names no origin, so it is an
+    ordinary change, flagged and keeping the origin, rather than an origin
+    erased.
+    """
+    origin = RecordOrigin.of_catalogue(record.leading)
+    if origin is None:
+        touched(book, changed)
+        return
+    book.record_origin = origin
+    book.record_modified_here = False
 
 
 def _apply_match(book: Book, match: BookMatch, policy: Policy) -> list[str]:
@@ -227,6 +273,7 @@ def _apply_match(book: Book, match: BookMatch, policy: Policy) -> list[str]:
     changed = _write(book, values, policy)
     if _write_cover(book, match.cover_url, policy):
         changed.append("cover_url")
+    touched(book, changed)
     return changed
 
 

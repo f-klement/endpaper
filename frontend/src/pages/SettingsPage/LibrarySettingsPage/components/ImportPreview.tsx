@@ -1,4 +1,7 @@
-import type { ImportPreviewOut } from "../../../../api/generated/model";
+import type {
+  ImportPreviewOut,
+  ImportPreviewRow,
+} from "../../../../api/generated/model";
 import { useTranslation, type MessageKey } from "../../../../i18n";
 
 interface ImportPreviewProps {
@@ -80,15 +83,6 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
   // The schema defaults it to an empty list, but the generated type keeps it
   // optional, so the page does not have to care which.
   const rows = preview.rows ?? [];
-  // Named on every preview, the ordinary answer included: a reader named only
-  // when it was not the ordinary one made a wrong reading look exactly like the
-  // common case, so the screen went quiet on the one occasion it was needed.
-  const service =
-    preview.reader && preview.reader !== "generic" ? preview.reader : null;
-  const excluded = preview.excluded ?? 0;
-  // Null where the file has no such column, which is a different answer from
-  // that column with no row saying yes. The count alone cannot separate them.
-  const exclusionColumn = preview.exclusion_column ?? null;
 
   return (
     <div className="rounded-xl border border-paper-200 bg-paper-50 p-3 text-sm dark:border-paper-700 dark:bg-paper-900">
@@ -97,24 +91,16 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
       </p>
 
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        {FIELDS.map(({ keys, label }) => {
-          const column = columnFor(preview.mapping, keys);
-          return column ? (
-            <div key={label} className="contents">
-              <dt className="text-paper-600 dark:text-paper-400">{t(label)}</dt>
-              <dd className="truncate font-medium text-paper-700 dark:text-paper-200">
-                {column}
-              </dd>
-            </div>
-          ) : null;
-        })}
+        {FIELDS.map(({ keys, label }) => (
+          <MatchedField
+            key={label}
+            label={label}
+            column={columnFor(preview.mapping, keys)}
+          />
+        ))}
       </dl>
 
-      <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
-        {service
-          ? t("import.readAs", { service: serviceName(service) })
-          : t("import.readAsGeneric")}
-      </p>
+      <ReaderLine reader={preview.reader} />
 
       {unmatched.length > 0 && (
         <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
@@ -129,31 +115,7 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
           {rows.map((row, index) => (
             // The index keys these: two rows of one export can be the same
             // book on two shelves, and a title is not a key.
-            <li
-              key={index}
-              className="truncate text-paper-600 dark:text-paper-300"
-            >
-              {row.title}
-              {row.author && (
-                <span className="text-paper-600 dark:text-paper-400">
-                  {" "}
-                  {t("book.by", { author: row.author })}
-                </span>
-              )}
-              {/* The status and the ISBN are here because they are what a
-                  wrong column looks like. A title list looks correct whether
-                  the status came from the shelf or from the tag column. */}
-              {row.status && (
-                <span className="ml-1 text-accent-700 dark:text-accent-300">
-                  {row.status}
-                </span>
-              )}
-              {row.isbn && (
-                <span className="ml-1 text-paper-600 dark:text-paper-400">
-                  {row.isbn}
-                </span>
-              )}
-            </li>
+            <SampleRow key={index} row={row} />
           ))}
         </ul>
       )}
@@ -164,16 +126,101 @@ export default function ImportPreview({ preview }: ImportPreviewProps) {
         </p>
       )}
 
-      {/* Said before the write, because it is the one number on this screen
-          about books that will not arrive, and said at zero: a count shown
-          only when it is above zero cannot be told apart from a file nothing
-          read. A member who exported 400 titles and imported 380 is owed the
-          other twenty. */}
-      <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
-        {exclusionColumn
-          ? t("import.excluded", { count: excluded, column: exclusionColumn })
-          : t("import.excludedNoColumn")}
-      </p>
+      <ExclusionLine
+        excluded={preview.excluded}
+        column={preview.exclusion_column}
+      />
     </div>
+  );
+}
+
+/** One field's row of the mapping, or nothing where no column filled it. */
+function MatchedField({
+  label,
+  column,
+}: {
+  label: MessageKey;
+  column: string | null;
+}) {
+  const { t } = useTranslation();
+  return column ? (
+    <div className="contents">
+      <dt className="text-paper-600 dark:text-paper-400">{t(label)}</dt>
+      <dd className="truncate font-medium text-paper-700 dark:text-paper-200">
+        {column}
+      </dd>
+    </div>
+  ) : null;
+}
+
+/** Which reader took the file. */
+function ReaderLine({ reader }: { reader: ImportPreviewOut["reader"] }) {
+  const { t } = useTranslation();
+  // Named on every preview, the ordinary answer included: a reader named only
+  // when it was not the ordinary one made a wrong reading look exactly like the
+  // common case, so the screen went quiet on the one occasion it was needed.
+  const service = reader && reader !== "generic" ? reader : null;
+  return (
+    <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
+      {service
+        ? t("import.readAs", { service: serviceName(service) })
+        : t("import.readAsGeneric")}
+    </p>
+  );
+}
+
+/** One sample row: the title, then what a wrong column would show up in. */
+function SampleRow({ row }: { row: ImportPreviewRow }) {
+  const { t } = useTranslation();
+  return (
+    <li className="truncate text-paper-600 dark:text-paper-300">
+      {row.title}
+      {row.author && (
+        <span className="text-paper-600 dark:text-paper-400">
+          {" "}
+          {t("book.by", { author: row.author })}
+        </span>
+      )}
+      {/* The status and the ISBN are here because they are what a
+          wrong column looks like. A title list looks correct whether
+          the status came from the shelf or from the tag column. */}
+      {row.status && (
+        <span className="ml-1 text-accent-700 dark:text-accent-300">
+          {row.status}
+        </span>
+      )}
+      {row.isbn && (
+        <span className="ml-1 text-paper-600 dark:text-paper-400">
+          {row.isbn}
+        </span>
+      )}
+    </li>
+  );
+}
+
+/**
+ * How many rows the file itself marks as not to be imported.
+ *
+ * Said before the write, because it is the one number on this screen about
+ * books that will not arrive, and said at zero: a count shown only when it is
+ * above zero cannot be told apart from a file nothing read. A member who
+ * exported 400 titles and imported 380 is owed the other twenty.
+ */
+function ExclusionLine({
+  excluded,
+  column,
+}: {
+  excluded: ImportPreviewOut["excluded"];
+  column: ImportPreviewOut["exclusion_column"];
+}) {
+  const { t } = useTranslation();
+  // Null where the file has no such column, which is a different answer from
+  // that column with no row saying yes. The count alone cannot separate them.
+  return (
+    <p className="mt-2 text-xs text-paper-600 dark:text-paper-400">
+      {column
+        ? t("import.excluded", { count: excluded ?? 0, column })
+        : t("import.excludedNoColumn")}
+    </p>
   );
 }

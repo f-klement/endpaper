@@ -4055,6 +4055,23 @@ describe("useRapidIntake and a file that states its ISBN", () => {
     ]);
   });
 
+  it("marks a file's record whose subject was dropped as changed here", async () => {
+    const { result } = renderTheIntake();
+    const file = await statingIsbn(
+      "9780441013593",
+      "dune.epub",
+      "<dc:subject>Fiction</dc:subject><dc:subject>Science Fiction</dc:subject>",
+    );
+    act(() => result.current.pickFiles([file]));
+    await readingDone(result);
+
+    act(() =>
+      result.current.dropSubject(result.current.entries[0]!.key, "Fiction"),
+    );
+
+    expect(result.current.entries[0]?.draft?.record_modified_here).toBe(true);
+  });
+
   it(
     "spends no lookup on a row removed while the run is going",
     async () => {

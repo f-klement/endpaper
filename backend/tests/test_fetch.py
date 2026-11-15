@@ -680,6 +680,17 @@ class TestDecodingMatchesWhatHttpxWouldHaveDone:
         see, or the walk is skipped and the surrogate reaches a response model."""
         assert fetch.Fetched(200, written).json() == ["\N{REPLACEMENT CHARACTER}"]
 
+    def test_a_json_answer_that_is_one_string_is_repaired(self):
+        assert fetch.Fetched(200, b'"\\ud800x"').json() == "\N{REPLACEMENT CHARACTER}x"
+
+    def test_the_repair_leaves_every_value_that_is_not_a_string_as_it_parsed(self):
+        written = b'{"a": [1, null, true, "\\ud800"], "b": 2.5, "c": {"d": false}}'
+        assert fetch.Fetched(200, written).json() == {
+            "a": [1, None, True, "\N{REPLACEMENT CHARACTER}"],
+            "b": 2.5,
+            "c": {"d": False},
+        }
+
     def test_the_repair_walks_as_deep_as_the_parser_does(self):
         """Walked with a stack: a repair that recursed would raise on an answer
         the parser had just accepted. 3,000 is past the interpreter's default

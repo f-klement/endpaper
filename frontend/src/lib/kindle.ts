@@ -543,7 +543,14 @@ export function readKindleLibrary(xml: string): KindleReading {
   // document's to choose rather than the list's to state.
   const entries = childrenNamed(list, ENTRY);
   if (entries.length === 0) return { ok: false, failure: "empty" };
+  return { ok: true, library: libraryOf(entries) };
+}
 
+/**
+ * The books among a list's entries, and how many entries were something else
+ * an account's catalogue lists, or carried no ASIN.
+ */
+function libraryOf(entries: readonly Element[]): KindleLibrary {
   let skipped = 0;
   const books: KindleBook[] = [];
   for (const entry of entries) {
@@ -559,8 +566,7 @@ export function readKindleLibrary(xml: string): KindleReading {
     }
     books.push({ asin, title, authors, publisher, year, personal });
   }
-
-  return { ok: true, library: { books, skipped } };
+  return { books, skipped };
 }
 
 /**

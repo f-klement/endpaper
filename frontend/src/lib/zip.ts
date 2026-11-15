@@ -338,6 +338,57 @@ function findEndOfCentralDirectory(
 }
 
 /**
+ * Where the central directory is and how many entries it holds, as the end
+ * record at `eocd` declares them.
+ *
+ * Refuses a zip64 or spanned archive, a directory larger than `MAX_ENTRIES`
+ * could justify, and one running past `size`, in that order. Every number
+ * returned has passed those checks, so the caller may slice by them.
+ */
+function readEndRecord(
+  tail: Uint8Array,
+  eocd: number,
+  size: number,
+): { total: number; directorySize: number; directoryOffset: number } {
+  const view = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+  const thisDisk = u16(view, eocd + 4);
+  const directoryDisk = u16(view, eocd + 6);
+  const total = u16(view, eocd + 10);
+  const directorySize = u32(view, eocd + 12);
+  const directoryOffset = u32(view, eocd + 16);
+
+  if (declaresZip64(total, directorySize, directoryOffset)) {
+    throw new ZipError("zip64", "zip64 archives are out of bounds here");
+  }
+  if (thisDisk !== 0 || directoryDisk !== 0) {
+    throw new ZipError("unsupported", "spanned archive");
+  }
+  if (directorySize > MAX_CENTRAL_DIRECTORY_BYTES) {
+    throw new ZipError("too-large", "central directory is implausibly large");
+  }
+  if (directoryOffset + directorySize > size) {
+    throw new ZipError("truncated", "central directory runs past the file");
+  }
+  return { total, directorySize, directoryOffset };
+}
+
+/**
+ * Whether an end record hands its numbers to a zip64 record: each field holds
+ * its all ones value, which zip64 writes where the real number does not fit.
+ */
+function declaresZip64(
+  total: number,
+  directorySize: number,
+  directoryOffset: number,
+): boolean {
+  return (
+    total === MAX_ENTRIES ||
+    directorySize === ZIP64_SENTINEL_32 ||
+    directoryOffset === ZIP64_SENTINEL_32
+  );
+}
+
+/**
  * Read the archive's directory. The entries' bytes are not touched.
  *
  * Rejects rather than throwing a bare `Error`: every refusal here is a
@@ -357,29 +408,11 @@ export async function openZip(blob: Blob): Promise<ZipArchive> {
     throw new ZipError("not-a-zip", "no end of central directory record");
   }
 
-  const view = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
-  const thisDisk = u16(view, eocd + 4);
-  const directoryDisk = u16(view, eocd + 6);
-  const total = u16(view, eocd + 10);
-  const directorySize = u32(view, eocd + 12);
-  const directoryOffset = u32(view, eocd + 16);
-
-  if (
-    total === MAX_ENTRIES ||
-    directorySize === ZIP64_SENTINEL_32 ||
-    directoryOffset === ZIP64_SENTINEL_32
-  ) {
-    throw new ZipError("zip64", "zip64 archives are out of bounds here");
-  }
-  if (thisDisk !== 0 || directoryDisk !== 0) {
-    throw new ZipError("unsupported", "spanned archive");
-  }
-  if (directorySize > MAX_CENTRAL_DIRECTORY_BYTES) {
-    throw new ZipError("too-large", "central directory is implausibly large");
-  }
-  if (directoryOffset + directorySize > size) {
-    throw new ZipError("truncated", "central directory runs past the file");
-  }
+  const { total, directorySize, directoryOffset } = readEndRecord(
+    tail,
+    eocd,
+    size,
+  );
 
   const directory = await bytesAt(
     blob,
@@ -436,46 +469,60 @@ function readCentralDirectory(
     if (u32(headers, at) !== CENTRAL_SIGNATURE) {
       throw new ZipError("not-a-zip", "central directory header not found");
     }
-    const flags = u16(headers, at + 8);
-    const method = u16(headers, at + 10);
-    const compressedSize = u32(headers, at + 20);
-    const uncompressedSize = u32(headers, at + 24);
-    const nameLength = u16(headers, at + 28);
-    const extraLength = u16(headers, at + 30);
-    const commentLength = u16(headers, at + 32);
-    const headerOffset = u32(headers, at + 42);
-
-    if ((flags & FLAG_ENCRYPTED) !== 0) {
-      throw new ZipError("encrypted", "an entry is encrypted");
-    }
-    if (
-      compressedSize === ZIP64_SENTINEL_32 ||
-      uncompressedSize === ZIP64_SENTINEL_32 ||
-      headerOffset === ZIP64_SENTINEL_32
-    ) {
-      throw new ZipError("zip64", "zip64 archives are out of bounds here");
-    }
-    const nameAt = at + CENTRAL_HEADER_BYTES;
-    if (nameAt + nameLength > directory.length) {
-      throw new ZipError("truncated", "central directory ends mid name");
-    }
-    // Decoded as UTF-8 whatever the language encoding flag says. The two paths
-    // this seam's callers ask for are `META-INF/container.xml` and whatever
-    // `container.xml` names, which the EPUB specification requires to be a
-    // relative path in ASCII; a CP437 name outside that is mis-decoded and
-    // simply does not match, which is a miss rather than a wrong entry.
-    const name = names.decode(directory.subarray(nameAt, nameAt + nameLength));
-
-    entries.push({
-      name,
-      method,
-      compressedSize,
-      uncompressedSize,
-      headerOffset,
-    });
-    at = nameAt + nameLength + extraLength + commentLength;
+    const { entry, next } = readCentralHeader(directory, headers, at, names);
+    entries.push(entry);
+    at = next;
   }
   return entries;
+}
+
+/**
+ * The entry whose central header starts at `at`, and where the next header
+ * starts. The caller has checked that the fixed part of the header is inside
+ * `directory` and carries its signature.
+ *
+ * Refuses an encrypted or zip64 entry, and a name running past the directory.
+ */
+function readCentralHeader(
+  directory: Uint8Array,
+  headers: DataView,
+  at: number,
+  names: TextDecoder,
+): { entry: ZipEntry; next: number } {
+  const flags = u16(headers, at + 8);
+  const method = u16(headers, at + 10);
+  const compressedSize = u32(headers, at + 20);
+  const uncompressedSize = u32(headers, at + 24);
+  const nameLength = u16(headers, at + 28);
+  const extraLength = u16(headers, at + 30);
+  const commentLength = u16(headers, at + 32);
+  const headerOffset = u32(headers, at + 42);
+
+  if ((flags & FLAG_ENCRYPTED) !== 0) {
+    throw new ZipError("encrypted", "an entry is encrypted");
+  }
+  if (
+    compressedSize === ZIP64_SENTINEL_32 ||
+    uncompressedSize === ZIP64_SENTINEL_32 ||
+    headerOffset === ZIP64_SENTINEL_32
+  ) {
+    throw new ZipError("zip64", "zip64 archives are out of bounds here");
+  }
+  const nameAt = at + CENTRAL_HEADER_BYTES;
+  if (nameAt + nameLength > directory.length) {
+    throw new ZipError("truncated", "central directory ends mid name");
+  }
+  // Decoded as UTF-8 whatever the language encoding flag says. The two paths
+  // this seam's callers ask for are `META-INF/container.xml` and whatever
+  // `container.xml` names, which the EPUB specification requires to be a
+  // relative path in ASCII; a CP437 name outside that is mis-decoded and
+  // simply does not match, which is a miss rather than a wrong entry.
+  const name = names.decode(directory.subarray(nameAt, nameAt + nameLength));
+
+  return {
+    entry: { name, method, compressedSize, uncompressedSize, headerOffset },
+    next: nameAt + nameLength + extraLength + commentLength,
+  };
 }
 
 /**
@@ -541,6 +588,42 @@ async function readEntry(
       `${entry.name} declares more than ${limit}`,
     );
   }
+  const { dataStart, dataEnd } = await locateData(blob, entry);
+
+  // **After the truncation checks and before the slice.** After, because an
+  // entry pointing past the end of the file is a broken archive whatever its
+  // size, and reporting that as too large would name the wrong fault. Before,
+  // because this is the line that would otherwise allocate it.
+  if (entry.compressedSize > maxCompressedFor(limit)) {
+    throw new ZipError(
+      "too-large",
+      `${entry.name} holds more compressed bytes than ${limit} could need`,
+    );
+  }
+
+  const raw = await bytesAt(blob, dataStart, dataEnd);
+  if (entry.method === METHOD_STORED) {
+    return storedPrefix(raw, limit, stop, entry.name);
+  }
+  if (entry.method !== METHOD_DEFLATE) {
+    throw new ZipError(
+      "unsupported",
+      `${entry.name} uses method ${entry.method}`,
+    );
+  }
+  return inflateRaw(raw, stop, entry.name);
+}
+
+/**
+ * Where an entry's compressed bytes start and end, read from its local header.
+ *
+ * Refuses a header past the end of the file, one without its signature, and
+ * data running past the end of the file. Reads nothing but the header.
+ */
+async function locateData(
+  blob: Blob,
+  entry: ZipEntry,
+): Promise<{ dataStart: number; dataEnd: number }> {
   if (entry.headerOffset + LOCAL_HEADER_BYTES > blob.size) {
     throw new ZipError("truncated", `${entry.name} has no local header`);
   }
@@ -567,41 +650,29 @@ async function readEntry(
   if (dataEnd > blob.size) {
     throw new ZipError("truncated", `${entry.name} runs past the file`);
   }
+  return { dataStart, dataEnd };
+}
 
-  // **After the truncation checks and before the slice.** After, because an
-  // entry pointing past the end of the file is a broken archive whatever its
-  // size, and reporting that as too large would name the wrong fault. Before,
-  // because this is the line that would otherwise allocate it.
-  if (entry.compressedSize > maxCompressedFor(limit)) {
-    throw new ZipError(
-      "too-large",
-      `${entry.name} holds more compressed bytes than ${limit} could need`,
-    );
+/** A stored entry's bytes: refused above `limit`, cut at `stop`. */
+function storedPrefix(
+  raw: Uint8Array<ArrayBuffer>,
+  limit: number,
+  stop: number,
+  name: string,
+): ZipPrefix {
+  // The ceiling and not the stop: an entry the archive was not allowed to
+  // hold is a refusal whatever the caller asked to read of it.
+  if (raw.length > limit) {
+    throw new ZipError("too-large", `${name} is larger than ${limit}`);
   }
-
-  const raw = await bytesAt(blob, dataStart, dataEnd);
-  if (entry.method === METHOD_STORED) {
-    // The ceiling and not the stop: an entry the archive was not allowed to
-    // hold is a refusal whatever the caller asked to read of it.
-    if (raw.length > limit) {
-      throw new ZipError("too-large", `${entry.name} is larger than ${limit}`);
-    }
-    // **A copy and not a `subarray`, when there is anything to cut off.** A
-    // view keeps the whole entry alive behind it and hands back every byte past
-    // the prefix through `.buffer`, which is the opposite of what `prefix`
-    // promises. The condition is what keeps it free: neither `read` nor a
-    // prefix that fits ever copies.
-    return raw.length > stop
-      ? { bytes: raw.slice(0, stop), partial: true }
-      : { bytes: raw, partial: false };
-  }
-  if (entry.method !== METHOD_DEFLATE) {
-    throw new ZipError(
-      "unsupported",
-      `${entry.name} uses method ${entry.method}`,
-    );
-  }
-  return inflateRaw(raw, stop, entry.name);
+  // **A copy and not a `subarray`, when there is anything to cut off.** A
+  // view keeps the whole entry alive behind it and hands back every byte past
+  // the prefix through `.buffer`, which is the opposite of what `prefix`
+  // promises. The condition is what keeps it free: neither `read` nor a
+  // prefix that fits ever copies.
+  return raw.length > stop
+    ? { bytes: raw.slice(0, stop), partial: true }
+    : { bytes: raw, partial: false };
 }
 
 /**
@@ -620,17 +691,7 @@ async function inflateRaw(
   stop: number,
   name: string,
 ): Promise<ZipPrefix> {
-  if (typeof DecompressionStream === "undefined") {
-    throw new ZipError("no-inflate", "this browser cannot inflate");
-  }
-  let inflater: DecompressionStream;
-  try {
-    inflater = new DecompressionStream("deflate-raw");
-  } catch {
-    // The constructor exists and the format does not, which is a real state:
-    // "deflate-raw" landed later than "deflate" and "gzip" in every engine.
-    throw new ZipError("no-inflate", "this browser cannot inflate raw deflate");
-  }
+  const inflater = rawInflater();
 
   // A `ReadableStream` over the bytes rather than `new Blob(...).stream()`.
   // The bytes are already in memory, so the Blob buys nothing, and jsdom
@@ -682,9 +743,34 @@ async function inflateRaw(
     }
   }
 
-  // Trimmed rather than sized to `total`, because the chunk that crossed the
-  // stop is kept whole and is the one that overruns it.
-  const out = new Uint8Array(Math.min(total, stop));
+  return { bytes: joinUpTo(chunks, Math.min(total, stop)), partial };
+}
+
+/** A `deflate-raw` inflater, or `no-inflate` when this browser has none. */
+function rawInflater(): DecompressionStream {
+  if (typeof DecompressionStream === "undefined") {
+    throw new ZipError("no-inflate", "this browser cannot inflate");
+  }
+  try {
+    return new DecompressionStream("deflate-raw");
+  } catch {
+    // The constructor exists and the format does not, which is a real state:
+    // "deflate-raw" landed later than "deflate" and "gzip" in every engine.
+    throw new ZipError("no-inflate", "this browser cannot inflate raw deflate");
+  }
+}
+
+/**
+ * The first `length` bytes of `chunks`, joined.
+ *
+ * `length` rather than the chunks' own total, because the chunk that crossed
+ * the stop is kept whole and is the one that overruns it.
+ */
+function joinUpTo(
+  chunks: readonly Uint8Array[],
+  length: number,
+): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(length);
   let at = 0;
   for (const chunk of chunks) {
     if (at === out.length) break;
@@ -692,5 +778,5 @@ async function inflateRaw(
     out.set(take, at);
     at += take.length;
   }
-  return { bytes: out, partial };
+  return out;
 }

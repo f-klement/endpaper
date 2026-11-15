@@ -49,6 +49,31 @@ function copyDraft(book: BookOut) {
   };
 }
 
+type CopyDraft = ReturnType<typeof copyDraft>;
+
+/** Whether any field differs from what the stored book fills it with. */
+function isEdited(current: CopyDraft, saved: CopyDraft): boolean {
+  return (Object.keys(saved) as (keyof CopyDraft)[]).some(
+    (field) => current[field] !== saved[field],
+  );
+}
+
+/**
+ * The PATCH a submit sends, the price already parsed. Empty means "clear":
+ * the API distinguishes absent from null, and an empty string would be
+ * neither.
+ */
+function copyUpdate(draft: CopyDraft, minor: number | null): BookDetailsUpdate {
+  return {
+    format: (draft.format || null) as BookFormat | null,
+    condition: (draft.condition || null) as BookCondition | null,
+    purchase_price_minor: minor,
+    purchase_currency: draft.currency.trim().toUpperCase() || null,
+    purchased_at: draft.purchasedAt || null,
+    purchase_source: draft.source.trim() || null,
+  };
+}
+
 /**
  * Facts about the object on the shelf, rather than about the work.
  *
@@ -89,13 +114,7 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
     saved.source,
   ]);
 
-  const dirty =
-    format !== saved.format ||
-    condition !== saved.condition ||
-    price !== saved.price ||
-    currency !== saved.currency ||
-    purchasedAt !== saved.purchasedAt ||
-    source !== saved.source;
+  const current = { format, condition, price, currency, purchasedAt, source };
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -107,16 +126,7 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
       return;
     }
     setPriceError(false);
-    onSave({
-      // Empty means "clear". The API distinguishes absent from null and an
-      // empty string would be neither.
-      format: (format || null) as BookFormat | null,
-      condition: (condition || null) as BookCondition | null,
-      purchase_price_minor: minor,
-      purchase_currency: currency.trim().toUpperCase() || null,
-      purchased_at: purchasedAt || null,
-      purchase_source: source.trim() || null,
-    });
+    onSave(copyUpdate(current, minor));
   }
 
   // No <details> of its own any more. It had one, opened on a copy with
@@ -246,7 +256,7 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
         <Button
           type="submit"
           size="sm"
-          disabled={!dirty}
+          disabled={!isEdited(current, saved)}
           isLoading={isSaving}
           aria-label={t("copy.save")}
         >

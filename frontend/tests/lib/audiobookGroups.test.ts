@@ -277,6 +277,39 @@ describe("the grouping rule", () => {
     expect(many[0]?.title).toBeNull();
   });
 
+  it.each([
+    ["only spaces", "   "],
+    ["only a control character", "\u0001"],
+  ])(
+    "names no album for a tag of %s, so one file keeps its own title",
+    (_, album) => {
+      const [group] = groupAudiobooks([
+        picked("Shelf/Real Title.m4b", { album, title: "Real Title" }),
+      ]);
+
+      expect(group?.album).toBeNull();
+      expect(group?.title).toBe("Real Title");
+    },
+  );
+
+  it("leaves an artist tag of only spaces out of the authors", () => {
+    const files = [
+      picked("a/1.mp3", { album: "One", artist: "   " }),
+      picked("a/2.mp3", { album: "One", artist: "Ann Radcliffe" }),
+    ];
+
+    expect(groupAudiobooks(files)[0]?.authors).toEqual(["Ann Radcliffe"]);
+  });
+
+  it("names an author once however each file spells them", () => {
+    const files = [
+      picked("a/1.mp3", { album: "One", artist: "Ann Radcliffe" }),
+      picked("a/2.mp3", { album: "One", artist: "ann  RADCLIFFE" }),
+    ];
+
+    expect(groupAudiobooks(files)[0]?.authors).toEqual(["Ann Radcliffe"]);
+  });
+
   it("does not let one artist per file build an unbounded author line", () => {
     const files = Array.from({ length: 500 }, (_, index) =>
       picked(`a/${index}.mp3`, { album: "One", artist: `Writer ${index}` }),

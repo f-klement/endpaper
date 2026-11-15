@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 import pytest
+from sqlalchemy import event
 
 import identity
 from enums import BookIdentifierScheme
@@ -274,6 +275,27 @@ class TestOneRecord:
 
         assert answer == Unknown()
 
+    def test_two_books_carrying_one_asin_outside_a_copy_group_are_tied(self, db, member):
+        """The narrowed read admits each holder's shelf row, which the tie rule
+        reads the copy group from."""
+        one, two = _book(db, member, "Docker"), _book(db, member, "Docker, again")
+        db.add_all(
+            [
+                BookIdentifier(book_id=book.id, scheme=BookIdentifierScheme.ASIN, value="B00J4YQKHY")
+                for book in (one, two)
+            ]
+        )
+        db.commit()
+
+        answer = recognise_one(
+            db,
+            member.id,
+            Source.STORE,
+            identifiers=[(BookIdentifierScheme.ASIN, "B00J4YQKHY")],
+        )
+
+        assert answer == Tied(frozenset({one.id, two.id}))
+
     def test_an_isbn_stored_with_hyphens_answers_the_canonical_one(self, db, member):
         """The full index keys every stored ISBN through `isbn.parse`, so the
         door has to find the spelling an exact comparison would miss."""
@@ -285,3 +307,54 @@ class TestOneRecord:
         book = _book(db, member, "Night Train", isbn=LOWER_X_TEN)
 
         assert recognise_one(db, member.id, Source.ADD, isbn=LOWER_X) == Seen(book.id)
+
+    def test_a_ladder_asking_a_title_is_refused(self, db, member):
+        """The narrowed rows hold no Book that shares only the title, so the
+        title rung would answer wrongly rather than not at all."""
+        with pytest.raises(ValueError, match="asks a title"):
+            recognise_one(db, member.id, Source.CATALOGUE, isbn=DUNE)
+
+    def test_an_identifier_of_a_scheme_the_ladder_does_not_ask_reads_nothing(self, db, member):
+        """The answer would be the same either way, since `recognise` keys by
+        the ladder's schemes too; what the narrowing owes is no read for a
+        record carrying none of them."""
+        book = _book(db, member, "Dune")
+        db.add(BookIdentifier(book_id=book.id, scheme=BookIdentifierScheme.CALIBRE_UUID, value="b00j4yqkhy"))
+        db.commit()
+        member_id = member.id
+        statements: list[str] = []
+
+        def record(conn, cursor, statement, *rest):
+            statements.append(statement)
+
+        event.listen(db.get_bind(), "before_cursor_execute", record)
+        try:
+            answer = recognise_one(
+                db,
+                member_id,
+                Source.STORE,
+                identifiers=[(BookIdentifierScheme.CALIBRE_UUID, "b00j4yqkhy")],
+            )
+        finally:
+            event.remove(db.get_bind(), "before_cursor_execute", record)
+
+        assert (answer, statements) == (Unknown(), [])
+
+    def test_an_identifier_sent_padded_answers_the_stored_one(self, db, member):
+        book = _book(db, member, "Docker")
+        db.add(BookIdentifier(book_id=book.id, scheme=BookIdentifierScheme.ASIN, value="B00J4YQKHY"))
+        db.commit()
+
+        answer = recognise_one(
+            db,
+            member.id,
+            Source.STORE,
+            identifiers=[(BookIdentifierScheme.ASIN, " B00J4YQKHY ")],
+        )
+
+        assert answer == Seen(book.id)
+
+    def test_a_record_with_no_isbn_answers_nothing_on_an_isbn_ladder(self, db, member):
+        _book(db, member, "Dune", isbn=DUNE)
+
+        assert recognise_one(db, member.id, Source.ADD, isbn=None) == Unknown()

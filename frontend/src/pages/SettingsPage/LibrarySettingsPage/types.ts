@@ -26,7 +26,11 @@
  */
 
 import type { BookCreate } from "../../../api/generated/model";
-import { BookFormat, OwnershipStatus } from "../../../api/generated/model";
+import {
+  BookFormat,
+  OwnershipStatus,
+  RecordOrigin,
+} from "../../../api/generated/model";
 import { boundIdentifiers, boundRecord } from "../../../lib/bookRequest";
 import {
   formatOf,
@@ -86,6 +90,7 @@ export function toBookCreate(book: CalibreBook): BookCreate | null {
     // be a 422 for the whole book. `STORE_SCHEMES`, inside this call, is the
     // other half: it is where a scheme becomes the endpoint's own name for one.
     identifiers: boundIdentifiers(identifiersOf(book)),
+    record_origin: RecordOrigin.calibre_import,
   };
 }
 
@@ -169,6 +174,7 @@ export function storeToBookCreate(
     location: null,
     is_private: false,
     classifications: [],
+    record_origin: RecordOrigin.store_import,
     // **The row's own answer where it has one, the library's where it does
     // not**, and that precedence is the whole of this expression.
     //

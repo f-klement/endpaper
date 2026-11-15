@@ -177,6 +177,47 @@ describe("LoginPage", () => {
       expect(api.lastCall("/auth/login", "POST")).toBeUndefined();
     });
 
+    it("says the account waits on its address when registering made no session", async () => {
+      api.on("/auth/register", {
+        body: { verification_required: true, token: null },
+      });
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
+
+      await userEvent
+        .setup()
+        .click(
+          await screen.findByRole("button", { name: "Switch to registration" }),
+        );
+      expect(
+        screen.queryByText(/your account is made/i),
+      ).not.toBeInTheDocument();
+      await fillAndSubmit("newcomer", "password123");
+
+      expect(
+        await screen.findByText(/your account is made/i),
+      ).toBeInTheDocument();
+    });
+
+    it("marks the chosen tab, and shows each tab's own words", async () => {
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
+
+      const signIn = await screen.findByRole("button", {
+        name: "Switch to sign in",
+      });
+      const register = screen.getByRole("button", {
+        name: "Switch to registration",
+      });
+      expect(signIn).toHaveAttribute("aria-pressed", "true");
+      expect(signIn).toHaveTextContent("Sign In");
+      expect(register).toHaveAttribute("aria-pressed", "false");
+      expect(register).toHaveTextContent("Create Account");
+      // The chosen tab is the raised one: its classes are what a sighted user
+      // reads, and `aria-pressed` alone would stay green with them swapped.
+      expect(signIn).toHaveClass("bg-paper-0");
+      expect(register).not.toHaveClass("bg-paper-0");
+      expect(register).toHaveClass("text-paper-600");
+    });
+
     it("explains that the first account becomes admin", async () => {
       renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
       const user = userEvent.setup();
@@ -270,6 +311,38 @@ describe("LoginPage", () => {
         .click(screen.getByRole("button", { name: "Switch to registration" }));
 
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("getting back in", () => {
+    it("opens the recovery card where the deployment resets passwords", async () => {
+      api.on("/auth/config", { body: { password_reset_enabled: true } });
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
+
+      await userEvent.setup().click(
+        await screen.findByRole("button", {
+          name: "Forgotten your password?",
+        }),
+      );
+
+      expect(
+        screen.getByRole("heading", { name: "Get back in" }),
+      ).toBeInTheDocument();
+    });
+
+    it("opens the confirmation card where new accounts confirm an address", async () => {
+      api.on("/auth/config", { body: { verification_required: true } });
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
+
+      await userEvent.setup().click(
+        await screen.findByRole("button", {
+          name: "I have a confirmation code",
+        }),
+      );
+
+      expect(
+        screen.getByRole("heading", { name: "Confirm your address" }),
+      ).toBeInTheDocument();
     });
   });
 

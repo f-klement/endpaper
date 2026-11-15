@@ -23,13 +23,16 @@ import {
   BookIdentifierScheme,
   ClassificationScheme,
   OwnershipStatus,
+  RecordOrigin,
 } from "../../../src/api/generated/model";
 import type { AudiobookGroup } from "../../../src/lib/audiobookGroups";
 import {
+  blankDraft,
   blankPending,
   draftFromAudiobook,
   draftFromCalibre,
   draftFromFile,
+  editedDraft,
   enrichedDraft,
   identifiersFromFile,
   titlesCouldAgree,
@@ -78,6 +81,8 @@ const DRAFT: { [K in keyof BookDraft]-?: BookDraft[K] } = {
   year: 1965,
   description: "Desert planet politics.",
   cover_url: "https://covers.openlibrary.org/b/isbn/9780441013593-L.jpg",
+  record_origin: "dnb",
+  record_modified_here: false,
   language: "en",
   page_count: 412,
   series_name: "Dune",
@@ -1043,6 +1048,23 @@ describe("which of a file's labels reach the endpoint", () => {
  * evasion: any name the module spells is held, wherever it sits.
  */
 
+describe("editedDraft", () => {
+  it("files a source's record changed before filing as modified here", () => {
+    const corrected = editedDraft(DRAFT, { title: "Dune Messiah" });
+
+    expect(toScanRequest(pending({ draft: corrected }))).toMatchObject({
+      record_origin: "dnb",
+      record_modified_here: true,
+    });
+  });
+
+  it("files a record being typed as unmodified", () => {
+    const typed = editedDraft(blankDraft("9780441013593"), { title: "Dune" });
+
+    expect(typed.record_modified_here).toBe(false);
+  });
+});
+
 describe("enrichedDraft", () => {
   /** What a file stating its ISBN drafts: thin, and partly spelled its own way. */
   const FILE: BookDraft = {
@@ -1107,6 +1129,46 @@ describe("enrichedDraft", () => {
 
   it("is the catalogue's record whole for a row with no draft of its own", () => {
     expect(enrichedDraft(LOOKUP, null)).toEqual(LOOKUP);
+  });
+
+  it("files a catalogue's record whose description the file filled as changed here", () => {
+    const enriched = enrichedDraft(
+      { ...LOOKUP, record_origin: RecordOrigin.dnb },
+      { ...FILE, record_origin: RecordOrigin.file },
+    );
+
+    expect(enriched.record_origin).toBe(RecordOrigin.dnb);
+    expect(enriched.record_modified_here).toBe(true);
+  });
+
+  it("files a catalogue's record the file filled only beside the description as unchanged", () => {
+    const beside: BookDraft = {
+      isbn: LOOKUP.isbn,
+      title: "Dune",
+      classifications: [{ scheme: ClassificationScheme.ddc, number: "813.54" }],
+      suggested_tag_ids: [],
+      identifiers: FILE.identifiers,
+      cover_url: "https://covers.example/dune.jpg",
+      record_origin: RecordOrigin.file,
+    };
+
+    const enriched = enrichedDraft(
+      { ...LOOKUP, record_origin: RecordOrigin.dnb },
+      beside,
+    );
+
+    expect(enriched.identifiers).toEqual(FILE.identifiers);
+    expect(enriched.record_modified_here).toBeFalsy();
+  });
+
+  it("leaves a file's record unflagged where the lookup named no catalogue", () => {
+    const enriched = enrichedDraft(LOOKUP, {
+      ...FILE,
+      record_origin: RecordOrigin.file,
+    });
+
+    expect(enriched.record_origin).toBe(RecordOrigin.file);
+    expect(enriched.record_modified_here).toBeFalsy();
   });
 });
 

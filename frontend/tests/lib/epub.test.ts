@@ -129,6 +129,39 @@ describe("a file that is not an EPUB", () => {
     expect(verdict(reading)).toBe("not-an-epub");
   });
 
+  it("refuses a blank rootfile path even when an entry has an empty name", async () => {
+    // The zip reader accepts a zero length entry name, so a blank path kept as
+    // "" would find this entry and read the package document it holds.
+    const reading = await read({ packagePath: "  ", storedAt: "" });
+    expect(verdict(reading)).toBe("not-an-epub");
+  });
+
+  it("reads a container whose rootfiles carry no namespace", async () => {
+    const reading = await read({
+      container: `<?xml version="1.0"?>
+<container version="1.0"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`,
+    });
+    expect(verdict(reading)).toBe("read: Dune");
+  });
+
+  it("takes the rootfile declaring the package media type over an earlier one", async () => {
+    // The earlier rendition names a file the archive lacks, so taking it
+    // instead reads as a refusal.
+    const reading = await read({
+      container: `<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.pdf" media-type="application/pdf"/><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`,
+    });
+    expect(verdict(reading)).toBe("read: Dune");
+  });
+
+  it("takes the only rootfile even when it names no media type", async () => {
+    const reading = await read({
+      container: `<?xml version="1.0"?>
+<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>`,
+    });
+    expect(verdict(reading)).toBe("read: Dune");
+  });
+
   it("refuses a container that declares its own entities", async () => {
     // The container is parsed by the same engine and is the same exposure as
     // the package document. See `xmlEntities.declaresEntities`.

@@ -9,6 +9,7 @@ import type { BookFormat } from "./bookFormat.ts";
 import type { PublicClassificationOut } from "./publicClassificationOut.ts";
 import type { PublicOnlineLinkOut } from "./publicOnlineLinkOut.ts";
 import type { PublicTagOut } from "./publicTagOut.ts";
+import type { RecordOrigin } from "./recordOrigin.ts";
 
 /**
  * One catalogue record, as published.
@@ -32,6 +33,7 @@ export interface PublicBookOut {
   online_links?: PublicOnlineLinkOut[];
   page_count?: number | null;
   publisher?: string | null;
+  record_origin?: RecordOrigin | null;
   series_index?: number | null;
   series_name?: string | null;
   subtitle?: string | null;

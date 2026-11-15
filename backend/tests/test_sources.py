@@ -746,6 +746,18 @@ class TestAStoredRowAlwaysResolvesToTheWholeRoster:
         )
         assert plan.asked == ()
 
+    def test_an_entry_that_is_not_an_object_naming_a_source_is_skipped(self):
+        plan = sources.parse(
+            {"sources": ["dnb", {"source": 7}, {"enabled": False}, {"source": "dnb", "enabled": False}]}
+        )
+        assert self._roster(plan)[0] is CatalogueSource.DNB
+        assert CatalogueSource.DNB not in plan.asked
+
+    def test_an_entry_after_every_source_is_named_changes_nothing(self):
+        named = [{"source": source.value, "enabled": False} for source in sources.DEFAULT_ORDER]
+        plan = sources.parse({"sources": [*named, {"source": "libris", "enabled": True}]})
+        assert plan.asked == ()
+
     def test_a_stored_row_survives_a_round_trip(self):
         plan = sources.parse({"sources": [{"source": "loc", "enabled": False}]})
         assert sources.parse(sources.serialise(plan)) == plan

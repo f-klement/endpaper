@@ -345,34 +345,47 @@ function readExth(record: DataView, at: number): ExthRecords {
 
   let cursor = at + EXTH_HEADER_BYTES;
   for (let index = 0; index < count; index += 1) {
-    const type = u32(record, cursor);
-    const length = u32(record, cursor + 4);
-    if (type === null || length === null) break;
-    if (length < EXTH_RECORD_HEADER_BYTES) break;
-    if (cursor + length > end) break;
-
-    // **Unreachable, and kept because it is what makes the bounding local.**
-    // The two checks above already give `cursor + length <= end` and
-    // `length >= 8`, and `end` is at most the record's length, so `slice`
-    // cannot refuse here. Driven over a corpus of 224,769 malformed and fuzzed
-    // inputs, `slice` returned null 1,605 times and every one of them came from
-    // `readTitle`; this call took none. Over well formed files it never refuses
-    // at all, from either site. So it is not a guard, and no test can cover it.
-    // What it buys is that this line reads correctly on its own, without the
-    // reader having to carry two earlier checks in their head to see that the
-    // bytes exist.
-    const value = slice(
-      record,
-      cursor + EXTH_RECORD_HEADER_BYTES,
-      length - EXTH_RECORD_HEADER_BYTES,
-    );
-    if (value === null) break;
-    const values = found.get(type) ?? [];
-    values.push(value);
-    found.set(type, values);
-    cursor += length;
+    const entry = exthRecordAt(record, cursor, end);
+    if (entry === null) break;
+    const values = found.get(entry.type) ?? [];
+    values.push(entry.value);
+    found.set(entry.type, values);
+    cursor += entry.length;
   }
   return found;
+}
+
+/**
+ * The EXTH record at `cursor`, or `null` when it does not fit before `end`,
+ * which ends the walk.
+ */
+function exthRecordAt(
+  record: DataView,
+  cursor: number,
+  end: number,
+): { type: number; length: number; value: Uint8Array } | null {
+  const type = u32(record, cursor);
+  const length = u32(record, cursor + 4);
+  if (type === null || length === null) return null;
+  if (length < EXTH_RECORD_HEADER_BYTES) return null;
+  if (cursor + length > end) return null;
+
+  // **Unreachable, and kept because it is what makes the bounding local.**
+  // The two checks above already give `cursor + length <= end` and
+  // `length >= 8`, and `end` is at most the record's length, so `slice`
+  // cannot refuse here. Driven over a corpus of 224,769 malformed and fuzzed
+  // inputs, `slice` returned null 1,605 times and every one of them came from
+  // `readTitle`; this call took none. Over well formed files it never refuses
+  // at all, from either site. So it is not a guard, and no test can cover it.
+  // What it buys is that this line reads correctly on its own, without the
+  // reader having to carry two earlier checks in their head to see that the
+  // bytes exist.
+  const value = slice(
+    record,
+    cursor + EXTH_RECORD_HEADER_BYTES,
+    length - EXTH_RECORD_HEADER_BYTES,
+  );
+  return value === null ? null : { type, length, value };
 }
 
 /** One EXTH value as text, or `null` when it says nothing. */
@@ -554,16 +567,40 @@ function recordZeroExtent(
   const records = u16(head, RECORD_COUNT_AT);
   if (records === null || records < 1) return "not-a-mobi";
 
-  const from = u32(head, PDB_HEADER_BYTES);
+  const from = recordZeroStart(head, records, size);
   if (from === null) return "damaged";
-  if (from < PDB_HEADER_BYTES + records * PDB_ENTRY_BYTES) return "damaged";
-  if (from >= size) return "damaged";
-
-  if (records === 1) return { from, to: size };
-
-  const to = u32(head, PDB_HEADER_BYTES + PDB_ENTRY_BYTES);
-  if (to === null || to <= from || to > size) return "damaged";
+  const to = recordZeroEnd(head, records, from, size);
+  if (to === null) return "damaged";
   return { from, to };
+}
+
+/** Where record 0 begins: after the offset table and inside the file. */
+function recordZeroStart(
+  head: DataView,
+  records: number,
+  size: number,
+): number | null {
+  const from = u32(head, PDB_HEADER_BYTES);
+  if (from === null) return null;
+  if (from < PDB_HEADER_BYTES + records * PDB_ENTRY_BYTES) return null;
+  if (from >= size) return null;
+  return from;
+}
+
+/**
+ * Where record 0 ends: the file's end for a single record, else where the
+ * second begins, which must be after `from` and inside the file.
+ */
+function recordZeroEnd(
+  head: DataView,
+  records: number,
+  from: number,
+  size: number,
+): number | null {
+  if (records === 1) return size;
+  const to = u32(head, PDB_HEADER_BYTES + PDB_ENTRY_BYTES);
+  if (to === null || to <= from || to > size) return null;
+  return to;
 }
 
 /**

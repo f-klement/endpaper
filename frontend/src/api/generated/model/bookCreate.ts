@@ -10,6 +10,7 @@ import type { BookFormat } from "./bookFormat.ts";
 import type { BookIdentifierIn } from "./bookIdentifierIn.ts";
 import type { ClassificationIn } from "./classificationIn.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
+import type { RecordOrigin } from "./recordOrigin.ts";
 
 export interface BookCreate {
   author?: string | null;
@@ -38,6 +39,8 @@ export interface BookCreate {
   publisher?: string | null;
   purchase_source?: string | null;
   purchased_at?: string | null;
+  record_modified_here?: boolean;
+  record_origin?: RecordOrigin;
   series_index?: number | null;
   series_name?: string | null;
   subtitle?: string | null;

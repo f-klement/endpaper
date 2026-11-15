@@ -257,6 +257,45 @@ export function applyAppearance(
   return theme;
 }
 
+/**
+ * The wallpaper an appearance asks for.
+ *
+ * The override forces which wallpaper, never whether: a test that fixes the
+ * pattern so it is not at the mercy of `Math.random` must still be able to turn
+ * it off.
+ */
+function chosenPattern(
+  wallpaper: string | null,
+  override: Pattern | undefined,
+): Pattern | null {
+  const chosen = patternFor(wallpaper);
+  return chosen === null ? null : (override ?? chosen);
+}
+
+/**
+ * Listens for the system preferences that repaint the page, and returns the
+ * unsubscribe.
+ *
+ * The dark listener is attached only while the mode is `system`, or somebody
+ * who asked for dark gets flipped back at sunrise by their laptop. The contrast
+ * listener is always attached, because that preference is not one this app
+ * offers and can be turned on with the page already open.
+ */
+function watchPreferences(
+  mode: ThemePreference,
+  onChange: () => void,
+): () => void {
+  const contrast = window.matchMedia?.(CONTRAST_QUERY);
+  const dark = mode === "system" ? window.matchMedia?.(DARK_QUERY) : undefined;
+
+  contrast?.addEventListener("change", onChange);
+  dark?.addEventListener("change", onChange);
+  return () => {
+    contrast?.removeEventListener("change", onChange);
+    dark?.removeEventListener("change", onChange);
+  };
+}
+
 interface ThemeProviderProps {
   children: ReactNode;
   /** Forces a starting appearance. Tests use it; the app does not. */
@@ -282,13 +321,10 @@ export function ThemeProvider({
   // appearance it belongs to.
   const account = useRef<number | string | null>(null);
 
-  const pattern = useMemo(() => {
-    const chosen = patternFor(appearance.wallpaper);
-    // The override forces which wallpaper, never whether: a test that fixes the
-    // pattern so it is not at the mercy of `Math.random` must still be able to
-    // turn it off.
-    return chosen === null ? null : (initialPattern ?? chosen);
-  }, [initialPattern, appearance.wallpaper]);
+  const pattern = useMemo(
+    () => chosenPattern(appearance.wallpaper, initialPattern),
+    [initialPattern, appearance.wallpaper],
+  );
 
   // One effect, because the three parts are one paint: the wallpaper's ink is
   // read off the palette's own tokens, so moving the class without the pattern
@@ -302,35 +338,17 @@ export function ThemeProvider({
   // open, there is. The picker's `withPalette` reads are layout effects for the
   // same reason, and it would be inconsistent for the component that reads to
   // guarantee more than the one that applies.
-  //
-  // The dark listener is attached only while the mode is `system`, or somebody
-  // who asked for dark gets flipped back at sunrise by their laptop. The
-  // contrast listener is always attached, because that preference is not one
-  // this app offers and can be turned on with the page already open.
   useLayoutEffect(() => {
     setTheme(applyAppearance(appearance, pattern));
     setWallpaperOff(prefersMoreContrast());
 
-    const contrast = window.matchMedia?.(CONTRAST_QUERY);
-    const dark =
-      appearance.mode === "system"
-        ? window.matchMedia?.(DARK_QUERY)
-        : undefined;
-
-    const onChange = () => {
+    return watchPreferences(appearance.mode, () => {
       const next = resolveTheme(appearance.mode);
       setTheme(next);
       applyTheme(next);
       applyWallpaper(pattern, next);
       setWallpaperOff(prefersMoreContrast());
-    };
-
-    contrast?.addEventListener("change", onChange);
-    dark?.addEventListener("change", onChange);
-    return () => {
-      contrast?.removeEventListener("change", onChange);
-      dark?.removeEventListener("change", onChange);
-    };
+    });
   }, [appearance, pattern]);
 
   const setAppearance = useCallback((patch: Partial<Appearance>) => {

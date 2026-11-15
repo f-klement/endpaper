@@ -73,102 +73,161 @@ export default function LibraryImport({
       />
 
       {preview && (
-        <>
-          <ImportPreview preview={preview} />
-
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={createMissing}
-              onChange={(event) => setCreateMissing(event.target.checked)}
-              className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
-            />
-            <span className="text-sm text-paper-700 dark:text-paper-200">
-              {t("import.createMissing")}
-            </span>
-          </label>
-          {createMissing && (
-            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950 dark:border-amber-900">
-              {t("import.createMissingHint")}
-            </p>
-          )}
-
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={applyTags}
-              onChange={(event) => setApplyTags(event.target.checked)}
-              className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
-            />
-            <span className="text-sm text-paper-700 dark:text-paper-200">
-              {t("import.applyTags")}
-            </span>
-          </label>
-          {/* Off by default and warned about: a Goodreads export's tag column
-              is its shelves, which for most people is a few hundred one-off
-              names that would bury the curated list. */}
-          {applyTags && (
-            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950 dark:border-amber-900">
-              {t("import.applyTagsHint", {
-                count: preview.distinct_tags ?? 0,
-              })}
-            </p>
-          )}
-
-          <ConfirmRow
-            isImporting={isImporting}
-            withheld={preview.total_rows === 0}
-            confirmLabel={t("import.confirm", { count: preview.total_rows })}
-            importingLabel={t("import.importing")}
-            onConfirm={() => onConfirm({ createMissing, applyTags })}
-            onCancel={onCancel}
-          />
-        </>
+        <PreviewAndOptions
+          preview={preview}
+          isImporting={isImporting}
+          createMissing={createMissing}
+          applyTags={applyTags}
+          onCreateMissing={setCreateMissing}
+          onApplyTags={setApplyTags}
+          onConfirm={() => onConfirm({ createMissing, applyTags })}
+          onCancel={onCancel}
+        />
       )}
 
       <ImportError error={error} />
 
       {result && (
-        <ResultPanel>
-          <p>
-            {t("import.result", {
-              rowsRead: result.rows_read,
-              matched: result.matched,
-              created: result.created,
-              statusesUpdated: result.statuses_updated,
-            })}
-          </p>
-          {result.skipped > 0 && (
-            <p className="text-xs text-paper-600 dark:text-paper-400">
-              {t("import.skipped", { count: result.skipped })}
-            </p>
-          )}
-          {/* Said here as well as on the preview, and in the past tense,
-              because the preview is cleared the moment the import succeeds and
-              this is the point at which the number is a fact. A member who
-              exported 400 titles and imported 380 is owed the other twenty. */}
-          {(result.excluded ?? 0) > 0 && (
-            <p className="text-xs text-paper-600 dark:text-paper-400">
-              {t("import.excludedResult", { count: result.excluded ?? 0 })}
-            </p>
-          )}
-          <TitleList
-            heading={t("import.unmatched")}
-            titles={result.unmatched_titles}
-          />
-          {/* Named as well as counted: the member can already see each of
-              these in their trash, and restoring one is what imports it. */}
-          <TitleList
-            heading={t("import.inTrash", { count: result.in_trash ?? 0 })}
-            titles={result.in_trash_titles}
-          />
-          <TitleList
-            heading={t("import.ambiguous", { count: result.ambiguous ?? 0 })}
-            titles={result.ambiguous_titles}
-          />
-          <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
-        </ResultPanel>
+        <ImportResult
+          result={result}
+          onReviewUnconfirmed={onReviewUnconfirmed}
+        />
       )}
     </div>
+  );
+}
+
+interface PreviewAndOptionsProps {
+  preview: ImportPreviewOut;
+  isImporting: boolean;
+  createMissing: boolean;
+  applyTags: boolean;
+  onCreateMissing: (checked: boolean) => void;
+  onApplyTags: (checked: boolean) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * The preview, the two checkboxes and the confirm row.
+ *
+ * The checkboxes' state stays with `LibraryImport`, which outlives this: held
+ * here, a member's choice would reset every time a new file is read.
+ */
+function PreviewAndOptions({
+  preview,
+  isImporting,
+  createMissing,
+  applyTags,
+  onCreateMissing,
+  onApplyTags,
+  onConfirm,
+  onCancel,
+}: PreviewAndOptionsProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <ImportPreview preview={preview} />
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={createMissing}
+          onChange={(event) => onCreateMissing(event.target.checked)}
+          className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
+        />
+        <span className="text-sm text-paper-700 dark:text-paper-200">
+          {t("import.createMissing")}
+        </span>
+      </label>
+      {createMissing && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950 dark:border-amber-900">
+          {t("import.createMissingHint")}
+        </p>
+      )}
+
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={applyTags}
+          onChange={(event) => onApplyTags(event.target.checked)}
+          className="rounded border-paper-300 text-accent-700 dark:text-accent-400"
+        />
+        <span className="text-sm text-paper-700 dark:text-paper-200">
+          {t("import.applyTags")}
+        </span>
+      </label>
+      {/* Off by default and warned about: a Goodreads export's tag column
+          is its shelves, which for most people is a few hundred one-off
+          names that would bury the curated list. */}
+      {applyTags && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950 dark:border-amber-900">
+          {t("import.applyTagsHint", {
+            count: preview.distinct_tags ?? 0,
+          })}
+        </p>
+      )}
+
+      <ConfirmRow
+        isImporting={isImporting}
+        withheld={preview.total_rows === 0}
+        confirmLabel={t("import.confirm", { count: preview.total_rows })}
+        importingLabel={t("import.importing")}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />
+    </>
+  );
+}
+
+/** What the import did, counted and named. */
+function ImportResult({
+  result,
+  onReviewUnconfirmed,
+}: {
+  result: ImportResultOut;
+  onReviewUnconfirmed: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ResultPanel>
+      <p>
+        {t("import.result", {
+          rowsRead: result.rows_read,
+          matched: result.matched,
+          created: result.created,
+          statusesUpdated: result.statuses_updated,
+        })}
+      </p>
+      {result.skipped > 0 && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("import.skipped", { count: result.skipped })}
+        </p>
+      )}
+      {/* Said here as well as on the preview, and in the past tense,
+          because the preview is cleared the moment the import succeeds and
+          this is the point at which the number is a fact. A member who
+          exported 400 titles and imported 380 is owed the other twenty. */}
+      {(result.excluded ?? 0) > 0 && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("import.excludedResult", { count: result.excluded ?? 0 })}
+        </p>
+      )}
+      <TitleList
+        heading={t("import.unmatched")}
+        titles={result.unmatched_titles}
+      />
+      {/* Named as well as counted: the member can already see each of
+          these in their trash, and restoring one is what imports it. */}
+      <TitleList
+        heading={t("import.inTrash", { count: result.in_trash ?? 0 })}
+        titles={result.in_trash_titles}
+      />
+      <TitleList
+        heading={t("import.ambiguous", { count: result.ambiguous ?? 0 })}
+        titles={result.ambiguous_titles}
+      />
+      <ReviewAdded added={result.created} onReview={onReviewUnconfirmed} />
+    </ResultPanel>
   );
 }

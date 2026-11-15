@@ -170,6 +170,46 @@ describe("StatsPage", () => {
   });
 });
 
+describe("the reading summary", () => {
+  it("shows the average rating beside the books finished in all", async () => {
+    api.on("/api/stats", {
+      body: makeStats({
+        total: 40,
+        average_rating: 4,
+        rated_count: 3,
+        finished_by_month: [
+          { month: "2026-01", count: 2 },
+          { month: "2026-02", count: 5 },
+        ],
+      }),
+    });
+    renderWithProviders(<StatsPage />);
+
+    expect(await screen.findByText("4.0")).toBeInTheDocument();
+    expect(screen.getByText("average of 3 ratings")).toBeInTheDocument();
+    expect(
+      screen.getByText("books finished").previousSibling,
+    ).toHaveTextContent(/^7$/);
+  });
+
+  it("counts no ratings when the server sends no count", async () => {
+    api.on("/api/stats", {
+      body: makeStats({ total: 40, average_rating: 4 }),
+    });
+    renderWithProviders(<StatsPage />);
+
+    expect(await screen.findByText("average of 0 ratings")).toBeInTheDocument();
+  });
+
+  it("draws no summary for a library nobody has rated", async () => {
+    api.on("/api/stats", { body: makeStats({ total: 40 }) });
+    renderWithProviders(<StatsPage />);
+    await screen.findByText("40");
+
+    expect(screen.queryByText("books finished")).not.toBeInTheDocument();
+  });
+});
+
 describe("pages read", () => {
   it("charts the pages read each month", async () => {
     api.on("/api/stats", {

@@ -668,6 +668,21 @@ describe("reading a .fb2 off the disk", () => {
     });
   });
 
+  it("still reads the label when a high byte sits beside the equals sign", async () => {
+    // The sniffer turns a byte over 0x7f into a space, and the `\s*` around
+    // `=` admits a space, so this declaration names windows-1251. Kept as a
+    // high character instead, it would match nothing and the file would be
+    // read as UTF-8. `Г` is 0xC3 once encoded.
+    const xml = fb2(
+      titleInfo("<book-title>Евгений Онегин</book-title>"),
+      '<?xml version="1.0" encodingГ="windows-1251"?>',
+    );
+
+    expect(verdict(await readFb2(new Blob([cp1251(xml)])))).toBe(
+      "read: Евгений Онегин",
+    );
+  });
+
   it("reads a UTF-8 file that starts with a byte order mark", async () => {
     const raw = bytes(fb2(titleInfo("<book-title>Онегин</book-title>")));
     const withMark = new Uint8Array(raw.length + 3);
@@ -676,6 +691,24 @@ describe("reading a .fb2 off the disk", () => {
 
     expect(verdict(await readFb2(new Blob([withMark])))).toBe("read: Онегин");
   });
+
+  it.each([
+    ["little", [0xff, 0xfe]],
+    ["big", [0xfe, 0xff]],
+  ] as const)(
+    "reads a UTF-16 %s endian file by its byte order mark",
+    async (endian, mark) => {
+      const xml = fb2(titleInfo("<book-title>Онегин</book-title>"));
+      const raw = new Uint8Array(2 + xml.length * 2);
+      raw.set(mark);
+      const view = new DataView(raw.buffer);
+      for (let at = 0; at < xml.length; at += 1) {
+        view.setUint16(2 + at * 2, xml.charCodeAt(at), endian === "little");
+      }
+
+      expect(verdict(await readFb2(new Blob([raw])))).toBe("read: Онегин");
+    },
+  );
 
   it("falls back to UTF-8 for an encoding this engine has never heard of", async () => {
     // `TextDecoder` throws a `RangeError` for an unknown label, and an

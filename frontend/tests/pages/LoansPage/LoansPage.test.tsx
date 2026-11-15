@@ -342,6 +342,23 @@ describe("LoansPage", () => {
       expect(await screen.findByText("No loans")).toBeInTheDocument();
     });
 
+    it("offers active loans only once every loan is shown, and goes back", async () => {
+      renderWithProviders(<LoansPage />);
+      await screen.findByText("No active loans");
+      const user = userEvent.setup();
+
+      await user.click(screen.getByRole("button", { name: "Show all" }));
+      const back = await screen.findByRole("button", { name: "Active only" });
+      expect(back).toHaveAttribute("aria-pressed", "true");
+
+      await user.click(back);
+
+      await waitFor(() => expect(lastQuery().get("active_only")).toBe("true"));
+      expect(
+        await screen.findByRole("button", { name: "Show all" }),
+      ).toHaveAttribute("aria-pressed", "false");
+    });
+
     it("offers no return action on an already-returned loan", async () => {
       api.on("/api/loans", {
         body: makeLoanPage([
@@ -455,6 +472,34 @@ describe("LoansPage overdue handling", () => {
     await waitFor(() =>
       expect(api.lastCall(/overdue_only=true.*page_size=50/)).toBeDefined(),
     );
+  });
+
+  it("draws the pressed overdue filter in danger, with a frame of its own", async () => {
+    stubLoans([makeLoan()], 2);
+    renderWithProviders(<LoansPage />);
+    const filter = await screen.findByRole("button", { name: "Overdue only" });
+    expect(filter).not.toHaveClass("text-danger-600");
+    expect(filter).not.toHaveClass("border-danger-300");
+
+    await userEvent.setup().click(filter);
+
+    expect(filter).toHaveAttribute("aria-pressed", "true");
+    expect(filter).toHaveClass("text-danger-600");
+    expect(filter).toHaveClass("border-danger-300");
+  });
+
+  it("lifts the overdue filter on a second press", async () => {
+    stubLoans([makeLoan()], 2);
+    renderWithProviders(<LoansPage />);
+    const filter = await screen.findByRole("button", { name: "Overdue only" });
+    const user = userEvent.setup();
+
+    await user.click(filter);
+    await waitFor(() => expect(lastQuery().get("overdue_only")).toBe("true"));
+    await user.click(filter);
+
+    await waitFor(() => expect(lastQuery().get("overdue_only")).toBe("false"));
+    expect(filter).toHaveAttribute("aria-pressed", "false");
   });
 
   it("sends the reader to the overdue page for the delivery status", async () => {

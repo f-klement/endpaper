@@ -553,6 +553,21 @@ def store_key(phrase: str) -> str:
             "CREDENTIAL_ENCRYPTION_KEY pins a different key for this deployment. "
             "Change it where the app is configured, or clear it."
         )
+    written = _write_once_and_clear_the_rest(phrase)
+    if not written:
+        raise KeyConfigurationError(
+            "There is nowhere on this machine to keep an encryption key. Set "
+            "CREDENTIAL_ENCRYPTION_KEY where the app is configured."
+        )
+    return written
+
+
+def _write_once_and_clear_the_rest(phrase: str) -> str:
+    """Write the phrase to the first writable source and clear every later writable one.
+
+    Answers the token of the source written, or empty when none was writable,
+    which `store_key` refuses.
+    """
     written = ""
     for source in KEY_SOURCES:
         write = source.write
@@ -563,11 +578,6 @@ def store_key(phrase: str) -> str:
             written = source.token
         elif source.clear is not None:
             source.clear()
-    if not written:
-        raise KeyConfigurationError(
-            "There is nowhere on this machine to keep an encryption key. Set "
-            "CREDENTIAL_ENCRYPTION_KEY where the app is configured."
-        )
     return written
 
 
@@ -1278,16 +1288,17 @@ def unreadable_settings(db: Session, state: KeyState | None = None) -> list[str]
     resolved = key_state() if state is None else state
     stranded: list[str] = []
     for name, value in db.query(Setting.key, Setting.value).all():
-        if not value or not is_sealed(value):
-            continue
-        parts = value.split(".")
-        if (
-            resolved.material is None
-            or parts[0] != VERSION
-            or parts[1] != generation_of_key(resolved.material)
-        ):
+        if _is_stranded(value, resolved.material):
             stranded.append(name)
     return sorted(stranded)
+
+
+def _is_stranded(value: str | None, material: bytes | None) -> bool:
+    """Whether one settings row is an envelope `material` cannot open, by its shape alone."""
+    if not value or not is_sealed(value):
+        return False
+    parts = value.split(".")
+    return material is None or parts[0] != VERSION or parts[1] != generation_of_key(material)
 
 
 def origin_of(url: str) -> str:
@@ -1341,9 +1352,15 @@ def origin_of(url: str) -> str:
         return ""
     if not host or not scheme:
         return ""
-    if port is None and scheme in ("http", "https"):
-        port = 443 if scheme == "https" else 80
+    port = _with_default_port(scheme, port)
     return f"{scheme}://{host}:{port}" if port is not None else f"{scheme}://{host}"
+
+
+def _with_default_port(scheme: str, port: int | None) -> int | None:
+    """The port as written, or the scheme's default for `http` and `https` alone."""
+    if port is None and scheme in ("http", "https"):
+        return 443 if scheme == "https" else 80
+    return port
 
 
 @dataclass(frozen=True)

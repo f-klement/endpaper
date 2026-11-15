@@ -1152,15 +1152,21 @@ def _unpack_publication(value: str, row: ImportRow) -> None:
         row.publisher = text[: year_at.start()].strip().rstrip(",").strip()[:255] or None
 
     if row.format is None:
-        # Bounded, because the parts of this cell are bounded by the upload and
-        # not by anything about a publication. `_match_format` costs 1.46
-        # microseconds on a miss, so an unbounded scan over a 5 MB file of
-        # commas was 6.1 seconds of CPU on a route any member can reach three
-        # times a minute. No real cell carries a format past the eighth comma.
-        for part in text[year_at.end() :].split(",")[:_FORMAT_PARTS_SCANNED]:
-            row.format = _match_format(part)
-            if row.format is not None:
-                break
+        row.format = _first_format(text[year_at.end() :])
+
+
+def _first_format(after_the_year: str) -> BookFormat | None:
+    """The first of the comma separated parts after the year that names a format."""
+    # Bounded, because the parts of this cell are bounded by the upload and
+    # not by anything about a publication. `_match_format` costs 1.46
+    # microseconds on a miss, so an unbounded scan over a 5 MB file of
+    # commas was 6.1 seconds of CPU on a route any member can reach three
+    # times a minute. No real cell carries a format past the eighth comma.
+    for part in after_the_year.split(",")[:_FORMAT_PARTS_SCANNED]:
+        found = _match_format(part)
+        if found is not None:
+            return found
+    return None
 
 
 def _unpack_readings(value: str, row: ImportRow) -> None:

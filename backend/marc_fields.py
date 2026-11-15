@@ -641,6 +641,15 @@ _RECORD_TYPE_POSITION: Final = 6
 _FORM_OF_ITEM_POSITION: Final = 23
 
 
+def _coded_as(value: str, position: int, codes: frozenset[str]) -> bool:
+    """Whether a fixed length field carries one of `codes` at `position`.
+
+    False for a field too short to have the position, which is the rule
+    `_marc_carrier_is_book` states for the leader and the 008 alike.
+    """
+    return len(value) > position and value[position] in codes
+
+
 def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
     """Whether this record's own codes say it is a thing on a shelf.
 
@@ -687,7 +696,7 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
     `Zsfassung + 1 CD-ROM`) carry `007 tu` and nothing else.
     """
     leader = record.findtext(f"{_MARC}leader") or ""
-    if len(leader) > _RECORD_TYPE_POSITION and leader[_RECORD_TYPE_POSITION] in _NOT_A_BOOK_RECORD_TYPES:
+    if _coded_as(leader, _RECORD_TYPE_POSITION, _NOT_A_BOOK_RECORD_TYPES):
         return False
 
     carriers: list[str] = []
@@ -706,11 +715,7 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
         tag = control.get("tag")
         if tag == "007":
             carriers.append(value[:1])
-        elif (
-            tag == "008"
-            and len(value) > _FORM_OF_ITEM_POSITION
-            and value[_FORM_OF_ITEM_POSITION] in _NOT_A_BOOK_FORMS_OF_ITEM
-        ):
+        elif tag == "008" and _coded_as(value, _FORM_OF_ITEM_POSITION, _NOT_A_BOOK_FORMS_OF_ITEM):
             return False
 
     # **A record that declares a text carrier is a text**, whatever other `007`
@@ -732,6 +737,38 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
 _LINK_RELATIONS: Final[dict[str, LinkRelationship]] = {
     str(position): relation for position, relation in enumerate(LinkRelationship)
 }
+
+
+def _field_links(datafield: ElementTree.Element) -> list[Link]:
+    """One `856` field's links, one per `$u` that `Link.of` accepts, repeats kept.
+
+    Every link carries the field's text and its relation; `Fields.online_links`
+    says which text and drops the repeats across fields.
+    """
+    entry = Subfields(
+        (subfield.get("code") or "", _marc_text(subfield.text))
+        for subfield in datafield.findall(f"{_MARC}subfield")
+    )
+    label = entry.get("y") or entry.get("3") or entry.get("z") or None
+    relation = _LINK_RELATIONS.get(datafield.get("ind2") or " ")
+    return [link for url in entry.all("u") if (link := Link.of(url, label, relation)) is not None]
+
+
+def _credited_as(entry: Subfields) -> str:
+    """The name an author field's `$a` is credited as, or "" where it credits nobody.
+
+    Empty for a field with no `$a` and for one `credited_name` trims to nothing.
+    """
+    return credited_name(flip_catalogue_name(entry["a"])) if entry.get("a") else ""
+
+
+def _names_a_creator(entry: Subfields) -> bool:
+    """Whether a `700` names a person who wrote something, rather than a work or a bystander.
+
+    `t` marks an added entry for a *work*, not a person: the row exists to link
+    the original title, and its name is the original author's.
+    """
+    return "t" not in entry and any(code in _AUTHOR_RELATORS for code in entry._relator_codes())
 
 
 class Fields:
@@ -786,15 +823,8 @@ class Fields:
         for datafield in self._record.findall(f"{_MARC}datafield"):
             if datafield.get("tag") != "856":
                 continue
-            entry = Subfields(
-                (subfield.get("code") or "", _marc_text(subfield.text))
-                for subfield in datafield.findall(f"{_MARC}subfield")
-            )
-            label = entry.get("y") or entry.get("3") or entry.get("z") or None
-            relation = _LINK_RELATIONS.get(datafield.get("ind2") or " ")
-            for url in entry.all("u"):
-                link = Link.of(url, label, relation)
-                if link is not None and link.url not in seen:
+            for link in _field_links(datafield):
+                if link.url not in seen:
                     seen.add(link.url)
                     links.append(link)
         return links
@@ -1035,17 +1065,10 @@ class Fields:
         """
         entries: list[tuple[str, Subfields]] = []
         for entry in self.get("100"):
-            if entry.get("a") and (name := credited_name(flip_catalogue_name(entry["a"]))):
+            if name := _credited_as(entry):
                 entries.append((name, entry))
         for entry in self.get("700"):
-            # `t` marks an added entry for a *work*, not a person: the row exists
-            # to link the original title, and its name is the original author's.
-            if (
-                entry.get("a")
-                and "t" not in entry
-                and any(code in _AUTHOR_RELATORS for code in entry._relator_codes())
-                and (name := credited_name(flip_catalogue_name(entry["a"])))
-            ):
+            if _names_a_creator(entry) and (name := _credited_as(entry)):
                 entries.append((name, entry))
         seen: dict[str, Subfields] = {}
         for name, entry in entries:

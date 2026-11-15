@@ -53,6 +53,21 @@ export default function MemberAddresses({ state }: MemberAddressesProps) {
           onSave={(email) => state.save(member.id, email)}
         />
       ))}
+      <SaveOutcome state={state} />
+    </SettingsSection>
+  );
+}
+
+/**
+ * How the last save went: refused by the directory, failed, or landed.
+ *
+ * A fragment, so its lines sit in the section's own spacing under the rows.
+ */
+function SaveOutcome({ state }: MemberAddressesProps) {
+  const { t } = useTranslation();
+
+  return (
+    <>
       {state.isDirectoryOwned && (
         <p role="status" className="text-sm text-paper-700 dark:text-paper-300">
           {t("account.email.directoryRefused")}
@@ -69,6 +84,6 @@ export default function MemberAddresses({ state }: MemberAddressesProps) {
           {t("settings.saved")}
         </p>
       )}
-    </SettingsSection>
+    </>
   );
 }

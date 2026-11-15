@@ -134,93 +134,24 @@ export default function CustomFieldsSection({
       ) : (
         <ul className="space-y-2">
           {fields.map((field) => (
-            <li key={field.id} className="text-sm">
-              <div className="flex items-center gap-2">
-                {renamingId === field.id ? (
-                  <>
-                    <input
-                      type="text"
-                      value={renameDraft}
-                      onChange={(event) => setRenameDraft(event.target.value)}
-                      maxLength={NAME_MAX}
-                      aria-label={t("customFields.renameLabel", {
-                        name: field.name,
-                      })}
-                      className="flex-1 px-3 py-1.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
-                    />
-                    <Button
-                      size="sm"
-                      onClick={() => saveRename(field.id)}
-                      disabled={isBusy}
-                    >
-                      {t("common.save")}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={stopRenaming}
-                    >
-                      {t("common.cancel")}
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <span className="flex-1 text-paper-700 dark:text-paper-200">
-                      {field.name}
-                    </span>
-                    <span className="text-xs text-paper-600 dark:text-paper-400">
-                      {field.kind === CustomFieldKind.url
-                        ? t("customFields.kindUrl")
-                        : t("customFields.kindText")}
-                    </span>
-                    {field.renamable && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setRenamingId(field.id);
-                          setRenameDraft(field.name);
-                          setRenameError(null);
-                        }}
-                      >
-                        {t("common.edit")}
-                      </Button>
-                    )}
-                    {isAdmin && (
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        disabled={isBusy}
-                        onClick={() => {
-                          // A confirm rather than a toast with an undo, unlike
-                          // deleting a book: there is no undo for this one. The
-                          // same call `delete_tag` asks the reader to make.
-                          if (
-                            window.confirm(
-                              t("customFields.deleteConfirm", {
-                                name: field.name,
-                              }),
-                            )
-                          ) {
-                            onRemove(field.id);
-                          }
-                        }}
-                      >
-                        {t("common.delete")}
-                      </Button>
-                    )}
-                  </>
-                )}
-              </div>
-              {renamingId === field.id && renameError != null && (
-                // Inside the row, so the sentence and the box it is about are
-                // read together. `ErrorState` rather than a bare span: this is
-                // a failed request like any other and looks like one.
-                <div className="mt-1">
-                  <ErrorState error={renameError} />
-                </div>
-              )}
-            </li>
+            <FieldRow
+              key={field.id}
+              field={field}
+              isAdmin={isAdmin}
+              isBusy={isBusy}
+              renaming={renamingId === field.id}
+              renameDraft={renameDraft}
+              renameError={renameError}
+              onRenameDraft={setRenameDraft}
+              onStartRename={() => {
+                setRenamingId(field.id);
+                setRenameDraft(field.name);
+                setRenameError(null);
+              }}
+              onSaveRename={() => saveRename(field.id)}
+              onStopRenaming={stopRenaming}
+              onRemove={onRemove}
+            />
           ))}
         </ul>
       )}
@@ -261,5 +192,136 @@ export default function CustomFieldsSection({
         </Button>
       </form>
     </SettingsSection>
+  );
+}
+
+interface FieldRowProps {
+  field: CustomFieldOut;
+  isAdmin: boolean;
+  isBusy: boolean;
+  /** Whether this row is the one being renamed. */
+  renaming: boolean;
+  renameDraft: string;
+  renameError: unknown;
+  onRenameDraft: (draft: string) => void;
+  onStartRename: () => void;
+  onSaveRename: () => void;
+  onStopRenaming: () => void;
+  onRemove: (fieldId: number) => void;
+}
+
+/**
+ * One field: its name and kind with what may be done to it, or the rename box,
+ * and a refused rename's sentence under the row it was typed in.
+ */
+function FieldRow({
+  field,
+  isAdmin,
+  isBusy,
+  renaming,
+  renameDraft,
+  renameError,
+  onRenameDraft,
+  onStartRename,
+  onSaveRename,
+  onStopRenaming,
+  onRemove,
+}: FieldRowProps) {
+  const { t } = useTranslation();
+  return (
+    <li className="text-sm">
+      <div className="flex items-center gap-2">
+        {renaming ? (
+          <>
+            <input
+              type="text"
+              value={renameDraft}
+              onChange={(event) => onRenameDraft(event.target.value)}
+              maxLength={NAME_MAX}
+              aria-label={t("customFields.renameLabel", {
+                name: field.name,
+              })}
+              className="flex-1 px-3 py-1.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
+            />
+            <Button size="sm" onClick={onSaveRename} disabled={isBusy}>
+              {t("common.save")}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={onStopRenaming}>
+              {t("common.cancel")}
+            </Button>
+          </>
+        ) : (
+          <FieldSummary
+            field={field}
+            isAdmin={isAdmin}
+            isBusy={isBusy}
+            onStartRename={onStartRename}
+            onRemove={onRemove}
+          />
+        )}
+      </div>
+      {renaming && renameError != null && (
+        // Inside the row, so the sentence and the box it is about are
+        // read together. `ErrorState` rather than a bare span: this is
+        // a failed request like any other and looks like one.
+        <div className="mt-1">
+          <ErrorState error={renameError} />
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** A field's name and kind, and the edit and delete it is offered. */
+function FieldSummary({
+  field,
+  isAdmin,
+  isBusy,
+  onStartRename,
+  onRemove,
+}: Pick<
+  FieldRowProps,
+  "field" | "isAdmin" | "isBusy" | "onStartRename" | "onRemove"
+>) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <span className="flex-1 text-paper-700 dark:text-paper-200">
+        {field.name}
+      </span>
+      <span className="text-xs text-paper-600 dark:text-paper-400">
+        {field.kind === CustomFieldKind.url
+          ? t("customFields.kindUrl")
+          : t("customFields.kindText")}
+      </span>
+      {field.renamable && (
+        <Button size="sm" variant="ghost" onClick={onStartRename}>
+          {t("common.edit")}
+        </Button>
+      )}
+      {isAdmin && (
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={isBusy}
+          onClick={() => {
+            // A confirm rather than a toast with an undo, unlike
+            // deleting a book: there is no undo for this one. The
+            // same call `delete_tag` asks the reader to make.
+            if (
+              window.confirm(
+                t("customFields.deleteConfirm", {
+                  name: field.name,
+                }),
+              )
+            ) {
+              onRemove(field.id);
+            }
+          }}
+        >
+          {t("common.delete")}
+        </Button>
+      )}
+    </>
   );
 }

@@ -14,7 +14,7 @@
  *
  * **The shape lives here too**, and that was argued rather than assumed. Keeping
  * it on the page does not survive this module's own guard: the wire test
- * asserts every one of the twelve fields becomes a query parameter and its
+ * asserts every field becomes a query parameter and its
  * client-only allowlist is empty, so nothing in `BookFilters` is view state and
  * it is not a view model. `lib/libraryView.ts` already holds `LibraryView` by
  * the same logic. `pages/Home/types.ts` re-exports both, so no consumer moved.
@@ -186,7 +186,7 @@ export function toggledFilter<K extends ListFilterKey>(
  * for the one that was found.
  *
  * **The fields are read off `DEFAULT_FILTERS` rather than written out**, so a
- * thirteenth filter is covered by existing, and an unknown key in the stored
+ * new filter is covered by existing, and an unknown key in the stored
  * object is dropped rather than carried into a request.
  *
  * **What this checks is the shape that would break the browser, not the value.**
@@ -216,7 +216,7 @@ export function sanitiseFilters(value: unknown): BookFilters {
     // whole set is about to be shared: a saved search's filters are handed to a
     // component through one snapshot, and the caller that pushed into a list
     // would edit it for every later reader. Frozen here rather than by a walk
-    // afterwards, so a thirteenth list filter is covered by existing, which is
+    // afterwards, so a new list filter is covered by existing, which is
     // the property the field walk above already has.
     if (keepsShape(given, defaults[key]))
       Object.assign(rebuilt, {
@@ -307,11 +307,11 @@ export function readFilters(params: URLSearchParams): BookFilters {
 
   return {
     ...DEFAULT_FILTERS,
-    ...(isOwnership(ownership) ? { ownership } : {}),
-    ...(isStatus(status) ? { status } : {}),
-    ...(isSort(sort) ? { sort } : {}),
-    ...(isFormat(format) ? { format } : {}),
-    ...(isLending(lending) ? { lending } : {}),
+    ownership: checked(ownership, isOwnership, DEFAULT_FILTERS.ownership),
+    status: checked(status, isStatus, DEFAULT_FILTERS.status),
+    sort: checked(sort, isSort, DEFAULT_FILTERS.sort),
+    format: checked(format, isFormat, DEFAULT_FILTERS.format),
+    lending: checked(lending, isLending, DEFAULT_FILTERS.lending),
     // Present and not "false" is on. A bare `?discuss` is what a link somebody
     // typed looks like, and treating it as off would make the link silently do
     // nothing.
@@ -331,6 +331,15 @@ export function readFilters(params: URLSearchParams): BookFilters {
   };
 }
 
+/** `value` where `guard` recognises it, otherwise the field's default. */
+function checked<V extends string, F>(
+  value: string | null,
+  guard: (value: string | null) => value is V,
+  fallback: F,
+): V | F {
+  return guard(value) ? value : fallback;
+}
+
 /**
  * The same filters as query parameters for the listing endpoint.
  *
@@ -338,17 +347,47 @@ export function readFilters(params: URLSearchParams): BookFilters {
  * set does not know it is being read a page at a time.
  */
 export function toParams(filters: BookFilters): ListBooksParams {
+  // Empty values are omitted rather than sent blank, so the query key (and
+  // therefore the cache entry) is the same as an unfiltered request. Each
+  // helper keeps that rule for its own fields, and the spread order is the
+  // parameter order.
   return {
-    // Empty values are omitted rather than sent blank, so the query key (and
-    // therefore the cache entry) is the same as an unfiltered request.
-    ...(filters.query ? { q: filters.query } : {}),
-    ...(filters.status ? { status: filters.status } : {}),
-    ...(filters.ownership ? { ownership: filters.ownership } : {}),
-    ...(filters.series ? { series: filters.series } : {}),
-    ...(filters.author ? { author: filters.author } : {}),
-    ...(filters.location ? { location: filters.location } : {}),
-    ...(filters.format ? { format: filters.format } : {}),
-    ...(filters.lending ? { lending: filters.lending } : {}),
+    ...singleValueParams(filters),
+    ...collectionAndDiscussParams(filters),
+    ...listParams(filters),
+    sort: filters.sort,
+  };
+}
+
+/** The eight filters holding one string each, sent only when set. */
+function singleValueParams(filters: BookFilters): ListBooksParams {
+  return {
+    ...whenSet("q", filters.query),
+    ...whenSet("status", filters.status),
+    ...whenSet("ownership", filters.ownership),
+    ...whenSet("series", filters.series),
+    ...whenSet("author", filters.author),
+    ...whenSet("location", filters.location),
+    ...whenSet("format", filters.format),
+    ...whenSet("lending", filters.lending),
+  };
+}
+
+/**
+ * `{ [key]: value }` where `value` is set, otherwise nothing, so a blank never
+ * reaches the query key. Typed by the parameter, so a filter can only be sent
+ * as the parameter that accepts its kind.
+ */
+function whenSet<K extends keyof ListBooksParams>(
+  key: K,
+  value: ListBooksParams[K] | null,
+): Pick<ListBooksParams, K> | Record<string, never> {
+  return value ? ({ [key]: value } as Pick<ListBooksParams, K>) : {};
+}
+
+/** Which collection, and whether only books on offer for a talk. */
+function collectionAndDiscussParams(filters: BookFilters): ListBooksParams {
+  return {
     // The two are mutually exclusive on the server, which is why one field
     // produces one parameter or the other and never both.
     ...(typeof filters.collection === "number"
@@ -356,11 +395,16 @@ export function toParams(filters: BookFilters): ListBooksParams {
       : {}),
     ...(filters.collection === "unfiled" ? { unfiled: true } : {}),
     ...(filters.discuss ? { discuss: true } : {}),
+  };
+}
+
+/** The three list filters, each sent only when it holds something. */
+function listParams(filters: BookFilters): ListBooksParams {
+  return {
     ...(filters.tagIds.length ? { tags: filters.tagIds.join(",") } : {}),
     ...(filters.headings.length ? { classification: filters.headings } : {}),
     ...(filters.ddcDivisions.length
       ? { ddc: filters.ddcDivisions.join(",") }
       : {}),
-    sort: filters.sort,
   };
 }

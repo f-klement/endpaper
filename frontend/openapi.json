@@ -1096,6 +1096,27 @@
             ],
             "title": "Purchased At"
           },
+          "record_modified_here": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Modified Here"
+          },
+          "record_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "series_index": {
             "anyOf": [
               {
@@ -1389,6 +1410,15 @@
               }
             ],
             "title": "Purchased At"
+          },
+          "record_modified_here": {
+            "default": false,
+            "title": "Record Modified Here",
+            "type": "boolean"
+          },
+          "record_origin": {
+            "$ref": "#/components/schemas/RecordOrigin",
+            "default": "manual"
           },
           "series_index": {
             "anyOf": [
@@ -1849,6 +1879,16 @@
             ],
             "title": "Publisher"
           },
+          "record_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "series_index": {
             "anyOf": [
               {
@@ -2033,6 +2073,16 @@
               }
             ],
             "title": "Publisher"
+          },
+          "record_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "series_index": {
             "anyOf": [
@@ -2492,6 +2542,27 @@
               }
             ],
             "title": "Purchased At"
+          },
+          "record_modified_here": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Modified Here"
+          },
+          "record_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "refused_identifiers": {
             "items": {
@@ -6296,6 +6367,16 @@
             ],
             "title": "Publisher"
           },
+          "record_origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "series_index": {
             "anyOf": [
               {
@@ -6883,6 +6964,32 @@
         ],
         "title": "ReadwiseWaitingOut",
         "type": "object"
+      },
+      "RecordOrigin": {
+        "description": "Where a Book's record came from: a catalogue, a file, an import, or a person.\n\n**A closed set rather than a free string**, so every surface can label each\nvalue and a stored value nobody can name degrades to unknown rather than\narriving on screen untranslated. Every `CatalogueSource` is a member under\nits own value; the rest are the origins that are not a catalogue.\n\n**Where the record came from, never whether it was changed since.** That is\n`books.record_modified_here`, and why the two are two columns is on\n`models.Book`.",
+        "enum": [
+          "open_library",
+          "google_books",
+          "dnb",
+          "k10plus",
+          "oenb",
+          "nlg",
+          "nkp",
+          "bnf",
+          "loc",
+          "bne",
+          "bna",
+          "bnu",
+          "manual",
+          "file",
+          "csv_import",
+          "marc_import",
+          "opds_import",
+          "calibre_import",
+          "store_import"
+        ],
+        "title": "RecordOrigin",
+        "type": "string"
       },
       "RecoveryPhraseIn": {
         "description": "A key typed back in, on a new machine or after it was lost.\n\nWhitespace and case are the caller's problem to get wrong and this\napplication's to absorb: `credentials.normalise_phrase` NFKD-normalises,\nlowercases and re-joins, because the encoder rejects an uppercase phrase\noutright and a person pasting from a document that capitalised the first\nword has not made a mistake.",
@@ -8496,6 +8603,26 @@
         ],
         "title": "VerificationRequest",
         "type": "object"
+      },
+      "WorkFact": {
+        "description": "A column of `books` that describes the work. A file's value filling one a catalogue's record left empty files that record as changed here.",
+        "enum": [
+          "isbn",
+          "title",
+          "subtitle",
+          "author",
+          "publisher",
+          "year",
+          "description",
+          "page_count",
+          "language",
+          "categories",
+          "google_books_id",
+          "series_name",
+          "series_index"
+        ],
+        "title": "WorkFact",
+        "type": "string"
       }
     },
     "securitySchemes": {

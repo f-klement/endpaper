@@ -62,8 +62,8 @@ describe("the two column sets", () => {
     expect(AVAILABLE_COLUMNS.household).toEqual(THE_TABLE_BEFORE_THIS_TICKET);
   });
 
-  it("offers the cataloguer's two in library mode and nowhere else", () => {
-    for (const key of ["callNumber", "classification"] as const) {
+  it("offers the cataloguer's three in library mode and nowhere else", () => {
+    for (const key of ["callNumber", "classification", "origin"] as const) {
       expect(AVAILABLE_COLUMNS.cataloguer).toContain(key);
       expect(AVAILABLE_COLUMNS.household).not.toContain(key);
     }
@@ -87,8 +87,8 @@ describe("the two column sets", () => {
     }
   });
 
-  it("shows a cataloguer the call number and the subjects", () => {
-    for (const key of ["callNumber", "classification"] as const) {
+  it("shows a cataloguer the call number, the subjects and the record source", () => {
+    for (const key of ["callNumber", "classification", "origin"] as const) {
       expect(DEFAULT_COLUMNS.cataloguer).toContain(key);
     }
   });

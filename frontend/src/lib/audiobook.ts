@@ -151,10 +151,7 @@ function reader(file: Blob) {
     offset: number,
     length: number,
   ): Promise<DataView | null> {
-    if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length)) {
-      return null;
-    }
-    if (offset < 0 || length <= 0 || offset + length > file.size) return null;
+    if (!insideBlob(offset, length, file.size)) return null;
     reads += 1;
     if (reads > MAX_READS) throw new AudioError("unreadable");
     const buffer = await file.slice(offset, offset + length).arrayBuffer();
@@ -162,6 +159,18 @@ function reader(file: Blob) {
     // by a file that changed under it, which is a thing a member can do.
     return buffer.byteLength === length ? new DataView(buffer) : null;
   };
+}
+
+/**
+ * Whether `length` bytes from `offset` lie wholly inside a blob of `size`:
+ * whole numbers a double holds exactly, a start no earlier than the first
+ * byte, at least one byte, and an end no later than the last.
+ */
+function insideBlob(offset: number, length: number, size: number): boolean {
+  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length)) {
+    return false;
+  }
+  return offset >= 0 && length > 0 && offset + length <= size;
 }
 
 type Read = ReturnType<typeof reader>;
@@ -286,23 +295,33 @@ async function boxAt(read: Read, at: number, to: number): Promise<Box | null> {
   const header = await read(at, Math.min(16, to - at));
   if (header === null) return null;
 
-  let size = header.getUint32(0);
   const type = fourCharacters(header, 4);
-  let head = 8;
-  if (size === 1) {
-    if (header.byteLength < 16) return null;
-    const high = header.getUint32(8);
-    const low = header.getUint32(12);
-    // Above this the size is past what a double counts exactly, and a blob
-    // that large does not exist: either way the arithmetic below would lie.
-    if (high > 0x001fffff) return null;
-    size = high * 2 ** 32 + low;
-    head = 16;
-  } else if (size === 0) {
-    size = to - at;
-  }
+  const declared = declaredSize(header, to - at);
+  if (declared === null) return null;
+  const { size, head } = declared;
   if (size < head || at + size > to) return null;
   return { type, body: at + head, end: at + size };
+}
+
+/**
+ * The size a box header declares and how long the header is, or `null` for a
+ * 64 bit size that is cut short or larger than a double counts. `room` is what
+ * the parent has left from this box on, which a `size` of 0 claims whole.
+ */
+function declaredSize(
+  header: DataView,
+  room: number,
+): { readonly size: number; readonly head: number } | null {
+  const size = header.getUint32(0);
+  if (size === 0) return { size: room, head: 8 };
+  if (size !== 1) return { size, head: 8 };
+  if (header.byteLength < 16) return null;
+  const high = header.getUint32(8);
+  const low = header.getUint32(12);
+  // Above this the size is past what a double counts exactly, and a blob
+  // that large does not exist: either way the arithmetic in `boxAt` would lie.
+  if (high > 0x001fffff) return null;
+  return { size: high * 2 ** 32 + low, head: 16 };
 }
 
 /** The first child of this region with the given type, or `null`. */
@@ -373,6 +392,15 @@ async function readIlst(
   from: number,
   to: number,
 ): Promise<AudioTags | null> {
+  return mp4Tags(await ilstValues(read, from, to));
+}
+
+/** The wanted keys' values, walking entries until all three are found. */
+async function ilstValues(
+  read: Read,
+  from: number,
+  to: number,
+): Promise<Map<string, string>> {
   const found = new Map<string, string>();
   let at = from;
   while (at < to && found.size < MP4_KEYS.length) {
@@ -384,11 +412,15 @@ async function readIlst(
     }
     at = entry.end;
   }
+  return found;
+}
 
+/** The tags those values make, or `null` when none of the three was there. */
+function mp4Tags(found: Map<string, string>): AudioTags | null {
   const album = found.get(MP4_ALBUM) ?? null;
   const artist = found.get(MP4_ARTIST) ?? null;
   const title = found.get(MP4_TITLE) ?? null;
-  if (album === null && artist === null && title === null) return null;
+  if ([album, artist, title].every((value) => value === null)) return null;
   return { album, artists: artist === null ? [] : [artist], title };
 }
 
@@ -404,22 +436,25 @@ async function readEntryValue(read: Read, entry: Box): Promise<string | null> {
     const size = view.getUint32(at);
     const type = fourCharacters(view, at + 4);
     if (size < 16 || at + size > view.byteLength) break;
-    if (type === "data") {
-      // The low 24 bits of the type field say what the payload is. 1 is UTF-8
-      // and 2 is UTF-16BE; 0 means the key decides, and for a text key it is
-      // UTF-8. Everything else is a picture, a number or a private blob.
-      const kind = view.getUint32(at + 8) & 0xffffff;
-      const payload = new Uint8Array(
-        view.buffer,
-        view.byteOffset + at + 16,
-        size - 16,
-      );
-      if (kind === 0 || kind === 1) return clean(utf8.decode(payload));
-      if (kind === 2) return clean(decodeUtf16(payload, true));
-      return null;
-    }
+    if (type === "data") return dataText(view, at, size);
     at += size;
   }
+  return null;
+}
+
+/** One `data` box's payload as text, or `null` when it is not text. */
+function dataText(view: DataView, at: number, size: number): string | null {
+  // The low 24 bits of the type field say what the payload is. 1 is UTF-8
+  // and 2 is UTF-16BE; 0 means the key decides, and for a text key it is
+  // UTF-8. Everything else is a picture, a number or a private blob.
+  const kind = view.getUint32(at + 8) & 0xffffff;
+  const payload = new Uint8Array(
+    view.buffer,
+    view.byteOffset + at + 16,
+    size - 16,
+  );
+  if (kind === 0 || kind === 1) return clean(utf8.decode(payload));
+  if (kind === 2) return clean(decodeUtf16(payload, true));
   return null;
 }
 
@@ -457,6 +492,24 @@ async function readMp3(read: Read, size: number): Promise<AudioTags | null> {
 }
 
 async function readId3v2(read: Read): Promise<AudioTags | null> {
+  const header = await id3v2Header(read);
+  if (header === null) return null;
+  const body = await id3v2Body(read, header);
+  if (body === null) return null;
+  const from = framesFrom(body, header);
+  if (from === null) return null;
+  return id3v2Tags(readFrames(body, from, header.major));
+}
+
+/** What the ten byte ID3v2 header says about the tag behind it. */
+interface Id3v2Header {
+  readonly major: number;
+  readonly flags: number;
+  readonly declared: number;
+}
+
+/** The header the file opens with, or `null` when there is no tag to read. */
+async function id3v2Header(read: Read): Promise<Id3v2Header | null> {
   const header = await read(0, 10);
   if (header === null) return null;
   if (fourCharacters(header, 0).slice(0, 3) !== "ID3") return null;
@@ -469,24 +522,34 @@ async function readId3v2(read: Read): Promise<AudioTags | null> {
   const flags = header.getUint8(5);
   const declared = synchsafe(header, 6);
   if (declared === null || declared === 0) return null;
+  return { major, flags, declared };
+}
 
+/** The tag's bytes past its header, cut to `MAX_ID3_BYTES`, desynchronised. */
+async function id3v2Body(
+  read: Read,
+  { major, flags, declared }: Id3v2Header,
+): Promise<Uint8Array | null> {
   const view = await read(10, Math.min(declared, MAX_ID3_BYTES));
   if (view === null) return null;
-  let body = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  const body = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
   // Unsynchronisation, which for 2.2 and 2.3 is applied to the whole tag: every
   // 0xFF is followed by an inserted 0x00 so that nothing inside the tag looks
   // like the start of an audio frame. Undone here, before any size is read,
   // because the sizes were written against the undone form.
-  if (major < 4 && (flags & 0x80) !== 0) body = desynchronise(body);
+  return major < 4 && (flags & 0x80) !== 0 ? desynchronise(body) : body;
+}
 
-  let at = 0;
-  if ((flags & 0x40) !== 0) {
-    const extended = extendedHeaderLength(body, major);
-    if (extended === null) return null;
-    at = extended;
-  }
+/** Where the first frame begins: past any extended header. */
+function framesFrom(
+  body: Uint8Array,
+  { major, flags }: Id3v2Header,
+): number | null {
+  return (flags & 0x40) === 0 ? 0 : extendedHeaderLength(body, major);
+}
 
-  const found = readFrames(body, at, major);
+/** The tags those frames make, or `null` when none of the three was there. */
+function id3v2Tags(found: Map<string, string[]>): AudioTags | null {
   const album = pick(found, ID3_ALBUM)[0] ?? null;
   const artists = pick(found, ID3_ARTIST);
   const title = pick(found, ID3_TITLE)[0] ?? null;
@@ -576,44 +639,90 @@ function readFrames(
 ): Map<string, string[]> {
   const found = new Map<string, string[]>();
   const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-  const layout = major === 2 ? ID3V22 : major === 4 ? ID3V24 : ID3V23;
+  const layout = frameLayout(major);
 
   let at = from;
   while (at + layout.headLength <= body.length) {
-    const id = fourCharacters(view, at).slice(0, layout.idLength);
-    // A run of zero bytes is the padding every writer leaves after the frames,
-    // and any other unnameable id is a tag this has lost its place in.
-    if (!/^[A-Z0-9]+$/.test(id)) break;
-
-    const size = layout.size(view, at);
-    if (size === null || size < 0) break;
-    let start = at + layout.headLength;
-    if (start + size > body.length) break;
-
-    const frameFlags = layout.flags(view, at);
-    at = start + size;
-
-    // Neither compression nor encryption is implemented, so such a frame is
-    // skipped rather than decoded as though its bytes were text.
-    if ((frameFlags & layout.unreadable) !== 0) continue;
-
-    let length = size;
-    if ((frameFlags & layout.dataLength) !== 0) {
-      if (length < 4) continue;
-      start += 4;
-      length -= 4;
-    }
-    let payload = body.subarray(start, start + length);
-    if ((frameFlags & layout.unsynchronised) !== 0) {
-      payload = desynchronise(payload);
-    }
-
-    if (id.startsWith("T") && !found.has(id)) {
+    const frame = frameAt(body, view, at, layout);
+    if (frame === null) break;
+    at = frame.end;
+    const { id, payload } = frame;
+    if (payload !== null && id.startsWith("T") && !found.has(id)) {
       const values = decodeTextFrame(payload);
       if (values.length > 0) found.set(id, values);
     }
   }
   return found;
+}
+
+/** The frame layout of one ID3 version; the header refused any but 2 to 4. */
+function frameLayout(major: number): FrameLayout {
+  return major === 2 ? ID3V22 : major === 4 ? ID3V24 : ID3V23;
+}
+
+/** One frame header read, and the bytes its flags leave to decode. */
+interface Frame {
+  readonly id: string;
+  /** One past the frame's last byte, which is where the next header begins. */
+  readonly end: number;
+  /** `null` when the frame is one this cannot read. */
+  readonly payload: Uint8Array | null;
+}
+
+/**
+ * The frame at `at`, or `null` when the tag has lost its place there and the
+ * walk must stop.
+ */
+function frameAt(
+  body: Uint8Array,
+  view: DataView,
+  at: number,
+  layout: FrameLayout,
+): Frame | null {
+  const id = fourCharacters(view, at).slice(0, layout.idLength);
+  // A run of zero bytes is the padding every writer leaves after the frames,
+  // and any other unnameable id is a tag this has lost its place in.
+  if (!/^[A-Z0-9]+$/.test(id)) return null;
+
+  const size = layout.size(view, at);
+  if (size === null || size < 0) return null;
+  const start = at + layout.headLength;
+  if (start + size > body.length) return null;
+
+  const flags = layout.flags(view, at);
+  return {
+    id,
+    end: start + size,
+    payload: framePayload(body, start, size, flags, layout),
+  };
+}
+
+/**
+ * A frame's body with its flags applied, or `null` when they leave nothing to
+ * read.
+ */
+function framePayload(
+  body: Uint8Array,
+  from: number,
+  size: number,
+  flags: number,
+  layout: FrameLayout,
+): Uint8Array | null {
+  // Neither compression nor encryption is implemented, so such a frame is
+  // skipped rather than decoded as though its bytes were text.
+  if ((flags & layout.unreadable) !== 0) return null;
+
+  let start = from;
+  let length = size;
+  if ((flags & layout.dataLength) !== 0) {
+    if (length < 4) return null;
+    start += 4;
+    length -= 4;
+  }
+  const payload = body.subarray(start, start + length);
+  return (flags & layout.unsynchronised) !== 0
+    ? desynchronise(payload)
+    : payload;
 }
 
 /**
@@ -632,9 +741,15 @@ async function readId3v1(read: Read, size: number): Promise<AudioTags | null> {
 
   const at = (offset: number) =>
     clean(latin1(new Uint8Array(view.buffer, view.byteOffset + offset, 30)));
-  const title = at(3);
-  const artist = at(33);
-  const album = at(63);
+  return id3v1Tags(at(3), at(33), at(63));
+}
+
+/** The three fixed fields as tags, or `null` when every one was blank. */
+function id3v1Tags(
+  title: string,
+  artist: string,
+  album: string,
+): AudioTags | null {
   if (title === "" && artist === "" && album === "") return null;
   return {
     album: album || null,
@@ -752,18 +867,10 @@ function latin1(raw: Uint8Array): string {
  * little endian one is required of every runtime.
  */
 function decodeUtf16(raw: Uint8Array, bigEndian: boolean): string {
-  let bytes = raw;
-  let swap = bigEndian;
-  if (bytes.length >= 2) {
-    if (bytes[0] === 0xff && bytes[1] === 0xfe) {
-      swap = false;
-      bytes = bytes.subarray(2);
-    } else if (bytes[0] === 0xfe && bytes[1] === 0xff) {
-      swap = true;
-      bytes = bytes.subarray(2);
-    }
-  }
-  if (swap) {
+  const mark = byteOrderMark(raw);
+  let bytes = mark === null ? raw : raw.subarray(2);
+  // A byte order mark overrides the order the caller expected.
+  if (mark === null ? bigEndian : mark === "big") {
     const swapped = new Uint8Array(bytes.length);
     for (let at = 0; at + 1 < bytes.length; at += 2) {
       swapped[at] = bytes[at + 1]!;
@@ -772,6 +879,14 @@ function decodeUtf16(raw: Uint8Array, bigEndian: boolean): string {
     bytes = swapped;
   }
   return new TextDecoder("utf-16le").decode(bytes);
+}
+
+/** The byte order a UTF-16 value's first two bytes declare, or `null`. */
+function byteOrderMark(raw: Uint8Array): "big" | "little" | null {
+  if (raw.length < 2) return null;
+  if (raw[0] === 0xff && raw[1] === 0xfe) return "little";
+  if (raw[0] === 0xfe && raw[1] === 0xff) return "big";
+  return null;
 }
 
 /**

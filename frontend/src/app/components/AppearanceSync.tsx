@@ -34,11 +34,11 @@ interface AppearanceSyncProps {
 export default function AppearanceSync({ accountId }: AppearanceSyncProps) {
   const { appearance, adopt, release } = useTheme();
   const { stored, save } = useStoredAppearance(accountId);
-  const synced = useRef<{ account: number; value: Appearance } | null>(null);
+  const synced = useRef<Mark | null>(null);
   // What this device had cached for this account, and therefore what is on
   // screen until the server answers. Anything else means the member changed
   // something in the meantime.
-  const adopted = useRef<{ account: number; value: Appearance } | null>(null);
+  const adopted = useRef<Mark | null>(null);
 
   useEffect(() => {
     const cached = readCachedAppearance(accountId);
@@ -51,22 +51,17 @@ export default function AppearanceSync({ accountId }: AppearanceSyncProps) {
   }, [accountId, adopt, release]);
 
   useEffect(() => {
-    if (!stored) return;
-    if (synced.current?.account === accountId) return;
-    if (adopted.current?.account !== accountId) return;
-
-    // Somebody changed the appearance while the request was in flight. Their
-    // choice is newer than the answer, so it wins and is pushed rather than
-    // being reverted by it, which is a race a fast hand on the settings page
-    // would otherwise lose.
-    if (!sameAppearance(adopted.current.value, appearance)) {
-      synced.current = { account: accountId, value: appearance };
-      save(appearance);
-      return;
-    }
-
-    synced.current = { account: accountId, value: stored };
-    adopt(stored, accountId);
+    const answer = readTheAnswer(
+      accountId,
+      stored,
+      appearance,
+      synced.current,
+      adopted.current,
+    );
+    if (answer === null) return;
+    synced.current = { account: accountId, value: answer.value };
+    if (answer.kind === "push") save(answer.value);
+    else adopt(answer.value, accountId);
   }, [stored, appearance, accountId, adopt, save]);
 
   useEffect(() => {
@@ -79,4 +74,35 @@ export default function AppearanceSync({ accountId }: AppearanceSyncProps) {
   }, [appearance, accountId, save]);
 
   return null;
+}
+
+/** An appearance, and the account it was taken from or sent to. */
+interface Mark {
+  account: number;
+  value: Appearance;
+}
+
+/**
+ * What the server's answer means for this account, once: nothing yet, an
+ * appearance to adopt, or a newer local choice to push over it.
+ */
+function readTheAnswer(
+  accountId: number,
+  stored: Appearance | undefined,
+  appearance: Appearance,
+  synced: Mark | null,
+  adopted: Mark | null,
+): { kind: "push" | "adopt"; value: Appearance } | null {
+  if (!stored) return null;
+  if (synced?.account === accountId) return null;
+  if (adopted?.account !== accountId) return null;
+
+  // Somebody changed the appearance while the request was in flight. Their
+  // choice is newer than the answer, so it wins and is pushed rather than
+  // being reverted by it, which is a race a fast hand on the settings page
+  // would otherwise lose.
+  if (!sameAppearance(adopted.value, appearance)) {
+    return { kind: "push", value: appearance };
+  }
+  return { kind: "adopt", value: stored };
 }

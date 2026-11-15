@@ -132,6 +132,33 @@ function readable(text: unknown): text is string {
 }
 
 /**
+ * An object `detail`, read as a message, a Book it names and a code saying
+ * which refusal it is. A message that is not readable falls back to the
+ * status text; a book id or code of the wrong type is dropped alone.
+ */
+function objectDetail(
+  detail: object,
+  statusText: string,
+): { message: string; bookId?: number; code?: string } {
+  const {
+    message,
+    book_id: bookId,
+    code,
+  } = detail as {
+    message?: unknown;
+    book_id?: unknown;
+    code?: unknown;
+  };
+  // The book is kept when the sentence is blank: it is what lets the
+  // reader open the copy already on the shelf.
+  return {
+    message: readable(message) ? message : statusText,
+    bookId: typeof bookId === "number" ? bookId : undefined,
+    code: typeof code === "string" ? code : undefined,
+  };
+}
+
+/**
  * Read what a failed response says, and anything it says about what to do.
  *
  * FastAPI puts it in `detail`, which is a string for a raised
@@ -155,26 +182,10 @@ async function errorDetail(
       if (messages.length > 0) return { message: messages.join(", ") };
     }
 
-    // An object detail: a message plus whatever the route could say about it,
-    // a Book it names and a code saying which refusal it is. Not a list, which
-    // is an object too and is read above.
+    // An object detail: a message plus whatever the route could say about it.
+    // Not a list, which is an object too and is read above.
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-      const {
-        message,
-        book_id: bookId,
-        code,
-      } = detail as {
-        message?: unknown;
-        book_id?: unknown;
-        code?: unknown;
-      };
-      // The book is kept when the sentence is blank: it is what lets the
-      // reader open the copy already on the shelf.
-      return {
-        message: readable(message) ? message : response.statusText,
-        bookId: typeof bookId === "number" ? bookId : undefined,
-        code: typeof code === "string" ? code : undefined,
-      };
+      return objectDetail(detail, response.statusText);
     }
   } catch {
     // Body was not JSON, so fall through to the status text.
@@ -372,14 +383,10 @@ export function isRedirect(response: Response): boolean {
 }
 
 /**
- * The mutator Orval calls for every operation.
- *
- * Generic over the response type so the generated hooks stay fully typed.
+ * The headers every request through `customFetch` carries: the caller's own,
+ * plus the session's token, a content type and what it accepts.
  */
-export const customFetch = async <T>(
-  url: string,
-  options: RequestInit = {},
-): Promise<T> => {
+function requestHeaders(options: RequestInit): Headers {
   const token = getToken();
   const isFormData = options.body instanceof FormData;
 
@@ -428,6 +435,33 @@ export const customFetch = async <T>(
   // The blob fallback below exists for a proxy's own error page rather than
   // for an endpoint of ours.
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
+  return headers;
+}
+
+/** A successful response's body: nothing for a 204, JSON where it says so. */
+async function readBody<T>(response: Response): Promise<T> {
+  if (response.status === 204) return null as T;
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    // File downloads and the like: hand back the blob rather than failing to
+    // parse it as JSON.
+    return (await response.blob()) as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+/**
+ * The mutator Orval calls for every operation.
+ *
+ * Generic over the response type so the generated hooks stay fully typed.
+ */
+export const customFetch = async <T>(
+  url: string,
+  options: RequestInit = {},
+): Promise<T> => {
+  const headers = requestHeaders(options);
 
   // `redirect: "manual"` is what makes an edge sign-out detectable. Following
   // it instead, which is the default, turns the proxy's 302 into an opaque
@@ -467,16 +501,7 @@ export const customFetch = async <T>(
     );
   }
 
-  if (response.status === 204) return null as T;
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("application/json")) {
-    // File downloads and the like: hand back the blob rather than failing to
-    // parse it as JSON.
-    return (await response.blob()) as T;
-  }
-
-  return (await response.json()) as T;
+  return readBody<T>(response);
 };
 
 /**

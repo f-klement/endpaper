@@ -104,12 +104,9 @@ type Refinements = Map<string, Map<string, string>>;
 function indexRefinements(metas: Element[]): Refinements {
   const index: Refinements = new Map();
   for (const meta of metas) {
-    const refines = meta.getAttribute("refines");
-    const property = meta.getAttribute("property");
-    const value = meta.textContent?.trim();
-    if (!refines || !property || !value) continue;
-    if (!refines.startsWith("#")) continue;
-    const target = refines.slice(1);
+    const refining = refinementIn(meta);
+    if (refining === null) continue;
+    const { target, property, value } = refining;
     const properties = index.get(target) ?? new Map<string, string>();
     // First one wins, so a document repeating a property does not flip on the
     // reader's iteration order.
@@ -117,6 +114,22 @@ function indexRefinements(metas: Element[]): Refinements {
     index.set(target, properties);
   }
   return index;
+}
+
+/**
+ * The id a `<meta>` refines, without its `#`, and the property and value it
+ * gives that id; `null` where any of the three is missing or empty, or the
+ * target is not a fragment.
+ */
+function refinementIn(
+  meta: Element,
+): { target: string; property: string; value: string } | null {
+  const refines = meta.getAttribute("refines");
+  const property = meta.getAttribute("property");
+  const value = meta.textContent?.trim();
+  if (!refines || !property || !value) return null;
+  if (!refines.startsWith("#")) return null;
+  return { target: refines.slice(1), property, value };
 }
 
 function refinement(
@@ -362,23 +375,40 @@ function readSeries(
     };
   }
 
-  const collections = metas.filter(
-    (meta) =>
-      meta.getAttribute("property") === "belongs-to-collection" &&
-      !meta.hasAttribute("refines"),
-  );
-  const typeOf = (meta: Element) =>
-    refinement(index, meta, "collection-type")?.trim().toLowerCase() ?? null;
-  const chosen =
-    collections.find((meta) => typeOf(meta) === "series") ??
-    collections.find((meta) => typeOf(meta) !== "set") ??
-    collections[0];
+  const chosen = chosenCollection(metas, index);
   if (chosen === undefined) return { seriesName: null, seriesIndex: null };
 
   return {
     seriesName: text(chosen),
     seriesIndex: toNumber(refinement(index, chosen, "group-position")),
   };
+}
+
+/**
+ * The `belongs-to-collection` read as the series: the first typed `series`,
+ * else the first not typed `set`, else the first.
+ */
+function chosenCollection(
+  metas: Element[],
+  index: Refinements,
+): Element | undefined {
+  const collections = metas.filter(
+    (meta) =>
+      meta.getAttribute("property") === "belongs-to-collection" &&
+      !meta.hasAttribute("refines"),
+  );
+  return (
+    collections.find((meta) => collectionType(index, meta) === "series") ??
+    collections.find((meta) => collectionType(index, meta) !== "set") ??
+    collections[0]
+  );
+}
+
+/** A collection's `collection-type` refinement, lower cased, or `null`. */
+function collectionType(index: Refinements, meta: Element): string | null {
+  return (
+    refinement(index, meta, "collection-type")?.trim().toLowerCase() ?? null
+  );
 }
 
 /**

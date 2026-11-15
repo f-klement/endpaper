@@ -11,8 +11,8 @@
  * **What it deliberately does not own is the request.** `post` is the caller's,
  * so what a record becomes on the wire stays where the record is understood,
  * and this module names no endpoint at all. That is also what keeps it here:
- * `tests/houseRules.test.ts` refuses any module outside a `hooks.ts` that
- * reaches the API directly, and a loop that takes its write as a callback is
+ * a house rule refuses any module outside a `hooks.ts` that reaches the API
+ * directly, and a loop that takes its write as a callback is
  * free to live where every page can reach it.
  *
  * **One item is one unit of work, and `post` may take more than one request to

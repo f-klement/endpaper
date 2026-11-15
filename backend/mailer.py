@@ -199,27 +199,61 @@ def checked_config(db: Session, *, recipients: tuple[str, ...] | None = None) ->
     *field* and never the value: `mail_password` is a secret and
     `mail_server` is not worth a log line either.
     """
+    host = _host(db)
+    port = _port(db)
+    use_ssl, use_tls = _transport(db)
+    username, password = _credentials(db, encrypted=use_ssl or use_tls)
+    return MailConfig(
+        host=host,
+        port=port,
+        username=username,
+        password=password,
+        use_ssl=use_ssl,
+        use_tls=use_tls,
+        sender=_sender(db),
+        recipients=_recipients(db, recipients),
+    )
+
+
+def _host(db: Session) -> str:
+    """The mail server in force, refused when empty or not a hostname."""
     host = settings_store.in_force(db, SettingKey.MAIL_SERVER).strip()
     if not host:
         raise MailRefused("No mail server is configured.")
     if any(character.isspace() for character in host):
         raise MailRefused("The mail server is not a hostname.")
+    return host
 
+
+def _port(db: Session) -> int:
+    """The mail port in force, refused when it is not a port number."""
     try:
         port = int(settings_store.in_force(db, SettingKey.MAIL_PORT).strip())
     except ValueError:
         raise MailRefused("The mail port is not a number.") from None
     if not 1 <= port <= 65535:
         raise MailRefused("The mail port is outside 1 to 65535.")
+    return port
 
+
+def _transport(db: Session) -> tuple[bool, bool]:
+    """Implicit TLS and STARTTLS, in that order, refused when both are on."""
     use_ssl = settings_store.bool_in_force(db, SettingKey.MAIL_USE_SSL)
     use_tls = settings_store.bool_in_force(db, SettingKey.MAIL_USE_TLS)
     if use_ssl and use_tls:
         raise MailRefused("Choose implicit TLS or STARTTLS, not both. They are two protocols.")
+    return use_ssl, use_tls
 
+
+def _credentials(db: Session, *, encrypted: bool) -> tuple[str, str]:
+    """The username and password in force, refused where a login could not work or would leak.
+
+    `encrypted` is whether either TLS flag is on; without it a password would
+    cross the network in the clear.
+    """
     username = settings_store.in_force(db, SettingKey.MAIL_USERNAME).strip()
     password = _password(db)
-    if password and not (use_ssl or use_tls):
+    if password and not encrypted:
         raise MailRefused(
             "A mail password with neither STARTTLS nor TLS would cross the "
             "network in the clear. Switch one of them on."
@@ -241,31 +275,27 @@ def checked_config(db: Session, *, recipients: tuple[str, ...] | None = None) ->
             "The mail password has a character outside ASCII, which cannot be "
             "sent to a mail server from here."
         )
+    return username, password
 
+
+def _sender(db: Session) -> str:
+    """The sender address in force, refused when empty or not an address."""
     sender = settings_store.in_force(db, SettingKey.MAIL_DEFAULT_SENDER).strip()
     if not sender:
         raise MailRefused("No sender address is configured.")
     if not looks_like_address(sender):
         raise MailRefused("The sender address is not an address.")
+    return sender
 
+
+def _recipients(db: Session, recipients: tuple[str, ...] | None) -> tuple[str, ...]:
+    """The caller's recipients, or the household address when it passed none."""
     if recipients is None:
-        recipients = _addresses(settings_store.in_force(db, SettingKey.OVERDUE_MAIL_TO))
-    else:
-        # Through the same door, so a caller supplied address cannot reach the
-        # envelope on terms the configured one could not: the count and the
-        # header injection rule are `_addresses`, once, for both sources.
-        recipients = _addresses(",".join(recipients))
-
-    return MailConfig(
-        host=host,
-        port=port,
-        username=username,
-        password=password,
-        use_ssl=use_ssl,
-        use_tls=use_tls,
-        sender=sender,
-        recipients=recipients,
-    )
+        return _addresses(settings_store.in_force(db, SettingKey.OVERDUE_MAIL_TO))
+    # Through the same door, so a caller supplied address cannot reach the
+    # envelope on terms the configured one could not: the count and the
+    # header injection rule are `_addresses`, once, for both sources.
+    return _addresses(",".join(recipients))
 
 
 def _build(config: MailConfig, subject: str, body: str) -> EmailMessage:

@@ -128,6 +128,35 @@ describe("AccountSettingsPage KOReader sync", () => {
     expect(screen.getByText(/shown only this once/)).toBeInTheDocument();
   });
 
+  it("says plainly when no sync password was ever made", async () => {
+    render();
+
+    expect(
+      await screen.findByText("You have no sync password yet."),
+    ).toBeInTheDocument();
+  });
+
+  it("says when the sync password was made, and offers a new one or a sign out", async () => {
+    api.on("/api/kosync/account", {
+      body: {
+        username: "kim",
+        has_password: true,
+        password_set_at: "2026-10-15T08:00:00Z",
+      },
+    });
+    render();
+
+    expect(
+      await screen.findByText(/Your sync password was made on/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Make a new sync password" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Sign out every device" }),
+    ).toBeInTheDocument();
+  });
+
   it("counts the documents waiting for a book", async () => {
     api.on("/api/kosync/inbox", {
       body: [

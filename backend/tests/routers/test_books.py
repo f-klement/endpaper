@@ -894,6 +894,75 @@ def open_library_oversized():
         yield mock
 
 
+class TestRecordProvenance:
+    """Where a record came from and whether it changed here, at the routes that write either."""
+
+    def test_a_body_naming_no_origin_was_typed_by_hand(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune")
+
+        assert (book["record_origin"], book["record_modified_here"]) == ("manual", False)
+
+    def test_a_body_naming_a_catalogue_keeps_it(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune", record_origin="dnb")
+
+        assert book["record_origin"] == "dnb"
+
+    def test_a_draft_the_client_changed_before_filing_files_as_modified(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune", record_origin="dnb", record_modified_here=True)
+
+        assert (book["record_origin"], book["record_modified_here"]) == ("dnb", True)
+
+    def test_an_origin_outside_the_closed_set_is_refused(self, client, admin):
+        res = client.post(
+            "/api/books", json={"title": "Dune", "record_origin": "somewhere"}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 422
+
+    def test_an_edit_to_the_description_marks_it_changed_and_keeps_the_origin(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune", record_origin="dnb")
+
+        res = client.patch(f"/api/books/{book['id']}", json={"publisher": "Ace"}, headers=admin["headers"])
+
+        assert (res.json()["record_origin"], res.json()["record_modified_here"]) == ("dnb", True)
+
+    def test_saving_the_value_already_held_changes_nothing(self, client, admin, make_book):
+        """A form saved untouched sends every field back as it was."""
+        book = make_book(admin["headers"], title="Dune", publisher="Ace", categories=["Fiction"])
+
+        res = client.patch(
+            f"/api/books/{book['id']}",
+            json={"title": "Dune", "publisher": "Ace", "categories": ["Fiction"]},
+            headers=admin["headers"],
+        )
+
+        assert res.json()["record_modified_here"] is False
+
+    def test_a_changed_subject_list_marks_it_changed(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune", categories=["Fiction"])
+
+        res = client.patch(f"/api/books/{book['id']}", json={"categories": []}, headers=admin["headers"])
+
+        assert res.json()["record_modified_here"] is True
+
+    def test_moving_the_copy_to_another_shelf_is_not_a_change_to_the_record(self, client, admin, make_book):
+        book = make_book(admin["headers"], title="Dune")
+
+        res = client.patch(f"/api/books/{book['id']}", json={"location": "Loft"}, headers=admin["headers"])
+
+        assert res.json()["record_modified_here"] is False
+
+    def test_a_refresh_names_the_catalogue_that_replaced_the_record(
+        self, client, admin, make_book, open_library_hit
+    ):
+        book = make_book(admin["headers"], title="Stale", isbn="9780743273565")
+        client.patch(f"/api/books/{book['id']}", json={"publisher": "Typed"}, headers=admin["headers"])
+
+        res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
+
+        assert (res.json()["record_origin"], res.json()["record_modified_here"]) == ("open_library", False)
+
+
 class TestRefreshMetadata:
     def test_overwrites_fields_from_the_source(self, client, admin, make_book, open_library_hit):
         book = make_book(admin["headers"], title="Stale", isbn="9780743273565")

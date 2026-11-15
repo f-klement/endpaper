@@ -1,5 +1,9 @@
-import type { HighlightOut, UserOut } from "../../../api/generated/model";
-import { useTranslation } from "../../../i18n";
+import type {
+  HighlightOut,
+  Locale,
+  UserOut,
+} from "../../../api/generated/model";
+import { useTranslation, type Translate } from "../../../i18n";
 import { shortMonthDate } from "../../../lib/date";
 
 /**
@@ -19,6 +23,91 @@ interface HighlightListProps {
   pendingIds: ReadonlySet<number>;
   onSetShared: (highlightId: number, isShared: boolean) => void;
   onDelete: (highlightId: number) => void;
+}
+
+/**
+ * The line under a passage: its chapter, its page, whose it is when it is not
+ * the reader's own, and the device's day, each only when there is one.
+ */
+function highlightDetails(
+  highlight: HighlightOut,
+  isAuthor: boolean,
+  t: Translate,
+  locale: Locale,
+): string {
+  return [
+    highlight.chapter,
+    highlight.page != null
+      ? t("quotes.onPage", { page: highlight.page })
+      : null,
+    isAuthor ? null : (highlight.author?.username ?? null),
+    highlight.highlighted_at
+      ? shortMonthDate(highlight.highlighted_at.slice(0, 10), locale)
+      : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+}
+
+/**
+ * The author's own controls: which state the passage is in, the one action
+ * that changes it, and delete. A passage too long to share says so where its
+ * share button would be.
+ */
+function HighlightControls({
+  highlight,
+  busy,
+  onSetShared,
+  onDelete,
+}: {
+  highlight: HighlightOut;
+  busy: boolean;
+  onSetShared: (highlightId: number, isShared: boolean) => void;
+  onDelete: (highlightId: number) => void;
+}) {
+  const { t } = useTranslation();
+  const tooLong = codePoints(highlight.text) > SHARE_MAX;
+  return (
+    <span className="flex items-center gap-2 shrink-0">
+      <span className="text-xs text-paper-600 dark:text-paper-400">
+        {highlight.is_shared ? t("highlights.shared") : t("highlights.private")}
+      </span>
+      {highlight.is_shared ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onSetShared(highlight.id, false)}
+          className="text-xs text-accent-600 hover:text-accent-800 disabled:opacity-50 dark:text-accent-400 dark:hover:text-accent-300"
+        >
+          {t("highlights.unshare")}
+        </button>
+      ) : tooLong ? (
+        <span className="text-xs text-paper-600 italic dark:text-paper-400">
+          {t("highlights.tooLongToShare")}
+        </span>
+      ) : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onSetShared(highlight.id, true)}
+          className="text-xs text-accent-600 hover:text-accent-800 disabled:opacity-50 dark:text-accent-400 dark:hover:text-accent-300"
+        >
+          {t("highlights.share")}
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => {
+          if (confirm(t("highlights.deleteConfirm"))) onDelete(highlight.id);
+        }}
+        // The rungs QuoteList's delete names, for its reason.
+        className="text-xs text-danger-500 hover:text-danger-600 disabled:opacity-50 dark:text-danger-300 dark:hover:text-danger-100"
+      >
+        {t("common.delete")}
+      </button>
+    </span>
+  );
 }
 
 /**
@@ -56,19 +145,6 @@ export default function HighlightList({
       <div className="space-y-3">
         {highlights.map((highlight) => {
           const isAuthor = highlight.user_id === currentUser.id;
-          const tooLong = codePoints(highlight.text) > SHARE_MAX;
-          const busy = pendingIds.has(highlight.id);
-          const details = [
-            highlight.chapter,
-            highlight.page != null
-              ? t("quotes.onPage", { page: highlight.page })
-              : null,
-            isAuthor ? null : (highlight.author?.username ?? null),
-            highlight.highlighted_at
-              ? shortMonthDate(highlight.highlighted_at.slice(0, 10), locale)
-              : null,
-          ].filter((part): part is string => Boolean(part));
-
           return (
             <div
               key={highlight.id}
@@ -84,51 +160,15 @@ export default function HighlightList({
               )}
               <div className="flex items-center justify-between gap-2 mt-2">
                 <span className="text-xs text-paper-600 dark:text-paper-400">
-                  {details.join(" · ")}
+                  {highlightDetails(highlight, isAuthor, t, locale)}
                 </span>
                 {isAuthor && (
-                  <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-paper-600 dark:text-paper-400">
-                      {highlight.is_shared
-                        ? t("highlights.shared")
-                        : t("highlights.private")}
-                    </span>
-                    {highlight.is_shared ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onSetShared(highlight.id, false)}
-                        className="text-xs text-accent-600 hover:text-accent-800 disabled:opacity-50 dark:text-accent-400 dark:hover:text-accent-300"
-                      >
-                        {t("highlights.unshare")}
-                      </button>
-                    ) : tooLong ? (
-                      <span className="text-xs text-paper-600 italic dark:text-paper-400">
-                        {t("highlights.tooLongToShare")}
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onSetShared(highlight.id, true)}
-                        className="text-xs text-accent-600 hover:text-accent-800 disabled:opacity-50 dark:text-accent-400 dark:hover:text-accent-300"
-                      >
-                        {t("highlights.share")}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        if (confirm(t("highlights.deleteConfirm")))
-                          onDelete(highlight.id);
-                      }}
-                      // The rungs QuoteList's delete names, for its reason.
-                      className="text-xs text-danger-500 hover:text-danger-600 disabled:opacity-50 dark:text-danger-300 dark:hover:text-danger-100"
-                    >
-                      {t("common.delete")}
-                    </button>
-                  </span>
+                  <HighlightControls
+                    highlight={highlight}
+                    busy={pendingIds.has(highlight.id)}
+                    onSetShared={onSetShared}
+                    onDelete={onDelete}
+                  />
                 )}
               </div>
             </div>

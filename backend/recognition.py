@@ -92,7 +92,7 @@ from enum import Enum
 from typing import Any, Final, Self
 
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 import identity
 import isbn as isbn_utils
@@ -289,6 +289,20 @@ def _isbns_of(rows: Iterable[Any]) -> dict[_Key, set[int]]:
     )
 
 
+def _narrow_to_identifiers(
+    schemes: tuple[BookIdentifierScheme, ...], identifiers: Iterable[tuple[BookIdentifierScheme, str]]
+) -> _Narrow | None:
+    """The identifiers of these schemes one record carries, in the three
+    spellings `_Narrow.values` says, or `None` where it carries none."""
+    values: set[str] = set()
+    for scheme, value in identifiers:
+        if scheme in schemes and (bare := value.strip()):
+            values.update((bare, bare.upper(), bare.lower()))
+    if not values:
+        return None
+    return _Narrow(isbn_keys=frozenset(), isbn_patterns=(), values=frozenset(values))
+
+
 class Index:
     """The Books one Member can see, keyed the way one source is matched.
 
@@ -352,26 +366,31 @@ class Index:
         ladder = _LADDERS[source]
         if ladder.title is not None:
             raise ValueError(f"{source} asks a title, which a narrowed index cannot answer")
-        keys: set[str] = set()
-        forms: set[str] = set()
-        values: set[str] = set()
-        if ladder.schemes is None and (key := _isbn_key(isbn)) is not None:
-            keys.add(key)
-            forms.update(isbn_utils.equivalent_forms(isbn) or [key])
-        elif ladder.schemes is not None:
-            for scheme, value in identifiers:
-                if scheme in ladder.schemes and (bare := value.strip()):
-                    values.update((bare, bare.upper(), bare.lower()))
-        if not keys and not values:
+        narrow = cls._narrow_for(ladder, isbn, identifiers)
+        if narrow is None:
             # A record carrying none of this ladder's keys is answered by no
             # Book, so nothing is read for it.
             return cls(ladder, set(), {}, {}, {}, {}, {})
-        narrow = _Narrow(
-            isbn_keys=frozenset(keys),
-            isbn_patterns=tuple(sorted(_spelled_anywhere(form) for form in forms)),
-            values=frozenset(values),
-        )
         return cls._read(db, member_id, ladder, narrow=narrow)
+
+    @staticmethod
+    def _narrow_for(
+        ladder: _Ladder, isbn: str | None, identifiers: Iterable[tuple[BookIdentifierScheme, str]]
+    ) -> _Narrow | None:
+        """The keys of this ladder's own that one record carries: its ISBN for
+        an ISBN ladder, else its identifiers of the ladder's schemes. `None`
+        where it carries none."""
+        if ladder.schemes is not None:
+            return _narrow_to_identifiers(ladder.schemes, identifiers)
+        key = _isbn_key(isbn)
+        if key is None:
+            return None
+        forms = set(isbn_utils.equivalent_forms(isbn) or [key])
+        return _Narrow(
+            isbn_keys=frozenset({key}),
+            isbn_patterns=tuple(sorted(_spelled_anywhere(form) for form in forms)),
+            values=frozenset(),
+        )
 
     @staticmethod
     def _past_the_shelf(
@@ -381,27 +400,7 @@ class Index:
         and the identifier rung read, the ISBNs on the shelf, in the trash, and
         anywhere. Apart from `_read`, so that the shelf alone ladder's branch
         there did not take `_read` past its recorded complexity."""
-        # The one read past the viewer, counted by
-        # `tests/test_shelf.py::test_the_named_ways_past_a_viewer_have_the_callers_they_claim`.
-        # Ids of rows nobody here may see stay inside this object: `Hidden`
-        # is the only thing they ever decide, and it carries none of them.
-        anywhere = whole_table_for_uniqueness(db, Book.id, Book.isbn)
-        if narrow is None:
-            anywhere = anywhere.filter(Book.isbn.isnot(None))
-        else:
-            # **A scan of `books.isbn`, not the unique index**: an exact
-            # comparison misses a row stored with hyphens or a lower case
-            # x, which the full index finds through `isbn.parse`, and the
-            # door then made a second Book. The patterns are a superset;
-            # the keys below decide.
-            anywhere = anywhere.filter(
-                or_(*(Book.isbn.ilike(pattern, escape="\\") for pattern in narrow.isbn_patterns))
-            )
-        held_anywhere: dict[_Key, set[int]] = _grouped(
-            (key, book_id)
-            for book_id, isbn in anywhere
-            if (key := _isbn_key(isbn)) is not None and (narrow is None or key in narrow.isbn_keys)
-        )
+        held_anywhere = Index._holders_anywhere(db, narrow)
         # The full build reads every shelf row, which the title rung needs.
         # A narrowed one asks the shelf and the trash for the holders alone,
         # by primary key, since every holder is in `held_anywhere`, and not
@@ -421,6 +420,32 @@ class Index:
         )
         by_identifier = _isbns_of(rows)
         return rows, by_identifier, in_trash, held_anywhere
+
+    @staticmethod
+    def _holders_anywhere(db: Session, narrow: _Narrow | None) -> dict[_Key, set[int]]:
+        """The Books holding each ISBN key, whoever may see them: every ISBN
+        for the full build, the record's own for a narrowed one."""
+        # The one read past the viewer, counted by
+        # `tests/test_shelf.py::test_the_named_ways_past_a_viewer_have_the_callers_they_claim`.
+        # Ids of rows nobody here may see stay inside the Index: `Hidden` is
+        # the only thing they ever decide, and it carries none of them.
+        anywhere = whole_table_for_uniqueness(db, Book.id, Book.isbn)
+        if narrow is None:
+            anywhere = anywhere.filter(Book.isbn.isnot(None))
+        else:
+            # **A scan of `books.isbn`, not the unique index**: an exact
+            # comparison misses a row stored with hyphens or a lower case
+            # x, which the full index finds through `isbn.parse`, and the
+            # door then made a second Book. The patterns are a superset;
+            # the keys below decide.
+            anywhere = anywhere.filter(
+                or_(*(Book.isbn.ilike(pattern, escape="\\") for pattern in narrow.isbn_patterns))
+            )
+        return _grouped(
+            (key, book_id)
+            for book_id, isbn in anywhere
+            if (key := _isbn_key(isbn)) is not None and (narrow is None or key in narrow.isbn_keys)
+        )
 
     @classmethod
     def _read(cls, db: Session, member_id: int, ladder: _Ladder, narrow: _Narrow | None) -> Self:
@@ -445,20 +470,7 @@ class Index:
                 .join(BookIdentifier, BookIdentifier.book_id == Book.id)
                 .filter(BookIdentifier.scheme.in_(ladder.schemes))
             )
-            if narrow is not None:
-                carrying = carrying.filter(BookIdentifier.value.in_(narrow.values))
-            by_identifier = _grouped(
-                (pair, book_id)
-                for value, scheme, book_id in carrying
-                if (pair := _identifier_key(BookIdentifierScheme(scheme), value)) is not None
-            )
-            holders = set().union(*by_identifier.values())
-            if narrow is None:
-                rows = shelf.select(*columns).all()
-            else:
-                # Skipped when nothing carries the key, so an identifier held
-                # only off the shelf costs exactly what one nobody holds does.
-                rows = shelf.select(*columns).filter(Book.id.in_(holders)).all() if holders else []
+            rows, by_identifier = cls._identified(carrying, narrow, shelf, columns)
 
         index = cls(
             ladder,
@@ -472,6 +484,29 @@ class Index:
         for book_id, _isbn, title, author, group in rows:
             index._admit(book_id, title, author, group)
         return index
+
+    @staticmethod
+    def _identified(
+        carrying: Query[Any], narrow: _Narrow | None, shelf: Shelf, columns: tuple[Any, ...]
+    ) -> tuple[list[Any], dict[_Key, set[int]]]:
+        """An identifier ladder's reads, all on the Shelf: the Books carrying
+        each identifier, from `carrying`, its Books joined to their identifiers
+        of the ladder's schemes, and the shelf rows the Index admits."""
+        if narrow is not None:
+            carrying = carrying.filter(BookIdentifier.value.in_(narrow.values))
+        by_identifier: dict[_Key, set[int]] = _grouped(
+            (pair, book_id)
+            for value, scheme, book_id in carrying
+            if (pair := _identifier_key(BookIdentifierScheme(scheme), value)) is not None
+        )
+        holders = set().union(*by_identifier.values())
+        if narrow is None:
+            rows = shelf.select(*columns).all()
+        else:
+            # Skipped when nothing carries the key, so an identifier held
+            # only off the shelf costs exactly what one nobody holds does.
+            rows = shelf.select(*columns).filter(Book.id.in_(holders)).all() if holders else []
+        return rows, by_identifier
 
     def recognise(
         self,
@@ -497,6 +532,11 @@ class Index:
             if held:
                 return Resembles(frozenset(held)) if self._ladder.title_is_a_guess else self._settle(held)
 
+        return self._off_the_shelf(keys)
+
+    def _off_the_shelf(self, keys: set[_Key]) -> Answer:
+        """The answer for a record no Book on the shelf holds: `Hidden` or
+        `InTrash` for an ISBN held off it, else `Unknown`."""
         if self._ladder.schemes is None:
             trashed = _union(self._in_trash, keys)
             hidden = _union(self._held_anywhere, keys) - trashed - self._visible

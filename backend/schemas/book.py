@@ -26,6 +26,7 @@ from enums import (
     LendingWillingness,
     OwnershipStatus,
     ReadStatus,
+    RecordOrigin,
 )
 from models import (
     AUTHOR_LINE_MAX,
@@ -289,6 +290,10 @@ class BookLookup(BaseModel):
     # lookup and then throws half the record away.
     language: str | None = None
     page_count: int | None = None
+    #: The catalogue whose record this is, which the client posts back as
+    #: `BookCreate.record_origin`. Null for a record no catalogue on the roster
+    #: leads: see `catalogue.Record.leading`.
+    record_origin: RecordOrigin | None = None
     #: What the catalogues placed this book at, kept whole: scheme, number and
     #: the caption they gave it. Here and not only in `suggested_tag_ids`
     #: because the suggestion is the library's reading of the number and this
@@ -432,6 +437,22 @@ class BookCreate(BaseModel):
     #: missing was any way for a client to say it, so every store import wrote
     #: `owned` whether or not its store had established one.
     ownership: OwnershipStatus = OwnershipStatus.OWNED
+    #: Where the record came from, as the client knows it: the catalogue a
+    #: lookup named, the file or import it read, or nothing.
+    #:
+    #: **`MANUAL` when absent**, because a body that names no origin is, as far
+    #: as this server can see, somebody typing. **The value is the client's
+    #: claim and is believed**, at the same trust as the title beside it: a
+    #: member who could type the whole record can as well say where it came
+    #: from. What it cannot do is name an origin outside the closed set.
+    record_origin: RecordOrigin = RecordOrigin.MANUAL
+    #: Whether the client changed the record before filing it: a subject taken
+    #: off a file's draft, or a catalogue's record filled from a file.
+    #:
+    #: **Believed, at the same trust as the origin**, and for the same reason:
+    #: the edit happened in the browser, where the server cannot see it, and
+    #: without this a corrected draft would file as the catalogue's untouched.
+    record_modified_here: bool = False
 
     @field_validator(*BLANK_IS_NULL, mode="before")
     @classmethod
@@ -894,6 +915,11 @@ class BookColumns(BaseModel):
     purchase_currency: str | None = None
     purchased_at: date | None = None
     purchase_source: str | None = None
+    #: Where the record came from, null for a row written before anybody asked.
+    record_origin: RecordOrigin | None = None
+    #: Whether anything here changed the record since it arrived, null likewise.
+    #: Why these are two fields and not one is on `models.Book`.
+    record_modified_here: bool | None = None
 
     model_config = {"from_attributes": True}
 
@@ -1245,6 +1271,11 @@ class BookMatch(BaseModel):
     # caller-supplied id list here, and is 4.8x the 105 seeded tags, so no
     # realistic vocabulary trips it.
     suggested_tag_ids: list[RowIdField] = Field(default=[], max_length=500)
+    #: The catalogue whose record this row is, for a draft the client files
+    #: through `BookCreate.record_origin`. `evidence` never writes it: applying
+    #: a candidate to a Book that exists does not change where that Book's record
+    #: came from (`evidence.touched`).
+    record_origin: RecordOrigin | None = None
 
     @field_validator("cover_url")
     @classmethod

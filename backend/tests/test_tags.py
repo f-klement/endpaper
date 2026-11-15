@@ -1318,7 +1318,7 @@ TAG_READERS: Final = {
     ],
     "shelf.py": [
         (
-            "matching: shelf = shelf.where(Book.tags.any(Tag.id == tag_id))",
+            "_narrowed_by_subject: shelf = shelf.where(Book.tags.any(Tag.id == tag_id))",
             "the tag filter, which narrows a Shelf that already carries the "
             "viewer's predicate. It reads an id the caller supplied and returns "
             "Books, never a Tag, so no name is resolved here at all.",

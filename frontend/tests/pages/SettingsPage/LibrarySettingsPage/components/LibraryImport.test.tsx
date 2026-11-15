@@ -104,6 +104,13 @@ describe("LibraryImport", () => {
       expect(screen.getByText("Exclusive Shelf")).toBeInTheDocument();
     });
 
+    it("lists only the fields a column filled", () => {
+      renderImport({ preview: preview() });
+      expect(
+        screen.getAllByRole("term").map((term) => term.textContent),
+      ).toEqual(["Title", "Author", "Reading status"]);
+    });
+
     it("names the fields it could not find", () => {
       // The silent failure this whole step exists to catch.
       renderImport({ preview: preview() });
@@ -115,6 +122,59 @@ describe("LibraryImport", () => {
     it("shows the first rows as the parser read them", () => {
       renderImport({ preview: preview() });
       expect(screen.getByText(/Dune/)).toBeInTheDocument();
+    });
+
+    it("shows a row's ISBN beside its title", () => {
+      renderImport({
+        preview: preview({
+          rows: [{ title: "Dune", isbn: "9780441013593" }],
+        }),
+      });
+      expect(screen.getByRole("listitem")).toHaveTextContent(
+        "Dune9780441013593",
+      );
+    });
+
+    it("lists no rows when the preview carries none", () => {
+      renderImport({ preview: preview({ rows: undefined }) });
+      expect(screen.queryByRole("listitem")).toBeNull();
+    });
+
+    it("says how many rows had no title before anything is written", () => {
+      renderImport({ preview: preview({ skipped: 2 }) });
+      expect(
+        screen.getByText("2 rows had no title and were skipped."),
+      ).toBeInTheDocument();
+    });
+
+    it("imports without adding books once that box is cleared, and drops its warning", async () => {
+      const props = renderImport({ preview: preview() });
+      const user = userEvent.setup();
+
+      await user.click(
+        screen.getByRole("checkbox", { name: /Add books that are not/ }),
+      );
+      expect(
+        screen.queryByText(/They arrive marked as not confirmed/),
+      ).toBeNull();
+      await user.click(screen.getByRole("button", { name: "Import 10 books" }));
+
+      expect(props.onConfirm).toHaveBeenCalledWith({
+        createMissing: false,
+        applyTags: false,
+      });
+    });
+
+    it("counts no tags for a file whose preview gave no tag count", async () => {
+      renderImport({ preview: preview({ distinct_tags: undefined }) });
+
+      await userEvent
+        .setup()
+        .click(screen.getByRole("checkbox", { name: /Bring the tags across/ }));
+
+      expect(
+        screen.getByText(/This file has 0 different tags/),
+      ).toBeInTheDocument();
     });
 
     it("imports on confirmation", async () => {
@@ -147,6 +207,11 @@ describe("LibraryImport", () => {
       });
     });
 
+    it("says nothing about tags until asked to bring them", () => {
+      renderImport({ preview: preview() });
+      expect(screen.queryByText(/different tags/)).toBeNull();
+    });
+
     it("says how many tags this particular file would create", async () => {
       // A count of the file in hand beats "often hundreds", which is a fact
       // about Goodreads rather than about what is being imported.
@@ -177,6 +242,13 @@ describe("LibraryImport", () => {
       // exactly like the common case: the screen went quiet on the one
       // occasion somebody needed it to speak.
       renderImport({ preview: preview() });
+      expect(
+        screen.getByText("Read as a plain table, with the columns guessed."),
+      ).toBeInTheDocument();
+    });
+
+    it("calls the generic reader a plain table rather than a service", () => {
+      renderImport({ preview: preview({ reader: "generic" }) });
       expect(
         screen.getByText("Read as a plain table, with the columns guessed."),
       ).toBeInTheDocument();
@@ -226,6 +298,18 @@ describe("LibraryImport", () => {
       ).toBeInTheDocument();
     });
 
+    it("counts zero for a file with such a column whose preview gave no count", () => {
+      renderImport({
+        preview: preview({
+          excluded: undefined,
+          exclusion_column: "HasBeenDeleted",
+        }),
+      });
+      expect(
+        screen.getByText(/0 rows are marked as deleted/),
+      ).toBeInTheDocument();
+    });
+
     it("says the file marks nothing as deleted when it has no such column", () => {
       renderImport({ preview: preview({ excluded: 0 }) });
       expect(
@@ -266,6 +350,13 @@ describe("LibraryImport", () => {
     it("says nothing about deleted rows when the file marked none", () => {
       renderImport({ result: outcome() });
       expect(screen.queryByText(/marked as deleted/)).not.toBeInTheDocument();
+    });
+
+    it("says how many rows had no title", () => {
+      renderImport({ result: outcome({ skipped: 4 }) });
+      expect(
+        screen.getByText("4 rows had no title and were skipped."),
+      ).toBeInTheDocument();
     });
 
     it("reports what the import did", () => {

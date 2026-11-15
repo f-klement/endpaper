@@ -107,20 +107,31 @@ function position(value: LuaValue | undefined, page?: LuaKey): string | null {
   if (typeof value === "number") return String(value);
   const coordinates = table(value);
   if (!coordinates) return null;
+  return canonical(coordinates, page);
+}
+
+/**
+ * A coordinate table as `key=value` pairs sorted by key and joined by `;`, a
+ * nested table in braces. The module docstring says why this spelling is fixed.
+ */
+function canonical(coordinates: LuaTable, page?: LuaKey): string {
   const entries = new Map(coordinates);
   // An old fixed layout highlight's coordinates omit the page they are on;
   // KOReader adds it from the key the highlight was filed under.
   if (page !== undefined && !entries.has("page"))
     entries.set("page", page as LuaValue);
   const parts: string[] = [];
-  for (const [key, inner] of [...entries].toSorted(([a], [b]) =>
-    String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0,
-  )) {
+  for (const [key, inner] of [...entries].toSorted(byKeyText)) {
     const rendered =
       inner instanceof Map ? `{${position(inner)}}` : String(inner);
     parts.push(`${String(key)}=${rendered}`);
   }
   return parts.join(";");
+}
+
+/** Two table entries in the order of their keys as text. */
+function byKeyText([a]: [LuaKey, LuaValue], [b]: [LuaKey, LuaValue]): number {
+  return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0;
 }
 
 /** A page to add to coordinates: only a number is one, an XPointer is not. */
@@ -145,22 +156,35 @@ function pageOf(value: LuaValue | undefined): number | null {
  */
 function wallClock(value: LuaValue | undefined): string | null {
   if (typeof value !== "string" || !WALL_CLOCK.test(value)) return null;
-  const [year, month, day, hour, minute, second] = value
-    .split(/[- :]/)
-    .map(Number) as [number, number, number, number, number, number];
+  const fields = value.split(/[- :]/).map(Number) as WallClockFields;
+  return exists(fields) ? value : null;
+}
+
+/** Year, month, day, hour, minute and second, as `WALL_CLOCK` orders them. */
+type WallClockFields = [number, number, number, number, number, number];
+
+/** Whether a wall clock reading names a moment the calendar has. */
+function exists([
+  year,
+  month,
+  day,
+  hour,
+  minute,
+  second,
+]: WallClockFields): boolean {
   // `setUTCFullYear` rather than `Date.UTC`, which reads years 0 to 99 as 1900
   // onwards and so would let year 0 through.
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
-  const real =
+  return (
     year >= 1 &&
     date.getUTCFullYear() === year &&
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day &&
     hour < 24 &&
     minute < 60 &&
-    second < 60;
-  return real ? value : null;
+    second < 60
+  );
 }
 
 interface Draft {
@@ -228,17 +252,28 @@ function fromBookmarks(sidecar: LuaTable): Draft[] {
       highlightedAt: wallClock(bookmark.get("datetime")),
     }));
   if (sidecar.get("highlights_imported") === true) return drafts;
+  return [...drafts, ...fromHighlight(sidecar.get("highlight"), drafts)];
+}
 
+/**
+ * The pre 2014 `highlight` table's marks that `drafts` does not already hold,
+ * keyed by their two positions, each kept once.
+ */
+function fromHighlight(
+  highlight: LuaValue | undefined,
+  drafts: readonly Draft[],
+): Draft[] {
   const seen = new Set(
     drafts.map((draft) => `${draft.pos0}\u0000${draft.pos1}`),
   );
-  for (const [page, marks] of table(sidecar.get("highlight")) ?? []) {
+  const added: Draft[] = [];
+  for (const [page, marks] of table(highlight) ?? []) {
     for (const mark of items(marks)) {
       const pos0 = position(mark.get("pos0"), page);
       const pos1 = position(mark.get("pos1"), page);
       if (pos0 === null || seen.has(`${pos0}\u0000${pos1}`)) continue;
       seen.add(`${pos0}\u0000${pos1}`);
-      drafts.push({
+      added.push({
         pos0,
         pos1,
         text: text(mark.get("text")),
@@ -249,18 +284,23 @@ function fromBookmarks(sidecar: LuaTable): Draft[] {
       });
     }
   }
-  return drafts;
+  return added;
 }
 
-function fits(draft: Draft): draft is Draft & {
-  pos0: string;
-  pos1: string;
-  text: string;
-} {
+/** A draft carrying the two positions and the passage a mark is keyed by. */
+type Keyable = Draft & { pos0: string; pos1: string; text: string };
+
+/**
+ * Whether the server can key this mark. One with no passage or no position
+ * was never a highlight a member could see.
+ */
+function isKeyable(draft: Draft): draft is Keyable {
+  return draft.pos0 !== null && draft.pos1 !== null && draft.text !== null;
+}
+
+/** Whether a keyable mark is within every ceiling the server stores. */
+function fits(draft: Keyable): boolean {
   return (
-    draft.pos0 !== null &&
-    draft.pos1 !== null &&
-    draft.text !== null &&
     draft.pos0.length <= POSITION_MAX &&
     draft.pos1.length <= POSITION_MAX &&
     draft.text.length <= TEXT_MAX &&
@@ -303,12 +343,8 @@ export function readSidecar(source: string): SidecarReading {
     table(sidecar.get("annotations")) !== null
       ? fromAnnotations(sidecar.get("annotations"))
       : fromBookmarks(sidecar);
-  // A mark with no passage or no position is not one the server can key, and
-  // was never a highlight a member could see; it is dropped, not counted.
-  const marks = drafts.filter(
-    (draft) =>
-      draft.pos0 !== null && draft.pos1 !== null && draft.text !== null,
-  );
+  // A mark the server cannot key is dropped, not counted.
+  const marks = drafts.filter(isKeyable);
   const highlights = marks.filter(fits).map((draft): SidecarHighlight => ({
     pos0: draft.pos0,
     pos1: draft.pos1,

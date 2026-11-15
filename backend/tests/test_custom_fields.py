@@ -561,6 +561,7 @@ class TestALinkIsNotWhateverSomebodyTyped:
         "no host": "https:///book/12",
         "credentials": "https://calibre.example@evil.example/",
         "a password": "https://user:pass@evil.example/",
+        "a password with no user": "https://:pass@evil.example/",
         "a port past the range": "https://calibre.example:99999/x",
         "port zero": "https://calibre.example:0/x",
         "empty": "",
@@ -579,6 +580,8 @@ class TestALinkIsNotWhateverSomebodyTyped:
         "a tab in the host": "https://calibre.example\t/x",
         "a newline": "https://calibre.example/a\nb",
         "an empty label": "https://calibre..example/x",
+        "an empty first label": "https://.calibre.example/x",
+        "an empty last label": "https://calibre.example./x",
         # WHATWG percent-decodes the host **before** IDNA maps it, so every one
         # of these is `_HOST_SEPARATORS` arriving one step earlier. Measured
         # 2026-08-27 against `new URL(...).host`: all three resolve to

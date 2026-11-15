@@ -1,6 +1,6 @@
 /** Tests for src/pages/AuthorsPage/components/MergeBar. */
 
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19,11 +19,15 @@ beforeEach(() => {
 
 type Props = React.ComponentProps<typeof MergeBar>;
 
-function renderBar(selected = TWO, onMerge = vi.fn<Props["onMerge"]>()) {
+function renderBar(
+  selected = TWO,
+  onMerge = vi.fn<Props["onMerge"]>(),
+  isMerging = false,
+) {
   renderLocalised(
     <MergeBar
       selected={selected}
-      isMerging={false}
+      isMerging={isMerging}
       onMerge={onMerge}
       onClear={vi.fn<() => void>()}
     />,
@@ -116,5 +120,74 @@ describe("MergeBar", () => {
       .click(screen.getByRole("button", { name: "Keep Tolkien" }));
 
     expect(onMerge).not.toHaveBeenCalled();
+  });
+
+  it("holds every action while a merge is running", () => {
+    renderBar(TWO, vi.fn<Props["onMerge"]>(), true);
+
+    const keeps = screen.getAllByRole("button", { name: "Merging..." });
+    expect(keeps).toHaveLength(2);
+    for (const keep of keeps) expect(keep).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Fold into this name" }),
+    ).toBeDisabled();
+  });
+
+  it("holds the typed name's button while a merge is running", async () => {
+    renderBar(TWO, vi.fn<Props["onMerge"]>(), true);
+
+    await userEvent
+      .setup()
+      .type(screen.getByLabelText("Or a name none of them has"), "Tolkien");
+
+    expect(
+      screen.getByRole("button", { name: "Fold into this name" }),
+    ).toBeDisabled();
+  });
+
+  it("sends nothing for a typed name that is only whitespace", () => {
+    // The submit button is disabled for a blank field, but Enter in the field
+    // submits the form all the same, so the handler refuses it too.
+    const confirmed = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onMerge = renderBar();
+    const field = screen.getByLabelText("Or a name none of them has");
+
+    fireEvent.change(field, { target: { value: "   " } });
+    fireEvent.submit(field.closest("form")!);
+
+    expect(confirmed).not.toHaveBeenCalled();
+    expect(onMerge).not.toHaveBeenCalled();
+  });
+
+  it("keeps the typed name when the reader cancels", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const onMerge = renderBar();
+    const user = userEvent.setup();
+    const field = screen.getByLabelText("Or a name none of them has");
+
+    await user.type(field, "J. R. R. Tolkien");
+    await user.click(
+      screen.getByRole("button", { name: "Fold into this name" }),
+    );
+
+    expect(onMerge).not.toHaveBeenCalled();
+    expect(field).toHaveValue("J. R. R. Tolkien");
+  });
+
+  it("empties the field once the typed name is sent", async () => {
+    const onMerge = renderBar();
+    const user = userEvent.setup();
+    const field = screen.getByLabelText("Or a name none of them has");
+
+    await user.type(field, "Ursula K.  Le Guin");
+    await user.click(
+      screen.getByRole("button", { name: "Fold into this name" }),
+    );
+
+    expect(onMerge).toHaveBeenCalledWith(
+      ["tolkein", "tolkien"],
+      "Ursula K. Le Guin",
+    );
+    expect(field).toHaveValue("");
   });
 });

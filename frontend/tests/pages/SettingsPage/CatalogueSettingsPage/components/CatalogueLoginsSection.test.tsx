@@ -166,6 +166,23 @@ describe("saving one", () => {
     );
   });
 
+  it("sends the username without the spaces around it", async () => {
+    const user = userEvent.setup();
+    api.on(/credential$/, { body: { catalogue_sources: [] } }, "PUT");
+    render([source()]);
+
+    await user.selectOptions(screen.getByLabelText("Add a login for"), "bne");
+    await user.type(screen.getByLabelText("Username"), " alice ");
+    await user.type(screen.getByLabelText("Password"), "hunter2");
+    await user.click(screen.getByRole("button", { name: "Save login" }));
+
+    await waitFor(() =>
+      expect(api.lastCall(/credential$/, "PUT")?.body).toMatchObject({
+        username: "alice",
+      }),
+    );
+  });
+
   it("will not send half a login", async () => {
     const user = userEvent.setup();
     render([source()]);
@@ -206,6 +223,55 @@ describe("saving one", () => {
 
     expect(await screen.findByText("Make a key first.")).toBeInTheDocument();
     expect(screen.getByLabelText("Username")).toHaveValue("alice");
+  });
+});
+
+describe("closing the form", () => {
+  it("keeps what was typed when the picker is moved away and back", async () => {
+    const user = userEvent.setup();
+    render([source()]);
+    const picker = screen.getByLabelText("Add a login for");
+
+    await user.selectOptions(picker, "bne");
+    await user.type(screen.getByLabelText("Username"), "alice");
+    await user.selectOptions(picker, "");
+    await user.selectOptions(picker, "bne");
+
+    expect(screen.getByLabelText("Username")).toHaveValue("alice");
+  });
+
+  it("empties the fields on Cancel", async () => {
+    const user = userEvent.setup();
+    render([source()]);
+    const picker = screen.getByLabelText("Add a login for");
+
+    await user.selectOptions(picker, "bne");
+    await user.type(screen.getByLabelText("Username"), "alice");
+    await user.type(screen.getByLabelText("Password"), "hunter2");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.selectOptions(picker, "bne");
+
+    expect(screen.getByLabelText("Username")).toHaveValue("");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
+  });
+
+  it("empties the fields after a save that succeeded", async () => {
+    const user = userEvent.setup();
+    api.on(/credential$/, { body: { catalogue_sources: [] } }, "PUT");
+    render([source()]);
+    const picker = screen.getByLabelText("Add a login for");
+
+    await user.selectOptions(picker, "bne");
+    await user.type(screen.getByLabelText("Username"), "alice");
+    await user.type(screen.getByLabelText("Password"), "hunter2");
+    await user.click(screen.getByRole("button", { name: "Save login" }));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("Username")).not.toBeInTheDocument(),
+    );
+    await user.selectOptions(picker, "bne");
+
+    expect(screen.getByLabelText("Username")).toHaveValue("");
+    expect(screen.getByLabelText("Password")).toHaveValue("");
   });
 });
 
