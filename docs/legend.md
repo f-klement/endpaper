@@ -7,7 +7,7 @@ It defines nothing endpaper invented: for that, read [data-model.md](data-model.
 
 ## The catalogues
 
-Twelve of the fourteen metadata sources are national or union library catalogues. The other two,
+Fifteen of the seventeen metadata sources are national or union library catalogues. The other two,
 Open Library and Google Books, are ordinary web APIs and need no glossary.
 
 | Term | What it is |
@@ -24,6 +24,9 @@ Open Library and Google Books, are ordinary web APIs and need no glossary.
 | **BNU** | Biblioteca Nacional de Uruguay, Uruguay's national library. The BNA's profile at a different address, login included: the library publishes one and this build ships it. Asked about an ISBN and never about a title, and only about Uruguayan publishing, `978-9974`, which is all it answered when the whole sample was put to it. Plaintext on port 9992. |
 | **BN_PL** | Biblioteka Narodowa, Poland's national library. Reached over Alma's SRU, the BNE's profile at another tenant. Asked about an ISBN and never about a title, and only about Polish publishing, `978-83`: every book it answered outside that group when the whole sample was put to it is held by another catalogue in the chain. |
 | **LIBRIS** | The Swedish union catalogue, run by the National Library of Sweden: one shared database behind Swedish research and public libraries, so it holds foreign editions as well as Swedish publishing. Reached over SRU on its own server. Asked about an ISBN and never about a title, and about every ISBN: it is the only catalogue in the chain holding one of the sample's Italian books. |
+| **KB_DK** | Det Kgl. Bibliotek, the Royal Danish Library. Reached over Alma's SRU, the BNE's profile at another tenant. Asked about an ISBN and never about a title, and only about Danish publishing, `978-87`: every book it answered outside that group when the whole sample was put to it is held by a catalogue still asked about it, BIBSYS for the one nothing older holds. |
+| **BIBSYS** | The Norwegian union catalogue, the shared Alma network zone behind Norway's research and public libraries, which the National Library of Norway's records join. Reached over Alma's SRU. Asked about an ISBN and never about a title, and about every ISBN: with the Royal Danish Library asked only about Danish books, it is the one catalogue in the chain still asked about a Brazilian book of the sample that the two of them alone hold. |
+| **Melinda** | The Finnish union catalogue, run by the National Library of Finland: one shared database behind Finnish research and public libraries, the national bibliography's records among them. Reached over SRU on its own server. Asked about an ISBN and never about a title, and about every ISBN: it is the only catalogue in the chain holding one of the sample's Greek books. |
 
 ## Inside an ISBN
 
@@ -36,7 +39,7 @@ Open Library and Google Books, are ordinary web APIs and need no glossary.
 
 | Term | What it is |
 |---|---|
-| **SRU** | Search/Retrieve via URL. The standard HTTP query protocol for library catalogues: send a query and a `recordSchema`, receive XML. All twelve catalogues above speak it, though the NKP, the BNA and the BNU take their queries in PQF rather than CQL. |
+| **SRU** | Search/Retrieve via URL. The standard HTTP query protocol for library catalogues: send a query and a `recordSchema`, receive XML. All fifteen catalogues above speak it, though the NKP, the BNA and the BNU take their queries in PQF rather than CQL. |
 | **PQF** | Prefix Query Format, YAZ's textual form of a Z39.50 query: `@attr 1=7 "9788025712948"` is "the ISBN index equals this". The NKP, the BNA and the BNU take this and refuse CQL, so their terms are quoted by `z3950.pqf_term`, which is PQF's own escaping rule and deliberately not the CQL sanitiser. |
 | **CQL** | The query language SRU carries. Its index names are catalogue specific, which is why the code holds `num=` (the DNB's identifier index, which matches an identifier anywhere in a record), `WOE=` (the DNB's all words index) and `pica.all=` (K10plus's catch all, named for PICA, the cataloguing system behind those networks). |
 | **MARC**, **MARC21** | MAchine Readable Cataloging, the dominant library record format since the 1960s. A record is numbered **fields**, each holding lettered **subfields**: `245 $a` is the title and `$b` the subtitle. MARC21 is the Anglo-American branch, the harmonisation of the American and Canadian formats, and it is what every catalogue this build reads sends. It is not the only branch: see UNIMARC below. |

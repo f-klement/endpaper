@@ -100,11 +100,11 @@ RECOVERY_CODE_LIMIT = RateLimit(max_attempts=10, window_seconds=3600)
 IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
 # A metadata search asks eight public catalogues at once, and a lookup can reach
-# any of twelve catalogues, the first two at once and the rest in turn until one
-# answers. Four of them are asked only about ISBNs in their own registration
+# any of fifteen catalogues, the first two at once and the rest in turn until one
+# answers. Five of them are asked only about ISBNs in their own registration
 # groups, all `978` groups and no group in two remits. So in the default order a
-# `978` ISBN whose group this build can name reaches nine at most, while a `979`
-# ISBN, or one whose group it cannot name, can reach all twelve. The library
+# `978` ISBN whose group this build can name reaches eleven at most, while a `979`
+# ISBN, or one whose group it cannot name, can reach all fifteen. The library
 # runs or pays for none of them. One member holding the scan page open with a
 # script behind it would spend somebody else's quota and put this deployment's
 # address in front of their rate limiter, which is a way to lose metadata for

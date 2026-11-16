@@ -110,7 +110,7 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # An empty JSON object: no sender has run yet. Not a preference, so it has
     # no field in `SettingsUpdate` and never reaches `_read_settings`.
     SettingKey.SENDER_HEALTH: "{}",
-    # The provider list. An empty object rather than the fourteen sources spelled
+    # The provider list. An empty object rather than the seventeen sources spelled
     # out, because `sources.parse` already answers "absent means the defaults"
     # and writing them twice is two places for the default order to drift.
     SettingKey.CATALOGUE_SOURCES: "{}",
@@ -600,7 +600,7 @@ def catalogue_sources(db: Session, state: credentials.KeyState | None = None) ->
     **One row read and one `json.loads` per request that reaches a catalogue**,
     and that is accepted rather than cached. It is the same cost
     `google_books_api_key` already pays beside it on the same call sites, a
-    populated row holds fourteen sources, and the alternative is a process local
+    populated row holds seventeen sources, and the alternative is a process local
     cache that has to be invalidated on write: a second source of truth for a
     value whose whole point is that turning a source off takes effect
     immediately. If this ever shows up in a measurement, the honest fix is to

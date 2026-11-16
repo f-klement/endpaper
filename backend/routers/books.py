@@ -6268,7 +6268,7 @@ async def enrich_book(
     without that middle step it is matched by its title, which is the weakest
     instrument here. **Which
     catalogues either of those asks is the library's own provider list**, set
-    in Settings: the roster holds twelve lookup sources that answer an ISBN and
+    in Settings: the roster holds fifteen lookup sources that answer an ISBN and
     eight search sources that answer a title, the leading pair is asked together
     and the rest one at a time, and a source switched off is not asked on either
     path. Google Books answers only when its own section is on and a key is in

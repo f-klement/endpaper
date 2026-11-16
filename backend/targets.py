@@ -856,7 +856,7 @@ class Target:
 #: is on `enums.SourceFamily`.
 FAMILY: Final = SourceFamily.CATALOGUE
 
-#: The fourteen catalogues this application ships knowing about.
+#: The seventeen catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
 #: migrations write every one of these rows into `catalogue_targets` and
@@ -964,7 +964,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OPEN_LIBRARY: Target(
             source=CatalogueSource.OPEN_LIBRARY,
-            rank=4,
+            rank=5,
             transport=Transport.BESPOKE,
             base_url="https://openlibrary.org",
             reader=Reader.OPEN_LIBRARY,
@@ -976,7 +976,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.NKP: Target(
             source=CatalogueSource.NKP,
-            rank=6,
+            rank=7,
             transport=Transport.SRU,
             # The database path is load bearing: `aleph.nkp.cz:9991` alone, and
             # `/biblios`, both answer SRU diagnostic 1/235, "database does not
@@ -1008,7 +1008,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNE: Target(
             source=CatalogueSource.BNE,
-            rank=7,
+            rank=8,
             transport=Transport.SRU,
             # **The OPAC hostname, and that is the whole finding.** This library was
             # recorded as having no open interface, measured against
@@ -1079,7 +1079,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LIBRIS: Target(
             source=CatalogueSource.LIBRIS,
-            rank=8,
+            rank=9,
             transport=Transport.SRU,
             # SRU on LIBRIS's own server, so Sweden needs no Z39.50 client. The
             # same records answer Z39.50 on port 210 of this host.
@@ -1104,6 +1104,94 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             # The server caps `maximumRecords` at 10, so five is inside it.
             lookup_records=5,
             # 0 of 119 live records on 2026-11-16 were leader/07 `a`. Refused
+            # for the BNE's reason: an article is never a book.
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.MELINDA: Target(
+            source=CatalogueSource.MELINDA,
+            rank=10,
+            transport=Transport.SRU,
+            # SRU on Melinda's own server, the National Library of Finland's
+            # public API host. Measured 2026-11-16.
+            base_url="https://sru.api.melinda.kansalliskirjasto.fi/bib",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            # **Empty, and measured**: it alone answers one book of the 500,
+            # `9789605032708`, which is Greek, so a `978-951` and `978-952`
+            # remit would stop it being asked about the one book only it holds.
+            serves_groups=frozenset(),
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="bath.isbn",
+            lookup_records=5,
+            # 0 of 115 live records on 2026-11-16 were leader/07 `a`. Refused
+            # for the BNE's reason: an article is never a book.
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.BIBSYS: Target(
+            source=CatalogueSource.BIBSYS,
+            rank=11,
+            transport=Transport.SRU,
+            # Alma's SRU path on the network zone's own host, where the
+            # Norwegian libraries' shared records live. The National Library of
+            # Norway's institution view, `47BIBSYS_NB`, finds the same books more
+            # slowly. Measured 2026-11-16.
+            base_url="https://bibsys.alma.exlibrisgroup.com/view/sru/47BIBSYS_NETWORK",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            # **Empty**: a union catalogue holds foreign editions, 48 of the
+            # 500 in seven frames. `sources.SERVES_GROUPS` carries the bar.
+            serves_groups=frozenset(),
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="alma.isbn",
+            lookup_records=5,
+            # 1 of 182 live records on 2026-11-16 was leader/07 `a`, and none of
+            # the books found was one. Refused for the BNE's reason.
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.KB_DK: Target(
+            source=CatalogueSource.KB_DK,
+            rank=4,
+            transport=Transport.SRU,
+            # Alma's SRU path at the `eu01` data centre, the Royal Danish
+            # Library's own institution zone. Measured 2026-11-16.
+            base_url="https://eu01.alma.exlibrisgroup.com/view/sru/45KBDK_KGL",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            # **Danish publishing, and the bar is met on the committed sample.**
+            # Of the 35 of the 500 it answers, every one outside `978-87` is held
+            # by a source the remit leaves asked: the one book no older source
+            # holds, `9786557145029`, Brazilian, BIBSYS holds, which is why
+            # BIBSYS carries no remit. `metadata`'s block for this row carries
+            # the pass.
+            serves_groups=frozenset({"978-87"}),
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="alma.isbn",
+            lookup_records=5,
+            # 0 of 134 live records on 2026-11-16 were leader/07 `a`. Refused
             # for the BNE's reason: an article is never a book.
             refuses_component_parts=True,
         ),
@@ -1141,7 +1229,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OENB: Target(
             source=CatalogueSource.OENB,
-            rank=5,
+            rank=6,
             transport=Transport.SRU,
             base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
             reader=Reader.MARC_GND,
@@ -1168,7 +1256,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNA: Target(
             source=CatalogueSource.BNA,
-            rank=9,
+            rank=12,
             transport=Transport.SRU,
             # **Plaintext by necessity and an IP address by necessity**, which are
             # two separate compromises: port 9991 speaks no TLS, and the library
@@ -1221,7 +1309,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNU: Target(
             source=CatalogueSource.BNU,
-            rank=10,
+            rank=13,
             transport=Transport.SRU,
             # **The BNA's two compromises again**: port 9992 speaks no TLS and the
             # library publishes a bare address. That row's comment carries what
@@ -1265,7 +1353,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.GOOGLE_BOOKS: Target(
             source=CatalogueSource.GOOGLE_BOOKS,
-            rank=11,
+            rank=14,
             transport=Transport.BESPOKE,
             base_url="https://www.googleapis.com/books/v1/volumes",
             reader=Reader.GOOGLE_BOOKS,
@@ -1282,7 +1370,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNF: Target(
             source=CatalogueSource.BNF,
-            rank=12,
+            rank=15,
             transport=Transport.SRU,
             base_url="https://catalogue.bnf.fr/api/SRU",
             reader=Reader.DUBLIN_CORE,
@@ -1302,7 +1390,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LOC: Target(
             source=CatalogueSource.LOC,
-            rank=13,
+            rank=16,
             transport=Transport.SRU,
             base_url="http://lx2.loc.gov:210/lcdb",
             reader=Reader.MODS,

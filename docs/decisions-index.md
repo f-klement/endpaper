@@ -1029,4 +1029,7 @@ repeat the argument.
 |  | [The Library of Congress name authority file is the second file a name search asks (2026-11-16)](decisions.md#the-library-of-congress-name-authority-file-is-the-second-file-a-name-search-asks-2026-11-16) | 873 |
 |  | [ORCID is the last file a name search asks, and never compared with ISNI (2026-11-16)](decisions.md#orcid-is-the-last-file-a-name-search-asks-and-never-compared-with-isni-2026-11-16) | 1,234 |
 |  | [Poland's National Library and LIBRIS join the roster, placed by the marginal rule (2026-11-16)](decisions.md#polands-national-library-and-libris-join-the-roster-placed-by-the-marginal-rule-2026-11-16) | 1,346 |
+|  | [The Royal Danish Library, BIBSYS and Melinda join the roster, and where the remit placement put them (2026-11-16)](decisions.md#the-royal-danish-library-bibsys-and-melinda-join-the-roster-and-where-the-remit-placement-put-them-2026-11-16) | 1,436 |
+|  | [Refused: the National Library of Norway's view (47BIBSYS_NB)](decisions.md#refused-the-national-library-of-norways-view-47bibsys_nb) | 83 |
+|  | [Refused: Iceland's Leitir (354ILC_NETWORK)](decisions.md#refused-icelands-leitir-354ilc_network) | 64 |
 <!-- index: end -->

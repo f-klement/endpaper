@@ -355,8 +355,38 @@ class TestTheQueryIsBuiltHereAndNowhereElse:
             "bne": f"alma.isbn={isbn}",
             "bn_pl": f"alma.isbn={isbn}",
             "libris": f"bath.isbn={isbn}",
+            "kb_dk": f"alma.isbn={isbn}",
+            "bibsys": f"alma.isbn={isbn}",
+            "melinda": f"bath.isbn={isbn}",
             "bna": f'@attr 1=7 "{isbn}"',
             "bnu": f'@attr 1=7 "{isbn}"',
+        }
+
+    def test_the_seeded_record_schemas_are_what_each_catalogue_answers(self):
+        """Melinda answers a schema it does not know with `numberOfRecords 1`, no
+        record and no diagnostic, so a wrong value there turns every lookup into a
+        quiet miss. `test_schema` compares the migration with these rows, so a value
+        wrong in both is caught here. An empty one sends none."""
+        assert {
+            source.value: targets.SEEDED[source].sru_params("x", 1).get("recordSchema", "")
+            for source in targets.SEEDED
+            if targets.SEEDED[source].transport is targets.Transport.SRU
+        } == {
+            "dnb": "MARC21-xml",
+            "k10plus": "marcxml",
+            "oenb": "marcxml",
+            "nlg": "marcxml",
+            "nkp": "",
+            "bne": "marcxml",
+            "bn_pl": "marcxml",
+            "libris": "marcxml",
+            "kb_dk": "marcxml",
+            "bibsys": "marcxml",
+            "melinda": "marcxml",
+            "bna": "",
+            "bnu": "",
+            "bnf": "dublincore",
+            "loc": "mods",
         }
 
     def test_the_seeded_search_queries_are_what_the_adapters_built(self):

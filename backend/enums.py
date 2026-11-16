@@ -1006,13 +1006,13 @@ class CatalogueSource(StrEnum):
 
     **Not every source answers every question**, and the split is real rather
     than incidental. BNF and LOC are title search only, because neither was
-    worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL and LIBRIS are the other
-    way round, **lookup only**, and for two different reasons. The NKP's, the
-    BNA's and the BNU's is the server's: each renders one populated record per
-    response whatever page size is asked for, so a search for ten candidates
-    would be ten requests. The BNE's, the BN_PL's and LIBRIS's is ours: nobody
-    has measured what a search at any of them would find, so each holds the
-    conservative default. See `sources.LOOKUP_SOURCES` and
+    worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL, LIBRIS, KB_DK, BIBSYS and
+    MELINDA are the other way round, **lookup only**, and for two different reasons. The NKP's,
+    the BNA's and the BNU's is the server's: each renders one populated record
+    per response whatever page size is asked for, so a search for ten
+    candidates would be ten requests. The rest is ours: nobody has measured
+    what a search at any of them would find, so each holds the conservative
+    default. See `sources.LOOKUP_SOURCES` and
     `SEARCH_SOURCES`, which is why those are two sets and not one.
 
     **Two members need a credential and are free**: the BNA and the BNU. What
@@ -1047,6 +1047,18 @@ class CatalogueSource(StrEnum):
     #: SRU and MARC21 on its own server rather than on Alma, and a union
     #: catalogue like K10plus rather than a legal deposit one.
     LIBRIS = "libris"
+    #: Det Kgl. Bibliotek, the Royal Danish Library. Alma SRU and MARC21, the
+    #: BNE's profile at a third Alma tenant. `KB_DK` rather than `KB`, which is
+    #: also the National Library of Sweden's and the Dutch one's own name.
+    KB_DK = "kb_dk"
+    #: The BIBSYS network, the Norwegian union catalogue of research and public
+    #: libraries, which the National Library of Norway's records join. Alma's
+    #: network zone over SRU and MARC21, so the BNE's profile once more.
+    BIBSYS = "bibsys"
+    #: Melinda, the Finnish union catalogue the National Library of Finland
+    #: runs. SRU and MARC21 on its own server rather than on Alma, LIBRIS's
+    #: shape.
+    MELINDA = "melinda"
 
 
 # A member per `CatalogueSource` is checked below the class rather than
@@ -1080,6 +1092,9 @@ class RecordOrigin(StrEnum):
     BNU = "bnu"
     BN_PL = "bn_pl"
     LIBRIS = "libris"
+    KB_DK = "kb_dk"
+    BIBSYS = "bibsys"
+    MELINDA = "melinda"
     #: Typed by a member, or sent by a client that named no other origin.
     MANUAL = "manual"
     #: Read off the book's own file, or its name, on the scan page.

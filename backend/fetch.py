@@ -1,6 +1,6 @@
 """One door for the catalogue requests this app makes, and every bound on them.
 
-`metadata.py` and `google_books.py` ask fourteen third party catalogues for records.
+`metadata.py` and `google_books.py` ask seventeen third party catalogues for records.
 Every one of those requests used to be built by hand: nine `httpx.AsyncClient(...)`
 constructions in `metadata.py` and one in `google_books.py`, each repeating the
 timeout, each following redirects anywhere, and none of them bounding the bytes
@@ -11,7 +11,7 @@ is there not one outbound policy for the whole app".** `covers.py` answers a
 different question: `cover_url` arrives on `BookCreate` from any signed in
 member, so the host is chosen by an attacker and has to be tested against an
 allowlist (`covers.is_fetchable`) on every hop. Folding them together would mean
-adding fourteen catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the
+adding seventeen catalogue hosts to `COVER_HOSTS`, and `COVER_HOSTS` is what the
 CSP's `img-src` is generated from: the merge would widen the browser policy to
 pay for a fetch policy. What the two do share is the *shape* of the read loop,
 and both now have it: refuse a hop the door's own rule does not admit, count raw
@@ -112,12 +112,15 @@ MAX_REDIRECTS: Final = 2
 #: **Which makes the ceiling sixteen concurrent sources, and it is worth having
 #: written down before somebody proposes the seventeenth.** 536,870,912 divided
 #: by (2,097,152 x 15.28) is 16.75, so eight spends 47.8% of the pod and the
-#: seventeenth source exceeds it outright. **The roster is twelve of that
-#: ceiling**, and #91 proposes national catalogues for more countries still, so
-#: the next source but four is the one that does not fit. The provider list
-#: (`sources.py`) lets a library switch sources **off**, never on beyond the
-#: roster, so nothing a household does moves this: the bound is the roster's
-#: size, which is why `tests/test_fetch.py::_concurrent_search_sources` counts
+#: seventeenth source exceeds it outright. **What counts against it is the
+#: sources a search asks at once, and not the roster**: a lookup asks the
+#: leading pair together and the rest one at a time, and every catalogue added
+#: since the eighth search source answers lookups only, so the roster has grown
+#: past that ceiling without moving this. The ninth search source is the one to
+#: re-derive it for. The provider list (`sources.py`) lets a library switch
+#: sources **off**, never on beyond the roster, so nothing a household does
+#: moves this: the bound is the size of the search roster, which is why
+#: `tests/test_fetch.py::_concurrent_search_sources` counts
 #: `sources.SEARCH_SOURCES` rather than whatever is enabled.
 #: Eight *honest* worst cases is about 5.07 MiB on the wire and about 81 MB
 #: parsed. The eighth is the NLG, and the figure is its **largest** measured
@@ -151,14 +154,16 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #: 215.8 MB traced peak. `aiter_raw()` on the identical response counted 65,250.
 #:
 #: So the bytes are counted raw, and compression is not requested, which keeps
-#: "the wire bytes" and "the memory" the same number. Measured live, all fourteen
+#: "the wire bytes" and "the memory" the same number. Measured live, all seventeen
 #: sources answer under `identity`: DNB, the BnF, Google Books, the ÖNB, the
-#: BNE, the BN_PL and LIBRIS gzip when offered and honour this. K10plus, Open
-#: Library, the Library of Congress, the NLG, the NKP, the BNA and the BNU never
-#: compressed anyway, the BNA measured 2026-09-07 over 53 requests and the BNU
-#: 2026-11-07, 900 bytes under both `gzip` and `identity` with no
-#: `content-encoding` on either. The BN_PL and LIBRIS answered 11,573 and 14,660
-#: bytes under `identity` against 1,917 and 2,651 under `gzip` on 2026-11-16.
+#: BNE, the BN_PL, LIBRIS, the Royal Danish Library and BIBSYS gzip when
+#: offered and honour this. K10plus, Open Library, the Library of Congress, the
+#: NLG, the NKP, the BNA, the BNU and Melinda never compressed anyway, the BNA
+#: measured 2026-09-07 over 53 requests, the BNU 2026-11-07, 900 bytes under both
+#: `gzip` and `identity` with no `content-encoding` on either, and Melinda
+#: 2026-11-16, 10,226 bytes under both. The BN_PL, LIBRIS, the Royal Danish Library and
+#: BIBSYS answered 11,573, 14,660, 7,134 and 8,662 bytes under `identity`
+#: against 1,917, 2,651, 1,334 and 1,457 under `gzip` on 2026-11-16.
 #: The one that would cost most, K10plus at 687,481 bytes, is uncompressed today
 #: either way.
 #:
@@ -172,13 +177,14 @@ MAX_RESPONSE_BYTES: Final = 2_097_152
 #: nothing to begin with. The NKP is the ninth and behaves the same way, 7,362
 #: bytes under both with no `content-encoding`, 2026-08-31.
 #:
-#: **Six sources do not enter the arithmetic below**, and that is the one place
-#: this file's counts and the roster's diverge. The bound is on what
-#: `metadata.search` asks **concurrently**, which is `sources.SEARCH_SOURCES`,
-#: and none of the NKP, the BNE, the BNA, the BNU, the BN_PL and LIBRIS answers
-#: a title search: the NKP's, the BNA's and the BNU's servers render one
-#: populated record per response whatever page size is asked for, and the
-#: search gain of the other three was never measured. So the fan out is still
+#: **The lookup only sources do not enter the arithmetic below**, and that is
+#: the one place this file's counts and the roster's diverge. The bound is on
+#: what `metadata.search` asks **concurrently**, which is
+#: `sources.SEARCH_SOURCES`, and none of the NKP, the BNE, the BNA, the BNU, the
+#: BN_PL, LIBRIS and the three Nordic catalogues answers a title search: the NKP's,
+#: the BNA's and the BNU's servers render one populated record per response
+#: whatever page size is asked for, and the search gain of the others was never
+#: measured. So the fan out is still
 #: eight and every figure below is unchanged.
 _IDENTITY: Final = {"accept-encoding": "identity"}
 
@@ -924,7 +930,7 @@ def pinned_client(policy: AddressPolicy, *, resolver: Resolver = system_resolver
     the behaviour, which is a guard on an implementation detail of httpx.
 
     **This says nothing about the app's other outbound doors.**
-    `catalogue_client` trusts the environment, so the fourteen seeded catalogues
+    `catalogue_client` trusts the environment, so the seventeen seeded catalogues
     still honour a proxy variable, which is the right answer for a host that is
     a module constant.
     """

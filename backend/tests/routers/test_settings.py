@@ -1355,7 +1355,7 @@ class TestTheProviderList:
         """A client one release ahead is not a bad request."""
         response = client.put(
             "/api/settings",
-            json={"catalogue_sources": [{"source": "bibsys", "enabled": True}]},
+            json={"catalogue_sources": [{"source": "leitir", "enabled": True}]},
             headers=admin["headers"],
         )
         assert response.status_code == 422

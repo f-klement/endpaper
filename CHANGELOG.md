@@ -18,6 +18,12 @@
 - Book lookups ask the National Library of Greece before Open Library about Greek ISBNs, and the
   Austrian National Library before the Czech and Spanish ones about German language ISBNs, so
   those books are found with fewer requests.
+- Book lookups ask the Royal Danish Library about Danish ISBNs before Open Library, and find
+  Danish books the other free catalogues miss.
+- Book lookups also ask BIBSYS, the Norwegian union catalogue, which holds Norwegian books the
+  other free catalogues miss.
+- Book lookups also ask Melinda, the Finnish union catalogue, which holds Finnish books the
+  other free catalogues miss.
 
 ## v0.21.3
 

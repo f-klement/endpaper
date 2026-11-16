@@ -59,9 +59,9 @@ deliberately not exposed.
 **Which catalogues, and in what order by default.** For a scanned or typed ISBN, the German
 National Library and K10plus are asked together and their records merged. When neither
 answers, the rest are asked in turn until one does: the National Library of Greece, the
-Polish National Library, Open Library, the Austrian National Library, the Czech National
-Library, the Spanish National Library, LIBRIS (the Swedish union catalogue), the Argentine
-National Library, the Uruguayan National Library and Google Books. The Greek, Polish, Austrian and Uruguayan libraries are
+Polish National Library, the Royal Danish Library, Open Library, the Austrian National Library, the Czech National
+Library, the Spanish National Library, LIBRIS (the Swedish union catalogue), Melinda
+(the Finnish union catalogue), BIBSYS (the Norwegian union catalogue), the Argentine National Library, the Uruguayan National Library and Google Books. The Greek, Polish, Danish, Austrian and Uruguayan libraries are
 asked only about ISBNs in the registration
 groups they collect, so a German book does not wait on Athens, and Settings names the groups
 beside each. A title search asks the German National Library, K10plus, Open Library, the

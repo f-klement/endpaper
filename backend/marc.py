@@ -287,11 +287,14 @@ _HEADING_KIND_FIELD: Final[dict[tuple[ClassificationScheme, HeadingKind | None],
 #: writes no `040`, since a subfield naming an agency nobody can cite is a claim
 #: nobody made:
 #:
-#: - Open Library, Google Books, K10plus and LIBRIS each have a code, and none of
-#:   them is the agency that created the record they serve: the first two
-#:   aggregate other catalogues' and publishers' records, and K10plus and LIBRIS
-#:   are union catalogues whose records were made by their member libraries. Naming them in `$a` would be
-#:   false, and the catalogue that did create it is not in the answer.
+#: - Open Library, Google Books, K10plus, LIBRIS, BIBSYS and Melinda each have a
+#:   code, and none of them is the agency that created the record they serve:
+#:   the first two aggregate other catalogues' and publishers' records, and the
+#:   other four are union catalogues whose records were made by their member
+#:   libraries. Naming them in `$a` would be false, and the catalogue that did
+#:   create it is not in the answer.
+#: - The Royal Danish Library serves records it did not make either: they carry
+#:   no `040` and name the Danish national bibliography's record in `035`.
 #: - Every origin that is not a catalogue was created by this library or by
 #:   whoever wrote the file, and this install has no organization code of its own.
 #:

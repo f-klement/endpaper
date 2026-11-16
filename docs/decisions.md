@@ -9404,7 +9404,7 @@ this catalogue. So the refusal was scoped to German and English without saying s
 silently, for every catalogue that is neither.
 
 **Fixed for this source only, deliberately.** Widening the shared pattern is the tempting
-move and it changes what eleven other sources refuse on the strength of a phrase measured
+move and it changes what fourteen other sources refuse on the strength of a phrase measured
 in one catalogue. `_NKP_ONLINE` states this source's own and a test pins that the shared
 rule is untouched. **Whether the rule should be per source everywhere was a real question
 and a larger one than this ticket.** It is answered below, in "The record's own carrier
@@ -25899,3 +25899,143 @@ none: a union catalogue, the K10plus rule.
 - LIBRIS's `MEASURED` p90 of 0.367s sits inside `FIRST_TIER_BUDGET_SECONDS` while its p90 on
   Swedish books is 2.134s; harmless while the slot rule refuses a third tier slot, and the
   row's comment says so, so no action.
+
+## The Royal Danish Library, BIBSYS and Melinda join the roster, and where the remit placement put them (2026-11-16)
+
+Three SRU 1.2 catalogues answering MARC21 in `marcxml`, each a target row and no new reader
+(`Reader.MARC_GND`, `_dnb_record`), each lookup only for the BNE's reason:
+
+| row | endpoint | index |
+|---|---|---|
+| `KB_DK`, Det Kgl. Bibliotek | `eu01.alma.exlibrisgroup.com/view/sru/45KBDK_KGL` | `alma.isbn` |
+| `BIBSYS`, the Norwegian union catalogue | `bibsys.alma.exlibrisgroup.com/view/sru/47BIBSYS_NETWORK` | `alma.isbn` |
+| `MELINDA`, the Finnish union catalogue | `sru.api.melinda.kansalliskirjasto.fi/bib` | `bath.isbn` |
+
+**Measured 2026-11-16, production path (`metadata._sru_lookup`), one serial pass per host over
+the 500 of the committed sample, the Polish frame and the three Nordic frames (700 ISBNs, 0.4 s
+between requests, the three hosts in parallel); committed as `kb_dk`, `bibsys`, `melinda`
+columns in the sample and the Polish frame.**
+
+| | of 500 | frames | largest frame | concentration | p90 | held by no older source | sample marginal (of 278) |
+|---|---|---|---|---|---|---|---|
+| KB_DK | 35 | 8 | 12 German | 34% | 0.640 s | 1, `9786557145029` (Brazilian), BIBSYS holds it too | 1 |
+| BIBSYS | 48 | 7 | 17 German | 35% | 0.362 s | 0 (its one is the same Brazilian book) | 2 |
+| MELINDA | 32 | 6 | 10 German, 10 Austrian | 31% | 0.251 s | 1, `9789605032708` (Greek), nothing else holds it | 3 |
+
+On its own country's fifty (the measure seat's frames, Wikidata by publisher country, seed
+20261116, re-put through the production reader):
+
+| | found of 50 | the nine older keyless sources | NEW over them | median, p90, max |
+|---|---|---|---|---|
+| KB_DK, Denmark | 38 | 14 | 27 | 0.353, 0.889, 1.355 s |
+| BIBSYS, Norway | 48 | 33 | 16 | 0.310, 0.587, 0.693 s |
+| MELINDA, Finland | 50 | 41 | 9 | 0.284, 0.344, 0.748 s |
+
+The production reader agreed with the measure seat's stand-in on every own frame ISBN but one:
+KB's `9788775332373`, a three volume set whose records name that ISBN only qualified (`$q (ib.)`)
+beside an unqualified other; `marc_fields.Fields._isbn_entries` reads that as a cross reference,
+by design. Every other response with records that the reader refused (KB 28, BIBSYS 32) named no
+asked ISBN in its own `020`; Melinda refused none.
+
+**Remits, by the zero book bar (the rule as `sources.SERVES_GROUPS` states it).**
+- Melinda: none. It alone holds a Greek book of the 500, so `978-951` and `978-952` would lose it.
+- KB_DK and BIBSYS: the one book either holds that no older source does is the same Brazilian book,
+  held by those two and nothing else. Either may carry a remit and not both, and the rule does
+  not say which. **The owner ruled on 2026-11-16: KB_DK takes `978-87` and BIBSYS takes none.**
+  The figures put to that ruling, over the books the leading pair misses:
+
+  | | books | KB_DK | BIBSYS | LIBRIS | Melinda | Open Library |
+  |---|---|---|---|---|---|---|
+  | Danish, `978-87` | 37 | 29 | 4 | 2 | 0 | 1 |
+  | Norwegian, `978-82` | 34 | not counted | 34 | 16 | 8 | 2 |
+
+  The Norwegian row is counted over the measure seat's fifty Norwegian ISBNs, a frame the branch
+  does not commit (see below).
+
+  What each lookup pays as ruled. A Danish one asks KB_DK before Open Library, which spares
+  Open Library's request (sample mean 1.63 s against about 0.2 s for each other) for the 29 KB
+  answers. A Norwegian one asks Open Library, NKP, BNE, LIBRIS and Melinda before BIBSYS: all
+  34 pay Open Library, LIBRIS answers 16 at the fourth request, and 14 reach BIBSYS at the
+  sixth. A `978-82` remit on BIBSYS instead would answer all 34 ahead of Open Library, and the
+  29 Danish books would reach KB only at the tail's end. The figures lean neither way
+  decisively. The branch followed the BN_PL's precedent of a national library's remit, and the
+  owner kept it. A Finnish lookup walks
+  Open Library, NKP, BNE and LIBRIS before Melinda, which answers first for 9 of the 15 the
+  pair misses. At the KB commit alone, before BIBSYS existed, KB held the Brazilian book alone
+  and carried no remit; the placement commit gives it the remit once BIBSYS covers the book.
+- The bound was blind to exactly this: checked one remit at a time, a `978-82` remit on BIBSYS
+  beside KB's `978-87` passed for each while losing the book between them. The bound now counts
+  another source as holding a book only if that source is still asked about it
+  (`_lost_outside_the_remits`), and `test_two_remits_cannot_lose_a_book_between_them` plants the
+  pair and asserts the loss is named for both.
+
+**Placement.** A remitted row is ranked on its own ISBNs, so the measure seat's fifty Danish ISBNs
+are committed as `backend/tests/fixtures/catalogue_frame_denmark_2026_11_16.json` (the nine older
+columns from the measure seat's stand-in pass, the three new from the production pass, as the
+Polish frame was built). `TAIL_MARGINAL` over the 500 plus the Polish and Danish frames
+(278 + 39 + 39 books the leading pair misses):
+
+| NLG | BN_PL | KB_DK | Open Library | OeNB | NKP | BNE | LIBRIS | Melinda | BIBSYS |
+|---|---|---|---|---|---|---|---|---|---|
+| 34 | 30 | 29 | 87 | 1 | 42 | 40 | 9 | 6 | 6 |
+
+`TAIL_INSIDE_REMIT` for KB_DK, 37 Danish books the pair misses inside `978-87`: KB 29, Open Library
+1, NKP 0, BNE 0, LIBRIS 2, Melinda 0, BIBSYS 4. So KB goes ahead of Open Library, and among the
+remitted rows meeting there it follows the NLG (34) and the BN_PL (30) by `TAIL_MARGINAL`.
+
+Default order now: DNB and K10plus together; then NLG, BN_PL, **KB_DK**, Open Library, OeNB, NKP,
+BNE, LIBRIS, **Melinda**, **BIBSYS**; then BNA, BNU, Google Books; BnF and LoC search only.
+
+- **Melinda and BIBSYS tie at 6.** The rule was silent on a tie between two unremitted rows it
+  compares on `TAIL_MARGINAL`. **The owner ruled on 2026-11-16 that the faster goes first**, by
+  p90 (here 0.251 s against 0.362 s). Before it, the helper that builds the order sorted stably
+  by `TAIL_MARGINAL`'s own literal order, which is the order under test, so a tie resolved
+  circularly. The helper now breaks ties by p90 and
+  `test_two_rows_on_equal_counts_go_faster_first` pins it. It changes nothing today: over the
+  500 alone Melinda answers 3 and BIBSYS 2, and the tie exists only because unremitted rows are
+  also counted on the Polish and Danish remit frames.
+- **No Norwegian or Finnish frame is committed**, following breadth3's handling of the Swedish
+  frame: neither row has a remit, and a frame for an unremitted row counts that catalogue's own
+  books over every other row's. Measured, committing them would read BIBSYS 43, LIBRIS 32,
+  Melinda 30, Open Library 91, and the order would put BIBSYS ahead of the NKP (42) by one book,
+  asking a Norwegian union catalogue before the Czech library on every walk past Open Library.
+- **Tier**: unchanged at two. All three are general by concentration and inside the budget; as a
+  third slot each earns KB 1, BIBSYS 2, Melinda 3 against `SLOT_MUST_EARN` 10, and LIBRIS's 6
+  stays the best third slot. `TIER_UNION` is {1: 210, 2: 222, 3: 228, 4: 231, 5: 232, 6: 233,
+  7: 234, 8: 234}.
+
+**Coverage over the 500.** The sources needing no credential answer 398 (395 + LIBRIS's
+Italian + the Brazilian KB and BIBSYS share + Melinda's Greek); a stock install 410 (miss 90;
+outside German language publishing 86 of 400). The remit model: 1.832 s and 1,757 tail requests
+unfiltered, 1.371 s and 891 with remits (demoted 1.5812 s); per frame saving 0.052 s to 0.817 s.
+
+**Probes (2026-11-16).** KB and BIBSYS (Alma): unknown index and unknown context set answer
+diagnostic `200801`, unknown `recordSchema` refused the same way, honest miss 420 bytes with no
+diagnostic, ISBN-10 form matched, `maximumRecords=50` honoured, `identity` honoured (KB 7,134
+against 1,334 gzip; BIBSYS 8,662 against 1,457). KB's `alma.isbn=9780000000019` returns a
+placeholder record whose `020 $a` is `0000000019`, the BN_PL's cost again. Melinda: unknown index
+answers `info:srw/diagnostic/1/16`; **an unknown `recordSchema` is a quiet miss** (`numberOfRecords
+1`, no record, no diagnostic); honest miss 188 bytes; ISBN-10 matched; never compresses (10,226
+bytes both ways). Component parts: KB 0 of 134, BIBSYS 1 of 182 (not a find), Melinda 0 of 115
+leader/07 `a`; `refuses_component_parts` set on all three for the BNE's reason.
+
+**MARC 040.** None of the three writes one: KB's records carry no `040` and name the Danish
+national bibliography (`035 (DK-870970)`); BIBSYS (`040 $a NO-OsNB`) and Melinda (`040 $a FI-NL`)
+are union catalogues whose records were made by member libraries, the K10plus rule. No row for the
+040 code table.
+
+## Refused: the National Library of Norway's view (47BIBSYS_NB)
+
+The measure seat put it to the same fifty Norwegian ISBNs: 47 found, NEW 16 over the nine, **the
+same 16** BIBSYS finds (BIBSYS holds one more, `9788245043501`, which LIBRIS also finds). Slower on
+every statistic: median 0.502 s against 0.264 s, p90 0.840 s against 0.354 s, max 22.998 s, with
+three requests over 13 s (13.3, 16.4, 23.0 s) against BIBSYS's one at 6.7 s. A second door to the
+same records adds no book, so one row, the network zone.
+
+## Refused: Iceland's Leitir (354ILC_NETWORK)
+
+Not measurable on the method. Wikidata's pool for publisher country Iceland holds **3** valid
+ISBN-13s (978-9935 twice, 978-9979 once), where the rule needs 50. On all three: Leitir finds 2,
+K10plus 1, nothing else; NEW 1 (`9789935437877`); median 0.200 s. A 3 ISBN frame supports no
+verdict either way; a frame of Icelandic books from another source is needed before it can be
+ranked.
