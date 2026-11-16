@@ -2697,12 +2697,14 @@ async def author_authority(
 ) -> list[AuthorityCandidateOut]:
     """What the authority files say about this author.
 
-    **Two routes, and which one ran is on every row as `certain`.** Where a
-    catalogue record for one of this author's Books already asserted a GND
+    **Two routes, and which one ran is on every row as `certain`.** Where this
+    Library already holds a GND number for the author, from a catalogue record
+    or a confirmation, or failing that a confirmed Library of Congress (LCNAF)
     number, that number is a key: it resolves to exactly one record, and the
-    spelling on it is the suggestion this feature exists to offer. Where it did
-    not, the author's name is put to a name search, and a name is not a key.
-    Two people are spelled `Stevenson, Robert Louis` in the GND.
+    spelling on it is the suggestion this feature exists to offer. Where it
+    holds neither, the author's name is put to a name search of both files, the
+    GND's people first, and a name is not a key. Two people are spelled
+    `Stevenson, Robert Louis` in the GND.
 
     **`q` steers that search and forces it.** Without it the query is the
     author's own display name, which is exactly wrong when the shelf spells
@@ -2725,9 +2727,9 @@ async def author_authority(
     the identity half of that line rather than an exception to it.
 
     An author nobody can see is **404, not 403**, exactly as a private book is.
-    503 where the authority file could not be reached: nothing in this feature
-    is blocked by it, so the client can offer "try again" rather than an error
-    page.
+    503 where an authority file could not be reached and the other found
+    nobody: nothing in this feature is blocked by it, so the client can offer
+    "try again" rather than an error page.
     """
     # Its own limiter, not the catalogues'. lobid publishes 30 complex searches
     # a minute for its whole service and `METADATA_LIMIT` is 60 per member: see
@@ -2751,19 +2753,12 @@ async def author_authority(
             # saying the shelf spelling is not the one to look up.
             found = await authority.search(q, deadline=deadline)
         elif stored:
-            # One row per scheme per spelling. `resolve` answers None for a
-            # number the file does not hold, which a hand edited row or a
-            # retired GND record can produce.
-            found = [
-                candidate
-                for candidate in await asyncio.gather(
-                    *(
-                        authority.resolve(row.identifier, deadline=deadline)
-                        for row in stored[: authority.MAX_CANDIDATES]
-                    )
-                )
-                if candidate is not None
-            ]
+            # Which stored numbers are asked, and of which file, is
+            # `resolve_stored`'s: a number the file no longer holds answers
+            # nothing, which a hand edited row or a retired record can produce.
+            found = await authority.resolve_stored(
+                [(row.scheme, row.identifier) for row in stored], deadline=deadline
+            )
         else:
             found = await authority.search(authorship.display_name(author), deadline=deadline)
     except authority.AuthorityUnavailable:
@@ -2846,7 +2841,8 @@ async def confirm_author_identifier(
     is up to eight outbound calls, which is why it is a deliberate action rather
     than something a lookup does on the way past.
 
-    **Only for `gnd`**, the one scheme this app can resolve.
+    **The cross references only for `gnd`.** An LCNAF record is stored as
+    confirmed and nothing else is read from it.
 
     **A cross reference colliding with a stored value is reported, not raised.**
     The confirmation is already committed, so failing here would report a write

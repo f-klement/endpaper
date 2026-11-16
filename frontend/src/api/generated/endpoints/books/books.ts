@@ -1113,12 +1113,14 @@ export const getAuthorAuthorityUrl = (params: AuthorAuthorityParams) => {
 /**
  * What the authority files say about this author.
  *
- * **Two routes, and which one ran is on every row as `certain`.** Where a
- * catalogue record for one of this author's Books already asserted a GND
+ * **Two routes, and which one ran is on every row as `certain`.** Where this
+ * Library already holds a GND number for the author, from a catalogue record
+ * or a confirmation, or failing that a confirmed Library of Congress (LCNAF)
  * number, that number is a key: it resolves to exactly one record, and the
- * spelling on it is the suggestion this feature exists to offer. Where it did
- * not, the author's name is put to a name search, and a name is not a key.
- * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ * spelling on it is the suggestion this feature exists to offer. Where it
+ * holds neither, the author's name is put to a name search of both files, the
+ * GND's people first, and a name is not a key. Two people are spelled
+ * `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1141,9 +1143,9 @@ export const getAuthorAuthorityUrl = (params: AuthorAuthorityParams) => {
  * the identity half of that line rather than an exception to it.
  *
  * An author nobody can see is **404, not 403**, exactly as a private book is.
- * 503 where the authority file could not be reached: nothing in this feature
- * is blocked by it, so the client can offer "try again" rather than an error
- * page.
+ * 503 where an authority file could not be reached and the other found
+ * nobody: nothing in this feature is blocked by it, so the client can offer
+ * "try again" rather than an error page.
  * @summary Author Authority
  */
 export const authorAuthority = async (
@@ -1199,12 +1201,14 @@ export type AuthorAuthorityQueryError = Refusal | HTTPValidationError;
 /**
  * What the authority files say about this author.
  *
- * **Two routes, and which one ran is on every row as `certain`.** Where a
- * catalogue record for one of this author's Books already asserted a GND
+ * **Two routes, and which one ran is on every row as `certain`.** Where this
+ * Library already holds a GND number for the author, from a catalogue record
+ * or a confirmation, or failing that a confirmed Library of Congress (LCNAF)
  * number, that number is a key: it resolves to exactly one record, and the
- * spelling on it is the suggestion this feature exists to offer. Where it did
- * not, the author's name is put to a name search, and a name is not a key.
- * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ * spelling on it is the suggestion this feature exists to offer. Where it
+ * holds neither, the author's name is put to a name search of both files, the
+ * GND's people first, and a name is not a key. Two people are spelled
+ * `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1227,9 +1231,9 @@ export type AuthorAuthorityQueryError = Refusal | HTTPValidationError;
  * the identity half of that line rather than an exception to it.
  *
  * An author nobody can see is **404, not 403**, exactly as a private book is.
- * 503 where the authority file could not be reached: nothing in this feature
- * is blocked by it, so the client can offer "try again" rather than an error
- * page.
+ * 503 where an authority file could not be reached and the other found
+ * nobody: nothing in this feature is blocked by it, so the client can offer
+ * "try again" rather than an error page.
  * @summary Author Authority
  */
 export function useAuthorAuthority<
@@ -1262,12 +1266,14 @@ export function useAuthorAuthority<
 /**
  * What the authority files say about this author.
  *
- * **Two routes, and which one ran is on every row as `certain`.** Where a
- * catalogue record for one of this author's Books already asserted a GND
+ * **Two routes, and which one ran is on every row as `certain`.** Where this
+ * Library already holds a GND number for the author, from a catalogue record
+ * or a confirmation, or failing that a confirmed Library of Congress (LCNAF)
  * number, that number is a key: it resolves to exactly one record, and the
- * spelling on it is the suggestion this feature exists to offer. Where it did
- * not, the author's name is put to a name search, and a name is not a key.
- * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ * spelling on it is the suggestion this feature exists to offer. Where it
+ * holds neither, the author's name is put to a name search of both files, the
+ * GND's people first, and a name is not a key. Two people are spelled
+ * `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1290,9 +1296,9 @@ export function useAuthorAuthority<
  * the identity half of that line rather than an exception to it.
  *
  * An author nobody can see is **404, not 403**, exactly as a private book is.
- * 503 where the authority file could not be reached: nothing in this feature
- * is blocked by it, so the client can offer "try again" rather than an error
- * page.
+ * 503 where an authority file could not be reached and the other found
+ * nobody: nothing in this feature is blocked by it, so the client can offer
+ * "try again" rather than an error page.
  * @summary Author Authority
  */
 export function useAuthorAuthority<
@@ -1325,12 +1331,14 @@ export function useAuthorAuthority<
 /**
  * What the authority files say about this author.
  *
- * **Two routes, and which one ran is on every row as `certain`.** Where a
- * catalogue record for one of this author's Books already asserted a GND
+ * **Two routes, and which one ran is on every row as `certain`.** Where this
+ * Library already holds a GND number for the author, from a catalogue record
+ * or a confirmation, or failing that a confirmed Library of Congress (LCNAF)
  * number, that number is a key: it resolves to exactly one record, and the
- * spelling on it is the suggestion this feature exists to offer. Where it did
- * not, the author's name is put to a name search, and a name is not a key.
- * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ * spelling on it is the suggestion this feature exists to offer. Where it
+ * holds neither, the author's name is put to a name search of both files, the
+ * GND's people first, and a name is not a key. Two people are spelled
+ * `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1353,9 +1361,9 @@ export function useAuthorAuthority<
  * the identity half of that line rather than an exception to it.
  *
  * An author nobody can see is **404, not 403**, exactly as a private book is.
- * 503 where the authority file could not be reached: nothing in this feature
- * is blocked by it, so the client can offer "try again" rather than an error
- * page.
+ * 503 where an authority file could not be reached and the other found
+ * nobody: nothing in this feature is blocked by it, so the client can offer
+ * "try again" rather than an error page.
  * @summary Author Authority
  */
 export function useAuthorAuthority<
@@ -1380,12 +1388,14 @@ export function useAuthorAuthority<
 /**
  * What the authority files say about this author.
  *
- * **Two routes, and which one ran is on every row as `certain`.** Where a
- * catalogue record for one of this author's Books already asserted a GND
+ * **Two routes, and which one ran is on every row as `certain`.** Where this
+ * Library already holds a GND number for the author, from a catalogue record
+ * or a confirmation, or failing that a confirmed Library of Congress (LCNAF)
  * number, that number is a key: it resolves to exactly one record, and the
- * spelling on it is the suggestion this feature exists to offer. Where it did
- * not, the author's name is put to a name search, and a name is not a key.
- * Two people are spelled `Stevenson, Robert Louis` in the GND.
+ * spelling on it is the suggestion this feature exists to offer. Where it
+ * holds neither, the author's name is put to a name search of both files, the
+ * GND's people first, and a name is not a key. Two people are spelled
+ * `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1408,9 +1418,9 @@ export function useAuthorAuthority<
  * the identity half of that line rather than an exception to it.
  *
  * An author nobody can see is **404, not 403**, exactly as a private book is.
- * 503 where the authority file could not be reached: nothing in this feature
- * is blocked by it, so the client can offer "try again" rather than an error
- * page.
+ * 503 where an authority file could not be reached and the other found
+ * nobody: nothing in this feature is blocked by it, so the client can offer
+ * "try again" rather than an error page.
  * @summary Author Authority
  */
 export function useAuthorAuthority<
@@ -1460,7 +1470,8 @@ export const getConfirmAuthorIdentifierUrl = () => {
  * is up to eight outbound calls, which is why it is a deliberate action rather
  * than something a lookup does on the way past.
  *
- * **Only for `gnd`**, the one scheme this app can resolve.
+ * **The cross references only for `gnd`.** An LCNAF record is stored as
+ * confirmed and nothing else is read from it.
  *
  * **A cross reference colliding with a stored value is reported, not raised.**
  * The confirmation is already committed, so failing here would report a write
@@ -1569,7 +1580,8 @@ export type ConfirmAuthorIdentifierMutationVariables = {
  * is up to eight outbound calls, which is why it is a deliberate action rather
  * than something a lookup does on the way past.
  *
- * **Only for `gnd`**, the one scheme this app can resolve.
+ * **The cross references only for `gnd`.** An LCNAF record is stored as
+ * confirmed and nothing else is read from it.
  *
  * **A cross reference colliding with a stored value is reported, not raised.**
  * The confirmation is already committed, so failing here would report a write

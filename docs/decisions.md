@@ -6761,9 +6761,10 @@ answer as a later one.
 | Will it answer an ISBN? | `@attr 1=7` matching an ISBN taken from **that target's own record** | |
 
 The first gap cost Spain: `z3950.bne.es` answers Init and refuses every search on every
-database name with an identical `[101]`. The second cost Sweden: `libris.kb.se` answers,
-and takes **12.9 seconds for the search alone** against a 4.0 second budget for the whole
-fan out. The third is new and is the worst of the three, because it has no diagnostic at
+database name with an identical `[101]`. The second is measured on Sweden: `libris.kb.se`
+answers a title search in **2.38 seconds for the search alone** and an ISBN in 0.43, inside a
+4.0 second budget for the whole fan out but most of it for a title, and it also answers SRU at
+`libris.kb.se/sru/libris`. The third is new and is the worst of the three, because it has no diagnostic at
 all: `catalogos.cultura.gob.es:220/ABNET_REBECA` indexes the ISBN as the exact string
 **including its hyphens**, so `84-204-5732-9` matches and `8420457329` returns **0 hits
 and no error**. An ISBN normalised the way this application normalises it would return
@@ -10370,9 +10371,10 @@ the truncating door.
 
 ## A slow catalogue is kept and made opt-in, behind an explicit second search
 
-Owner's ruling, 2026-08-30. An earlier decision ruled a national catalogue out on latency,
-10.7s for its title search against a 4.0s fan out, and that was right while there was
-nowhere to put a slow source. There is now a provider table with a switch and a position per
+Owner's ruling, 2026-08-30. An earlier decision ruled a national catalogue out on latency
+against a 4.0s fan out, and that was right while there was nowhere to put a slow source.
+That catalogue, Sweden's LIBRIS, answers a title search in 2.38s and an ISBN in 0.43s
+(measured 2026-11-16), so the ruling now governs a slow source in general rather than Sweden. There is now a provider table with a switch and a position per
 source, so "off by default, on for the libraries that want it" is expressible, and dropping
 a catalogue that holds domestic editions nothing else holds is a worse answer than offering
 it.
@@ -17157,9 +17159,9 @@ is now a test beside it.** Measured on ruff 0.16.7: `S314` reports `fromstring`,
 `iterparse`, and does **not** report `XML`, `XMLID` or `fromstringlist`, though `XML` is
 CPython's own documented alias of `fromstring`. So a fourth site spelled `ElementTree.XML(b)`
 would have been silent, and the per site suppression would have been resting on a rule that
-could not see it. `TestOnlyThreeModulesTurnOutsideXmlIntoATree` closes that: one arm asks
+could not see it. `TestOnlyTheNamedModulesTurnOutsideXmlIntoATree` closes that: one arm asks
 which modules parse, over all six spellings and over both receiver forms, and one keeps the
-three honest modules using only spellings ruff can report.
+honest modules using only spellings ruff can report.
 
 **Its first draft asked the wrong question and the arm caught it.** Written as "which modules
 import an XML parser", it named five: `marc_fields.py` imports `ElementTree` for the
@@ -25599,3 +25601,78 @@ worker). Each is bounded or pytest's own. RSS also keeps pymalloc arenas a fragm
 cannot hand back. Anonymous memory outside pymalloc, read as RssAnon less one MiB per arena,
 grew by roughly 10 to 72 MiB per worker across these runs; this measurement does not
 attribute it.
+
+## The Library of Congress name authority file is the second file a name search asks (2026-11-16)
+
+**Probed first, because the ticket waited on it.** Both of the Library of Congress's authority
+files answer SRU 1.1 on `lx2.loc.gov:210`, the gateway the catalogue search already uses:
+`NAF` (names) and `SAF` (subjects), each with `marcxml` and `mads` schemas in its explain
+record. Neither is Z39.50 only, so this did not wait on the client route decision.
+
+| file | indexes the explain record lists | record |
+|---|---|---|
+| NAF | `cql.anywhere`, `dc.title`, `bath.name`, `bath.personalName`, `bath.corporateName`, `bath.conferenceName`, `bath.uniformTitle`, `bath.geographicName`, `bath.lccn`, `local.id`, `bath.standardIdentifier`, `local.primaryHeading` | MARC21 authority, `001` the LCCN, `008/09` `a` for an established heading |
+| SAF | `cql.anywhere`, `dc.subject`, `dc.title`, `bath.name`, `local.subjectTopical` and nine other `local.subject*` | MARC21 authority, `150` heading, `008/11` `a` (LCSH); `dc.subject="Science fiction"` answered 228 records, `local.subjectTopical` 188 |
+
+**The subject file is recorded and not built**: nothing in the app searches a subject heading
+until library mode's suggest field does.
+
+**The name file is built behind `authority.search`, after lobid.** Both are asked together;
+lobid's people come first, then the NAF's, each capped at five. A NAF person whose number a
+GND record's `sameAs` already carries is dropped, because two files asserted that link. A file
+that fails costs its own people; the search raises only where nobody was found and a file did
+not answer. This adds a file. It does not decide which file a name search should trust first.
+
+**What the index can find is narrower than the GND's, measured.** `bath.personalName` matches a
+heading's leading words, so a name has to be surname first (`Ursula Le Guin` answers 0,
+`Le Guin, Ursula K` 429), and the app turns reading order round by moving the last word to the
+front, which is wrong for a surname of two words; a name typed with a comma is put as typed. A
+prolific author's name heads hundreds of name and title records, the index orders by neither
+relevance nor date, and no CQL refused them cheaply (a `not dc.title` clause over every initial
+left 46 of 429 and took 9 seconds). So 25 records are asked and the people among them kept.
+Over twelve English language authors, inverted from reading order, the person was inside the
+first 5 records for 4, inside 25 for 9, and at 53, past 50 and past 100 for Atwood, Mary
+Shelley and Christie. **A famous author can be missed by this file.** lobid is still asked for
+them.
+
+**The round trip holds.** The stored LCNAF number is unspaced (`n78088964`, as `id.loc.gov`
+and Wikidata's `P244` write it) and the `bath.lccn` index matches only MARC's padded form
+collapsed to one space: `n78088964` answers 0 and `n 78088964` the record. Eleven numbers over
+all six shapes the sample held came back as themselves.
+
+**A stored LCNAF number now resolves**, but only for an author with no GND number: a
+confirmed GND record brings its LCNAF number as a cross reference, so asking both would show
+one person twice. Before this the resolve route put every stored number to lobid, so five
+non GND rows could fill the five places and an author confirmed by an LCNAF number alone
+would have answered nothing.
+
+**The gateway's cold session.** The first search of the day on each file answered SRU
+diagnostic 1/2, "target closed connection during search", and the same query answered at once
+when repeated, so that one diagnostic is asked once more.
+Idle time alone did not bring it back: after 2, 5 and 10 minutes of nothing, the first search
+answered, only slower (0.64s against 0.21s), so what drops the session is not measured.
+
+**A diagnostic refuses the page only where the page holds no person, and only the envelope's
+own.** The rule `metadata._sru_refusal` already holds for the catalogue: SRU lets a diagnostic
+stand in for one record it could not render, so one inside `records` says nothing about the
+people beside it, and a page whose only record is such a surrogate reads as nobody, the same
+trade `metadata._sru_refusal` makes. Not observed live on the NAF either way; the catalogue's
+probe was once wrong in exactly this direction.
+
+**Only an authority record is read**: a record whose leader/06 is not `z` is dropped before its
+fields are read, which is what keeps the reader outside the carrier test's reason to exist.
+
+**What it costs.** A name search went from 11 outbound requests to 23 (one more host request,
+two on a cold session, and two Wikidata requests per NAF person), about 43 KB to about 130 KB.
+The resolve branch's ceiling of 25 is unchanged. `docs/security.md` carries the row.
+
+**Accepted, each for its reason:**
+
+- `test_nothing_here_can_touch_a_database` admits five whole modules rather than the names
+  used from them: the reviewer checked that none of the five opens a session, and an allowlist
+  of (module, name) pairs was weighed and not taken.
+- During a lobid outage a NAF hit answers 200 rather than 503, because one file failing costs
+  its own people and no more, as `search` and the route's docstring state.
+- `_catalogue_order` misorders a surname of more than one word, such as Le Guin, because
+  nothing in a name typed in reading order says where the surname starts; a `q` holding a
+  comma is the escape, taken as already in catalogue order.

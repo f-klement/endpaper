@@ -274,7 +274,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,473 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,496 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
@@ -313,7 +313,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [Curl is Nonpareil worked a second time, and that is the point rather than a shortcut](decisions.md#curl-is-nonpareil-worked-a-second-time-and-that-is-the-point-rather-than-a-shortcut) | 168 |
 | An identifier two files disagree about is shown and never stored | [Golden Lily is John Henry Dearle's, not William Morris's](decisions.md#golden-lily-is-john-henry-dearles-not-william-morriss) | 52 |
 | An identifier two files disagree about is shown and never stored | [A claim survives review when the evidence that would test it is not on the line](decisions.md#a-claim-survives-review-when-the-evidence-that-would-test-it-is-not-on-the-line) | 153 |
-| An identifier two files disagree about is shown and never stored | [A Z39.50 target is three separate questions, and the third one fails silently](decisions.md#a-z3950-target-is-three-separate-questions-and-the-third-one-fails-silently) | 229 |
+| An identifier two files disagree about is shown and never stored | [A Z39.50 target is three separate questions, and the third one fails silently](decisions.md#a-z3950-target-is-three-separate-questions-and-the-third-one-fails-silently) | 252 |
 | An identifier two files disagree about is shown and never stored | [A red line in the survey is a moment, not a verdict](decisions.md#a-red-line-in-the-survey-is-a-moment-not-a-verdict) | 159 |
 | An identifier two files disagree about is shown and never stored | [Published catalogue lists rot, and a `gaierror` is a claim about a string](decisions.md#published-catalogue-lists-rot-and-a-gaierror-is-a-claim-about-a-string) | 182 |
 | An identifier two files disagree about is shown and never stored | [A load bearing operational fact may not live only in a file that gets deleted](decisions.md#a-load-bearing-operational-fact-may-not-live-only-in-a-file-that-gets-deleted) | 121 |
@@ -464,7 +464,7 @@ repeat the argument.
 |  | [The record's own carrier code decides, and prose is the fallback](decisions.md#the-records-own-carrier-code-decides-and-prose-is-the-fallback) | 257 |
 |  | [A catalogue record is bounded at construction, not at each door](decisions.md#a-catalogue-record-is-bounded-at-construction-not-at-each-door) | 485 |
 |  | [Two producers of one record, and they differ about one thing](decisions.md#two-producers-of-one-record-and-they-differ-about-one-thing) | 225 |
-|  | [A slow catalogue is kept and made opt-in, behind an explicit second search](decisions.md#a-slow-catalogue-is-kept-and-made-opt-in-behind-an-explicit-second-search) | 258 |
+|  | [A slow catalogue is kept and made opt-in, behind an explicit second search](decisions.md#a-slow-catalogue-is-kept-and-made-opt-in-behind-an-explicit-second-search) | 283 |
 |  | [The slow marking ships empty, and that is a measurement](decisions.md#the-slow-marking-ships-empty-and-that-is-a-measurement) | 214 |
 |  | [The longer deadline is separate, bounded, and its margin is chosen rather than measured](decisions.md#the-longer-deadline-is-separate-bounded-and-its-margin-is-chosen-rather-than-measured) | 128 |
 |  | [The answer says what was asked, rather than the request implying it](decisions.md#the-answer-says-what-was-asked-rather-than-the-request-implying-it) | 151 |
@@ -727,7 +727,7 @@ repeat the argument.
 |  | [The rapid add's progress is not a live region](decisions.md#the-rapid-adds-progress-is-not-a-live-region) | 74 |
 |  | [The rule that one module writes a shelf in bulk is two assertions, not one](decisions.md#the-rule-that-one-module-writes-a-shelf-in-bulk-is-two-assertions-not-one) | 334 |
 |  | [oxlint is adopted as a ratchet, and the suppression list is two lists](decisions.md#oxlint-is-adopted-as-a-ratchet-and-the-suppression-list-is-two-lists) | 488 |
-|  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,941 |
+|  | [Three more ruff families, and what each suppression is standing on](decisions.md#three-more-ruff-families-and-what-each-suppression-is-standing-on) | 1,940 |
 |  | [The tooling tree's disciplines run in the backend suite, not in a job step](decisions.md#the-tooling-trees-disciplines-run-in-the-backend-suite-not-in-a-job-step) | 250 |
 |  | [Turning a linter on is not the same as fixing what it finds](decisions.md#turning-a-linter-on-is-not-the-same-as-fixing-what-it-finds) | 282 |
 |  | [A floor that nothing drives is not a floor](decisions.md#a-floor-that-nothing-drives-is-not-a-floor) | 164 |
@@ -1026,4 +1026,5 @@ repeat the argument.
 |  | [A record's provenance is written at every door, and the flag counts only the description](decisions.md#a-records-provenance-is-written-at-every-door-and-the-flag-counts-only-the-description) | 763 |
 |  | [MARC `040` names only an agency that can be cited](decisions.md#marc-040-names-only-an-agency-that-can-be-cited) | 321 |
 |  | [A test module's caches live as long as its tests, not as long as the worker](decisions.md#a-test-modules-caches-live-as-long-as-its-tests-not-as-long-as-the-worker) | 416 |
+|  | [The Library of Congress name authority file is the second file a name search asks (2026-11-16)](decisions.md#the-library-of-congress-name-authority-file-is-the-second-file-a-name-search-asks-2026-11-16) | 873 |
 <!-- index: end -->

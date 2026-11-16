@@ -40,17 +40,35 @@ import json as jsonlib
 import time
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, Literal, cast
 
 import httpx
 import pytest
 import respx
+from hypothesis import given
+from hypothesis import strategies as st
 
 import authority
-from authority import AuthorityUnavailable, resolve, search
+import fetch
+import marc_fields
+import xml_parse
+from authority import AuthorityUnavailable, resolve, resolve_stored, search
 from enums import AuthorityScheme
+from tests.strategies import (
+    Node,
+    answer_of,
+    charsets,
+    depths,
+    encoded,
+    field_values,
+    text_around,
+    widths,
+    witness,
+    xml_characters,
+    xml_of,
+)
 
 LOBID = "https://lobid.org/"
 WIKIDATA = "https://www.wikidata.org/w/api.php"
@@ -337,8 +355,9 @@ def _wikidata_router(
     def handler(request: httpx.Request) -> httpx.Response:
         action = request.url.params.get("action")
         if action == "query":
-            gnd = request.url.params.get("srsearch", "")
-            return _json(item if "118753711" in gnd else WIKIDATA_NO_ITEM)
+            asked = request.url.params.get("srsearch", "")
+            # Q1512 holds both numbers: `P227=118753711` and `P244=n78088964`.
+            return _json(item if "118753711" in asked or "P244=n78088964" in asked else WIKIDATA_NO_ITEM)
         if action == "wbgetentities":
             return _json(description)
         if action == "wbgetclaims":
@@ -349,6 +368,116 @@ def _wikidata_router(
         return _json({}, 400)
 
     mock.get(url__startswith=WIKIDATA).mock(side_effect=handler)
+
+
+#: The Library of Congress Name Authority File, over SRU on the catalogue's
+#: gateway. **Captured live on 2026-11-16** and trimmed: the search kept one of
+#: its name and title records and the person behind it, out of 25 answered and
+#: 208 held; the person kept four of thirty `400` variants (none of the
+#: non-Latin ones) and lost its sixteen `670` source notes, which say where a
+#: cataloguer saw each form and which this module never reads.
+NAF = "http://lx2.loc.gov:210/NAF"
+
+#: `bath.personalName="Stevenson, Robert Louis"`, 25 records asked; records 5 and 6.
+NAF_SEARCH = (
+    '<?xml version="1.0"?>'
+    "\n"
+    '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:version>1.1</zs:ver'
+    "sion><zs:numberOfRecords>208</zs:numberOfRecords><zs:records><zs:record><zs:recordSchema>m"
+    "arcxml</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xml"
+    'ns="http://www.loc.gov/MARC21/slim"><leader>00964cz  a2200229n  4500</leader><controlfield'
+    ' tag="001">n  95034724 </controlfield><controlfield tag="008">950407n| azannaabn          '
+    '|a aaa      </controlfield><datafield tag="100" ind1="1" ind2=" "><subfield code="a">Steve'
+    'nson, Robert Louis,</subfield><subfield code="d">1850-1894.</subfield><subfield code="t">N'
+    'ovels.</subfield><subfield code="k">Selections</subfield></datafield></record></zs:recordD'
+    "ata><zs:recordPosition>5</zs:recordPosition></zs:record><zs:record><zs:recordSchema>marcxm"
+    'l</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xmlns="h'
+    'ttp://www.loc.gov/MARC21/slim"><leader>04164cz  a2200709n  4500</leader><controlfield tag='
+    '"001">n  78088964 </controlfield><controlfield tag="003">DLC</controlfield><controlfield t'
+    'ag="008">781130n| azannaabn          |b aaa      </controlfield><datafield tag="010" ind1='
+    '" " ind2=" "><subfield code="a">n  78088964 </subfield></datafield><datafield tag="046" in'
+    'd1=" " ind2=" "><subfield code="f">1850</subfield><subfield code="g">1894</subfield><subfi'
+    'eld code="2">edtf</subfield></datafield><datafield tag="100" ind1="1" ind2=" "><subfield c'
+    'ode="a">Stevenson, Robert Louis,</subfield><subfield code="d">1850-1894</subfield></datafi'
+    'eld><datafield tag="400" ind1="1" ind2=" "><subfield code="a">Stevenson, R. L.</subfield><'
+    'subfield code="q">(Robert Louis),</subfield><subfield code="d">1850-1894</subfield></dataf'
+    'ield><datafield tag="400" ind1="1" ind2=" "><subfield code="a">Stivenson, Robert Lui,</sub'
+    'field><subfield code="d">1850-1894</subfield></datafield><datafield tag="400" ind1="1" ind'
+    '2=" "><subfield code="a">Stevenson, Robert Louis Balfour,</subfield><subfield code="d">185'
+    '0-1894</subfield></datafield><datafield tag="400" ind1="1" ind2=" "><subfield code="a">Sti'
+    "venson, Robert Lui</subfield></datafield></record></zs:recordData><zs:recordPosition>6</zs"
+    ":recordPosition></zs:record></zs:records></zs:searchRetrieveResponse>"
+)
+
+#: `bath.lccn="n 78088964"`, the round trip of the person above.
+NAF_RECORD = (
+    '<?xml version="1.0"?>'
+    "\n"
+    '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:version>1.1</zs:ver'
+    "sion><zs:numberOfRecords>1</zs:numberOfRecords><zs:records><zs:record><zs:recordSchema>mar"
+    "cxml</zs:recordSchema><zs:recordPacking>xml</zs:recordPacking><zs:recordData><record xmlns"
+    '="http://www.loc.gov/MARC21/slim"><leader>04164cz  a2200709n  4500</leader><controlfield t'
+    'ag="001">n  78088964 </controlfield><controlfield tag="003">DLC</controlfield><controlfiel'
+    'd tag="008">781130n| azannaabn          |b aaa      </controlfield><datafield tag="010" in'
+    'd1=" " ind2=" "><subfield code="a">n  78088964 </subfield></datafield><datafield tag="046"'
+    ' ind1=" " ind2=" "><subfield code="f">1850</subfield><subfield code="g">1894</subfield><su'
+    'bfield code="2">edtf</subfield></datafield><datafield tag="100" ind1="1" ind2=" "><subfiel'
+    'd code="a">Stevenson, Robert Louis,</subfield><subfield code="d">1850-1894</subfield></dat'
+    'afield><datafield tag="400" ind1="1" ind2=" "><subfield code="a">Stevenson, R. L.</subfiel'
+    'd><subfield code="q">(Robert Louis),</subfield><subfield code="d">1850-1894</subfield></da'
+    'tafield><datafield tag="400" ind1="1" ind2=" "><subfield code="a">Stivenson, Robert Lui,</'
+    'subfield><subfield code="d">1850-1894</subfield></datafield><datafield tag="400" ind1="1" '
+    'ind2=" "><subfield code="a">Stevenson, Robert Louis Balfour,</subfield><subfield code="d">'
+    '1850-1894</subfield></datafield><datafield tag="400" ind1="1" ind2=" "><subfield code="a">'
+    "Stivenson, Robert Lui</subfield></datafield></record></zs:recordData><zs:recordPosition>1<"
+    "/zs:recordPosition></zs:record></zs:records></zs:searchRetrieveResponse>"
+)
+
+#: Verbatim: what the gateway answered to the first search of a cold session.
+#: This capture is the subject file's; the name file's first search gave the
+#: same diagnostic, and each answered the same query at once when repeated.
+NAF_COLD = (
+    '<?xml version="1.0"?>'
+    "\n"
+    '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:version>1.1</zs:ver'
+    'sion><zs:echoedSearchRetrieveRequest><zs:version>1.1</zs:version><zs:query>dc.subject="Sci'
+    'ence fiction"</zs:query><zs:maximumRecords>3</zs:maximumRecords><zs:recordPacking>xml</zs:'
+    "recordPacking><zs:recordSchema>marcxml</zs:recordSchema></zs:echoedSearchRetrieveRequest><"
+    'zs:diagnostics xmlns:diag="http://www.loc.gov/zing/srw/diagnostic/"><diag:diagnostic><diag'
+    ":uri>info:srw/diagnostic/1/2</diag:uri><diag:details>session_shared: target closed connect"
+    "ion during search</diag:details><diag:message>System temporarily unavailable</diag:message"
+    "></diag:diagnostic></zs:diagnostics></zs:searchRetrieveResponse>"
+)
+
+#: Verbatim: `bath.personalName="Ursula K. Le Guin"`, reading order, which
+#: the index does not match.
+NAF_EMPTY = (
+    '<?xml version="1.0"?>'
+    "\n"
+    '<zs:searchRetrieveResponse xmlns:zs="http://www.loc.gov/zing/srw/"><zs:version>1.1</zs:ver'
+    "sion><zs:numberOfRecords>0</zs:numberOfRecords><zs:echoedSearchRetrieveRequest><zs:version"
+    '>1.1</zs:version><zs:query>bath.personalName="Ursula K. Le Guin"</zs:query><zs:maximumReco'
+    "rds>5</zs:maximumRecords><zs:recordPacking>xml</zs:recordPacking><zs:recordSchema>marcxml<"
+    "/zs:recordSchema></zs:echoedSearchRetrieveRequest></zs:searchRetrieveResponse>"
+)
+
+
+def _xml(body: str, status: int = 200) -> httpx.Response:
+    return httpx.Response(status, text=body, headers={"content-type": "text/xml; charset=utf-8"})
+
+
+def _naf_router(mock, *bodies: str | httpx.Response):
+    """Route the NAF to these answers in order, or to `NAF_EMPTY` throughout.
+
+    **Every search asks both files**, so a test about lobid that does not
+    route the NAF would see it refused by respx, read as the file being down,
+    and an empty lobid answer would then raise rather than answer nobody.
+    """
+    answers = [body if isinstance(body, httpx.Response) else _xml(body) for body in bodies]
+    route = mock.get(url__startswith=NAF)
+    if len(answers) > 1:
+        return route.mock(side_effect=answers)
+    return route.mock(return_value=answers[0] if answers else _xml(NAF_EMPTY))
 
 
 def _national_asks(mock) -> list[str]:
@@ -632,6 +761,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         here rather than defensive."""
         with respx.mock(assert_all_called=False) as mock:
             route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock)
             await search("Stevenson (")
 
         assert route.calls[0].request.url.params["q"] == "Stevenson \\("
@@ -642,6 +772,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         changes the result set. Escaped it is three literal terms."""
         with respx.mock(assert_all_called=False) as mock:
             route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock)
             await search('Stevenson" OR preferredName:"Kane')
 
         sent = route.calls[0].request.url.params["q"]
@@ -655,6 +786,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         answer with one record."""
         with respx.mock(assert_all_called=False) as mock:
             route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock)
             await search("Jean-Pierre Naugrette")
 
         assert route.calls[0].request.url.params["q"] == "Jean\\-Pierre Naugrette"
@@ -665,6 +797,7 @@ class TestTheNameNeverBecomesQuerySyntax:
         escaping can double the length."""
         with respx.mock(assert_all_called=False) as mock:
             route = mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock)
             await search("(" * 400)
 
         sent = route.calls[0].request.url.params["q"]
@@ -837,6 +970,13 @@ class TestTheRefusalsAreStructural:
         allowlist makes every ordinary way of reaching a session a failure, and
         the remaining one requires writing a line whose only purpose is to hide
         an import from a reader.
+
+        **The name authority file's reader widened it by five**: `xml` and
+        `xml_parse` to parse, `marc_fields` to read a MARC record, `metadata`
+        for the doctype refusal every XML door shares, and `bibliographic` for
+        ISBD punctuation. None opens a session. **Direct imports only**:
+        `metadata` and `bibliographic` import `models` for a page count
+        constant, and this rule does not follow them there.
         """
         imported: set[str] = set()
         for node in ast.walk(ast.parse(self._source())):
@@ -854,6 +994,11 @@ class TestTheRefusalsAreStructural:
             "deadline",
             "fetch",
             "enums",
+            "xml",
+            "xml_parse",
+            "marc_fields",
+            "metadata",
+            "bibliographic",
         }, sorted(imported)
 
 
@@ -2997,6 +3142,7 @@ class TestAnUnusableAnswerFromAnySupplierCostsWhatItCarried:
     async def test_a_search_answer_carrying_no_member_list_finds_nobody(self):
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=LOBID).mock(return_value=_json({"member": "nobody"}))
+            _naf_router(mock)
             assert await search("anybody") == []
 
     @pytest.mark.asyncio
@@ -3302,3 +3448,536 @@ class TestTheCrossReferencesThatArriveWithTheRecord:
         assert all(row.disagreements == () for row in found)
         assert asked
         assert "wbgetclaims" not in asked
+
+
+def _naf_query(route) -> str:
+    """The CQL the one NAF request of this route carried."""
+    return route.calls[0].request.url.params["query"]
+
+
+def _with_fixed_field(record: str, position: int, value: str) -> str:
+    """`NAF_RECORD` with one character of its `008` replaced."""
+    fixed = "781130n| azannaabn          |b aaa      "
+    assert fixed in record
+    return record.replace(fixed, fixed[:position] + value + fixed[position + 1 :])
+
+
+#: `LOBID_SEARCH` with neither person linking an LCNAF number, so the NAF's
+#: Stevenson is not the GND's by any assertion either file made.
+_LOBID_UNLINKED = {
+    "member": [
+        {**row, "sameAs": [ref for ref in row.get("sameAs", []) if "id.loc.gov" not in ref["id"]]}
+        for row in LOBID_SEARCH["member"]
+    ]
+}
+
+
+class TestTheNameAuthorityFileIsTheSecondFile:
+    """The NAF beside lobid on a name search, measured live on 2026-11-16."""
+
+    @pytest.mark.asyncio
+    async def test_its_people_follow_lobids(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(_LOBID_UNLINKED))
+            _naf_router(mock, NAF_SEARCH)
+            _wikidata_router(mock)
+            found = await search("Robert Louis Stevenson")
+
+        assert [(row.scheme, row.identifier) for row in found] == [
+            (AuthorityScheme.GND, "118753711"),
+            (AuthorityScheme.GND, "131572873"),
+            (AuthorityScheme.LCNAF, "n78088964"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_person_a_gnd_record_already_links_is_offered_once(self):
+        """`118753711`'s `sameAs` carries `n78088964`, so the two files assert
+        one person between them, and the NAF's copy is dropped."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_SEARCH))
+            _naf_router(mock, NAF_SEARCH)
+            _wikidata_router(mock)
+            found = await search("Robert Louis Stevenson")
+
+        assert [row.identifier for row in found] == ["118753711", "131572873"]
+
+    @pytest.mark.asyncio
+    async def test_the_person_reads_as_the_file_writes_them(self):
+        """The name and title record ahead of him is a work, not a person, and
+        the heading's ISBD comma is not part of the name."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock, NAF_SEARCH)
+            _wikidata_router(mock)
+            (found,) = await search("Robert Louis Stevenson")
+
+        assert found.name == "Stevenson, Robert Louis"
+        assert (found.born, found.died) == ("1850", "1894")
+        assert found.variants == (
+            "Stevenson, R. L.",
+            "Stivenson, Robert Lui",
+            "Stevenson, Robert Louis Balfour",
+        )
+        assert not found.certain
+        assert found.same_as == ()
+
+    @pytest.mark.asyncio
+    async def test_wikidata_is_asked_by_the_lcnaf_property(self):
+        """`P244`, and not `P227` with an LCNAF number in it, which would answer
+        nothing and read as "Wikidata holds nobody"."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock, NAF_SEARCH)
+            _wikidata_router(mock)
+            (found,) = await search("Robert Louis Stevenson")
+
+        assert found.wikidata_id == "Q1512"
+        assert found.disagreements == ()
+
+    @pytest.mark.asyncio
+    async def test_the_name_is_put_surname_first(self):
+        """In reading order the index finds nobody: `Ursula K. Le Guin` answers
+        `NAF_EMPTY`."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            route = _naf_router(mock)
+            await search("Robert Louis Stevenson")
+
+        assert _naf_query(route) == 'bath.personalName="Stevenson, Robert Louis"'
+
+    @pytest.mark.asyncio
+    async def test_a_name_holding_a_comma_is_put_as_typed(self):
+        """Which is how a surname of two words reaches the index."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            route = _naf_router(mock)
+            await search("Le Guin, Ursula K.")
+
+        assert _naf_query(route) == 'bath.personalName="Le Guin, Ursula K."'
+
+    @pytest.mark.asyncio
+    async def test_a_quote_or_a_mask_in_a_name_stays_inside_the_term(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            route = _naf_router(mock)
+            await search('Kane" or bath.name="*, Ste?ven^\\')
+
+        assert _naf_query(route) == 'bath.personalName="Kane\\" or bath.name=\\"\\*, Ste\\?ven\\^\\\\"'
+
+    @pytest.mark.asyncio
+    async def test_more_people_than_the_ceiling_are_cut(self):
+        person = NAF_RECORD.split("<zs:records>")[1].split("</zs:records>")[0]
+        many = NAF_RECORD.replace(
+            person,
+            "".join(
+                person.replace("78088964", str(78088964 + index))
+                for index in range(authority.MAX_CANDIDATES + 3)
+            ),
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock, many)
+            _wikidata_router(mock, item=WIKIDATA_NO_ITEM)
+            found = await search("Robert Louis Stevenson")
+
+        assert len(found) == authority.MAX_CANDIDATES
+
+    @pytest.mark.asyncio
+    async def test_a_reference_an_undifferentiated_name_and_a_family_are_not_people(self):
+        reference = _with_fixed_field(NAF_RECORD, authority._KIND_OF_RECORD, "c")
+        undifferentiated = _with_fixed_field(NAF_RECORD, authority._UNDIFFERENTIATED, "b")
+        family = NAF_RECORD.replace('<datafield tag="100" ind1="1"', '<datafield tag="100" ind1="3"')
+        for body in (reference, undifferentiated, family):
+            assert authority._naf_read(fetch.Fetched(200, body.encode(), "utf-8"), certain=False) == []
+        assert len(authority._naf_read(fetch.Fetched(200, NAF_RECORD.encode(), "utf-8"), certain=False)) == 1
+
+    def test_a_bibliographic_record_is_not_a_person(self):
+        """Leader/06 `z` is what makes it an authority record, whatever its `008`
+        happens to hold at the positions an authority record defines."""
+        bibliographic = NAF_RECORD.replace("<leader>04164cz  a22", "<leader>04164cam a22")
+        assert authority._naf_read(fetch.Fetched(200, bibliographic.encode(), "utf-8"), certain=False) == []
+
+
+class TestOneFileFailingCostsItsOwnPeople:
+    """A search raises only where nobody was found and a file did not answer."""
+
+    @pytest.mark.asyncio
+    async def test_the_naf_down_leaves_lobids_people(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_SEARCH))
+            _naf_router(mock, httpx.Response(502))
+            _wikidata_router(mock)
+            found = await search("Robert Louis Stevenson")
+
+        assert [row.identifier for row in found] == ["118753711", "131572873"]
+
+    @pytest.mark.asyncio
+    async def test_lobid_down_leaves_the_nafs_people(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(502))
+            _naf_router(mock, NAF_SEARCH)
+            _wikidata_router(mock)
+            found = await search("Robert Louis Stevenson")
+
+        assert [row.identifier for row in found] == ["n78088964"]
+
+    @pytest.mark.asyncio
+    async def test_nobody_found_while_a_file_was_down_is_unavailable_not_nobody(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock, httpx.Response(502))
+            with pytest.raises(AuthorityUnavailable):
+                await search("Robert Louis Stevenson")
+
+    @pytest.mark.asyncio
+    async def test_nobody_found_by_two_files_that_answered_is_nobody(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            _naf_router(mock)
+            assert await search("Ursula K. Le Guin") == []
+
+    @pytest.mark.parametrize(
+        ("gnd", "naf", "defect"),
+        [
+            ([], RuntimeError("naf reader defect"), "naf reader defect"),
+            (RuntimeError("lobid reader defect"), [], "lobid reader defect"),
+        ],
+        ids=["from the naf", "from lobid"],
+    )
+    def test_a_defect_in_either_file_is_raised_and_not_read_as_an_outage(self, gnd, naf, defect):
+        """Read as a file not answering, a bug in one reader would show as
+        that file being down beside the other file's people."""
+        with pytest.raises(RuntimeError, match=defect):
+            authority._merged(gnd, naf)
+
+    @pytest.mark.asyncio
+    async def test_a_cold_session_is_asked_once_more(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            route = _naf_router(mock, NAF_COLD, NAF_SEARCH)
+            _wikidata_router(mock)
+            found = await search("Robert Louis Stevenson")
+
+        assert route.call_count == 2
+        assert [row.identifier for row in found] == ["n78088964"]
+
+    @pytest.mark.asyncio
+    async def test_a_session_cold_twice_is_not_asked_a_third_time(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
+            route = _naf_router(mock, NAF_COLD, NAF_COLD, NAF_SEARCH)
+            with pytest.raises(AuthorityUnavailable):
+                await search("Robert Louis Stevenson")
+
+        assert route.call_count == 2
+
+    def test_a_diagnostic_inside_one_record_does_not_refuse_the_page(self):
+        """SRU lets a diagnostic stand in for one record it could not render,
+        which says nothing about the people beside it."""
+        start = NAF_SEARCH.index("<zs:recordData>") + len("<zs:recordData>")
+        end = NAF_SEARCH.index("</zs:recordData>")
+        surrogate = (
+            '<diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">'
+            "<uri>info:srw/diagnostic/1/67</uri></diagnostic>"
+        )
+        body = NAF_SEARCH[:start] + surrogate + NAF_SEARCH[end:]
+        found = authority._naf_read(fetch.Fetched(200, body.encode(), "utf-8"), certain=False)
+        assert [row.identifier for row in found] == ["n78088964"]
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            NAF_COLD.replace("info:srw/diagnostic/1/2", "info:srw/diagnostic/1/10"),
+            '<!DOCTYPE r [<!ENTITY a "a">]>' + NAF_SEARCH.split("\n", 1)[1],
+            NAF_SEARCH[:-40],
+        ],
+        ids=["another diagnostic", "a doctype", "a cut body"],
+    )
+    def test_an_answer_it_cannot_read_is_a_refusal_and_not_nobody(self, body):
+        """The gateway answers every error with HTTP 200 and an envelope holding
+        no records, which read naively is "nobody by that name"."""
+        with pytest.raises(AuthorityUnavailable):
+            authority._naf_read(fetch.Fetched(200, body.encode(), "utf-8"), certain=False)
+
+
+class TestAStoredLcnafNumberIsResolvedByTheFile:
+    """The round trip #5 asks of every source: a number read off a live record,
+    put back through the index, answering the same record."""
+
+    @pytest.mark.parametrize(
+        ("stored", "asked"),
+        [
+            ("n78088964", "n 78088964"),
+            ("no97049895", "no 97049895"),
+            ("n2005066836", "n 2005066836"),
+            ("no2001077913", "no2001077913"),
+            ("nb2015021703", "nb2015021703"),
+            ("nr2002041108", "nr2002041108"),
+        ],
+    )
+    def test_each_shape_is_asked_as_the_index_holds_it(self, stored, asked):
+        """Each pair measured live on 2026-11-16: the right hand form answered
+        its record, and the unspaced `n78088964` answered none."""
+        assert authority._lccn_query(stored) == asked
+
+    @pytest.mark.parametrize(
+        "stored", ["n7808896", "n780889641", "x78088964", 'n78088964" or x', "118753711"]
+    )
+    def test_anything_else_is_not_put_to_the_index(self, stored):
+        assert authority._lccn_query(stored) is None
+
+    @pytest.mark.asyncio
+    async def test_a_lone_lcnaf_number_resolves_to_its_person(self):
+        with respx.mock(assert_all_called=False) as mock:
+            route = _naf_router(mock, NAF_RECORD)
+            _wikidata_router(mock)
+            (found,) = await resolve_stored([(AuthorityScheme.LCNAF, "n78088964")])
+
+        assert _naf_query(route) == 'bath.lccn="n 78088964"'
+        assert (found.scheme, found.identifier, found.certain) == (AuthorityScheme.LCNAF, "n78088964", True)
+        assert found.wikidata_id == "Q1512"
+
+    @pytest.mark.asyncio
+    async def test_a_gnd_number_beside_it_is_asked_and_the_naf_is_not(self):
+        """A confirmed GND record brings its LCNAF number as a cross reference,
+        so asking both files would show one person twice."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
+            route = _naf_router(mock, NAF_RECORD)
+            _wikidata_router(mock)
+            found = await resolve_stored(
+                [(AuthorityScheme.LCNAF, "n78088964"), (AuthorityScheme.GND, "118753711")]
+            )
+
+        assert [row.identifier for row in found] == ["118753711"]
+        assert route.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_a_number_neither_file_is_asked_by_takes_no_place(self):
+        """Five ISNI rows ahead of the GND number used to fill all five places
+        and answer nothing."""
+        stored = [(AuthorityScheme.ISNI, f"000000012283156{index}") for index in range(5)]
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
+            _wikidata_router(mock)
+            found = await resolve_stored([*stored, (AuthorityScheme.GND, "118753711")])
+
+        assert [row.identifier for row in found] == ["118753711"]
+
+    @pytest.mark.asyncio
+    async def test_a_number_the_file_no_longer_holds_answers_nothing(self):
+        with respx.mock(assert_all_called=False) as mock:
+            _naf_router(mock)
+            assert await resolve_stored([(AuthorityScheme.LCNAF, "n78088964")]) == []
+
+
+@dataclass(frozen=True)
+class NafAnswer:
+    """A NAF response as a spec: its authority records, free text, its charset,
+    and whether it carries the cold session diagnostic.
+
+    Drawn by the property in `TestANafAnswerIsReadOrRefusedByName` and rebuilt
+    by `a_naf_answer` in every named case it printed.
+    """
+
+    records: tuple[Node, ...]
+    extra: str
+    charset: str
+    nest: int = 0
+    width: int = 0
+    cold: bool = False
+
+
+def a_naf_answer(answer: NafAnswer) -> fetch.Fetched:
+    """The response the spec describes, built at the `fetch.Fetched` seam for
+    the reason `test_metadata.a_catalogue_answer` gives."""
+    namespaced = (replace(record, attrs=(("xmlns", marc_fields.NAMESPACE),)) for record in answer.records)
+    inner = "".join(f"<record><recordData>{xml_of(record)}</recordData></record>" for record in namespaced)
+    diagnostic = (
+        '<diagnostics><diagnostic xmlns="http://www.loc.gov/zing/srw/diagnostic/">'
+        "<uri>info:srw/diagnostic/1/2</uri></diagnostic></diagnostics>"
+        if answer.cold
+        else ""
+    )
+    text = (
+        '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+        f"<numberOfRecords>{len(answer.records)}</numberOfRecords>"
+        f"<records>{inner}</records>{diagnostic}"
+        + xml_of(Node("extraResponseData", text=answer.extra, nest=answer.nest, width=answer.width))
+        + "</searchRetrieveResponse>"
+    )
+    return fetch.Fetched(200, encoded(text, answer.charset), answer.charset)
+
+
+#: The `008` of a person, of a name and title record, and of the same person
+#: undifferentiated, as the live records write them, beside drawn text.
+_FIXED_FIELDS = st.sampled_from(
+    [
+        "781130n| azannaabn          |b aaa      ",
+        "950407n| azannaabn          |a aaa      ",
+        "781130n| azannaabn          |b aaa  b   ",
+    ]
+) | st.text(xml_characters(), max_size=45)
+
+#: An authority record's leader as the live records write it, a bibliographic
+#: record's, and drawn text.
+_LEADERS = st.sampled_from(["04164cz  a2200709n  4500", "01234cam a2200289 a 4500"]) | st.text(
+    xml_characters(), max_size=24
+)
+
+#: An LCCN as the `001` writes one, padded or not, beside drawn text.
+_CONTROL_NUMBERS = st.from_regex(r"n[a-z]? {0,2}[0-9]{8} ?|n[a-z]?[0-9]{10}", fullmatch=True) | st.text(
+    xml_characters(), max_size=14
+)
+
+
+def naf_records() -> st.SearchStrategy[Node]:
+    """One MARC21 authority `record`: a leader, a control number, an `008`, and
+    fields over the tags `_naf_person` reads plus a few it does not."""
+    subfield = st.builds(
+        lambda code, value: Node("subfield", (("code", code),), value),
+        st.sampled_from("adfgqt0"),
+        field_values(),
+    )
+    # A person's heading as the live records write it, beside the drawn fields:
+    # drawn alone, a `100` holding an `$a` and no `$t` was rare enough that the
+    # person witness found none in 2,000 draws under one seed of eight.
+    heading = st.just(
+        Node(
+            "datafield",
+            (("tag", "100"), ("ind1", "1"), ("ind2", " ")),
+            children=(Node("subfield", (("code", "a"),), "Stevenson, Robert Louis,"),),
+        )
+    )
+    datafield = heading | st.builds(
+        lambda tag, ind1, subfields: Node(
+            "datafield", (("tag", tag), ("ind1", ind1), ("ind2", " ")), children=tuple(subfields)
+        ),
+        st.sampled_from(["100", "400", "046", "670", "110"]),
+        st.sampled_from(" 0123"),
+        st.lists(subfield, max_size=4),
+    )
+    return st.builds(
+        lambda leader, number, fixed, fields: Node(
+            "record",
+            children=(
+                Node("leader", text=leader),
+                Node("controlfield", (("tag", "001"),), number),
+                Node("controlfield", (("tag", "008"),), fixed),
+                *fields,
+            ),
+        ),
+        _LEADERS,
+        _CONTROL_NUMBERS,
+        _FIXED_FIELDS,
+        st.lists(datafield, max_size=5),
+    )
+
+
+#: The Unicode category of a surrogate, as `test_metadata.SURROGATES` names it.
+_SURROGATES: Final[tuple[Literal["Cs"]]] = ("Cs",)
+
+NAF_ANSWERS = st.builds(
+    NafAnswer,
+    records=st.lists(naf_records(), max_size=3).map(tuple),
+    extra=st.text(xml_characters(), max_size=8)
+    | text_around(st.text(st.characters(categories=_SURROGATES), min_size=1, max_size=2), padding=4),
+    charset=charsets(),
+    # The envelope and the free text's element are two levels of the bound.
+    nest=depths(xml_parse.MAX_DEPTH - 2),
+    width=widths(),
+    cold=st.booleans(),
+)
+
+
+def _read(response: fetch.Fetched) -> list[authority.AuthorityCandidate] | None:
+    """What the door answers for this response, or None where it refuses."""
+    try:
+        return authority._naf_read(response)
+    except AuthorityUnavailable:
+        return None
+
+
+class TestANafAnswerIsReadOrRefusedByName:
+    """The NAF response path. Anything out of `_naf_read` but its answer or
+    `AuthorityUnavailable` is a 500 that, through the search's `gather`, costs
+    lobid's people too."""
+
+    @pytest.mark.property
+    @given(answer=NAF_ANSWERS)
+    def test_it_answers_people_or_refuses_inside_the_allocation_bound(self, answer):
+        response = a_naf_answer(answer)
+        got = answer_of(authority._naf_read, response, answers=list, refuses=AuthorityUnavailable)
+        if got.value is not None:
+            assert len(got.value) <= len(answer.records)
+            assert all(
+                row.scheme is AuthorityScheme.LCNAF and authority._LCCN.match(row.identifier) and row.name
+                for row in got.value
+            )
+        assert (
+            got.peak <= authority.ALLOCATION_FACTOR * len(response.text.encode()) + xml_parse.ALLOCATION_FLOOR
+        )
+
+    def test_the_generator_still_reaches_a_person(self):
+        witness(
+            NAF_ANSWERS, lambda answer: bool(_read(a_naf_answer(answer))), reaches="a person the door reads"
+        )
+
+    def test_the_generator_still_reaches_a_cold_session_refused(self):
+        witness(
+            NAF_ANSWERS,
+            lambda answer: answer.cold and answer.records != () and _read(a_naf_answer(answer)) is None,
+            reaches="a response holding records but no person, and the cold session diagnostic, refused",
+        )
+
+    def test_the_generator_still_reaches_a_wide_response_parsed(self):
+        witness(
+            NAF_ANSWERS,
+            lambda answer: answer.width > 0 and not answer.cold and _read(a_naf_answer(answer)) is not None,
+            reaches="a response carrying `WIDE` empty siblings, parsed",
+        )
+
+    def test_the_generator_still_reaches_a_charset_that_yields_a_lone_surrogate(self):
+        witness(
+            NAF_ANSWERS,
+            lambda answer: (
+                answer.charset != "idna"
+                and any(
+                    0xD800 <= ord(character) <= 0xDFFF
+                    for character in a_naf_answer(answer).content.decode(answer.charset, "replace")
+                )
+            ),
+            reaches="a response whose charset decodes to a lone surrogate",
+        )
+
+    def test_a_response_at_the_depth_bound_is_read_and_one_deeper_is_refused(self):
+        """The positive control for `xml_parse.MAX_DEPTH` at this door."""
+        depth = xml_parse.MAX_DEPTH
+        at = "<a>" * depth + "</a>" * depth
+        past = "<a>" * (depth + 1) + "</a>" * (depth + 1)
+        assert authority._naf_read(fetch.Fetched(200, at.encode(), "utf-8")) == []
+        with pytest.raises(AuthorityUnavailable):
+            authority._naf_read(fetch.Fetched(200, past.encode(), "utf-8"))
+
+    @staticmethod
+    def _holding(fill: str) -> fetch.Fetched:
+        """`NAF_RECORD` with `fill` among the person's fields."""
+        return fetch.Fetched(200, NAF_RECORD.replace("</record>", f"{fill}</record>").encode(), "utf-8")
+
+    @staticmethod
+    def _peak(response: fetch.Fetched) -> float:
+        got = answer_of(authority._naf_read, response, answers=list, refuses=AuthorityUnavailable)
+        return (got.peak - xml_parse.ALLOCATION_FLOOR) / len(response.text.encode())
+
+    def test_the_costliest_shape_found_at_the_bound_is_read_inside_its_bound(self):
+        """**The shape `authority.ALLOCATION_FACTOR` is measured on**, the one
+        `metadata.ALLOCATION_FACTOR`'s is, after one character above U+FFFF:
+        this door decodes the response inside the call too."""
+        shape = '<e a=""/>\u0100<x/>\u0100<x/>\u0100'
+        assert len(shape) == xml_parse.BYTES_PER_ATTRIBUTED
+        assert self._peak(self._holding("\U0001d400" + shape * 45_000)) <= authority.ALLOCATION_FACTOR
+
+    def test_a_record_of_empty_fields_is_read_inside_its_bound(self):
+        """The reader's own element, which `marc_fields.Fields` turns into a
+        node and a map entry each."""
+        assert self._peak(self._holding('<datafield tag="400"/>' * 40_000)) <= authority.ALLOCATION_FACTOR

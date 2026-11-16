@@ -59,11 +59,13 @@ logger = logging.getLogger("endpaper.z3950")
 #: same problem, and its comment is the one to read: one lookup shares one absolute
 #: deadline.
 #:
-#: **A target that costs nothing to ask is not free to wait for.** Measured 2026-08-28
-#: from a pod on the worker node: `lx2.loc.gov:210/LCDB` answers an ISBN in **0.561s**
-#: end to end, while `libris.kb.se:210/libris` takes **10.7s** for the search alone on
-#: `@attr 1=4 "moby dick"` and a further 2.3s for its first record. Sweden is therefore
-#: outside this ceiling and was already outside the 4.0s fan out by 2.7x.
+#: **A target that answers is not thereby quick enough to wait for.** Measured 2026-08-28
+#: from a pod on the worker node, `lx2.loc.gov:210/LCDB` answers an ISBN in **0.561s**
+#: end to end. Measured 2026-11-16, `libris.kb.se:210/libris` takes **2.38s** for the
+#: search alone on `@attr 1=4 "moby dick"`, 3.47s with the open and its first record,
+#: and 0.43s for an ISBN search: inside this ceiling, and most of the 4.0s fan out for a
+#: title. Sweden needs no client here, since LIBRIS also answers SRU at
+#: `libris.kb.se/sru/libris`.
 TIMEOUT_SECONDS: Final = 10.0
 
 #: The most a target may answer with, counted on the records it hands over.

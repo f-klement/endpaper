@@ -1,6 +1,6 @@
 """The authority files, read for a person rather than for a book.
 
-`metadata.py` asks catalogues about **books**; this module asks three authority
+`metadata.py` asks catalogues about **books**; this module asks four authority
 files about **people**. A book record describes a printing and dies with it; an
 authority record describes somebody who outlives every printing.
 
@@ -27,6 +27,15 @@ numbers that record's `sameAs` does not carry. A cluster names the GND record it
 was built from, so it is checked against an identifier already in hand rather
 than trusted on a name.
 
+**The Library of Congress Name Authority File is the second supplier**, asked
+beside lobid on every name search and listed after it. The GND is concentrated on
+German, and a name search that asks it alone decides whether a person is
+findable at all; the NAF is concentrated on English, which is the point of
+asking both. It answers over SRU on the gateway `metadata.py` already reaches for
+the Library of Congress catalogue, so it is a database name on a connection that
+exists rather than a new host. What its index can and cannot find is on
+`_NAF_PAGE`.
+
 ## Why VIAF is not a supplier
 
 **Half of its read API answers, and which half depends on the `Accept` header
@@ -39,6 +48,8 @@ which is why the finding is recorded here rather than left to be rediscovered.
 `rightsinfo`, and its 403 on a default user agent is why `fetch._AGENT` exists.
 **VIAF publishes neither**, which is measured rather than assumed and is one
 reason it stays out of the resolution path.
+**The Library of Congress gateway** states no terms in its responses either; it
+is the same gateway, under the same footing, as the catalogue search.
 
 ## The refusal this module is built around
 
@@ -48,9 +59,10 @@ authority file can only ever attach a number to it.
 
 ## The boundary
 
-Every catalogue source's, plus lobid and Wikidata. **No cover host is added and
-none could be**: `covers.COVER_HOSTS` is what the CSP is derived from, so a host
-added here would widen what the browser may load.
+Every catalogue source's, plus lobid and Wikidata. The NAF adds none: it is the
+Library of Congress catalogue's gateway, over the same plaintext HTTP. **No cover
+host is added and none could be**: `covers.COVER_HOSTS` is what the CSP is
+derived from, so a host added here would widen what the browser may load.
 """
 
 import asyncio
@@ -58,8 +70,13 @@ import logging
 import re
 from dataclasses import dataclass, replace
 from typing import Any, Final
+from xml.etree import ElementTree
 
 import fetch
+import marc_fields
+import metadata
+import xml_parse
+from bibliographic import strip_isbd_punctuation
 from deadline import in_
 from enums import AuthorityScheme
 
@@ -124,6 +141,79 @@ _LCNAF_URI: Final = re.compile(
     r"\Ahttps?://id\.loc\.gov/(?:rwo/agents|authorities/names)/(n[a-z]?[0-9]{6,10})\Z"
 )
 
+#: The Library of Congress Name Authority File, over SRU 1.1.
+#:
+#: **The catalogue's own gateway with another database name**: `lcdb` is the
+#: catalogue `targets.SEEDED` reaches, `NAF` is this. Plaintext for the reason
+#: the catalogue is, which `fetch.RedirectedOffHost` carries: the gateway has no
+#: TLS endpoint. Its subject twin `SAF` answers the same way and nothing here
+#: asks it, because no part of this app searches a subject heading yet.
+_NAF_URL: Final = "http://lx2.loc.gov:210/NAF"
+
+#: The Wikidata property holding an LCNAF number, unspaced (`n78088964`): the
+#: form `_LCNAF_URI` reads and `author_identifiers` stores.
+_P_LCNAF: Final = "P244"
+
+#: An LCNAF number as this app stores it: the prefix, then eight digits for a
+#: record made before 2001 or ten after. Anchored, because it goes into a query.
+_LCCN: Final = re.compile(r"\A(n[a-z]?)([0-9]{8}|[0-9]{10})\Z")
+
+#: How many records one NAF name search asks for, of which at most
+#: `MAX_CANDIDATES` people are kept.
+#:
+#: **Five times the people kept, because most of what the index answers is not
+#: a person.** `bath.personalName` matches the heading's leading words, and a
+#: prolific author's name heads hundreds of name and title records, one per
+#: translated work, which `_naf_person` drops. The index orders by neither
+#: relevance nor date, and no CQL refuses a name and title record: a `not
+#: dc.title` clause over every initial left 46 of 429 and took 9 seconds.
+#:
+#: Measured 2026-11-16 over twelve English language authors, inverted from
+#: reading order: the person record was inside the first 5 records for 4, inside
+#: the first 25 for 9, and for the other three at 53 (Atwood), past 50 (Mary
+#: Shelley) and past 100 (Christie). So **a famous author can be missed here**,
+#: and lobid is still asked for them. 25 records measured 24,221 to 80,603 bytes
+#: and 0.49 to 0.85 seconds.
+_NAF_PAGE: Final = 25
+
+#: The NAF door's half of its allocation bound: see `xml_parse.ALLOCATION_FLOOR`.
+#:
+#: **The catalogue door's figure, because it is the catalogue door's shape**: the
+#: response is decoded inside the call, so one character above U+FFFF makes the
+#: whole text four bytes a character, and then built through the same builder.
+#: Measured by `tracemalloc` on the suite pod, CPython 3.14.10, per byte of the
+#: text as UTF-8: the shape `metadata.ALLOCATION_FACTOR` is measured on, about
+#: 1 MiB of it inside one record, peaked at 32.6, and empty `400` fields read by
+#: `_naf_person` at 26.7. A spelling of its own rather than that constant,
+#: because the two doors read different records and either may move alone.
+ALLOCATION_FACTOR: Final = 33
+
+#: The diagnostic the gateway answers when its shared session to the file has
+#: dropped: `System temporarily unavailable`, `target closed connection during
+#: search`. Both files gave it on their first search of 2026-11-16 and answered
+#: the same query at once when it was repeated, so it is asked once more.
+#: **Idle time alone did not bring it back**: after 2, 5 and 10 minutes of
+#: nothing the first search answered, only slower (0.64s against 0.21s). So
+#: what drops the session is not measured, and the retry is for an answer seen
+#: twice in a day rather than one expected on every cold start. Any other
+#: diagnostic is an answer this module cannot read.
+_NAF_COLD_SESSION: Final = "info:srw/diagnostic/1/2"
+
+#: Where an envelope diagnostic is found, `_NAF_COLD_SESSION` among them: the
+#: envelope's `diagnostics`, in the SRU 1.1 namespace, and the diagnostic
+#: namespace's `uri` inside it, at any depth.
+_SRU_DIAGNOSTICS: Final = "{http://www.loc.gov/zing/srw/}diagnostics"
+_SRU_DIAGNOSTIC_URI: Final = "{http://www.loc.gov/zing/srw/diagnostic/}uri"
+
+#: The MARC21 slim namespace in ElementTree's `{uri}` spelling.
+_MARC: Final = f"{{{marc_fields.NAMESPACE}}}"
+
+#: Every character CQL reads specially inside a quoted term, each escaped. The
+#: quote and the backslash would end or break the term; `*`, `?` and `^` are
+#: masking and anchoring characters, which a name holding one would otherwise
+#: widen into a pattern.
+_CQL_ESCAPED: Final = str.maketrans({character: f"\\{character}" for character in '\\"*?^'})
+
 #: Every character Lucene reserves, each escaped with a backslash.
 #:
 #: **The query is unquoted, and that decision is what makes this list long.** A
@@ -179,6 +269,7 @@ MAX_CANDIDATES: Final = 5
 #: | a name search | 17,760 at `size=3` | **37,923 to 241,691** at `size=5` |
 #: | a `haswbstatement` search | 606 | 606 |
 #: | labels and descriptions | 341 | 341 |
+#: | a NAF page, `_NAF_PAGE` records | (none) | 24,221 to 80,603, on 2026-11-16 |
 #:
 #: **The search is the binding case and it is asked for at `MAX_CANDIDATES`,
 #: which is five, not three.** Its size is driven by the five records rather
@@ -204,8 +295,9 @@ MAX_CANDIDATES: Final = 5
 #:
 #: **A VIAF cluster is that shape**, which is why it does not use this constant.
 #: Measured 2026-08-28, a `BriefVIAF` response alone reaches 276,610 bytes and
-#: would be refused here. See `_VIAF_LIMIT`, which is why this comment now says
-#: "lobid or Wikidata" where it used to say "here".
+#: would be refused here. See `_VIAF_LIMIT`. The NAF page shares this cap with
+#: lobid and Wikidata at 3.25x its largest measured answer, so it is not the
+#: binding case.
 _RESPONSE_LIMIT: Final = 262_144
 
 #: How long the whole of one authority lookup may take, in seconds.
@@ -223,9 +315,13 @@ _RESPONSE_LIMIT: Final = 262_144
 #: 2026-08-27 a lobid record is 0.11 to 0.13s, its search 0.13 to 0.22s, and
 #: Wikidata's calls 0.22 to 0.29s each. `_cross_check` is **four** of those in
 #: sequence on the resolve branch since `P213` joined `P214`, so one candidate
-#: is roughly 1.3s and the candidates run together. The search branch is two,
-#: unchanged. The margin is for a slow day, not for a bigger fan out: that is
-#: what `MAX_CANDIDATES` bounds.
+#: is roughly 1.3s and the candidates run together. The margin is for a slow
+#: day, not for a bigger fan out: that is what `MAX_CANDIDATES` bounds.
+#:
+#: **A name search waits on the NAF page before its Wikidata pair.** lobid's
+#: search runs beside it, so the slower of the two counts: a NAF page measured
+#: 0.49 to 0.85s on 2026-11-16, two in sequence when the session is cold, then
+#: two Wikidata calls at most 0.29s each. So about **1.4s**, and **2.3s** cold.
 #:
 #: **A confirmation is the longer path and the figure above is not it.** It is
 #: one resolve plus `national_identifiers`, whose three VIAF calls measured 0.56,
@@ -335,8 +431,9 @@ class AuthorityCandidate:
     `AuthorityProvenance` exists to keep apart. It is shown, so a member can
     make that decision themselves.
 
-    `born` and `died` are the dates as the GND writes them, which is a partial
-    date on many records (`1850-11-13`, or `1850`, or absent). Kept as strings
+    `born` and `died` are the dates as the file writes them, which is a partial
+    date on many records (`1850-11-13`, or `1850`, or absent): the GND's
+    `dateOfBirth`, and the NAF's `046 $f` and `$g`, which are EDTF. Kept as strings
     rather than parsed: nothing here sorts or subtracts them, and parsing would
     turn a record with `XXXX` in it into an error instead of a hint.
 
@@ -351,7 +448,8 @@ class AuthorityCandidate:
     born: str | None = None
     died: str | None = None
     #: Every cross reference the GND record lists, as URIs. Recorded, shown,
-    #: never fetched. This is where the VIAF cluster id arrives.
+    #: never fetched. This is where the VIAF cluster id arrives. Empty for an
+    #: LCNAF candidate, whose cross references are not read.
     same_as: tuple[str, ...] = ()
     certain: bool = False
     #: The Wikidata item, from Wikidata's own reverse lookup rather than from
@@ -364,11 +462,12 @@ class AuthorityCandidate:
 
 
 class AuthorityUnavailable(Exception):
-    """lobid did not answer, or answered something this module cannot read.
+    """A supplier did not answer, or answered something this module cannot read.
 
     One exception for both, because the caller's options are the same: say the
     suggestion could not be fetched. Nobody is blocked by it, since every write
-    in this feature is optional.
+    in this feature is optional. On a name search it reaches the caller only
+    where neither file found anybody: see `search`.
 
     **Wikidata failing does not raise.** It is the cross check rather than the
     supplier, so an outage there costs the description and the disagreement
@@ -492,8 +591,19 @@ def _reached(body: dict[str, Any], *path: str) -> Any:
     return value
 
 
-async def _item_for(gnd: str, deadline: float | None) -> str | None:
-    """The Wikidata item whose `P227` is this GND number, found by Wikidata.
+#: Which Wikidata property holds each supplier's identifier, for the reverse
+#: lookup `_item_for` makes. A candidate of a scheme not listed here is not
+#: looked up, rather than looked up under the wrong property: a typo there is a
+#: zero result, which reads as "Wikidata holds nobody", as `_P_GND` says.
+_WIKIDATA_PROPERTY: Final = {
+    AuthorityScheme.GND: _P_GND,
+    AuthorityScheme.LCNAF: _P_LCNAF,
+}
+
+
+async def _item_for(candidate: AuthorityCandidate, deadline: float | None) -> str | None:
+    """The Wikidata item whose `P227` (GND) or `P244` (LCNAF) is this candidate's
+    number, found by Wikidata.
 
     **Not read from lobid's `sameAs`**, and that is the whole point of the second
     supplier: two independent assertions about one link can be compared, and one
@@ -503,11 +613,14 @@ async def _item_for(gnd: str, deadline: float | None) -> str | None:
     person. It is a hint for whoever is confirming and never a rule: see
     `AuthorityCandidate`.
     """
+    prop = _WIKIDATA_PROPERTY.get(candidate.scheme)
+    if prop is None:
+        return None
     body = await _wikidata(
         {
             "action": "query",
             "list": "search",
-            "srsearch": f"haswbstatement:{_P_GND}={gnd}",
+            "srsearch": f"haswbstatement:{prop}={candidate.identifier}",
             "srlimit": "1",
         },
         deadline,
@@ -1350,7 +1463,7 @@ async def _cross_check(
 
     Never raises. Wikidata is the cross check and not the supplier.
     """
-    item = await _item_for(candidate.identifier, deadline)
+    item = await _item_for(candidate, deadline)
     if item is None:
         return candidate
     description = await _description_of(item, deadline)
@@ -1393,8 +1506,37 @@ async def resolve(identifier: str, *, deadline: float | None = None) -> Authorit
     return await _cross_check(candidate, compare_references=True, deadline=deadline)
 
 
+async def resolve_stored(
+    stored: list[tuple[AuthorityScheme, str]], *, deadline: float | None = None
+) -> list[AuthorityCandidate]:
+    """The people this Library's stored identifiers name, at most `MAX_CANDIDATES`.
+
+    **The GND numbers where there are any, and the LCNAF numbers only where
+    there are none.** A GND record confirmed here arrives with its LCNAF number
+    as a cross reference, so asking both files would show one person twice and
+    pay a request for it. An LCNAF number stands alone only where a Member
+    confirmed a Library of Congress record, and then it is the one key there is.
+    A scheme neither file can be asked by is passed over rather than spent: it
+    used to take one of the five places and answer nothing.
+
+    **Certain**, as `resolve` is, and None is dropped: a number the file no
+    longer holds answers nothing rather than an error.
+    """
+    # `==` and not `is`: `AuthorIdentifier.scheme` is a `String` column, so a
+    # stored row hands back a plain `str` whatever its annotation says, and `is`
+    # matched no row at all.
+    gnd = [identifier for scheme, identifier in stored if scheme == AuthorityScheme.GND]
+    lcnaf = [identifier for scheme, identifier in stored if scheme == AuthorityScheme.LCNAF]
+    lookups = (
+        [resolve(identifier, deadline=deadline) for identifier in gnd[:MAX_CANDIDATES]]
+        if gnd
+        else [_naf_resolve(identifier, deadline) for identifier in lcnaf[:MAX_CANDIDATES]]
+    )
+    return [candidate for candidate in await asyncio.gather(*lookups) if candidate is not None]
+
+
 async def search(name: str, *, deadline: float | None = None) -> list[AuthorityCandidate]:
-    """The people an authority file holds under one name. A guess, every time.
+    """The people two authority files hold under one name. A guess, every time.
 
     **A name is not a key**, which is the entire reason the confirmation step
     exists, and it is demonstrated rather than asserted: `Stevenson, Robert
@@ -1402,16 +1544,40 @@ async def search(name: str, *, deadline: float | None = None) -> list[AuthorityC
     and nothing here writes: `POST /authors/identifiers` is where a Member says
     which one it is.
 
+    **lobid's people first, then the NAF's**, each file bounded by
+    `MAX_CANDIDATES`, and asked together rather than one after the other. A NAF
+    record whose number a GND record's `sameAs` already carries is the same
+    person and is dropped, because that is two files asserting the link rather
+    than two names looking alike. This adds a file; it does not decide which
+    file a search should trust first.
+
+    **One file failing costs its own people and no more.** The search raises
+    only where nobody was found and a file did not answer, because an empty
+    list then would say "nobody by that name" when the truth is "not asked".
+
     An empty or unusable name answers an empty list rather than putting a
     useless query to somebody else's service.
     """
-    query = _escaped(name.strip())
-    if not query:
+    query = name.strip()
+    if not _escaped(query):
         return []
+    gnd, naf = await asyncio.gather(
+        _gnd_people(query, deadline), _naf_people(query, deadline), return_exceptions=True
+    )
+    people = _merged(gnd, naf)
+    return list(
+        await asyncio.gather(
+            *(_cross_check(row, compare_references=False, deadline=deadline) for row in people)
+        )
+    )
+
+
+async def _gnd_people(query: str, deadline: float | None) -> list[AuthorityCandidate]:
+    """The people lobid holds under one name, at most `MAX_CANDIDATES`."""
     body = await _lobid(
         _LOBID_SEARCH_URL,
         params={
-            "q": query,
+            "q": _escaped(query),
             "filter": _PERSON_FILTER,
             "format": "json",
             "size": str(MAX_CANDIDATES),
@@ -1428,12 +1594,293 @@ async def search(name: str, *, deadline: float | None = None) -> list[AuthorityC
     # and the answer is somebody else's, so a service that ignored it would
     # otherwise decide how long this list is, and with it how many Wikidata
     # requests one member action makes.
-    kept = [row for row in found if row is not None][:MAX_CANDIDATES]
-    return list(
-        await asyncio.gather(
-            *(_cross_check(row, compare_references=False, deadline=deadline) for row in kept)
-        )
+    return [row for row in found if row is not None][:MAX_CANDIDATES]
+
+
+def _merged(
+    gnd: list[AuthorityCandidate] | BaseException, naf: list[AuthorityCandidate] | BaseException
+) -> list[AuthorityCandidate]:
+    """Both files' people as one list, lobid's first, the NAF's duplicates dropped.
+
+    **Only `AuthorityUnavailable` is a file not answering.** Anything else is a
+    defect, and it is raised rather than read as an outage, which would turn a
+    bug into a quiet empty list. A cancellation is one of those.
+    """
+    gnd_people, gnd_answered = _answered(gnd)
+    naf_people, naf_answered = _answered(naf)
+    if not naf_answered:
+        logger.info("The Library of Congress name authority file did not answer")
+    linked = {_matched(_LCNAF_URI, row.same_as) for row in gnd_people}
+    people = [*gnd_people, *(row for row in naf_people if row.identifier not in linked)]
+    if not people and not (gnd_answered and naf_answered):
+        raise AuthorityUnavailable
+    return people
+
+
+def _answered(
+    outcome: list[AuthorityCandidate] | BaseException,
+) -> tuple[list[AuthorityCandidate], bool]:
+    """One file's people and whether it answered; a defect raised, for the reason `_merged` gives."""
+    if isinstance(outcome, AuthorityUnavailable):
+        return [], False
+    if isinstance(outcome, BaseException):
+        raise outcome
+    return outcome, True
+
+
+def _catalogue_order(name: str) -> str:
+    """One name as the NAF heads it: surname first.
+
+    **The NAF's name index matches a heading's leading words, so reading order
+    finds nothing**: measured 2026-11-16, `Ursula Le Guin` answers 0 records and
+    `Le Guin, Ursula K` 429. A name holding a comma is taken as already in that
+    order, which is how a Member retyping the search (`q` on the route) reaches
+    a surname of two words; anything else has its last word moved to the front,
+    which is right for a surname of one word and wrong for `Le Guin`.
+    """
+    if "," in name:
+        return name
+    words = name.split()
+    if len(words) < 2:
+        return name
+    return f"{words[-1]}, {' '.join(words[:-1])}"
+
+
+def _cql_term(text: str) -> str:
+    """One string as the inside of a quoted CQL term, truncated before escaping
+    for the reason `_escaped` gives."""
+    return text[:MAX_QUERY_NAME].translate(_CQL_ESCAPED)
+
+
+async def _naf_people(query: str, deadline: float | None) -> list[AuthorityCandidate]:
+    """The people the NAF holds under one name, at most `MAX_CANDIDATES`."""
+    found = await _naf(
+        f'bath.personalName="{_cql_term(_catalogue_order(query))}"',
+        _NAF_PAGE,
+        certain=False,
+        deadline=deadline,
     )
+    return found[:MAX_CANDIDATES]
+
+
+def _lccn_query(identifier: str) -> str | None:
+    """A stored LCNAF number as the NAF's `bath.lccn` index matches it, or None.
+
+    **The stored form is unspaced and the index's is not**, so the number
+    cannot be put to it as it is: `n78088964` answers 0 records and
+    `n 78088964` answers the record. MARC pads the prefix to three characters
+    before eight digits and to two before ten, and the index collapses the
+    padding to one space. Measured 2026-11-16 over eleven numbers of all six
+    shapes the sample held (`n`, `no` with eight digits; `n`, `nb`, `no`, `nr`
+    with ten): every one came back as itself.
+    """
+    found = _LCCN.match(identifier)
+    if found is None:
+        return None
+    prefix, digits = found.groups()
+    width = 3 if len(digits) == 8 else 2
+    return f"{prefix} {digits}" if len(prefix) < width else f"{prefix}{digits}"
+
+
+async def _naf_resolve(identifier: str, deadline: float | None) -> AuthorityCandidate | None:
+    """The one person an LCNAF number names, or None if the file does not hold it.
+
+    Certain for the reason `resolve` is. Cross checked without the reference
+    comparison, which reads a GND record's `sameAs` and has nothing to read
+    here.
+    """
+    query = _lccn_query(identifier)
+    if query is None:
+        logger.info("Refused to resolve an identifier that is not an LCNAF number")
+        return None
+    found = await _naf(f'bath.lccn="{query}"', 1, certain=True, deadline=deadline)
+    for candidate in found:
+        if candidate.identifier == identifier:
+            return await _cross_check(candidate, compare_references=False, deadline=deadline)
+    return None
+
+
+class _ColdSession(AuthorityUnavailable):
+    """The NAF answered `_NAF_COLD_SESSION`, which is worth asking once more."""
+
+
+async def _naf(
+    query: str, maximum: int, *, certain: bool, deadline: float | None
+) -> list[AuthorityCandidate]:
+    """One NAF search, asked again once where the gateway's session was cold.
+
+    `AuthorityUnavailable` for anything else `_naf_read` refuses, and for one
+    cold answer following another.
+    """
+    params = {
+        "operation": "searchRetrieve",
+        "version": "1.1",
+        "recordSchema": "marcxml",
+        "maximumRecords": str(maximum),
+        "query": query,
+    }
+    try:
+        return _naf_read(await _naf_get(params, deadline), certain=certain)
+    except _ColdSession:
+        return _naf_read(await _naf_get(params, deadline), certain=certain)
+
+
+async def _naf_get(params: dict[str, str], deadline: float | None) -> fetch.Fetched:
+    """One bounded call to the NAF, or `AuthorityUnavailable`."""
+    try:
+        return await fetch.get_once(_NAF_URL, params=params, limit=_RESPONSE_LIMIT, deadline=deadline)
+    except Exception as failure:
+        raise AuthorityUnavailable from failure
+
+
+def _naf_read(response: fetch.Fetched, *, certain: bool = False) -> list[AuthorityCandidate]:
+    """The people one NAF response holds, or `AuthorityUnavailable`.
+
+    **The fourth door that turns outside XML into a tree**, on the terms the
+    other three keep: a document type declaration is refused before the parse,
+    for the reason `metadata.DOCTYPE` gives, the bytes are capped by
+    `_RESPONSE_LIMIT` before they arrive, and the tree is built through
+    `xml_parse`, which bounds the rest, within `ALLOCATION_FACTOR`. The gateway
+    is plaintext, so the body is whatever anybody on the path chose to send.
+
+    **A diagnostic is a refusal, never an empty answer.** The gateway answers
+    every error with HTTP 200 and a well formed envelope holding no records, so
+    reading one as "nobody" would put an outage in front of a Member as an
+    answer. `_ColdSession` is the one worth asking again.
+
+    **But people that parse win, and only the envelope's own diagnostics are
+    read**, the rule `metadata._sru_refusal` states and why: SRU lets a
+    diagnostic stand in for one record it could not render, and that says
+    nothing about the 24 beside it.
+    """
+    if response.status_code != 200:
+        raise AuthorityUnavailable
+    body = response.text
+    if metadata.DOCTYPE in body:
+        raise AuthorityUnavailable
+    parser = ElementTree.XMLParser(target=xml_parse.DepthBoundedTree())  # noqa: S314  doctype refused above, bytes capped, depth bounded
+    try:
+        root = xml_parse.fed(parser, body)
+    except ElementTree.ParseError as failure:
+        raise AuthorityUnavailable from failure
+    found = (_naf_person(node, certain=certain) for node in root.iter(marc_fields.RECORD_TAG))
+    people = [row for row in found if row is not None]
+    if not people:
+        _naf_refuse_on_diagnostic(root)
+    return people
+
+
+def _naf_refuse_on_diagnostic(root: ElementTree.Element) -> None:
+    """Raise where the envelope itself carries a diagnostic, a direct child of
+    the response; one inside `records` describes one record and is not read."""
+    diagnostic = root.find(f"{_SRU_DIAGNOSTICS}//{_SRU_DIAGNOSTIC_URI}")
+    if diagnostic is not None:
+        raise _ColdSession if diagnostic.text == _NAF_COLD_SESSION else AuthorityUnavailable
+
+
+#: Where the kind of record and the undifferentiated name flag sit in an
+#: authority record's `008`: `a` at 9 is an established heading rather than a
+#: reference, and `b` at 32 is a name the file could not tell apart from others.
+_KIND_OF_RECORD: Final = 9
+_UNDIFFERENTIATED: Final = 32
+
+#: Where a MARC21 leader says what kind of record it is: `z` is an authority.
+_RECORD_TYPE: Final = 6
+
+
+def _naf_person(node: ElementTree.Element, *, certain: bool) -> AuthorityCandidate | None:
+    """One MARC21 authority record as a candidate, or None where it is not a person.
+
+    **A person is an established, differentiated personal name heading with no
+    title in it**: a `100` without `$t` (a `$t` makes it a work, the name and
+    title records `_NAF_PAGE` is sized around), not a family (`100` first
+    indicator `3`), not a reference record, and not undifferentiated, which is
+    the record `_PERSON_FILTER` refuses on the GND side for the same reason. Of
+    the 329 records with a `100` sampled on 2026-11-16, 318 were name and title
+    records and the 11 people were all established and differentiated.
+
+    **Only an authority record, leader/06 `z`.** A bibliographic record's `008`
+    means something else at 9 and 32, so it would otherwise pass on whatever
+    those positions happen to hold. That is also why no carrier test is asked:
+    what reaches `Fields` here describes a person and never a book.
+
+    Dropped rather than raised, the call `_candidate` makes.
+    """
+    identifier = _naf_established(node)
+    if identifier is None:
+        return None
+    fields = marc_fields.Fields(node)
+    entry = _naf_personal_heading(node, fields)
+    if entry is None:
+        return None
+    name = strip_isbd_punctuation(entry.get("a", ""))
+    if not name:
+        return None
+    born, died = _naf_dates(fields)
+    return AuthorityCandidate(
+        scheme=AuthorityScheme.LCNAF,
+        identifier=identifier,
+        name=name,
+        variants=_naf_variants(fields, name),
+        born=born,
+        died=died,
+        certain=certain,
+    )
+
+
+def _naf_established(node: ElementTree.Element) -> str | None:
+    """The LCNAF number of an authority record for an established,
+    differentiated heading, or None."""
+    if node.findtext(f"{_MARC}leader", "")[_RECORD_TYPE : _RECORD_TYPE + 1] != "z":
+        return None
+    controls = _naf_controls(node)
+    identifier = "".join(controls.get("001", "").split())
+    fixed = controls.get("008", "")
+    if not _LCCN.match(identifier) or len(fixed) <= _UNDIFFERENTIATED:
+        return None
+    if fixed[_KIND_OF_RECORD] != "a" or fixed[_UNDIFFERENTIATED] == "b":
+        return None
+    return identifier
+
+
+def _naf_controls(node: ElementTree.Element) -> dict[str | None, str]:
+    """A record's control fields by tag, an empty one as the empty string."""
+    return {field.get("tag"): field.text or "" for field in node.findall(f"{_MARC}controlfield")}
+
+
+def _naf_personal_heading(
+    node: ElementTree.Element, fields: marc_fields.Fields
+) -> marc_fields.Subfields | None:
+    """The `100` of a single person with no title in it, or None: a family is
+    first indicator `3`, and a `$t` makes it a work."""
+    heading = node.find(f"{_MARC}datafield[@tag='100']")
+    if heading is None or heading.get("ind1") == "3":
+        return None
+    entry = fields.get("100")[0]
+    return None if "t" in entry else entry
+
+
+def _naf_dates(fields: marc_fields.Fields) -> tuple[str | None, str | None]:
+    """Birth and death as the `046` gives them, `$f` and `$g`."""
+    dates = fields.get("046")
+    if not dates:
+        return None, None
+    return dates[0].get("f"), dates[0].get("g")
+
+
+def _naf_variants(fields: marc_fields.Fields, name: str) -> tuple[str, ...]:
+    """The other personal names a NAF record lists, as `_variants` reads lobid's.
+
+    `400`, which is "see from" this name; one carrying `$t` names a work and is
+    left out with the `100` rule's reason. Repeats and the heading itself are
+    dropped, since `Stevenson, Robert Lui` arrives twice, once with dates.
+    """
+    seen: dict[str, None] = {}
+    for entry in fields.get("400"):
+        variant = strip_isbd_punctuation(entry.get("a", ""))
+        if variant and variant != name and "t" not in entry:
+            seen.setdefault(variant)
+    return tuple(seen)
 
 
 #: Where a Wikipedia article's URL may point, anchored at both ends.

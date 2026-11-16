@@ -274,7 +274,7 @@ def field_values() -> SearchStrategy[str]:
     )
 
 
-# ── MARC21, which three byte doors read ───────────────────────────────────────
+# ── MARC21 bibliographic records, which the upload and catalogue doors read ───
 
 
 def _marc_tags() -> list[str]:
@@ -474,8 +474,8 @@ class Answered[T]:
 #: What a byte door's first call on an input may spend on caches the process
 #: keeps, over what the same call costs warm, in bytes `tracemalloc` traces.
 #:
-#: **Measured, then given room**: over 620 `answer_of` calls through the three
-#: XML byte doors on the suite pod (`builder`, CPython 3.14.8), each door's test
+#: **Measured, then given room**: over 620 `answer_of` calls through the
+#: catalogue, upload and feed doors on the suite pod (`builder`, CPython 3.14.8), each door's test
 #: file in a fresh `pytest -n 0` process, a first call never spent more than
 #: 10,001 bytes over the second. A codec's module is not
 #: among those caches, because `TEXT_CODECS` imports every codec as this module
@@ -536,15 +536,15 @@ def answer_of[T](
     cost to a warm process. **The first is traced
     as well because a door keeping state per input reads as free on the
     second**: a memo on its parse, filled by the first call, leaves the second
-    nothing to allocate, and a builder plant that reds all three XML properties
-    passed with one, measured, while only the second call was traced.
+    nothing to allocate, and a builder plant that reds the catalogue, upload and
+    feed properties passed with one, measured, while only the second call was traced.
 
     **Logging is off for both calls.** A one past the bound catalogue response,
     refused and logged with its traceback, still peaked at 714,919 bytes on the
     suite's second call and passed on hypothesis's replay. The likely mechanism,
     not traced further, is the suite's capturing handler holding every record a
     run has logged in a list that reallocates in whichever call crosses its
-    capacity. **On the three XML byte doors here** logging is a constant: their
+    capacity. **On the XML byte doors here** logging is a constant: their
     logged arguments are bounded, and a refused lookup's traceback formatting
     measured about 32 KB whatever the response's size, under the floor. A door
     that logged part of its input would pay that per byte, and this helper

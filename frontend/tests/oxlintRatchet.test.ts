@@ -180,23 +180,33 @@ const TREES = treesTheScriptLints();
  * `outputOfFailedRun` and `parseReport` already refuse by name, so this adds a
  * bound and no new failure path.
  *
- * 10s is far above one invocation: this whole file, including every invocation
- * it makes, measures around a second on `builder` in a run of the file alone,
- * and over a second in some runs. **"Well under a second" is what stood here
- * and it was not true of one run in five.** No tighter figure is written: the
- * one that was moved with the arm count twice, and the bound does not turn on
- * it. What matters is the order, which is a second against a ten second bound
- * on a single invocation.
+ * 30s is two orders above one invocation. Measured on `builder`, four CPUs and
+ * four workers, 2026-11-16: the slowest call kind is the run over both trees,
+ * with or without denied rules, at 186 to 311ms alone and up to 404ms inside
+ * the full suite; `--print-config` takes 34 to 103ms and the three runs
+ * with flags 76 to 144ms. **The bound is a stated multiple of the worst of
+ * them**, about 74 times 404ms. That node is looser than the CI job's pod, which has the
+ * runner's two CPUs, so the figure is a floor for CI and the multiple is where
+ * the margin is.
+ *
+ * **The loaded node is the case that decided it.** Pipeline 3071330051 failed
+ * this arm at a 10s bound with "ETIMEDOUT" on a node whose after_script showed
+ * 130s of CPU stall: the arm took 10.9s, so one call took most of that, about
+ * 27 times the worst measured here, a stall rather than a wedge. 30s is nearly three times that
+ * call and still reports a call that never returns. It is a bound and not a
+ * retry: a retry would hide a real wedge, and a loaded node needs room, not a
+ * second attempt. "Well under a second" is what stood here once and was not
+ * true of one run in five, so no tighter figure is written beside this one.
  *
  * **The arm's budget is that plus 30s**, so that one wedged invocation is
  * reported by this bound rather than killed by vitest's default of 5s, and 30s
- * covers the rest of them at many times their measured cost. Before this the
- * arm ran on that default with **no margin written down anywhere**, which
+ * covers the rest of them (about 3s in all, measured) at many times their cost. Before this
+ * the arm ran on that default with **no margin written down anywhere**, which
  * passed and was not something anybody chose. A second invocation wedging in
  * the same run is reported by the budget instead, which is a poorer message for
  * a state one wedge already explains.
  */
-const LINTED = 10_000;
+const LINTED = 30_000;
 
 /**
  * The budget of the one arm that invokes oxlint, kept above `LINTED` so that the

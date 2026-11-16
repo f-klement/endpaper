@@ -1,7 +1,7 @@
 """Tests for backend/xml_parse.py: the depth and namespace bounds and what refusing costs.
 
-Each of the three byte doors that parse XML holds its own positive control at each
-bound, in its own file, through its own refusal. These are the builder's and the
+Each byte door that parses XML holds its own positive control at each bound, in its
+own file, through its own refusal. These are the builder's and the
 loop's, below any door.
 """
 

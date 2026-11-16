@@ -18,6 +18,7 @@ from database import engine
 from models import AuthorAlias, AuthorIdentifier, Book
 from schemas.author import MAX_BATCH_KEYS
 from tests.helpers import DNB, silence_catalogues, sru_response
+from tests.test_authority import NAF, NAF_RECORD
 
 AUTHORS = "/api/books/authors"
 
@@ -1225,6 +1226,35 @@ class TestWhatTheAuthorityFilesSay:
 
         assert res.status_code == 201
         assert res.json()["identifier"]["provenance"] == "member"
+
+
+class TestALibraryOfCongressRecordOnceConfirmed:
+    def test_resolves_as_the_one_certain_record(self, client, admin, make_book):
+        """An author confirmed by an LCNAF number alone, which a name search can
+        now offer, used to answer nothing at all on the next lookup: every
+        stored number was put to lobid, which refused this one unasked."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+        assert (
+            confirm(
+                client, admin["headers"], "Robert Louis Stevenson", "n78088964", scheme="lcnaf"
+            ).status_code
+            == 201
+        )
+
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=NAF).mock(
+                return_value=httpx.Response(200, text=NAF_RECORD, headers={"content-type": "text/xml"})
+            )
+            mock.get(url__startswith=WIKIDATA).mock(return_value=httpx.Response(200, json=WIKIDATA_NO_ITEM))
+            rows = client.get(
+                f"{AUTHORS}/authority",
+                params={"author": "Robert Louis Stevenson"},
+                headers=admin["headers"],
+            ).json()
+
+        assert [(row["scheme"], row["identifier"], row["certain"]) for row in rows] == [
+            ("lcnaf", "n78088964", True)
+        ]
 
 
 class TestSteeringTheAuthoritySearch:

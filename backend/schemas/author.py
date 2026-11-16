@@ -148,20 +148,20 @@ class AuthorityCandidateOut(BaseModel):
     scheme: AuthorityScheme
     identifier: str
     #: The authority's own spelling, which is the suggestion. In catalogue order
-    #: (`Stevenson, Robert Louis`), because that is how the GND writes a name.
+    #: (`Stevenson, Robert Louis`), because that is how both files write a name.
     name: str
     #: The authority's other spellings. Shown, and deliberately not written to
     #: `author_aliases`: an alias row is this Household's decision and this is a
     #: national library's list, and folding one into the other would turn a
     #: curated list into a generated one.
     variants: list[str] = Field(default_factory=list)
-    #: As the GND writes them, which is often partial (`1850`, `1850-11-13`) and
+    #: As the file writes them, which is often partial (`1850`, `1850-11-13`) and
     #: often absent. Strings rather than dates: nothing sorts or subtracts them.
     born: str | None = None
     died: str | None = None
-    #: Every cross reference the GND record lists. Recorded and shown, never
-    #: fetched. This is where a VIAF cluster id arrives without VIAF being
-    #: called.
+    #: Every cross reference a GND record lists, and none for an LCNAF record,
+    #: whose are not read. Recorded and shown, never fetched. This is where a
+    #: VIAF cluster id arrives without VIAF being called.
     same_as: list[str] = Field(default_factory=list)
     certain: bool = False
     wikidata_id: str | None = None

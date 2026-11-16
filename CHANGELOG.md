@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The author authority lookup also searches the Library of Congress name authority file,
+  listed after the GND's people, and an author confirmed by a Library of Congress number alone
+  now resolves to that person on the next lookup.
+
 ## v0.21.3
 
 _2026-11-11_

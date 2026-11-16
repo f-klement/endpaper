@@ -6264,7 +6264,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
     format, which is a finding on its own before it is a hole here.
     """
 
-    #: The one parse path that builds a `Fields` and asks nothing, by
+    #: The parse paths that build a `Fields` and ask nothing, by
     #: `<path>::<function>`, with the reason it is not the defect this class
     #: hunts.
     #:
@@ -6274,9 +6274,16 @@ class TestTheCarrierTestIsTheOnlyWayIn:
     #: about an object this app did not ask for, which is what the carrier test
     #: is for; a file was chosen by the person importing it.
     #:
+    #: `authority.py::_naf_person` builds a `Fields` only from an **authority**
+    #: record: it refuses any record whose leader/06 is not `z`, before the
+    #: `Fields`, and an authority record describes a person and never a book, so
+    #: "is this a book" has no answer there to ask for. It also refuses what it
+    #: does not read as a person: a heading carrying a title, a family, a
+    #: reference record.
+    #:
     #: `test_the_exemption_still_exists_to_be_exempted` is what stops this
     #: outliving its subject.
-    EXEMPT = frozenset({"marc.py::read"})
+    EXEMPT = frozenset({"marc.py::read", "authority.py::_naf_person"})
 
     @staticmethod
     def _functions(root: Path = BACKEND) -> dict[str, set[str]]:
@@ -6368,7 +6375,7 @@ class TestTheCarrierTestIsTheOnlyWayIn:
     def test_a_marc_parse_path_cannot_skip_the_carrier_test(self):
         """Reading a MARC record's fields obliges you to ask about its carrier.
 
-        One exemption, `EXEMPT` above, and outside it the correct answer is zero:
+        Two exemptions, `EXEMPT` above, and outside them the correct answer is zero:
         `Fields` exists to turn one record into book fields, and a caller doing
         that without asking whether it is a book is the defect.
 
@@ -6377,11 +6384,12 @@ class TestTheCarrierTestIsTheOnlyWayIn:
         this class was written; it was invisible while the parser was private to
         `metadata.py` and this walked that file alone. So the number went up
         because the walk widened, not because a path was added, and the number
-        that matters is that one of the three is exempt and two are not.
+        that matters is that one of the three is exempt and two are not. The
+        name authority file's reader is a fourth, and exempt.
         """
         functions = self._functions()
         readers = self._readers(functions)
-        assert len(readers) == 3, sorted(readers)
+        assert len(readers) == 4, sorted(readers)
         # **`_marc_lookup` needs both names and not either, and that is a
         # regression this guard shipped for one round.** A critic deleted the
         # carrier door from its ranking arm and all three checks in this class

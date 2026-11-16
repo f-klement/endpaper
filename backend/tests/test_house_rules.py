@@ -85,7 +85,7 @@ TREE_GUARDS = {
         "suite_modules",
     ),
     "TestOnlyTheLendingDeskNamesReturnedAt": ("application_sources",),
-    "TestOnlyThreeModulesTurnOutsideXmlIntoATree": ("shipped_modules",),
+    "TestOnlyTheNamedModulesTurnOutsideXmlIntoATree": ("shipped_modules",),
     "TestProvenanceColumnsAreNeverRead": (
         "application_modules",
         "application_sources",
@@ -9567,7 +9567,7 @@ _PARSERS_THE_LINTER_SEES = frozenset({"fromstring", "parse", "iterparse", "XMLPa
 #: The modules allowed to turn outside XML into a tree, each refusing a document
 #: type declaration first and capped on the bytes it reads. Every one says why in
 #: its own docstring.
-_MODULES_THAT_PARSE_XML = ("marc.py", "metadata.py", "opds.py")
+_MODULES_THAT_PARSE_XML = ("authority.py", "marc.py", "metadata.py", "opds.py")
 
 
 #: The module whose parse entry points this rule is about.
@@ -9642,21 +9642,22 @@ def _xml_parse_calls(source: str) -> list[tuple[int, str]]:
     return sorted(found)
 
 
-class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
-    """`S314` is suppressed at three sites, and this is what makes that honest.
+class TestOnlyTheNamedModulesTurnOutsideXmlIntoATree:
+    """`S314` is suppressed at one site in each module `_MODULES_THAT_PARSE_XML`
+    names, and this is what makes that honest.
 
-    Each of the three refuses a document type declaration before parsing and is
+    Each of them refuses a document type declaration before parsing and is
     capped on the bytes it reads, which is the work `defusedxml` would have been
     adopted for. The suppression is per site rather than per family so that a
-    **fourth** parse written without that refusal is loud: in any other module
-    the first arm below names it, and inside one of the three the linter
+    **further** parse written without that refusal is loud: in any other module
+    the first arm below names it, and inside one of them the linter
     reports it, while a site waiver copied onto it passes the linter and fails
     the hold the header of the lint configuration in `backend/pyproject.toml`
     describes.
 
     **That holds only while `S314` sees every spelling, and it does not.** So the
     first arm asks which modules parse, over every spelling including the three
-    the linter is blind to, and the second keeps the three honest modules using
+    the linter is blind to, and the second keeps the honest modules using
     only spellings it can report.
 
     **Importing `ElementTree` is not parsing, and is not what this reads.**
@@ -9675,8 +9676,8 @@ class TestOnlyThreeModulesTurnOutsideXmlIntoATree:
             if path.name in _MODULES_THAT_PARSE_XML and _xml_parse_calls(path.read_text())
         )
         assert parsing == sorted(_MODULES_THAT_PARSE_XML), (
-            f"the walk found parses in {parsing}, so it is not reading the three "
-            "modules this rule is about and would pass on a fourth."
+            f"the walk found parses in {parsing}, so it is not reading the "
+            "modules this rule is about and would pass on another."
         )
 
     def test_no_other_module_parses_xml_by_any_spelling(self) -> None:
@@ -9880,6 +9881,7 @@ def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
 _BYTE_DOORS: Final[dict[str, str]] = {
     "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
     "metadata.py::_parsed": ("tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"),
+    "authority.py::_naf_read": "tests/test_authority.py::TestANafAnswerIsReadOrRefusedByName",
     "opds.py::read_page": "tests/test_opds.py::TestAPageIsReadOrRefusedByName",
     "backup.py::read_manifest": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
     "backup.py::_manifest_bytes": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
@@ -9966,7 +9968,7 @@ class TestEveryByteDoorIsRegistered:
 
     def test_its_xml_half_is_the_xml_rules_population(self):
         """**Two resolvers of one fact**, asserted against each other: this
-        census's own and the one `TestOnlyThreeModulesTurnOutsideXmlIntoATree`
+        census's own and the one `TestOnlyTheNamedModulesTurnOutsideXmlIntoATree`
         holds. A narrowing in either **resolver** reds here. The name set, the
         corpus walk and the module tuple are shared, so a narrowing in any of
         those shrinks both sides together; the name set is held by that rule's
