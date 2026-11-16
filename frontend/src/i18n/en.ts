@@ -2140,6 +2140,8 @@ export const en = {
   "providers.name.bne": "Spanish National Library",
   "providers.name.bna": "Argentine National Library",
   "providers.name.bnu": "Uruguayan National Library",
+  "providers.name.bn_pl": "Polish National Library",
+  "providers.name.libris": "LIBRIS",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

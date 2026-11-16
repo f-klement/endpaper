@@ -725,7 +725,8 @@
           "bne",
           "ptbnp",
           "iccu",
-          "bnchl"
+          "bnchl",
+          "orcid"
         ],
         "title": "AuthorityScheme",
         "type": "string"
@@ -2817,7 +2818,7 @@
         "type": "object"
       },
       "CatalogueSource": {
-        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP, BNE, BNA and BNU are the other way round,\n**lookup only**, and for two different reasons. The NKP's, the BNA's and\nthe BNU's is the server's: each renders one populated record per response\nwhatever page size is asked for, so a search for ten candidates would be\nten requests. The\nBNE's is ours: its search works and nobody has measured what it would find,\nso it holds the conservative default. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.\n\n**Two members need a credential and are free**: the BNA and the BNU. What\nthat costs the roster's rules is on `sources.NEEDS_A_KEY`.",
+        "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP, BNE, BNA, BNU, BN_PL and LIBRIS are the other\nway round, **lookup only**, and for two different reasons. The NKP's, the\nBNA's and the BNU's is the server's: each renders one populated record per\nresponse whatever page size is asked for, so a search for ten candidates\nwould be ten requests. The BNE's, the BN_PL's and LIBRIS's is ours: nobody\nhas measured what a search at any of them would find, so each holds the\nconservative default. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.\n\n**Two members need a credential and are free**: the BNA and the BNU. What\nthat costs the roster's rules is on `sources.NEEDS_A_KEY`.",
         "enum": [
           "open_library",
           "google_books",
@@ -2830,7 +2831,9 @@
           "loc",
           "bne",
           "bna",
-          "bnu"
+          "bnu",
+          "bn_pl",
+          "libris"
         ],
         "title": "CatalogueSource",
         "type": "string"
@@ -6980,6 +6983,8 @@
           "bne",
           "bna",
           "bnu",
+          "bn_pl",
+          "libris",
           "manual",
           "file",
           "csv_import",
@@ -7673,7 +7678,7 @@
                 "items": {
                   "$ref": "#/components/schemas/CatalogueSourcePreference"
                 },
-                "maxItems": 12,
+                "maxItems": 14,
                 "type": "array"
               },
               {
@@ -9363,7 +9368,7 @@
     },
     "/api/books/authors/authority": {
       "get": {
-        "description": "What the authority files say about this author.\n\n**Two routes, and which one ran is on every row as `certain`.** Where this\nLibrary already holds a GND number for the author, from a catalogue record\nor a confirmation, or failing that a confirmed Library of Congress (LCNAF)\nnumber, that number is a key: it resolves to exactly one record, and the\nspelling on it is the suggestion this feature exists to offer. Where it\nholds neither, the author's name is put to a name search of both files, the\nGND's people first, and a name is not a key. Two people are spelled\n`Stevenson, Robert Louis` in the GND.\n\n**`q` steers that search and forces it.** Without it the query is the\nauthor's own display name, which is exactly wrong when the shelf spells\nsomebody in a form the GND does not use: the search then answers with the\nwrong people and there is no way to retype it. This is the one shape\ndecision worth making before a client exists, because a client built\nagainst the narrower version would have to change to gain it.\n\n**Nothing here writes, on either route.** A suggestion is offered and may be\noverruled, which was settled on 2026-08-24: suggest the authority's spelling\nand let it be overwritten, while storing the reference either way. Taking a\nsuggested spelling is `POST /authors/merge`, which already accepts a name\ntyped by hand. Confirming an identifier from a name search is\n`POST /authors/identifiers`, which records that a person chose it.\n\n**Nothing here is stored either**, and most of it has no column to be\nstored in. The dates and the one line description are there so somebody can\ntell two same named people apart while they decide.\n`docs/featurelist.md` refuses author biographies and portraits, and this is\nthe identity half of that line rather than an exception to it.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is.\n503 where an authority file could not be reached and the other found\nnobody: nothing in this feature is blocked by it, so the client can offer\n\"try again\" rather than an error page.",
+        "description": "What the authority files say about this author.\n\n**Two routes, and which one ran is on every row as `certain`.** Where this\nLibrary already holds a GND number for the author, from a catalogue record\nor a confirmation, or failing that a confirmed Library of Congress (LCNAF)\nnumber, or failing both a confirmed ORCID iD, that number is a key: it\nresolves to exactly one record, and the spelling on it is the suggestion\nthis feature exists to offer. Where it holds none, the author's name is put\nto a name search of the GND and the LCNAF, the GND's people first, and of\nORCID only where both find nobody. A name is not a key. Two people are\nspelled `Stevenson, Robert Louis` in the GND.\n\n**`q` steers that search and forces it.** Without it the query is the\nauthor's own display name, which is exactly wrong when the shelf spells\nsomebody in a form the GND does not use: the search then answers with the\nwrong people and there is no way to retype it. This is the one shape\ndecision worth making before a client exists, because a client built\nagainst the narrower version would have to change to gain it.\n\n**Nothing here writes, on either route.** A suggestion is offered and may be\noverruled, which was settled on 2026-08-24: suggest the authority's spelling\nand let it be overwritten, while storing the reference either way. Taking a\nsuggested spelling is `POST /authors/merge`, which already accepts a name\ntyped by hand. Confirming an identifier from a name search is\n`POST /authors/identifiers`, which records that a person chose it.\n\n**Nothing here is stored either**, and most of it has no column to be\nstored in. The dates and the one line description are there so somebody can\ntell two same named people apart while they decide.\n`docs/featurelist.md` refuses author biographies and portraits, and this is\nthe identity half of that line rather than an exception to it.\n\nAn author nobody can see is **404, not 403**, exactly as a private book is.\n503 where an authority file could not be reached and nobody was found:\nnothing in this feature is blocked by it, so the client can offer\n\"try again\" rather than an error page.",
         "operationId": "author_authority",
         "parameters": [
           {
@@ -9459,7 +9464,7 @@
     },
     "/api/books/authors/identifiers": {
       "post": {
-        "description": "Confirm that a candidate authority identifier is this author's.\n\n**This endpoint exists because a name is not a key.** An identifier belongs\nto a person, and only a member can say that this spelling is that person.\n\n**409, not 422, where the spelling already carries a different value**: the\nrequest is well formed and the state refuses it.\n\n**Confirming a GND number stores the cross references that came with it**,\nand the six national numbers, which cost the extra requests. A confirmation\nis up to eight outbound calls, which is why it is a deliberate action rather\nthan something a lookup does on the way past.\n\n**The cross references only for `gnd`.** An LCNAF record is stored as\nconfirmed and nothing else is read from it.\n\n**A cross reference colliding with a stored value is reported, not raised.**\nThe confirmation is already committed, so failing here would report a write\nthat happened as one that did not.",
+        "description": "Confirm that a candidate authority identifier is this author's.\n\n**This endpoint exists because a name is not a key.** An identifier belongs\nto a person, and only a member can say that this spelling is that person.\n\n**409, not 422, where the spelling already carries a different value**: the\nrequest is well formed and the state refuses it.\n\n**Confirming a GND number stores the cross references that came with it**,\nand the six national numbers, which cost the extra requests. A confirmation\nis up to eight outbound calls, which is why it is a deliberate action rather\nthan something a lookup does on the way past.\n\n**The cross references only for `gnd`.** An LCNAF or ORCID record is\nstored as confirmed and nothing else is read from it.\n\n**A cross reference colliding with a stored value is reported, not raised.**\nThe confirmation is already committed, so failing here would report a write\nthat happened as one that did not.",
         "operationId": "confirm_author_identifier",
         "requestBody": {
           "content": {
@@ -12777,7 +12782,7 @@
     },
     "/api/books/{book_id}/enrich": {
       "post": {
-        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain; then by\nthe book's own Google Books volume id, where it carries one and the library\nasks Google Books; and by title and author otherwise, which runs the ranked\nsearch. **Exact keys first, and the store identifier is an exact key**: a\nbook imported from Google Play Books carries a volume id and no ISBN, so\nwithout that middle step it is matched by its title, which is the weakest\ninstrument here. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds ten lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\n\n**It writes what a refresh writes, less the title.**\nCategories, the series, the Google Books volume id and Classifications\nneed a selected candidate through `enrich/apply`: this record was chosen by\nno Member. The volume id says which volume this book is, and a wrong one\nsilently drops the book out of the identifier backfill. The one exception\nis a record found by the book's own volume id and carrying that id, which\nrecords it, as the identifier backfill does.",
+        "description": "Fill in the fields a book is missing, from every catalogue available.\n\nMatched by ISBN when there is one, which runs the full merged chain; then by\nthe book's own Google Books volume id, where it carries one and the library\nasks Google Books; and by title and author otherwise, which runs the ranked\nsearch. **Exact keys first, and the store identifier is an exact key**: a\nbook imported from Google Play Books carries a volume id and no ISBN, so\nwithout that middle step it is matched by its title, which is the weakest\ninstrument here. **Which\ncatalogues either of those asks is the library's own provider list**, set\nin Settings: the roster holds twelve lookup sources that answer an ISBN and\neight search sources that answer a title, the leading pair is asked together\nand the rest one at a time, and a source switched off is not asked on either\npath. Google Books answers only when its own section is on and a key is in\nforce, so a library missing either asks one fewer on each path.\n\n**No API key is required.** This was Google-only and refused outright\nwithout a key, which made it useless for exactly the books the German and\nFrench catalogues were added for: a 978-3 ISBN that Google does not carry\nwould report \"no key\" rather than the full record the DNB was holding.\n\nOnly empty scalar fields are filled unless `overwrite` is set: enrichment\nadds what is missing, it does not overrule what somebody typed.\n\n**It writes what a refresh writes, less the title.**\nCategories, the series, the Google Books volume id and Classifications\nneed a selected candidate through `enrich/apply`: this record was chosen by\nno Member. The volume id says which volume this book is, and a wrong one\nsilently drops the book out of the identifier backfill. The one exception\nis a record found by the book's own volume id and carrying that id, which\nrecords it, as the identifier backfill does.",
         "operationId": "enrich_book",
         "parameters": [
           {

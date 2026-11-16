@@ -5,6 +5,19 @@
 - The author authority lookup also searches the Library of Congress name authority file,
   listed after the GND's people, and an author confirmed by a Library of Congress number alone
   now resolves to that person on the next lookup.
+- The author authority lookup asks ORCID for a name neither the German nor the Library of
+  Congress name authority file holds, and stores an ORCID iD a GND record links.
+- Confirming a GND number no longer stores an ISNI, Library of Congress number, VIAF cluster or
+  Wikidata item where the record links two different ones, rather than keeping the first.
+- Confirming a GND number whose record links two Wikidata items no longer stores the one
+  Wikidata's own lookup names, and the order the record lists two VIAF clusters, ISNIs or
+  Wikidata items in no longer changes what is compared or stored.
+- Book lookups also ask the Polish National Library about Polish ISBNs.
+- Book lookups also ask LIBRIS, the Swedish union catalogue, which holds Swedish books the other
+  free catalogues miss.
+- Book lookups ask the National Library of Greece before Open Library about Greek ISBNs, and the
+  Austrian National Library before the Czech and Spanish ones about German language ISBNs, so
+  those books are found with fewer requests.
 
 ## v0.21.3
 

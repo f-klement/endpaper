@@ -2700,11 +2700,12 @@ async def author_authority(
     **Two routes, and which one ran is on every row as `certain`.** Where this
     Library already holds a GND number for the author, from a catalogue record
     or a confirmation, or failing that a confirmed Library of Congress (LCNAF)
-    number, that number is a key: it resolves to exactly one record, and the
-    spelling on it is the suggestion this feature exists to offer. Where it
-    holds neither, the author's name is put to a name search of both files, the
-    GND's people first, and a name is not a key. Two people are spelled
-    `Stevenson, Robert Louis` in the GND.
+    number, or failing both a confirmed ORCID iD, that number is a key: it
+    resolves to exactly one record, and the spelling on it is the suggestion
+    this feature exists to offer. Where it holds none, the author's name is put
+    to a name search of the GND and the LCNAF, the GND's people first, and of
+    ORCID only where both find nobody. A name is not a key. Two people are
+    spelled `Stevenson, Robert Louis` in the GND.
 
     **`q` steers that search and forces it.** Without it the query is the
     author's own display name, which is exactly wrong when the shelf spells
@@ -2727,8 +2728,8 @@ async def author_authority(
     the identity half of that line rather than an exception to it.
 
     An author nobody can see is **404, not 403**, exactly as a private book is.
-    503 where an authority file could not be reached and the other found
-    nobody: nothing in this feature is blocked by it, so the client can offer
+    503 where an authority file could not be reached and nobody was found:
+    nothing in this feature is blocked by it, so the client can offer
     "try again" rather than an error page.
     """
     # Its own limiter, not the catalogues'. lobid publishes 30 complex searches
@@ -2841,8 +2842,8 @@ async def confirm_author_identifier(
     is up to eight outbound calls, which is why it is a deliberate action rather
     than something a lookup does on the way past.
 
-    **The cross references only for `gnd`.** An LCNAF record is stored as
-    confirmed and nothing else is read from it.
+    **The cross references only for `gnd`.** An LCNAF or ORCID record is
+    stored as confirmed and nothing else is read from it.
 
     **A cross reference colliding with a stored value is reported, not raised.**
     The confirmation is already committed, so failing here would report a write
@@ -6267,7 +6268,7 @@ async def enrich_book(
     without that middle step it is matched by its title, which is the weakest
     instrument here. **Which
     catalogues either of those asks is the library's own provider list**, set
-    in Settings: the roster holds ten lookup sources that answer an ISBN and
+    in Settings: the roster holds twelve lookup sources that answer an ISBN and
     eight search sources that answer a title, the leading pair is asked together
     and the rest one at a time, and a source switched off is not asked on either
     path. Google Books answers only when its own section is on and a key is in

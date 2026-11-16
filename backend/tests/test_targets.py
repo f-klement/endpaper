@@ -353,6 +353,8 @@ class TestTheQueryIsBuiltHereAndNowhereElse:
             "nlg": f"dc.isbn={isbn}",
             "nkp": f'@attr 1=7 "{isbn}"',
             "bne": f"alma.isbn={isbn}",
+            "bn_pl": f"alma.isbn={isbn}",
+            "libris": f"bath.isbn={isbn}",
             "bna": f'@attr 1=7 "{isbn}"',
             "bnu": f'@attr 1=7 "{isbn}"',
         }

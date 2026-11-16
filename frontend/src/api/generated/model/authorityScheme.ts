@@ -31,4 +31,5 @@ export const AuthorityScheme = {
   ptbnp: "ptbnp",
   iccu: "iccu",
   bnchl: "bnchl",
+  orcid: "orcid",
 } as const;

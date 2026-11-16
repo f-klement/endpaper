@@ -3692,7 +3692,7 @@ def highlight_visible_to(user_id: int) -> ColumnElement[bool]:
 #:
 #: **The number is the column's declared width**, so the bound and the
 #: declaration say the same thing rather than two things. Measured over the
-#: twelve seeded rows, the widest index name is `bib.anywhere` at 12 characters.
+#: fourteen seeded rows, the widest index name is `bib.anywhere` at 12 characters.
 TARGET_INDEX_MAX = 64
 
 #: The widest address a catalogue target may hold, in characters.

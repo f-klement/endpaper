@@ -42,9 +42,81 @@ SAMPLE = Path(__file__).parent / "fixtures" / "catalogue_survey_2026_08_31.json"
 #: is the same list, ordered the same way, and a new source joins both at once.
 SAMPLED = tuple(source.value for source in sources.MEASURED)
 
+#: Frames of 50 drawn for a remit the sample holds no ISBN of, one file each.
+#:
+#: **Beside the sample rather than in it**, because every figure in `sources`
+#: but `TAIL_MARGINAL` is stated over the ten frames, and an eleventh would move
+#: all of them for a rule that reads none of them. `TAIL_MARGINAL` reads both,
+#: and its docstring says why.
+FRAMES = sorted(SAMPLE.parent.glob("catalogue_frame_*.json"))
+
 
 def _sample() -> list[dict]:
     return json.loads(SAMPLE.read_text())
+
+
+def _frames() -> list[dict]:
+    return [row for path in FRAMES for row in json.loads(path.read_text())]
+
+
+def _tail_marginal(rows: list[dict]) -> dict[CatalogueSource, int]:
+    """What each tail source answers of the books the leading tier missed,
+    counting a source with a remit only on the ISBNs inside it.
+
+    Inside it because that is all it is asked about: the BN_PL's 3 answers in
+    the sample are all outside `978-83`, and no walk ever reaches it with one.
+    """
+    tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
+    missed = [row for row in rows if not any(row[name] == "found" for name in tier)]
+    return {
+        source: sum(
+            1
+            for row in missed
+            if row[source.value] == "found" and sources._serves(source, registration_group(row["isbn"]))
+        )
+        for source in sources.TAIL_MARGINAL
+    }
+
+
+def _tail_inside_remit(rows: list[dict]) -> dict[CatalogueSource, dict[CatalogueSource, int]]:
+    """For each remitted tail source, what it and each unremitted tail source
+    answer of the books the leading tier missed inside its remit."""
+    tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
+    missed = [row for row in rows if not any(row[name] == "found" for name in tier)]
+    tail = list(sources.TAIL_MARGINAL)
+    unremitted = [source for source in tail if source not in sources.SERVES_GROUPS]
+    table: dict[CatalogueSource, dict[CatalogueSource, int]] = {}
+    for remitted in (source for source in tail if source in sources.SERVES_GROUPS):
+        inside = [row for row in missed if sources._serves(remitted, registration_group(row["isbn"]))]
+        table[remitted] = {
+            source: sum(1 for row in inside if row[source.value] == "found")
+            for source in [remitted, *unremitted]
+        }
+    return table
+
+
+def _tail_by_the_rule(
+    tail: list[CatalogueSource],
+    marginal: dict[CatalogueSource, int],
+    inside: dict[CatalogueSource, dict[CatalogueSource, int]],
+) -> list[CatalogueSource]:
+    """The tail in the order `TAIL_MARGINAL`'s rule builds: unremitted rows by
+    `marginal`, each remitted row ahead of the first unremitted row it beats
+    on its own ISBNs, or last. A row is remitted here when `inside` has it.
+
+    Sorted stably, so rows the rule cannot tell apart keep the order `tail`
+    gives them.
+    """
+    by_marginal = sorted(tail, key=lambda source: -marginal[source])
+    unremitted = [source for source in by_marginal if source not in inside]
+    waiting = [source for source in by_marginal if source in inside]
+    order: list[CatalogueSource] = []
+    for source in unremitted:
+        beats = [row for row in waiting if inside[row][row] > inside[row][source]]
+        order.extend(beats)
+        waiting = [row for row in waiting if row not in beats]
+        order.append(source)
+    return order + waiting
 
 
 def _concentration_of(rows: list[dict], name: str) -> float:
@@ -83,8 +155,9 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
     re-running the probe, not running this suite.
 
     **The file is not one run any more, and its name says one date.** Every column
-    but `bne` is the 2026-08-31 pass; `bne` and `seconds_bne` are a 2026-09-05 pass
-    over the same 500 books. The coverage counts stay comparable, because those are
+    but four is the 2026-08-31 pass; `bne` is a 2026-09-05 pass over the same 500
+    books, `bnu` a 2026-11-07 one and `bn_pl` and `libris` 2026-11-16 ones, each
+    with its `seconds_` column. The coverage counts stay comparable, because those are
     a property of the books rather than of the day. `p90_seconds` is not comparable
     across the two dates in the way `Measured` promises within one, and
     `sources.MEASURED` says so at the row rather than leaving it here.
@@ -149,15 +222,49 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             assert per_frame, source
             assert row.largest_frame == max(per_frame.values()), source
 
-    def test_the_marginal_table_matches_the_sample(self):
+    def test_the_marginal_table_matches_the_sample_and_the_frames(self):
         """`TAIL_MARGINAL` counts books the leading tier missed, which is the
         one figure the tail's order rests on and no per source count holds."""
-        rows = _sample()
+        assert _tail_marginal(_sample() + _frames()) == sources.TAIL_MARGINAL
+
+    def test_the_inside_remit_table_matches_the_sample_and_the_frames(self):
+        """`TAIL_INSIDE_REMIT` is the other figure the tail's order rests on,
+        each remitted row against each unremitted one on the remitted row's
+        ISBNs."""
+        assert _tail_inside_remit(_sample() + _frames()) == sources.TAIL_INSIDE_REMIT
+
+    def test_each_frame_is_a_frame_the_sample_does_not_hold(self):
+        """A frame is fifty domestic ISBNs, the sample's own shape, and holds no
+        book the sample does. A frame for a country the sample already has, or
+        one sharing a book with it, counts that book twice in `TAIL_MARGINAL`
+        and nothing else notices."""
+        assert FRAMES, "no frame committed, so every assertion below is about nothing"
+        sample = _sample()
+        held = {row["isbn"] for row in sample}
+        named = {row["frame"] for row in sample}
         tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
-        missed = [entry for entry in rows if not any(entry[name] == "found" for name in tier)]
-        for source, stated in sources.TAIL_MARGINAL.items():
-            answered = sum(1 for entry in missed if entry[source.value] == "found")
-            assert stated == answered, source
+        for path in FRAMES:
+            rows = json.loads(path.read_text())
+            assert len(rows) == 50, path.name
+            assert len({row["isbn"] for row in rows}) == 50, path.name
+            assert len({row["frame"] for row in rows} - named) == 1, path.name
+            assert not {row["isbn"] for row in rows} & held, path.name
+            for name in tier + [source.value for source in sources.TAIL_MARGINAL]:
+                assert all(row[name] in ("found", "not_found") for row in rows), (path.name, name)
+
+    def test_every_remitted_tail_source_is_counted_on_its_own_isbns(self):
+        """**The owner's rule of 2026-11-16, enforced rather than stated**: a
+        source with a remit is ranked by what it adds on the ISBNs inside it, so
+        those ISBNs have to be in what `TAIL_MARGINAL` counts. The sample holds
+        Greek and German language frames and no Polish one, which is why the
+        Polish frame is committed. Without this, a remit row added with no frame
+        for its groups would count zero, sort last and pass every other test."""
+        rows = _sample() + _frames()
+        remitted = [source for source in sources.TAIL_MARGINAL if source in sources.SERVES_GROUPS]
+        assert remitted, "no remitted source in the tail, so this asserts nothing"
+        for source in remitted:
+            inside = [row for row in rows if sources._serves(source, registration_group(row["isbn"]))]
+            assert inside, source
 
     def test_the_union_table_matches_the_sample(self):
         """Recomputed the way it was produced: the best tier of each size that
@@ -180,24 +287,41 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             assert sources.TIER_UNION[size] == answered, size
 
     def test_the_tail_marginal_the_order_rests_on_recomputes(self):
-        """`DEFAULT_ORDER` orders the tail on 82, 42, 40, 34 and 1, which is the
-        one figure in that docstring no per source table can hold.
+        """`TAIL_MARGINAL` reads 34, 30, 86, 1, 42, 40 and 6, the sample's
+        figures plus the Polish frame's, which its docstring gives one source
+        at a time.
 
-        **The pooled counts say the opposite about four of the five**, which is
-        why this is spelled out here as well as in `TAIL_MARGINAL`: 237, 59, 57,
-        37 and 55 would put the OeNB ahead of all three national catalogues and
-        the NKP ahead of the BNE by two books where the margin that decides is
-        two the other way.
+        The pooled counts order the tail differently, and that sentence of the
+        docstring is pinned at the end here.
         """
-        rows = _sample()
         tier = [source.value for source in sources.DEFAULT_PLAN.lookup_together]
-        missed = [entry for entry in rows if not any(entry[name] == "found" for name in tier)]
-        assert len(missed) == 278
-        assert sum(1 for entry in missed if entry["open_library"] == "found") == 82
-        assert sum(1 for entry in missed if entry["nkp"] == "found") == 42
-        assert sum(1 for entry in missed if entry["bne"] == "found") == 40
-        assert sum(1 for entry in missed if entry["nlg"] == "found") == 34
-        assert sum(1 for entry in missed if entry["oenb"] == "found") == 1
+        sample = _tail_marginal(_sample())
+        frames = _tail_marginal(_frames())
+        assert sum(1 for row in _sample() if not any(row[name] == "found" for name in tier)) == 278
+        assert sum(1 for row in _frames() if not any(row[name] == "found" for name in tier)) == 39
+        assert sample == {
+            CatalogueSource.OPEN_LIBRARY: 82,
+            CatalogueSource.NKP: 42,
+            CatalogueSource.BNE: 40,
+            CatalogueSource.NLG: 34,
+            CatalogueSource.BN_PL: 0,
+            CatalogueSource.LIBRIS: 6,
+            CatalogueSource.OENB: 1,
+        }
+        assert frames == {
+            CatalogueSource.OPEN_LIBRARY: 4,
+            CatalogueSource.NKP: 0,
+            CatalogueSource.BNE: 0,
+            CatalogueSource.NLG: 0,
+            CatalogueSource.BN_PL: 30,
+            CatalogueSource.LIBRIS: 0,
+            CatalogueSource.OENB: 0,
+        }
+        # "The pooled rule would ask LIBRIS second and the OeNB ahead of the
+        # NLG": `MEASURED.answered` ranks the same seven that way.
+        pooled = sorted(sources.TAIL_MARGINAL, key=lambda source: -sources.MEASURED[source].answered)
+        assert pooled.index(CatalogueSource.LIBRIS) == 1
+        assert pooled.index(CatalogueSource.OENB) < pooled.index(CatalogueSource.NLG)
 
 
 class TestTheOrderFollowsTheMeasurement:
@@ -621,14 +745,32 @@ class TestTheOrderFollowsTheMeasurement:
         agreed while the tail was Open Library and the OeNB, and the NLG is the
         roster this class disclosed as the one where they come apart: pooled it
         answers 37 against the OeNB's 55, marginally it answers 34 against 1.
+
+        **A remitted row against an unremitted one is compared on the remitted
+        row's ISBNs alone**, the owner's ruling of 2026-11-16, which puts the
+        NLG and the BN_PL ahead of Open Library and the OeNB ahead of the NKP.
+        The rule and its tie break are in `TAIL_MARGINAL`'s docstring.
         """
         measured = [
             source for source in sources.DEFAULT_PLAN.lookup_in_turn(None) if source in sources.TAIL_MARGINAL
         ]
         # Or the ordering assertion below is a statement about one element.
         assert len(measured) >= 2
-        marginals = [sources.TAIL_MARGINAL[source] for source in measured]
-        assert marginals == sorted(marginals, reverse=True)
+        # Or the rule's remitted arm is never exercised.
+        assert sources.TAIL_INSIDE_REMIT
+        assert measured == _tail_by_the_rule(measured, sources.TAIL_MARGINAL, sources.TAIL_INSIDE_REMIT)
+
+    def test_a_remitted_row_goes_ahead_of_the_first_unremitted_row_it_beats(self):
+        """The tie break, pinned on a table built to need it. Pairwise, the
+        remitted row R beats A on its own ISBNs and loses to B, while A comes
+        before B: both R, A, B and A, B, R satisfy every adjacent comparison.
+        The rule takes the first. On equal counts R does not beat a row."""
+        r, a, b = CatalogueSource.NLG, CatalogueSource.OPEN_LIBRARY, CatalogueSource.NKP
+        marginal = {r: 1, a: 50, b: 40}
+
+        assert _tail_by_the_rule([a, b, r], marginal, {r: {r: 5, a: 2, b: 9}}) == [r, a, b]
+        assert _tail_by_the_rule([r, a, b], marginal, {r: {r: 5, a: 5, b: 3}}) == [a, r, b]
+        assert _tail_by_the_rule([r, a, b], marginal, {r: {r: 0, a: 1, b: 1}}) == [a, b, r]
 
     def test_a_source_the_sample_never_measured_sorts_between_the_two_rules(self):
         """`DEFAULT_ORDER`'s rule for a source `MEASURED` cannot rank, enforced.
@@ -707,7 +849,7 @@ class TestAStoredRowAlwaysResolvesToTheWholeRoster:
         assert sources.parse({"sources": "dnb"}) == sources.DEFAULT_PLAN
 
     def test_an_unknown_source_is_dropped_rather_than_raising(self):
-        plan = sources.parse({"sources": [{"source": "libris", "enabled": True}]})
+        plan = sources.parse({"sources": [{"source": "bibsys", "enabled": True}]})
         assert self._roster(plan) == list(sources.DEFAULT_ORDER)
 
     def test_a_repeated_source_is_counted_once(self):
@@ -755,7 +897,7 @@ class TestAStoredRowAlwaysResolvesToTheWholeRoster:
 
     def test_an_entry_after_every_source_is_named_changes_nothing(self):
         named = [{"source": source.value, "enabled": False} for source in sources.DEFAULT_ORDER]
-        plan = sources.parse({"sources": [*named, {"source": "libris", "enabled": True}]})
+        plan = sources.parse({"sources": [*named, {"source": "bibsys", "enabled": True}]})
         assert plan.asked == ()
 
     def test_a_stored_row_survives_a_round_trip(self):
@@ -1223,14 +1365,14 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         tier, tail = _free_plan_names()
         before = sum(_walk(row, tier, tail)[1] for row in rows)
         after = sum(_walk(row, tier, _served_tail(tail, row))[1] for row in rows)
-        assert before == after == 395
+        assert before == after == 396
 
     def test_the_uruguayan_figures_the_prose_states_recompute_from_its_column(self):
         """`metadata`'s block for the BNU, `sources`' stock install paragraph and
         `docs/api.md` state these: 26 found, all in the Uruguayan frame, 8 that
         none of the sources needing no credential holds, and that frame going
-        from 35 of 50 to 43. The 395 plus the 8 is the 403 that the Argentine
-        catalogue's 4, measured once and held by no column, takes to 407."""
+        from 35 of 50 to 43. The 396 plus the 8 is the 404 that the Argentine
+        catalogue's 4, measured once and held by no column, takes to 408."""
         rows = _sample()
         found = [row for row in rows if row[CatalogueSource.BNU.value] == "found"]
         free = [row for row in rows if any(row[name] == "found" for name in SAMPLED)]
@@ -1240,11 +1382,11 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         assert sum(row not in free for row in found) == 8
         assert sum(row in free for row in uruguayan) == 35
         assert sum(row in free or row in found for row in uruguayan) == 43
-        assert sum(row in free or row in found for row in rows) == 403
+        assert sum(row in free or row in found for row in rows) == 404
 
     def test_the_saving_the_constant_claims_recomputes(self):
-        """`SERVES_GROUPS` states 1.435s becoming 1.336s and 872 tail requests
-        becoming 673. A number written in prose stops being re-derived and starts
+        """`SERVES_GROUPS` states 1.590s becoming 1.272s and 1,316 tail requests
+        becoming 684. A number written in prose stops being re-derived and starts
         being copied."""
         rows = _sample()
         tier, tail = _free_plan_names()
@@ -1267,28 +1409,23 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         # refuses it, which is correct about the types and wrong about the test.
         plain_seconds, plain_requests = totals(False)
         served_seconds, served_requests = totals(True)
-        assert plain_seconds == pytest.approx(1.435, abs=0.001)
-        assert plain_requests == 872
-        assert served_seconds == pytest.approx(1.336, abs=0.001)
-        assert served_requests == 673
+        assert plain_seconds == pytest.approx(1.590, abs=0.001)
+        assert plain_requests == 1316
+        assert served_seconds == pytest.approx(1.272, abs=0.001)
+        assert served_requests == 684
 
-    def test_ordering_alone_saves_almost_nothing(self):
+    def test_skipping_saves_what_demoting_cannot(self):
         """**Why the rule skips rather than demotes**, which is the design this
         constant was written against and is the one a reader will propose first
         because it cannot lose a book.
 
         Moving a source that cannot answer to the back of the tail models at
-        1.4342s against 1.4346s: four tenths of a millisecond. The tail stops at the first
-        hit, so a dead source ahead of the answerer is only paid when something
-        behind it answers, and on the rows where nothing answers every source is
-        asked whatever the order. The saving is the failed lookups, and ordering
-        cannot reach them.
-
-        **Three decimals are not enough here and that is the point of the
-        fourth.** Demotion measured 1.385s when it was first tried, which is a
-        small saving rather than none, and that run had the NKP in the table too.
-        Rounded to three places the two runs would both read 1.385 and 1.396 and
-        look like one measurement.
+        1.4222s, against 1.5898s asking everything in order and 1.2724s
+        skipping. Demotion recovers what a dead source costs ahead of the
+        answerer, which is large now that the NLG and the BN_PL head the tail.
+        What it cannot recover is the failed lookups: on a row nothing answers
+        every source is asked whatever the order, and the 0.150s between the
+        last two figures is that.
         """
         rows = _sample()
         tier, tail = _free_plan_names()
@@ -1299,9 +1436,11 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
 
         mean = sum(_walk(row, tier, demoted(row))[0] for row in rows) / len(rows)
         plain = sum(_walk(row, tier, tail)[0] for row in rows) / len(rows)
-        assert mean == pytest.approx(1.4342, abs=0.0001)
-        assert plain == pytest.approx(1.4346, abs=0.0001)
-        assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 395
+        skipped = sum(_walk(row, tier, _served_tail(tail, row))[0] for row in rows) / len(rows)
+        assert mean == pytest.approx(1.4222, abs=0.0001)
+        assert plain == pytest.approx(1.5898, abs=0.0001)
+        assert skipped == pytest.approx(1.2724, abs=0.0001)
+        assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 396
 
     def test_an_unrestricted_source_is_asked_about_every_isbn(self):
         for group in ("978-3", "978-960", "978-80", None):
@@ -1442,7 +1581,7 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         two source plan would pass whatever the rule did. Here the NLG is the
         first source past the tier, which is where the rule reaches it.
         """
-        kept = ("k10plus", "open_library", "nlg")
+        kept = ("dnb", "k10plus", "nlg")
         assert len(kept) == sources.ALWAYS_ASKED + 1
         plan = sources.parse(
             {
@@ -1453,8 +1592,8 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
             }
         )
         assert plan.lookup_together == (
+            CatalogueSource.DNB,
             CatalogueSource.K10PLUS,
-            CatalogueSource.OPEN_LIBRARY,
         )
         assert plan.lookup_in_turn("978-960") == (CatalogueSource.NLG,)
         assert plan.lookup_in_turn("978-618") == (CatalogueSource.NLG,)

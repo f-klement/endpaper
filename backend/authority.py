@@ -1,6 +1,6 @@
 """The authority files, read for a person rather than for a book.
 
-`metadata.py` asks catalogues about **books**; this module asks four authority
+`metadata.py` asks catalogues about **books**; this module asks five authority
 files about **people**. A book record describes a printing and dies with it; an
 authority record describes somebody who outlives every printing.
 
@@ -36,6 +36,14 @@ the Library of Congress catalogue, so it is a database name on a connection that
 exists rather than a new host. What its index can and cannot find is on
 `_NAF_PAGE`.
 
+**ORCID is the last file, and it is asked only for a name the two before it
+both answered with nobody.** It is a researcher's own registration rather than a
+national file, so it is strong where both national files are thin and empty
+for the novelist and the long dead author a household shelf holds. A miss there
+then costs one request on a name nothing else could answer. Its people arrive
+under its own scheme, never as an ISNI: why the two are never compared is on
+`_ORCID_URI`.
+
 ## Why VIAF is not a supplier
 
 **Half of its read API answers, and which half depends on the `Accept` header
@@ -50,6 +58,7 @@ which is why the finding is recorded here rather than left to be rediscovered.
 reason it stays out of the resolution path.
 **The Library of Congress gateway** states no terms in its responses either; it
 is the same gateway, under the same footing, as the catalogue search.
+**ORCID**'s public terms and limits are on `_ORCID_SEARCH_URL`.
 
 ## The refusal this module is built around
 
@@ -59,8 +68,9 @@ authority file can only ever attach a number to it.
 
 ## The boundary
 
-Every catalogue source's, plus lobid and Wikidata. The NAF adds none: it is the
-Library of Congress catalogue's gateway, over the same plaintext HTTP. **No cover
+Every catalogue source's, plus lobid, Wikidata and `pub.orcid.org`. The NAF
+adds none: it is the Library of Congress catalogue's gateway, over the same
+plaintext HTTP. **No cover
 host is added and none could be**: `covers.COVER_HOSTS` is what the CSP is
 derived from, so a host added here would widen what the browser may load.
 """
@@ -141,6 +151,25 @@ _LCNAF_URI: Final = re.compile(
     r"\Ahttps?://id\.loc\.gov/(?:rwo/agents|authorities/names)/(n[a-z]?[0-9]{6,10})\Z"
 )
 
+#: An ORCID iD as ORCID writes it and this app stores it: four groups of four,
+#: hyphenated, an `X` allowed as the ISO 7064 check character. The URI's own
+#: form, for the reason `_ISNI_URI` stores the URI's form of an ISNI.
+_ORCID_DIGITS: Final = r"[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]"
+_ORCID_ID: Final = re.compile(rf"\A{_ORCID_DIGITS}\Z")
+
+#: Where an ORCID iD sits inside the URI lobid records for it.
+#:
+#: **ORCID and ISNI share one numbering space and are never compared**, because
+#: they never number one person with the same digits. ISNI reserved a block for
+#: ORCID to mint from (`0000-0001-5000-0007` to `0000-0003-5000-0001`, and
+#: `0009-0000-0000-0000` to `0009-0010-0000-0000` since), and assigns nothing
+#: in it itself. So a person holding both holds two different numbers, which is
+#: two schemes each saying one thing rather than a disagreement, and
+#: `AuthorOut.identifier_conflicts` compares within a scheme only. Measured
+#: 2026-11-16 over the first 200 GND records lobid returned carrying both: no
+#: ORCID equalled the ISNI beside it and no ISNI fell inside ORCID's block.
+_ORCID_URI: Final = re.compile(rf"\Ahttps?://orcid\.org/({_ORCID_DIGITS})\Z")
+
 #: The Library of Congress Name Authority File, over SRU 1.1.
 #:
 #: **The catalogue's own gateway with another database name**: `lcdb` is the
@@ -153,6 +182,9 @@ _NAF_URL: Final = "http://lx2.loc.gov:210/NAF"
 #: The Wikidata property holding an LCNAF number, unspaced (`n78088964`): the
 #: form `_LCNAF_URI` reads and `author_identifiers` stores.
 _P_LCNAF: Final = "P244"
+
+#: The Wikidata property holding an ORCID iD, hyphenated as `_ORCID_ID` reads it.
+_P_ORCID: Final = "P496"
 
 #: An LCNAF number as this app stores it: the prefix, then eight digits for a
 #: record made before 2001 or ten after. Anchored, because it goes into a query.
@@ -270,6 +302,7 @@ MAX_CANDIDATES: Final = 5
 #: | a `haswbstatement` search | 606 | 606 |
 #: | labels and descriptions | 341 | 341 |
 #: | a NAF page, `_NAF_PAGE` records | (none) | 24,221 to 80,603, on 2026-11-16 |
+#: | an ORCID search, `MAX_CANDIDATES` rows | (none) | 284 to 1,037, on 2026-11-16 |
 #:
 #: **The search is the binding case and it is asked for at `MAX_CANDIDATES`,
 #: which is five, not three.** Its size is driven by the five records rather
@@ -322,6 +355,9 @@ _RESPONSE_LIMIT: Final = 262_144
 #: search runs beside it, so the slower of the two counts: a NAF page measured
 #: 0.49 to 0.85s on 2026-11-16, two in sequence when the session is cold, then
 #: two Wikidata calls at most 0.29s each. So about **1.4s**, and **2.3s** cold.
+#: **ORCID adds one request after the pair, on a miss only**: 0.16 to 0.36s on
+#: 2026-11-16, so a name neither national file holds is about **1.8s**, and
+#: **2.7s** cold.
 #:
 #: **A confirmation is the longer path and the figure above is not it.** It is
 #: one resolve plus `national_identifiers`, whose three VIAF calls measured 0.56,
@@ -433,7 +469,8 @@ class AuthorityCandidate:
 
     `born` and `died` are the dates as the file writes them, which is a partial
     date on many records (`1850-11-13`, or `1850`, or absent): the GND's
-    `dateOfBirth`, and the NAF's `046 $f` and `$g`, which are EDTF. Kept as strings
+    `dateOfBirth`, and the NAF's `046 $f` and `$g`, which are EDTF; ORCID
+    carries neither. Kept as strings
     rather than parsed: nothing here sorts or subtracts them, and parsing would
     turn a record with `XXXX` in it into an error instead of a hint.
 
@@ -449,7 +486,7 @@ class AuthorityCandidate:
     died: str | None = None
     #: Every cross reference the GND record lists, as URIs. Recorded, shown,
     #: never fetched. This is where the VIAF cluster id arrives. Empty for an
-    #: LCNAF candidate, whose cross references are not read.
+    #: LCNAF or ORCID candidate, whose cross references are not read.
     same_as: tuple[str, ...] = ()
     certain: bool = False
     #: The Wikidata item, from Wikidata's own reverse lookup rather than from
@@ -550,13 +587,14 @@ def _web_links(record: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
-def _matched(pattern: re.Pattern[str], uris: tuple[str, ...]) -> str | None:
-    """The first id one of these URIs carries, or None if none does."""
-    for uri in uris:
-        found = pattern.match(uri)
-        if found is not None:
-            return found.group(1)
-    return None
+def _linked(pattern: re.Pattern[str], uris: tuple[str, ...]) -> frozenset[str]:
+    """Every id these URIs carry for one scheme, whatever their order.
+
+    **A set, and there is deliberately no reader of the first.** Which one a
+    record lists first is lobid's serialisation, not a claim, so every reading
+    of a record's cross references goes through this or through `_sole`.
+    """
+    return frozenset(found.group(1) for uri in uris if (found := pattern.match(uri)) is not None)
 
 
 async def _wikidata(params: dict[str, str], deadline: float | None) -> Any:
@@ -598,12 +636,13 @@ def _reached(body: dict[str, Any], *path: str) -> Any:
 _WIKIDATA_PROPERTY: Final = {
     AuthorityScheme.GND: _P_GND,
     AuthorityScheme.LCNAF: _P_LCNAF,
+    AuthorityScheme.ORCID: _P_ORCID,
 }
 
 
 async def _item_for(candidate: AuthorityCandidate, deadline: float | None) -> str | None:
-    """The Wikidata item whose `P227` (GND) or `P244` (LCNAF) is this candidate's
-    number, found by Wikidata.
+    """The Wikidata item whose `P227` (GND), `P244` (LCNAF) or `P496` (ORCID) is
+    this candidate's number, found by Wikidata.
 
     **Not read from lobid's `sameAs`**, and that is the whole point of the second
     supplier: two independent assertions about one link can be compared, and one
@@ -780,11 +819,19 @@ def _disagreements(
 def _disagreement(
     candidate: AuthorityCandidate, about: AuthorityScheme, pattern: re.Pattern[str], wikidata: str | None
 ) -> Disagreement | None:
-    """One comparison of `_disagreements`, or None where the two agree or either is silent."""
-    lobid = _matched(pattern, candidate.same_as)
-    if lobid is not None and wikidata is not None and lobid != wikidata:
-        return Disagreement(about=about.value, lobid=lobid, wikidata=wikidata)
-    return None
+    """One comparison of `_disagreements`, or None where the two agree or either is silent.
+
+    **The two agree only where the record links exactly one value and it is
+    Wikidata's**, the rule `_sole` states for storage. A record linking two,
+    one of them Wikidata's, is contested rather than settled by Wikidata
+    naming one: picking that one would be precedence, and `cross_references`
+    then stores neither, in either order. `lobid` is None in that row because
+    the record names no single value; every one stays in `same_as`.
+    """
+    linked = _linked(pattern, candidate.same_as)
+    if not linked or wikidata is None or linked == {wikidata}:
+        return None
+    return Disagreement(about=about.value, lobid=_sole(pattern, candidate.same_as), wikidata=wikidata)
 
 
 #: Which `sameAs` URI carries which scheme's identifier.
@@ -794,7 +841,7 @@ def _disagreement(
 #: one place beside `AuthorityScheme`.
 #:
 #: **Not every member of `AuthorityScheme` is here, and that is the split
-#: between the two writers.** These four arrive in a `sameAs` block for free;
+#: between the two writers.** These five arrive in a `sameAs` block for free;
 #: the six national files arrive only from a VIAF cluster and are listed in
 #: `_NATIONAL_SOURCES`. A scheme in neither is a member nothing writes.
 _CROSS_REFERENCE_URIS: Final = {
@@ -802,6 +849,7 @@ _CROSS_REFERENCE_URIS: Final = {
     AuthorityScheme.LCNAF: _LCNAF_URI,
     AuthorityScheme.VIAF: _VIAF_URI,
     AuthorityScheme.WIKIDATA: _ITEM_URI,
+    AuthorityScheme.ORCID: _ORCID_URI,
 }
 
 
@@ -832,19 +880,45 @@ def cross_references(candidate: AuthorityCandidate) -> dict[AuthorityScheme, str
     and an assertion a service makes about itself beats one another service
     makes about it. Where the reverse lookup found nothing, lobid's `sameAs` is
     used: one file saying so is better than no record at all, and the two cannot
-    be in conflict when only one has spoken.
+    be in conflict when only one has spoken. A record linking several items,
+    the reverse lookup's among them, is contested by `_disagreement`, so the
+    reverse lookup never picks one of several.
+
+    **A scheme only where the record carries exactly one of its values.** A
+    record linking two is two claims about one person: GND `1344514472` and
+    `1329281446` each carry two `orcid.org` links, and of 4,340 differentiated
+    persons carrying an ISNI, spread over ten `gndIdentifier` prefixes, 8 link
+    two ISNIs, 8 two Wikidata items and 2 two LCNAF numbers, measured
+    2026-11-16. Taking the first would be resolution by ordering, the rule
+    `_claims` states, so none is written and every one stays in `same_as`.
+    `_disagreement` compares by the same rule, so the record's order decides
+    neither what is stored nor what is contested.
     """
     contested = {row.about for row in candidate.disagreements}
     found: dict[AuthorityScheme, str] = {}
     for scheme, pattern in _CROSS_REFERENCE_URIS.items():
         if scheme.value in contested:
             continue
-        value = _matched(pattern, candidate.same_as)
-        if scheme is AuthorityScheme.WIKIDATA and candidate.wikidata_id is not None:
-            value = candidate.wikidata_id
+        value = _referenced(candidate, scheme, pattern)
         if value is not None:
             found[scheme] = value
     return found
+
+
+def _referenced(
+    candidate: AuthorityCandidate, scheme: AuthorityScheme, pattern: re.Pattern[str]
+) -> str | None:
+    """One scheme's identifier among a candidate's cross references, by the two
+    rules `cross_references` states, or None."""
+    if scheme is AuthorityScheme.WIKIDATA and candidate.wikidata_id is not None:
+        return candidate.wikidata_id
+    return _sole(pattern, candidate.same_as)
+
+
+def _sole(pattern: re.Pattern[str], uris: tuple[str, ...]) -> str | None:
+    """The one id these URIs carry, or None where they carry none or several."""
+    found = _linked(pattern, uris)
+    return next(iter(found)) if len(found) == 1 else None
 
 
 #: VIAF's three endpoints, written out whole rather than composed, the way the
@@ -1308,7 +1382,8 @@ async def _national_from_wikidata(
     absence is a hint, never a rule, and here it is simply no supply.
 
     **A contested item stops it**, exactly as a contested cluster stops the VIAF
-    route. Where lobid and Wikidata name different items for one person, reading
+    route. Where lobid and Wikidata name different items for one person, or
+    lobid links several and Wikidata names one of them, reading
     national numbers off Wikidata's item is reading them off somebody this app
     is not sure is the author, and a wrong national number is a durable row.
 
@@ -1405,8 +1480,13 @@ async def _cluster_for(
     client: Any, candidate: AuthorityCandidate, deadline: float | None
 ) -> tuple[str | None, bool]:
     """The VIAF cluster to read for this person, lobid's own or one asked of
-    VIAF by name, and whether VIAF has answered."""
-    cluster = _matched(_VIAF_URI, candidate.same_as)
+    VIAF by name, and whether VIAF has answered.
+
+    lobid's own only where the record links exactly one, by `_sole`; a record
+    linking several is asked by name, which still has to name the GND number
+    back before anything is read.
+    """
+    cluster = _sole(_VIAF_URI, candidate.same_as)
     # `heard` is the whole reason this is a tuple. A cluster read out of
     # lobid's `sameAs` costs no VIAF request, so reaching this branch and
     # coming back empty is the only place "VIAF is down" and "VIAF knows
@@ -1511,32 +1591,30 @@ async def resolve_stored(
 ) -> list[AuthorityCandidate]:
     """The people this Library's stored identifiers name, at most `MAX_CANDIDATES`.
 
-    **The GND numbers where there are any, and the LCNAF numbers only where
-    there are none.** A GND record confirmed here arrives with its LCNAF number
-    as a cross reference, so asking both files would show one person twice and
-    pay a request for it. An LCNAF number stands alone only where a Member
-    confirmed a Library of Congress record, and then it is the one key there is.
-    A scheme neither file can be asked by is passed over rather than spent: it
+    **One file's numbers, the first in `_STORED_ORDER` that has any.** A GND
+    record confirmed here arrives with its LCNAF number and its ORCID as cross
+    references, so asking every file would show one person several times and
+    pay a request for each. An LCNAF number or an ORCID stands alone only where
+    a Member confirmed that file's record, and then it is the one key there is.
+    A scheme no file here can be asked by is passed over rather than spent: it
     used to take one of the five places and answer nothing.
 
     **Certain**, as `resolve` is, and None is dropped: a number the file no
     longer holds answers nothing rather than an error.
     """
-    # `==` and not `is`: `AuthorIdentifier.scheme` is a `String` column, so a
-    # stored row hands back a plain `str` whatever its annotation says, and `is`
-    # matched no row at all.
-    gnd = [identifier for scheme, identifier in stored if scheme == AuthorityScheme.GND]
-    lcnaf = [identifier for scheme, identifier in stored if scheme == AuthorityScheme.LCNAF]
-    lookups = (
-        [resolve(identifier, deadline=deadline) for identifier in gnd[:MAX_CANDIDATES]]
-        if gnd
-        else [_naf_resolve(identifier, deadline) for identifier in lcnaf[:MAX_CANDIDATES]]
-    )
-    return [candidate for candidate in await asyncio.gather(*lookups) if candidate is not None]
+    for wanted, resolver in _STORED_ORDER:
+        # `==` and not `is`: `AuthorIdentifier.scheme` is a `String` column, so
+        # a stored row hands back a plain `str` whatever its annotation says,
+        # and `is` matched no row at all.
+        numbers = [identifier for scheme, identifier in stored if scheme == wanted]
+        if numbers:
+            found = await asyncio.gather(*(resolver(number, deadline) for number in numbers[:MAX_CANDIDATES]))
+            return [candidate for candidate in found if candidate is not None]
+    return []
 
 
 async def search(name: str, *, deadline: float | None = None) -> list[AuthorityCandidate]:
-    """The people two authority files hold under one name. A guess, every time.
+    """The people the authority files hold under one name. A guess, every time.
 
     **A name is not a key**, which is the entire reason the confirmation step
     exists, and it is demonstrated rather than asserted: `Stevenson, Robert
@@ -1551,9 +1629,17 @@ async def search(name: str, *, deadline: float | None = None) -> list[AuthorityC
     than two names looking alike. This adds a file; it does not decide which
     file a search should trust first.
 
+    **ORCID only where both answered and found nobody**, the rank the owner
+    set on 2026-09-05: a fallback for the names the national files do not
+    carry, so its request is paid on a miss and never on an ordinary search.
+    A file that did not answer has not found nobody, so a national file down
+    raises before ORCID is asked, as it did before ORCID was a file: its
+    researchers sharing the name are not an answer to "try again".
+
     **One file failing costs its own people and no more.** The search raises
     only where nobody was found and a file did not answer, because an empty
     list then would say "nobody by that name" when the truth is "not asked".
+    ORCID down after both found nobody raises for the same reason.
 
     An empty or unusable name answers an empty list rather than putting a
     useless query to somebody else's service.
@@ -1565,6 +1651,8 @@ async def search(name: str, *, deadline: float | None = None) -> list[AuthorityC
         _gnd_people(query, deadline), _naf_people(query, deadline), return_exceptions=True
     )
     people = _merged(gnd, naf)
+    if not people:
+        people = await _orcid_people(query, deadline)
     return list(
         await asyncio.gather(
             *(_cross_check(row, compare_references=False, deadline=deadline) for row in people)
@@ -1610,7 +1698,7 @@ def _merged(
     naf_people, naf_answered = _answered(naf)
     if not naf_answered:
         logger.info("The Library of Congress name authority file did not answer")
-    linked = {_matched(_LCNAF_URI, row.same_as) for row in gnd_people}
+    linked = {number for row in gnd_people for number in _linked(_LCNAF_URI, row.same_as)}
     people = [*gnd_people, *(row for row in naf_people if row.identifier not in linked)]
     if not people and not (gnd_answered and naf_answered):
         raise AuthorityUnavailable
@@ -1881,6 +1969,166 @@ def _naf_variants(fields: marc_fields.Fields, name: str) -> tuple[str, ...]:
         if variant and variant != name and "t" not in entry:
             seen.setdefault(variant)
     return tuple(seen)
+
+
+#: ORCID's public API, version 3.0, asked without a client credential.
+#:
+#: **The anonymous tier, and its terms were read rather than assumed.** On
+#: 2026-11-16 ORCID's API limits page gave the anonymous tier 12 requests a
+#: second, a burst of 40, and 25,000 reads a day per IP address. A registered
+#: client raises the daily figure and nothing else, so none is used.
+#:
+#: **ORCID's terms make this API free for non commercial use, and they bind
+#: whoever runs a deployment that asks it, not this code.** Its Public APIs
+#: Terms of Service (updated 23 October 2024) "describe conditions under which
+#: ORCID allows the public to access our Anonymous API and Public API
+#: (together the Public APIs)", and say "you may not make use of the public
+#: APIs in connection with any revenue-generating product or service". The
+#: anonymous tier is named inside that definition, so staying anonymous does
+#: not step outside the clause. This module asks once per name search the two files before it
+#: answered with nobody, and once per stored ORCID resolved, under
+#: `ratelimit.AUTHORITY_LIMIT`.
+#:
+#: **`expanded-search` rather than `search`**, because it answers the names in
+#: the same request: `search` answers bare iDs, and a record per iD would follow.
+_ORCID_SEARCH_URL: Final = "https://pub.orcid.org/v3.0/expanded-search/"
+
+#: The header ORCID answers JSON on. Without it the same request answers
+#: ORCID's own XML, measured 2026-11-16.
+_ORCID_ACCEPT: Final = "application/json"
+
+#: The quote and the backslash, each escaped: the two characters that end or
+#: break a quoted Solr phrase. Inside the quotes nothing else is syntax, and
+#: unescaped syntax is measured: `family-name:(Stevenson (` answered HTTP 500
+#: with a Solr parse error on 2026-11-16.
+_PHRASE_ESCAPED: Final = str.maketrans({character: f"\\{character}" for character in '\\"'})
+
+
+async def _orcid_people(query: str, deadline: float | None) -> list[AuthorityCandidate]:
+    """The people ORCID holds under one name, at most `MAX_CANDIDATES`.
+
+    **By surname and first given name, as fields.** ORCID holds the two apart,
+    so the name is put in catalogue order the way `_catalogue_order` puts it to
+    the NAF and split at its comma. Only the first given name is asked, because
+    ORCID's `given-names` is what a researcher typed: `Ursula K.` asked whole
+    misses an `Ursula`. A bare surname is asked alone.
+    """
+    family, _, given = _catalogue_order(query).partition(",")
+    if not family.strip():
+        return []
+    clauses = [
+        _orcid_clause("family-name", family),
+        *(_orcid_clause("given-names", word) for word in given.split()[:1]),
+    ]
+    return (await _orcid(" AND ".join(clauses), deadline, certain=False))[:MAX_CANDIDATES]
+
+
+def _orcid_clause(field: str, text: str) -> str:
+    """One field of an ORCID query, its text a quoted phrase, truncated before
+    escaping for the reason `_escaped` gives."""
+    return f'{field}:"{text.strip()[:MAX_QUERY_NAME].translate(_PHRASE_ESCAPED)}"'
+
+
+async def _orcid_resolve(identifier: str, deadline: float | None) -> AuthorityCandidate | None:
+    """The one person an ORCID iD names, or None if ORCID does not hold it.
+
+    Certain for the reason `resolve` is, and cross checked as `_naf_resolve` is.
+    """
+    if not _ORCID_ID.match(identifier):
+        logger.info("Refused to resolve an identifier that is not an ORCID iD")
+        return None
+    for candidate in await _orcid(f"orcid:{identifier}", deadline, certain=True):
+        if candidate.identifier == identifier:
+            return await _cross_check(candidate, compare_references=False, deadline=deadline)
+    return None
+
+
+async def _orcid(query: str, deadline: float | None, *, certain: bool) -> list[AuthorityCandidate]:
+    """One ORCID search, or `AuthorityUnavailable`."""
+    try:
+        async with fetch.catalogue_client() as client:
+            client.headers["accept"] = _ORCID_ACCEPT
+            response = await fetch.get(
+                client,
+                _ORCID_SEARCH_URL,
+                params={"q": query, "rows": str(MAX_CANDIDATES)},
+                limit=_RESPONSE_LIMIT,
+                deadline=deadline,
+            )
+    except Exception as failure:
+        raise AuthorityUnavailable from failure
+    return _orcid_read(response, certain=certain)
+
+
+def _orcid_read(response: fetch.Fetched, *, certain: bool) -> list[AuthorityCandidate]:
+    """The people one ORCID answer holds, or `AuthorityUnavailable`.
+
+    **`expanded-result` null is nobody, and its absence is not.** ORCID answers
+    a search finding nobody with the key present and null, so a body without
+    it, or with something other than a list in it, is an answer this module
+    cannot read rather than an empty one.
+    """
+    if response.status_code != 200:
+        raise AuthorityUnavailable
+    try:
+        body = response.json()
+    except ValueError as failure:
+        raise AuthorityUnavailable from failure
+    rows = body.get("expanded-result", False) if isinstance(body, dict) else False
+    if rows is None:
+        return []
+    if not isinstance(rows, list):
+        raise AuthorityUnavailable
+    found = (_orcid_person(row, certain=certain) for row in rows)
+    return [row for row in found if row is not None]
+
+
+def _orcid_person(row: Any, *, certain: bool) -> AuthorityCandidate | None:
+    """One ORCID result as a candidate, or None where it carries no iD or no name.
+
+    **Its names and nothing else.** A result also lists the researcher's email
+    addresses and employers, and neither is read: an address is personal data
+    with no use here, and an employer is the body of work `docs/featurelist.md`
+    refuses, which is why `professionOrOccupation` is not read from lobid.
+
+    Dropped rather than raised, the call `_candidate` makes.
+    """
+    if not isinstance(row, dict):
+        return None
+    identifier = row.get("orcid-id")
+    if not isinstance(identifier, str) or not _ORCID_ID.match(identifier):
+        return None
+    name = ", ".join(_orcid_strings(row.get("family-names"), row.get("given-names")))
+    if not name:
+        return None
+    others = row.get("other-name")
+    listed = _orcid_strings(row.get("credit-name"), *(others if isinstance(others, list) else ()))
+    return AuthorityCandidate(
+        scheme=AuthorityScheme.ORCID,
+        identifier=identifier,
+        name=name,
+        variants=tuple(dict.fromkeys(value for value in listed if value != name)),
+        certain=certain,
+    )
+
+
+def _orcid_strings(*values: Any) -> list[str]:
+    """The non blank strings among these, stripped, in order."""
+    return [value.strip() for value in values if isinstance(value, str) and value.strip()]
+
+
+async def _gnd_resolve(identifier: str, deadline: float | None) -> AuthorityCandidate | None:
+    """`resolve` in the shape the other two files' resolvers take."""
+    return await resolve(identifier, deadline=deadline)
+
+
+#: Which file a stored identifier is resolved by, in the order `resolve_stored`
+#: asks them: the first scheme with a number stored is the only one asked.
+_STORED_ORDER: Final = (
+    (AuthorityScheme.GND, _gnd_resolve),
+    (AuthorityScheme.LCNAF, _naf_resolve),
+    (AuthorityScheme.ORCID, _orcid_resolve),
+)
 
 
 #: Where a Wikipedia article's URL may point, anchored at both ends.

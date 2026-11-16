@@ -4930,7 +4930,7 @@ class TestEveryTargetResolvesToADoorAndAReader:
         """Not a restatement of the derivation: it names the roster's answer.
 
         A derivation compared against itself is vacuous, so this writes out what
-        the twelve rows actually say. A row whose capability changes has to change
+        the fourteen rows actually say. A row whose capability changes has to change
         this line too, which is the argument the old test made for writing
         `SEARCH_SOURCES` out rather than deriving it, kept in the one place where
         it still costs nothing.
@@ -4946,6 +4946,8 @@ class TestEveryTargetResolvesToADoorAndAReader:
             "google_books",
             "bna",
             "bnu",
+            "bn_pl",
+            "libris",
         }
         assert {source.value for source in sources.SEARCH_SOURCES} == {
             "dnb",
@@ -5087,7 +5089,7 @@ class TestNoModuleHardCodesASourceOrder:
       neither is ever two or more sources and neither is reported.
       `test_dropping_an_exemption_surfaces_only_its_own_literal` is what said
       so: with the entry kept, dropping it surfaced nothing.
-    * `targets.SEEDED`, the twelve catalogue rows. **A mapping consulted by key**,
+    * `targets.SEEDED`, the fourteen catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
       `frozenset`s, which have no order to read. The order a household gets is
@@ -5120,6 +5122,11 @@ class TestNoModuleHardCodesASourceOrder:
       by surfacing nothing when its entry was dropped. What still checks that
       table is unchanged and is in `test_sources.py`: its membership,
       its spellings, and its values against the committed sample.
+    * `sources.TAIL_INSIDE_REMIT`, `TAIL_MARGINAL`'s case: what each tail source
+      answers inside one remitted source's groups, keyed on sources, recomputed
+      from the committed sample and frames by
+      `test_the_inside_remit_table_matches_the_sample_and_the_frames`. The tail
+      is derived from it, so its key order is decoration.
     * `marc._CATALOGUING_AGENCY`, the code `040 $a` names each origin by. A
       mapping consulted by key, `targets.SEEDED`'s case.
     * `sources.MEASURED`, what each lookup source needing no credential was
@@ -5164,7 +5171,7 @@ class TestNoModuleHardCodesASourceOrder:
 
     #: Where an ordered literal of sources is still allowed, by module and name.
     ALLOWED = {
-        "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL"},
+        "sources.py": {"DEFAULT_ORDER", "MEASURED", "TAIL_MARGINAL", "TAIL_INSIDE_REMIT"},
         "metadata.py": {"_MATCH_PRECEDENCE"},
         # The literal is inline in the `MappingProxyType` call, so the exempt
         # name and the literal are the same assignment again. Naming the view
@@ -5346,7 +5353,15 @@ class TestNoModuleHardCodesASourceOrder:
         the identity of a surfaced literal is the pair; the old spelling was a
         unit that had never had two modules producing one literal to be wrong
         about.
+
+        **The count is pinned per drop**: one literal, and for
+        `sources.TAIL_INSIDE_REMIT`, a table of tables, its outer keys plus each
+        inner table. A floor of one would accept a second ordered literal added
+        inside an exempt constant's value, which the guard, exempting by
+        identity over the whole subtree, never sees. No literal may come back
+        from two drops either, checked literal by literal below.
         """
+        expected = {"sources.py:TAIL_INSIDE_REMIT": len(sources.TAIL_INSIDE_REMIT) + 1}
         surfaced: dict[str, frozenset[str]] = {}
         for module, allowed in self.ALLOWED.items():
             for name in sorted(allowed):
@@ -5356,13 +5371,19 @@ class TestNoModuleHardCodesASourceOrder:
                     for where, names in self.ALLOWED.items()
                 }
                 reported = guard._offenders().get(module, set())
-                assert len(reported) == 1, (
-                    f"{module}:{name} surfaced {sorted(reported)}; dropping one "
-                    "exemption should surface exactly that constant's literal"
+                assert reported, (
+                    f"{module}:{name} surfaced nothing; dropping one exemption "
+                    "should surface that constant's literals"
                 )
-                surfaced[f"{module}:{name}"] = frozenset(f"{module}:{literal}" for literal in reported)
+                key = f"{module}:{name}"
+                assert len(reported) == expected.get(key, 1), (
+                    f"{key} surfaced {len(reported)} literals, expected "
+                    f"{expected.get(key, 1)}: {sorted(reported)}"
+                )
+                surfaced[key] = frozenset(f"{module}:{literal}" for literal in reported)
 
-        assert len(set(surfaced.values())) == len(surfaced), (
+        every = [literal for literals in surfaced.values() for literal in literals]
+        assert len(every) == len(set(every)), (
             f"two exemptions surface the same literal, so neither is pinned by itself: {surfaced}"
         )
 

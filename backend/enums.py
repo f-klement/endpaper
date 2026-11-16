@@ -582,6 +582,9 @@ class AuthorityScheme(StrEnum):
     ICCU = "iccu"
     #: Biblioteca Nacional de Chile.
     BNCHL = "bnchl"
+    #: Open Researcher and Contributor ID: a researcher's own registration
+    #: rather than a national file.
+    ORCID = "orcid"
 
 
 # **The inference the docstring sets aside is not available anyway**, and this
@@ -1003,13 +1006,13 @@ class CatalogueSource(StrEnum):
 
     **Not every source answers every question**, and the split is real rather
     than incidental. BNF and LOC are title search only, because neither was
-    worth an ISBN request. NKP, BNE, BNA and BNU are the other way round,
-    **lookup only**, and for two different reasons. The NKP's, the BNA's and
-    the BNU's is the server's: each renders one populated record per response
-    whatever page size is asked for, so a search for ten candidates would be
-    ten requests. The
-    BNE's is ours: its search works and nobody has measured what it would find,
-    so it holds the conservative default. See `sources.LOOKUP_SOURCES` and
+    worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL and LIBRIS are the other
+    way round, **lookup only**, and for two different reasons. The NKP's, the
+    BNA's and the BNU's is the server's: each renders one populated record per
+    response whatever page size is asked for, so a search for ten candidates
+    would be ten requests. The BNE's, the BN_PL's and LIBRIS's is ours: nobody
+    has measured what a search at any of them would find, so each holds the
+    conservative default. See `sources.LOOKUP_SOURCES` and
     `SEARCH_SOURCES`, which is why those are two sets and not one.
 
     **Two members need a credential and are free**: the BNA and the BNU. What
@@ -1036,6 +1039,14 @@ class CatalogueSource(StrEnum):
     #: Aleph behind the same YAZ front end, the same bare Dublin Core, and a
     #: login its library publishes. #117.
     BNU = "bnu"
+    #: The Biblioteka Narodowa, Poland's national library. Alma SRU and MARC21,
+    #: the BNE's profile exactly. `BN_PL` rather than `BNP`, which is the
+    #: Portuguese national library's own abbreviation and a candidate here.
+    BN_PL = "bn_pl"
+    #: LIBRIS, the Swedish union catalogue the National Library of Sweden runs.
+    #: SRU and MARC21 on its own server rather than on Alma, and a union
+    #: catalogue like K10plus rather than a legal deposit one.
+    LIBRIS = "libris"
 
 
 # A member per `CatalogueSource` is checked below the class rather than
@@ -1067,6 +1078,8 @@ class RecordOrigin(StrEnum):
     BNE = "bne"
     BNA = "bna"
     BNU = "bnu"
+    BN_PL = "bn_pl"
+    LIBRIS = "libris"
     #: Typed by a member, or sent by a client that named no other origin.
     MANUAL = "manual"
     #: Read off the book's own file, or its name, on the scan page.

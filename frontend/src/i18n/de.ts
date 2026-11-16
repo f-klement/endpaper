@@ -1871,6 +1871,8 @@ export const de: Messages = {
   "providers.name.bne": "Spanische Nationalbibliothek",
   "providers.name.bna": "Argentinische Nationalbibliothek",
   "providers.name.bnu": "Uruguayische Nationalbibliothek",
+  "providers.name.bn_pl": "Polnische Nationalbibliothek",
+  "providers.name.libris": "LIBRIS",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

@@ -20,6 +20,7 @@ without a restart. A few of those settings can also be pinned from the environme
 - [Where a credential lives](#where-a-credential-lives)
 - [Catalogue logins](#catalogue-logins)
 - [Google Books and Goodreads](#google-books-and-goodreads)
+- [ORCID](#orcid)
 - [Behind a reverse proxy](#behind-a-reverse-proxy)
 - [Data and backups](#data-and-backups)
 - [Upgrading](#upgrading)
@@ -362,6 +363,23 @@ Both are configured in the app: sign in as an admin and open Settings.
   `GOOGLE_BOOKS_API_KEY` pins one from the deployment instead.
 - **Goodreads** has no API here. The setting only shows or hides a link that looks a book
   up on Goodreads.
+
+## ORCID
+
+An author lookup asks ORCID's public API for a name that neither the GND nor the Library of
+Congress name authority file holds. It needs no key and has no setting.
+
+**ORCID's terms make that API free for non commercial use, and they bind whoever runs the
+deployment, not Endpaper.** Its [Public APIs Terms of
+Service](https://info.orcid.org/public-client-terms-of-service/) (updated 23 October 2024)
+define the term:
+
+> By "non-commercial" we mean that you may not charge any re-use fees for the Public APIs, and
+> you may not make use of the public APIs in connection with any revenue-generating product or
+> service.
+
+Asking without a client registration does not change that: the terms name the anonymous API
+among the APIs they cover.
 
 ## Behind a reverse proxy
 

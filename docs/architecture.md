@@ -421,11 +421,13 @@ flowchart TB
     k10plus["K10PLUS, SRU, MARC_PLAIN"]
   end
   subgraph in_turn ["asked one at a time while nothing is found"]
+    nlg["NLG, SRU, MARC_GND, only 978-618 and 978-960"]
+    bn_pl["BN_PL, SRU, MARC_GND, only 978-83"]
     open_library["OPEN_LIBRARY, BESPOKE, OPEN_LIBRARY"]
+    oenb["OENB, SRU, MARC_GND, only 978-3"]
     nkp["NKP, SRU, DUBLIN_CORE_BARE"]
     bne["BNE, SRU, MARC_GND"]
-    nlg["NLG, SRU, MARC_GND, only 978-618 and 978-960"]
-    oenb["OENB, SRU, MARC_GND, only 978-3"]
+    libris["LIBRIS, SRU, MARC_GND"]
     bna["BNA, SRU, DUBLIN_CORE_BARE, ships a login"]
     bnu["BNU, SRU, DUBLIN_CORE_BARE, ships a login, only 978-9974"]
     google_books["GOOGLE_BOOKS, BESPOKE, GOOGLE_BOOKS, metered, needs a key"]
@@ -436,11 +438,13 @@ flowchart TB
   end
   isbn --> together
   together -->|"no record"| in_turn
-  open_library --> nkp
+  nlg --> bn_pl
+  bn_pl --> open_library
+  open_library --> oenb
+  oenb --> nkp
   nkp --> bne
-  bne --> nlg
-  nlg --> oenb
-  oenb --> bna
+  bne --> libris
+  libris --> bna
   bna --> bnu
   bnu --> google_books
 ```

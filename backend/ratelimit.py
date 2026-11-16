@@ -99,12 +99,17 @@ RECOVERY_CODE_LIMIT = RateLimit(max_attempts=10, window_seconds=3600)
 # wedge the database for everyone else.
 IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
-# Every metadata call fans out to as many as eight public catalogues, none of
-# which the library runs or pays for. One member holding the scan page open
-# with a script behind it would spend somebody else's quota and put this
-# deployment's address in front of their rate limiter, which is a way to lose
-# metadata for everyone. Sixty a minute is far above scanning a shelf by hand
-# and far below what would be noticed upstream.
+# A metadata search asks eight public catalogues at once, and a lookup can reach
+# any of twelve catalogues, the first two at once and the rest in turn until one
+# answers. Four of them are asked only about ISBNs in their own registration
+# groups, all `978` groups and no group in two remits. So in the default order a
+# `978` ISBN whose group this build can name reaches nine at most, while a `979`
+# ISBN, or one whose group it cannot name, can reach all twelve. The library
+# runs or pays for none of them. One member holding the scan page open with a
+# script behind it would spend somebody else's quota and put this deployment's
+# address in front of their rate limiter, which is a way to lose metadata for
+# everyone. Sixty a minute is far above scanning a shelf by hand and far below
+# what would be noticed upstream.
 METADATA_LIMIT = RateLimit(max_attempts=60, window_seconds=60)
 
 # The authority files are not the catalogues and their published budget is much
@@ -143,8 +148,10 @@ METADATA_LIMIT = RateLimit(max_attempts=60, window_seconds=60)
 #   ten confirmations             lobid  10   Wikidata  40   VIAF  30
 #
 # So **lobid is the lightest of the three and Wikidata the heaviest by far**,
-# and the ceiling is sized on lobid anyway because lobid is the only one that
-# states a budget to be sized against: Wikidata asks for a user agent and a
+# and the ceiling is sized on lobid anyway because lobid is the only one of the
+# three that states a budget to be sized against (ORCID states one too, and is
+# asked only where the national files found nobody: `docs/security.md` has its
+# row): Wikidata asks for a user agent and a
 # reasonable rate rather than a number, and VIAF publishes neither and serves no
 # `robots.txt` at all. Sizing on the one supplier that can be exceeded
 # measurably, and staying well inside it, is what keeps the two unmeasured ones

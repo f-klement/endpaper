@@ -17,11 +17,11 @@ the sentence somebody thought to guard.
 **"The roster count" is not one number.** There are **seven** named sets a claim
 may bind to, and only **five** distinct sizes among them, because three of the
 seven are the roster's own size. Nothing
-in a sentence's shape says which one is meant. So "twelve sources" in this tree
+in a sentence's shape says which one is meant. So "fourteen sources" in this tree
 is a correct count of the roster, a correct count of what a lookup or a search
 may ask, or a stale count of some other subject entirely. Measured over the census below,
-**20** of its occurrences count something that is not the roster, so a scan
-with no classification fails 20 times on its first run and is switched off.
+**15** of its occurrences count something that is not the roster, so a scan
+with no classification fails 15 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -307,9 +307,9 @@ def roster_sets() -> dict[str, int]:
 #: sources there are.
 #:
 #: **`Counts` compares a number, not a set, and a reader will read it as the
-#: set.** Three of these seven names are 12 today, so seven names discriminate
+#: set.** Three of these seven names are 14 today, so seven names discriminate
 #: five ways and a claim can bind to the wrong one and pass. Live instance:
-#: `test_books_google.py` says enrichment reaches all twelve sources and binds
+#: `test_books_google.py` says enrichment reaches all fourteen sources and binds
 #: to `the whole roster`, while `helpers.py` states the identical fact about the
 #: identical helper and binds to `lookup or search`. Both pass. The day those
 #: two stop being equal, one fails naming a set it was never about. No test can
@@ -326,9 +326,11 @@ def roster_sets() -> dict[str, int]:
 #: asks it, and the subtraction was wrong in the other direction.
 #:
 #: **So there are two names now, and a measurement keeps the one it was taken
-#: over.** `sources.STOCK_INSTALL_ASKS` is nine; the seven that need no
-#: credential are the set the 395 of 500 pass ran against, and a set growing does
-#: not turn a measurement over seven into a measurement over nine. Each of the
+#: over.** `sources.STOCK_INSTALL_ASKS` is eleven; the sources that need no
+#: credential are the set the 396 of 500 is over, and a set growing does not
+#: turn a measurement over that set into a measurement over a larger one. The
+#: BN_PL and LIBRIS joined that set and the figure was re-derived: 395 became
+#: 396, the one book LIBRIS alone holds. Each of the
 #: three sentences was re-read and bound to whichever it is actually about.
 CARDINALITIES = {
     "the whole roster": lambda: len(CatalogueSource),
@@ -357,6 +359,7 @@ NOT_A_ROSTER_COUNT = {
     "SHIPS_A_CREDENTIAL": "which sources this build carries a login for",
     "SERVES_GROUPS": "which sources have a registration group remit",
     "TAIL_MARGINAL": "what each tail source answers, keyed on the source",
+    "TAIL_INSIDE_REMIT": "what tail sources answer inside each remit, keyed on the source",
     # The one entry whose reason a reader will check against the census bound
     # and find inside it: `MEASURED` has **seven** members and seven is a live
     # cardinality, which is what the whole of this entry turns on and what it
@@ -388,6 +391,8 @@ SPELLED = {
     "ten": 10,
     "eleven": 11,
     "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
 }
 
 _NUMBER = rf"(?:{'|'.join(SPELLED)}|\d{{1,3}})"
@@ -521,10 +526,11 @@ NOT_PROSE = ("/generated/", "/dist/")
 #
 # **What the rule costs is recomputed rather than recounted.** Every file
 # carrying the declaration in its header is stripped from the mirror, and between
-# them they hold **zero** census candidates. The one they held, `section 11
-# found for sources` in a stripped research document, was never a roster count
-# and left the census's bound when the roster grew to twelve. So today the rule
-# costs no claim's coverage. The figure moves when a stripped document gains or
+# them they hold **one** census candidate: a stripped research document citing
+# its own section number a few words before the word "sources". It was never a
+# roster count. It left the census's bound when the roster grew to twelve and
+# came back when the lookup sources reached the same number, so the rule costs
+# one candidate and that candidate has nothing to check. The figure moves when a stripped document gains or
 # loses a candidate, which is the event the sentence exists to disclose, and
 # `test_the_coverage_the_declaration_rule_costs_is_the_figure_it_states` is what
 # stops it reading zero over a corpus that holds one. It already had.
@@ -1289,13 +1295,20 @@ _MARC_IMPORT = "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components
 #: count of something that is not the roster, or both.
 OUT_OF_BOUND: frozenset[str] = frozenset(
     {
+        "backend/metadata.py '{n} sources' entry[3]",
+        "backend/metadata.py '{n} sources' entry[4]",
+        "backend/sources.py '{n} frames a source' entry[0]",
         "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
         "backend/tests/test_authority.py '{n} viaf source' entry[0]",
+        "backend/tests/test_classifications.py '{n} catalogues' entry[0]",
         "backend/tests/test_fetch.py '{n} sources' entry[0]",
+        "backend/tests/test_fetch.py '{n} sources' entry[2]",
         "backend/tests/test_fetch.py '{n} sources' entry[3]",
         "backend/tests/test_fetch.py '{n} sources' entry[4]",
+        "backend/tests/test_marc.py '{n} source' entry[0]",
         "backend/tests/test_roster_counts.py '{n} sources' entry[1]",
         "docs/decisions.md '{n} source' entry[0]",
+        "docs/decisions.md '{n} sources' entry[1]",
         "docs/security.md '{n} sources' entry[0]",
         # Split only to fit the line: this is one path and two entries on it.
         _MARC_IMPORT + " '{n} records this catalogue' entry[0]",
@@ -1350,6 +1363,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     # is a search roster count read off that comment's own arithmetic.
     ("backend/metadata.py", "{n} source"): [Counts("SEARCH_SOURCES")],
     ("backend/ratelimit.py", "{n} public catalogues"): [Counts("SEARCH_SOURCES")],
+    ("backend/ratelimit.py", "{n} catalogues"): [Counts("LOOKUP_SOURCES")],
     # Both halves of one sentence in the enrichment route's docstring, which
     # FastAPI publishes as the endpoint's OpenAPI description. It said
     # "searches all seven" with the noun elided, so nothing here could see it
@@ -1371,18 +1385,18 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("DEFAULT_ORDER", near="invalidated on write"),
     ],
     ("backend/sources.py", "{n} sources"): [
-        # **The claim moved to the eight and the 395 stayed with the seven**,
-        # which is why one file now carries both names. The pass was run against
-        # the seven; the eighth's contribution is a separate measurement in
-        # `metadata`'s block for it, and adding the two is arithmetic rather
-        # than a re-run.
+        # **What a stock install asks and what needs no credential are two sets**,
+        # which is why one file carries both names. The 396 is over the second,
+        # recomputed from the sample's columns; the credentialled rows' books
+        # are separate measurements in `metadata`'s blocks for them, and adding
+        # them is arithmetic rather than a re-run.
         Counts(
             "STOCK_INSTALL_ASKS",
-            near="answer 407 of the 500 ISBNs",
+            near="answer 408 of the 500 ISBNs",
         ),
         Counts(
             "the lookup sources that need no credential",
-            near="that need no credential at all answer 395",
+            near="that need no credential at all answer 396",
         ),
     ],
     ("backend/bibliographic.py", "{n} sources"): [
@@ -1395,25 +1409,26 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ],
     ("backend/metadata.py", "{n} sources"): [
         Counts("SEARCH_SOURCES", near="asked at once"),
-        # The chain a default install actually runs, in the block that says so
-        # and in the Argentine block's denominator, and **they are two different
-        # sets now**. The first is what an install asks, which is nine. The
-        # second is the denominator of what the Argentine row **adds**, which
-        # cannot include the row itself and is therefore the seven.
+        # The chain a default install actually runs, in the block that says so,
+        # and the set the 395 is over, which is every source that needs no
+        # credential. **The Argentine and Uruguayan blocks' denominators are
+        # neither**: each is what its row was measured against when it joined,
+        # which could not include the row and predates the BN_PL, so each is a
+        # dated count of seven and stays one as the set grows.
         Counts(
             "STOCK_INSTALL_ASKS",
             near="most deployments actually run",
         ),
         Counts(
             "the lookup sources that need no credential",
-            near="answer 395 and miss 105, are the two",
+            near="answer 396 and miss 104, are the two",
         ),
-        Counts(
-            "the lookup sources that need no credential",
+        NotTheRoster(
+            "the sources needing no credential on the day the Argentine pass ran",
             near="The frame goes from 24 answered to 28",
         ),
-        Counts(
-            "the lookup sources that need no credential",
+        NotTheRoster(
+            "the sources needing no credential on the day the Uruguayan pass ran",
             near="**8 that none of the",
         ),
     ],
@@ -1627,6 +1642,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ("docs/legend.md", "{n} metadata sources"): [Counts("the whole roster")],
     ("docs/security.md", "{n} catalogue"): [Counts("the whole roster")],
     ("docs/security.md", "{n} public catalogues"): [Counts("SEARCH_SOURCES")],
+    ("docs/security.md", "{n} catalogues"): [Counts("LOOKUP_SOURCES")],
     ("docs/security.md", "{n} third party catalogues"): [Counts("the whole roster")],
     ("docs/security.md", "{n} sources"): [
         NotTheRoster(
@@ -2773,6 +2789,8 @@ class TestTheFeatureListNamesTheRosterAsSourcesHoldsIt:
         CatalogueSource.BNE: "Spanish National Library",
         CatalogueSource.NLG: "National Library of Greece",
         CatalogueSource.OENB: "Austrian National Library",
+        CatalogueSource.LIBRIS: "LIBRIS",
+        CatalogueSource.BN_PL: "Polish National Library",
         CatalogueSource.BNA: "Argentine National Library",
         CatalogueSource.BNU: "Uruguayan National Library",
         CatalogueSource.GOOGLE_BOOKS: "Google Books",
@@ -2788,6 +2806,7 @@ class TestTheFeatureListNamesTheRosterAsSourcesHoldsIt:
         CatalogueSource.BNE: "Spanish",
         CatalogueSource.NLG: "Greek",
         CatalogueSource.OENB: "Austrian",
+        CatalogueSource.BN_PL: "Polish",
         CatalogueSource.BNA: "Argentine",
         CatalogueSource.BNU: "Uruguayan",
         CatalogueSource.BNF: "French",

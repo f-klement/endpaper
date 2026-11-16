@@ -466,13 +466,55 @@ def _xml(body: str, status: int = 200) -> httpx.Response:
     return httpx.Response(status, text=body, headers={"content-type": "text/xml; charset=utf-8"})
 
 
-def _naf_router(mock, *bodies: str | httpx.Response):
-    """Route the NAF to these answers in order, or to `NAF_EMPTY` throughout.
+#: ORCID's public API. **Captured live on 2026-11-16**, verbatim:
+#: `family-name:"Carberry" AND given-names:"Josiah"`, which is two people, and
+#: `orcid:0000-0002-1825-0097`, the round trip of the second. Josiah Carberry
+#: is ORCID's own fictitious test researcher, so the capture names nobody real.
+ORCID = "https://pub.orcid.org/"
+
+ORCID_SEARCH: dict[str, Any] = {
+    "expanded-result": [
+        {
+            "orcid-id": "0000-0002-1028-6941",
+            "given-names": "Josiah",
+            "family-names": "Carberry",
+            "credit-name": None,
+            "other-name": [],
+            "email": [],
+            "institution-name": ["CSHL"],
+        },
+        {
+            "orcid-id": "0000-0002-1825-0097",
+            "given-names": "Josiah",
+            "family-names": "Carberry",
+            "credit-name": None,
+            "other-name": ["Josiah Stinkney Carberry", "J. Carberry", "J. S. Carberry"],
+            "email": [],
+            "institution-name": ["Brown University", "Wesleyan University"],
+        },
+    ],
+    "num-found": 2,
+}
+
+ORCID_RECORD: dict[str, Any] = {"expanded-result": [ORCID_SEARCH["expanded-result"][1]], "num-found": 1}
+
+#: Verbatim: `family-name:"Atwood" AND given-names:"Margaret"`, nobody.
+ORCID_NOBODY = {"expanded-result": None, "num-found": 0}
+
+
+def _naf_router(mock, *bodies: str | httpx.Response, orcid: object = ORCID_NOBODY):
+    """Route the NAF to these answers in order, or to `NAF_EMPTY` throughout,
+    and ORCID to `orcid`.
 
     **Every search asks both files**, so a test about lobid that does not
     route the NAF would see it refused by respx, read as the file being down,
     and an empty lobid answer would then raise rather than answer nobody.
+    **ORCID is routed here for the same reason**: a search both files answer
+    with nobody asks it. A response passed as `orcid` is served as it is.
     """
+    mock.get(url__startswith=ORCID).mock(
+        return_value=orcid if isinstance(orcid, httpx.Response) else _json(orcid)
+    )
     answers = [body if isinstance(body, httpx.Response) else _xml(body) for body in bodies]
     route = mock.get(url__startswith=NAF)
     if len(answers) > 1:
@@ -645,6 +687,30 @@ class TestADisagreementIsSurfacedRatherThanResolved:
         assert candidate is not None
         [row] = [d for d in candidate.disagreements if d.about == "viaf"]
         assert (row.lobid, row.wikidata) == ("95207986", "11111111")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("first", ["Q1512", "Q4695503"])
+    async def test_a_record_linking_two_items_is_contested_in_either_order(self, first):
+        """Wikidata's reverse lookup answers `Q1512`, one of the two the record
+        links. Whichever lobid lists first, it is a disagreement with lobid's
+        side None, and no Wikidata item is a cross reference."""
+        second = "Q4695503" if first == "Q1512" else "Q1512"
+        linked = cast(list[dict[str, str]], LOBID_RECORD["sameAs"])
+        same_as = [
+            {"id": f"http://www.wikidata.org/entity/{first}"},
+            {"id": f"http://www.wikidata.org/entity/{second}"},
+            *(row for row in linked if "wikidata" not in row["id"]),
+        ]
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=_json({**LOBID_RECORD, "sameAs": same_as}))
+            _wikidata_router(mock)
+            candidate = await resolve("118753711")
+
+        assert candidate is not None
+        assert [(d.about, d.lobid, d.wikidata) for d in candidate.disagreements] == [
+            ("wikidata", None, "Q1512")
+        ]
+        assert AuthorityScheme.WIKIDATA not in authority.cross_references(candidate)
 
     @pytest.mark.asyncio
     async def test_one_file_being_silent_is_not_a_disagreement(self):
@@ -1401,6 +1467,23 @@ class TestTheClusterIsVerifiedRatherThanTrusted:
 
         assert found == {}
         assert not asked
+
+
+class TestTwoClustersInTheRecordAreAskedByName:
+    @pytest.mark.asyncio
+    async def test_neither_linked_cluster_is_read_and_viaf_is_asked_by_name(self):
+        """Reading the first of two would pick by lobid's order. 0 of 4,340
+        GND persons link two clusters, measured 2026-11-16."""
+        candidate = _certain_candidate(
+            same_as=(*_certain_candidate().same_as, "http://viaf.org/viaf/1148462")
+        )
+        with respx.mock(assert_all_called=False) as mock:
+            _viaf_router(mock)
+            await authority.national_identifiers(candidate)
+            asked = [call.request.url for call in mock.calls]
+
+        assert [url.path for url in asked][:1] == ["/viaf/AutoSuggest"]
+        assert all(url.params.get("query") != "local.viafID = 95207986" for url in asked)
 
 
 class TestTheClusterIsFoundByKeyWhenLobidNamesNone:
@@ -3501,6 +3584,16 @@ class TestTheNameAuthorityFileIsTheSecondFile:
 
         assert [row.identifier for row in found] == ["118753711", "131572873"]
 
+    def test_a_naf_record_under_a_gnd_records_second_link_is_dropped_too(self):
+        """GND `161105572` and `188387404` each link two LCNAF numbers,
+        measured 2026-11-16: both are the GND person's, whichever comes first."""
+        gnd = _certain_candidate(
+            same_as=(*_certain_candidate().same_as, "http://id.loc.gov/authorities/names/n2011087658")
+        )
+        naf = replace(gnd, scheme=AuthorityScheme.LCNAF, identifier="n2011087658", same_as=())
+
+        assert authority._merged([gnd], [naf]) == [gnd]
+
     @pytest.mark.asyncio
     async def test_the_person_reads_as_the_file_writes_them(self):
         """The name and title record ahead of him is a work, not a person, and
@@ -3981,3 +4074,313 @@ class TestANafAnswerIsReadOrRefusedByName:
         """The reader's own element, which `marc_fields.Fields` turns into a
         node and a map entry each."""
         assert self._peak(self._holding('<datafield tag="400"/>' * 40_000)) <= authority.ALLOCATION_FACTOR
+
+
+def _orcid_query(calls) -> str:
+    """The query the one ORCID request among these calls carried."""
+    (asked,) = [call.request for call in calls if str(call.request.url).startswith(ORCID)]
+    return asked.url.params["q"]
+
+
+def _orcid_read(body: object, status: int = 200) -> list[authority.AuthorityCandidate]:
+    return authority._orcid_read(_fetched(body, status), certain=False)
+
+
+class TestOrcidIsTheLastFile:
+    """ORCID asked only for a name the GND and the NAF hold nobody under, the
+    rank the owner set on 2026-09-05."""
+
+    @staticmethod
+    async def _searched(name: str, *, lobid: object = None, orcid: object = ORCID_SEARCH, naf=()):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(
+                return_value=lobid if isinstance(lobid, httpx.Response) else _json(lobid or {"member": []})
+            )
+            _naf_router(mock, *naf, orcid=orcid)
+            _wikidata_router(mock)
+            found = await search(name)
+            # Copied inside the block: respx clears its calls on leaving it.
+            calls = list(mock.calls)
+        return found, calls
+
+    @pytest.mark.asyncio
+    async def test_its_people_answer_a_name_neither_file_holds(self):
+        found, _ = await self._searched("Josiah Carberry")
+
+        assert [(row.scheme, row.identifier) for row in found] == [
+            (AuthorityScheme.ORCID, "0000-0002-1028-6941"),
+            (AuthorityScheme.ORCID, "0000-0002-1825-0097"),
+        ]
+        assert not any(row.certain for row in found)
+
+    @pytest.mark.asyncio
+    async def test_it_is_not_asked_where_a_file_found_somebody(self):
+        found, calls = await self._searched("Robert Louis Stevenson", lobid=LOBID_SEARCH)
+
+        assert [row.identifier for row in found] == ["118753711", "131572873"]
+        assert not [call for call in calls if str(call.request.url).startswith(ORCID)]
+
+    @pytest.mark.asyncio
+    async def test_the_name_is_asked_by_surname_and_first_given_name(self):
+        """ORCID's `given-names` is what a researcher typed, so a middle name
+        asked as well would miss everybody who left it out."""
+        _, calls = await self._searched("Josiah Stinkney Carberry")
+
+        assert _orcid_query(calls) == 'family-name:"Carberry" AND given-names:"Josiah"'
+
+    @pytest.mark.asyncio
+    async def test_a_surname_of_two_words_reaches_it_through_a_comma(self):
+        _, calls = await self._searched("Le Guin, Ursula K.")
+
+        assert _orcid_query(calls) == 'family-name:"Le Guin" AND given-names:"Ursula"'
+
+    @pytest.mark.asyncio
+    async def test_a_bare_surname_is_asked_alone(self):
+        _, calls = await self._searched("Carberry")
+
+        assert _orcid_query(calls) == 'family-name:"Carberry"'
+
+    @pytest.mark.asyncio
+    async def test_a_quote_in_a_name_stays_inside_the_phrase(self):
+        """Unescaped, `Kane" OR orcid:*` is a second clause; measured, a
+        stray `(` outside a phrase is HTTP 500."""
+        _, calls = await self._searched('Kane" OR orcid:* \\')
+
+        assert _orcid_query(calls) == 'family-name:"\\\\" AND given-names:"Kane\\""'
+
+    @pytest.mark.asyncio
+    async def test_wikidata_is_asked_by_the_orcid_property(self):
+        """`P496`, and not `P227`, which would answer nothing and read as
+        "Wikidata holds nobody"."""
+        _, calls = await self._searched("Josiah Carberry")
+
+        asked = sorted(
+            call.request.url.params["srsearch"]
+            for call in calls
+            if str(call.request.url).startswith(WIKIDATA) and "srsearch" in call.request.url.params
+        )
+        assert asked == ["haswbstatement:P496=0000-0002-1028-6941", "haswbstatement:P496=0000-0002-1825-0097"]
+
+    @pytest.mark.asyncio
+    async def test_nobody_in_all_three_is_nobody(self):
+        found, _ = await self._searched("Margaret Atwood", orcid=ORCID_NOBODY)
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_it_down_after_two_files_found_nobody_is_unavailable_not_nobody(self):
+        with pytest.raises(AuthorityUnavailable):
+            await self._searched("Josiah Carberry", orcid=httpx.Response(503))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("lobid", "naf"),
+        [(httpx.Response(502), ()), (None, (httpx.Response(503),))],
+        ids=["lobid down", "the NAF down"],
+    )
+    async def test_a_national_file_down_is_unavailable_and_orcid_is_not_asked(self, lobid, naf):
+        """A file that did not answer has not found nobody: ORCID's homonyms
+        are no answer to "try again", even where it holds the name."""
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=LOBID).mock(return_value=lobid or _json({"member": []}))
+            _naf_router(mock, *naf, orcid=ORCID_SEARCH)
+            _wikidata_router(mock)
+            with pytest.raises(AuthorityUnavailable):
+                await search("Josiah Carberry")
+            orcid_calls = [call for call in mock.calls if str(call.request.url).startswith(ORCID)]
+
+        assert orcid_calls == []
+
+    @pytest.mark.asyncio
+    async def test_its_request_carries_the_deadline_the_bound_and_the_json_header(self):
+        """Without the header ORCID answers its own XML, which reads as a
+        refusal on every search."""
+        seen = []
+
+        async def get(client, url, *, params=None, limit=None, deadline=None, credential=None):
+            seen.append((url, deadline, limit, client.headers.get("accept"), params["rows"]))
+            return _fetched(ORCID_NOBODY)
+
+        with _patched_fetch_get(get):
+            await authority._orcid_people("Josiah Carberry", 123.0)
+
+        assert seen == [
+            (authority._ORCID_SEARCH_URL, 123.0, authority._RESPONSE_LIMIT, "application/json", "5")
+        ]
+
+    @pytest.mark.asyncio
+    async def test_more_rows_than_the_ceiling_are_cut(self):
+        """`rows` is a request and the answer is somebody else's: an ORCID
+        ignoring it would otherwise decide how many Wikidata calls one search
+        makes, two per row."""
+        row = ORCID_RECORD["expanded-result"][0]
+        rows = [{**row, "orcid-id": f"0000-0002-1825-00{n:02d}"} for n in range(authority.MAX_CANDIDATES + 1)]
+
+        async def get(client, url, *, params=None, limit=None, deadline=None, credential=None):
+            return _fetched({"expanded-result": rows})
+
+        with _patched_fetch_get(get):
+            found = await authority._orcid_people("Josiah Carberry", None)
+
+        assert [person.identifier for person in found] == [
+            row["orcid-id"] for row in rows[: authority.MAX_CANDIDATES]
+        ]
+
+
+class TestAnOrcidAnswerIsReadOrRefused:
+    def test_a_person_reads_in_catalogue_order_with_the_names_they_gave(self):
+        (_, person) = _orcid_read(ORCID_SEARCH)
+
+        assert person.name == "Carberry, Josiah"
+        assert person.variants == ("Josiah Stinkney Carberry", "J. Carberry", "J. S. Carberry")
+        assert (person.born, person.died, person.same_as) == (None, None, ())
+
+    def test_a_credit_name_is_a_variant_and_the_name_itself_is_not(self):
+        row = {
+            **ORCID_SEARCH["expanded-result"][0],
+            "credit-name": "J. Carberry",
+            "other-name": ["Carberry, Josiah"],
+        }
+
+        (person,) = _orcid_read({"expanded-result": [row]})
+
+        assert person.variants == ("J. Carberry",)
+
+    def test_an_address_and_an_employer_never_reach_the_candidate(self):
+        """Behavioural: the values are in the answer and not in what it became."""
+        row = {**ORCID_SEARCH["expanded-result"][1], "email": ["josiah@example.org"]}
+
+        rendered = repr(_orcid_read({"expanded-result": [row]}))
+
+        for refused in ("josiah@example.org", "Brown University", "Wesleyan University"):
+            assert refused not in rendered
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"given-names": "Josiah", "family-names": "Carberry"},
+            {"orcid-id": "0000-0002-1825-0097/../x", "family-names": "Carberry"},
+            {"orcid-id": "0000-0002-1825-0097", "given-names": " ", "family-names": None},
+            "0000-0002-1825-0097",
+        ],
+        ids=["no iD", "an iD that is not one", "no name", "not an object"],
+    )
+    def test_a_row_it_cannot_use_is_dropped_and_the_rest_kept(self, row):
+        found = _orcid_read({"expanded-result": [row, *ORCID_RECORD["expanded-result"]]})
+
+        assert [person.identifier for person in found] == ["0000-0002-1825-0097"]
+
+    @pytest.mark.parametrize(
+        ("body", "status"),
+        [
+            (ORCID_SEARCH, 500),
+            ({"num-found": 0}, 200),
+            ({"expanded-result": {"orcid-id": "0000-0002-1825-0097"}}, 200),
+            (["expanded-result"], 200),
+        ],
+        ids=["a 500", "no result key", "a result that is not a list", "not an object"],
+    )
+    def test_an_answer_it_cannot_read_is_a_refusal_and_not_nobody(self, body, status):
+        with pytest.raises(AuthorityUnavailable):
+            _orcid_read(body, status)
+
+    def test_a_body_that_is_not_json_is_a_refusal(self):
+        with pytest.raises(AuthorityUnavailable):
+            authority._orcid_read(fetch.Fetched(200, b"<html>", "utf-8"), certain=False)
+
+
+class TestAStoredOrcidIsResolvedByTheFile:
+    @pytest.mark.asyncio
+    async def test_a_lone_orcid_resolves_to_its_person(self):
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=ORCID).mock(return_value=_json(ORCID_RECORD))
+            _wikidata_router(mock)
+            (found,) = await resolve_stored([(AuthorityScheme.ORCID, "0000-0002-1825-0097")])
+
+        assert route.calls[0].request.url.params["q"] == "orcid:0000-0002-1825-0097"
+        assert (found.scheme, found.identifier, found.certain) == (
+            AuthorityScheme.ORCID,
+            "0000-0002-1825-0097",
+            True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_lcnaf_number_beside_it_is_asked_and_orcid_is_not(self):
+        with respx.mock(assert_all_called=False) as mock:
+            orcid = mock.get(url__startswith=ORCID).mock(return_value=_json(ORCID_RECORD))
+            _naf_router(mock, NAF_RECORD)
+            _wikidata_router(mock)
+            found = await resolve_stored(
+                [(AuthorityScheme.ORCID, "0000-0002-1825-0097"), (AuthorityScheme.LCNAF, "n78088964")]
+            )
+
+        assert [row.identifier for row in found] == ["n78088964"]
+        assert orcid.call_count == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("stored", ["0000-0002-1825-009", "0000000218250097", "0000-0002-1825-0097 OR x"])
+    async def test_anything_that_is_not_an_orcid_is_not_put_to_it(self, stored):
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=ORCID).mock(return_value=_json(ORCID_RECORD))
+            assert await resolve_stored([(AuthorityScheme.ORCID, stored)]) == []
+
+        assert route.call_count == 0
+
+    @pytest.mark.asyncio
+    async def test_an_iD_orcid_no_longer_holds_answers_nothing(self):
+        with respx.mock(assert_all_called=False) as mock:
+            mock.get(url__startswith=ORCID).mock(return_value=_json(ORCID_NOBODY))
+            assert await resolve_stored([(AuthorityScheme.ORCID, "0000-0002-1825-0097")]) == []
+
+
+class TestAnOrcidArrivesFreeWithAGndRecord:
+    """A GND record links an ORCID in `sameAs`: 392,941 differentiated persons
+    did on lobid, measured 2026-11-16."""
+
+    @staticmethod
+    def _linking(*orcids: str) -> authority.AuthorityCandidate:
+        return _certain_candidate(
+            same_as=(*_certain_candidate().same_as, *(f"https://orcid.org/{orcid}" for orcid in orcids))
+        )
+
+    def test_one_orcid_is_a_cross_reference(self):
+        references = authority.cross_references(self._linking("0000-0002-1825-0097"))
+
+        assert references[AuthorityScheme.ORCID] == "0000-0002-1825-0097"
+
+    def test_two_orcids_are_neither_stored(self):
+        """GND `1344514472` links two, measured; taking the first would be
+        resolution by ordering."""
+        references = authority.cross_references(self._linking("0000-0002-1324-136X", "0009-0005-1097-0806"))
+
+        assert AuthorityScheme.ORCID not in references
+
+    def test_one_orcid_linked_twice_is_one(self):
+        references = authority.cross_references(self._linking("0000-0002-1825-0097", "0000-0002-1825-0097"))
+
+        assert references[AuthorityScheme.ORCID] == "0000-0002-1825-0097"
+
+    @pytest.mark.parametrize(
+        ("scheme", "second"),
+        [
+            (AuthorityScheme.ISNI, "https://isni.org/isni/0000000457424787"),
+            (AuthorityScheme.LCNAF, "http://id.loc.gov/rwo/agents/n2011087658"),
+            (AuthorityScheme.VIAF, "http://viaf.org/viaf/1148462"),
+            (AuthorityScheme.WIKIDATA, "http://www.wikidata.org/entity/Q4695503"),
+        ],
+        ids=["ISNI", "LCNAF", "VIAF", "Wikidata"],
+    )
+    def test_any_scheme_linked_twice_is_stored_for_neither(self, scheme, second):
+        """The ORCID rule is every scheme's: GND `101319665` links two ISNIs
+        and `161105572` two LCNAF numbers, measured. Wikidata's own reverse
+        lookup is absent here, so `sameAs` is all there is to read."""
+        candidate = _certain_candidate(same_as=(*_certain_candidate().same_as, second), wikidata_id=None)
+
+        assert scheme not in authority.cross_references(candidate)
+
+    def test_an_isni_beside_it_is_kept_under_its_own_scheme(self):
+        """The two never number one person alike, so both are stored and
+        nothing compares them: see `authority._ORCID_URI`."""
+        references = authority.cross_references(self._linking("0000-0002-1825-0097"))
+
+        assert references[AuthorityScheme.ISNI] == "0000000122831567"

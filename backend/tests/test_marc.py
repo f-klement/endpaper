@@ -689,6 +689,7 @@ class TestTheCataloguingSource:
             (RecordOrigin.BNE, "SpMaBN"),
             (RecordOrigin.BNA, "AR-BaBN"),
             (RecordOrigin.BNU, "UY-MoBN"),
+            (RecordOrigin.BN_PL, "PlWaBN"),
         ],
     )
     def test_a_national_librarys_record_names_it_by_its_code(self, origin, code):
@@ -699,7 +700,7 @@ class TestTheCataloguingSource:
 
     @pytest.mark.parametrize(
         "origin",
-        [RecordOrigin.OPEN_LIBRARY, RecordOrigin.K10PLUS, RecordOrigin.MANUAL, None],
+        [RecordOrigin.OPEN_LIBRARY, RecordOrigin.K10PLUS, RecordOrigin.LIBRIS, RecordOrigin.MANUAL, None],
     )
     def test_an_origin_no_citable_agency_created_writes_no_040(self, origin):
         """An aggregator did not create the record it serves, and this library has no code."""

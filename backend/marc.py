@@ -279,16 +279,18 @@ _HEADING_KIND_FIELD: Final[dict[tuple[ClassificationScheme, HeadingKind | None],
 #: the list's introduction says an ISIL "can be used in the same bibliographic
 #: and holdings fields that are populated by MARC organization codes", so
 #: `DE-101` is the German ISIL registry's entry for the Deutsche
-#: Nationalbibliothek.
+#: Nationalbibliothek. The Polish National Library's `PlWaBN` is record 15546,
+#: looked up 2026-11-16; its own records write `WA N` in `040`, which is a
+#: Polish union catalogue symbol and not a code on that list.
 #:
 #: **Every absence is the rule rather than a gap.** An origin with no entry
 #: writes no `040`, since a subfield naming an agency nobody can cite is a claim
 #: nobody made:
 #:
-#: - Open Library, Google Books and K10plus each have a code, and none of them is
-#:   the agency that created the record they serve: the first two aggregate other
-#:   catalogues' and publishers' records, and K10plus is a union catalogue whose
-#:   records were made by its member libraries. Naming them in `$a` would be
+#: - Open Library, Google Books, K10plus and LIBRIS each have a code, and none of
+#:   them is the agency that created the record they serve: the first two
+#:   aggregate other catalogues' and publishers' records, and K10plus and LIBRIS
+#:   are union catalogues whose records were made by their member libraries. Naming them in `$a` would be
 #:   false, and the catalogue that did create it is not in the answer.
 #: - Every origin that is not a catalogue was created by this library or by
 #:   whoever wrote the file, and this install has no organization code of its own.
@@ -312,6 +314,7 @@ _CATALOGUING_AGENCY: Final[dict[RecordOrigin, str]] = {
     RecordOrigin.BNE: "SpMaBN",
     RecordOrigin.BNA: "AR-BaBN",
     RecordOrigin.BNU: "UY-MoBN",
+    RecordOrigin.BN_PL: "PlWaBN",
 }
 
 

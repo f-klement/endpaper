@@ -9404,7 +9404,7 @@ this catalogue. So the refusal was scoped to German and English without saying s
 silently, for every catalogue that is neither.
 
 **Fixed for this source only, deliberately.** Widening the shared pattern is the tempting
-move and it changes what seven other sources refuse on the strength of a phrase measured
+move and it changes what eleven other sources refuse on the strength of a phrase measured
 in one catalogue. `_NKP_ONLINE` states this source's own and a test pins that the shared
 rule is untouched. **Whether the rule should be per source everywhere was a real question
 and a larger one than this ticket.** It is answered below, in "The record's own carrier
@@ -9891,10 +9891,10 @@ fifth MARC source, and the sentence was rewritten to name which two sources appl
 rather than to count anything. Its verdict went with it, and this guard is how that was
 noticed rather than left.
 
-The census raises 4 candidates in it. **0** are live claims the guard now checks against
-`sources.py`; **4** are not the roster, being this entry's own worked examples, a sentence
-about what a shared pattern would have changed, and a survey of national libraries in the
-Z39.50 transport entry.
+The census raises 3 candidates in it. **0** are live claims the guard now checks against
+`sources.py`; **3** are not the roster, being one of this entry's own worked examples, a
+sentence about what a shared pattern would have changed, and a survey of national libraries
+in the Z39.50 transport entry.
 All three figures are recomputed from the verdict table rather than reread.
 
 **Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
@@ -25552,10 +25552,11 @@ Nationalbibliothek at https://lobid.org/organisations/DE-101.
 | BNE | `SpMaBN` | MARC Code List, record 15566 |
 | Biblioteca Nacional Argentina | `AR-BaBN` | MARC Code List, record 10899 |
 | Biblioteca Nacional del Uruguay | `UY-MoBN` | MARC Code List, record 47567 |
+| Polish National Library | `PlWaBN` | MARC Code List, record 15546 |
 
-**No `040` for Open Library, Google Books or K10plus**: none created the record it serves. Two
-aggregate other catalogues' and publishers' records, and K10plus is a union catalogue of its
-member libraries' records. **No `040` for a non catalogue origin either**, and **never a
+**No `040` for Open Library, Google Books, K10plus or LIBRIS**: none created the record it
+serves. Two aggregate other catalogues' and publishers' records, and K10plus and LIBRIS are
+union catalogues of their member libraries' records. **No `040` for a non catalogue origin either**, and **never a
 `$d`**: both would name this library, and an install has no organization code. **A `$d` would
 also publish the flag**: the SRU server serves this record with no session, and
 `record_modified_here` is internal by the owner's decision, so an install code setting would
@@ -25676,3 +25677,225 @@ The resolve branch's ceiling of 25 is unchanged. `docs/security.md` carries the 
 - `_catalogue_order` misorders a surname of more than one word, such as Le Guin, because
   nothing in a name typed in reading order says where the surname starts; a `q` holding a
   comma is the escape, taken as already in catalogue order.
+
+## ORCID is the last file a name search asks, and never compared with ISNI (2026-11-16)
+
+**Probed first, because a credential would have made it the owner's call.** ORCID's public API
+answers `GET pub.orcid.org/v3.0/expanded-search/` without a client token: HTTP 200, 0.16 to
+0.36 seconds, 284 to 1,037 bytes for five rows. JSON needs `Accept: application/json`; without
+it the same request answers ORCID's own XML. ORCID's limits page gives the anonymous tier 12
+requests a second, a burst of 40 and 25,000 reads a day per IP address, and a registered client
+raises only the daily figure. No credential is used.
+
+**ORCID's terms make its free public API free for non commercial use, so they bind a
+deployment that asks it, not this code, and staying anonymous does not change that.** Its
+Public APIs Terms of Service (updated 23 October 2024, read 2026-11-16 at
+`info.orcid.org/public-client-terms-of-service/`) "describe conditions under which ORCID allows
+the public to access our Anonymous API and Public API (together the "Public APIs")", and say
+"you may not make use of the public APIs in connection with any revenue-generating product or
+service". The anonymous tier is inside that definition. `docs/configuration.md` says so to
+deployers; whether ORCID is asked by default is the owner's question.
+
+**A lookup on demand, not a suggest source.** It is asked by `search` under
+`ratelimit.AUTHORITY_LIMIT`, once per name search that missed, never per keystroke: 25,000
+reads a day per address would not carry a typeahead.
+
+**Ranked last, as the owner ruled on 2026-09-05**: asked only where lobid and the Library of
+Congress name authority file both answered and found nobody, so its request is paid on a miss
+alone. A national file that did not answer raises "try again" before ORCID is asked, as it did
+before ORCID was a file: its researchers sharing the name are no answer to an outage. Its people arrive under `AuthorityScheme.ORCID` and are cross checked against Wikidata
+by `P496`. A stored iD resolves only where no GND or LCNAF number is stored.
+
+**ORCID and ISNI are never compared, and that is the dedupe rule.** ISNI reserved a block of its
+numbering space for ORCID to mint from (`0000-0001-5000-0007` to `0000-0003-5000-0001`, and
+`0009-0000-0000-0000` to `0009-0010-0000-0000`) and assigns nothing in it itself, so one person
+holding both holds two different numbers. Two schemes each asserting one value is not a
+disagreement, and `identifier_conflicts` compares within a scheme only. Measured over the first 200 GND
+records lobid returned carrying both links: no ORCID equalled the ISNI beside it, and no ISNI fell inside
+ORCID's block. ORCID is not the identity spine; `IDENTITY_SPINE` stays ISNI.
+
+**A GND record's ORCID is stored only where it carries exactly one.** 392,941 differentiated
+persons on lobid link an ORCID; GND `1344514472` and `1329281446` each link two, a researcher
+registered twice. Taking the first is resolution by ordering, the rule `_claims` already states,
+so neither is written and both stay in `same_as`.
+**Every scheme a GND record links now follows that rule**, because the commoner duplicate is
+not ORCID's: of 4,340 differentiated persons carrying an ISNI, at most the first 500 lobid returned
+under each `gndIdentifier` prefix from 10 to 18, 8 link two ISNIs, 8 two Wikidata items, 2 two
+LCNAF numbers and none two VIAF clusters (2026-11-16).
+**One rule reads every link, stored or compared**, so the order lobid lists them in decides
+nothing. The comparison with Wikidata agrees only where the record links exactly one value and
+it is Wikidata's: a record linking two items, Wikidata's own reverse lookup naming one of them,
+is a disagreement (lobid's side None, since the record names no single item), so no Wikidata
+row is written and no national number is read off the item. Wikidata naming one of several is
+not taken as settling it, because that would be precedence by a second route. A record linking
+two VIAF clusters is contested where Wikidata's item names a cluster, and nothing is read off
+either; where the item names none, VIAF is asked by name. The search drops a NAF person under
+any LCNAF number the GND record links, not only the first.
+**Rows written before this rule stay.** A confirmation adds and never removes, so an author
+confirmed earlier whose record links two keeps the first; at most 8 ISNI, 2 LCNAF and 8
+Wikidata records in 4,340, and ORCID never shipped, so nothing is migrated.
+
+**What a candidate carries: names and nothing else.** A result also lists email addresses and
+employers. Neither is read: an address is personal data, and an employer is the body of work the
+feature list refuses, as `professionOrOccupation` is on the lobid side. So an ORCID candidate
+has no dates and no affiliation, and two people of one name are told apart only by a Wikidata
+description where an item exists. `Robert Stevenson` answers 17 people, the first five with
+nothing but the name.
+
+**Coverage, measured as the ticket asked.** The 500 books of
+`catalogue_survey_2026_08_31.json` were looked up through `metadata.lookup` with the default
+plan and no logins: 333 yielded a credit line, 359 distinct names. Each was put to lobid, the
+NAF and ORCID through the module's own readers, one request at a time, on 2026-11-16. A "match"
+below is a name answering exactly one ORCID person, not a confirmed identity.
+
+| frame | names | ORCID one | ORCID several | ORCID none | both national files found nobody | of those, ORCID answered |
+|---|---|---|---|---|---|---|
+| argentina | 22 | 6 | 9 | 7 | 3 | 3 |
+| austria | 58 | 22 | 7 | 29 | 2 | 1 |
+| brazil | 47 | 22 | 18 | 7 | 13 | 9 |
+| czechia | 48 | 9 | 8 | 31 | 15 | 3 |
+| german | 57 | 13 | 5 | 39 | 4 | 0 |
+| greece | 20 | 2 | 3 | 15 | 5 | 0 |
+| italy | 28 | 9 | 6 | 13 | 2 | 1 |
+| portugal | 21 | 3 | 13 | 5 | 1 | 1 |
+| spain | 39 | 3 | 12 | 24 | 0 | 0 |
+| uruguay | 22 | 6 | 8 | 8 | 0 | 0 |
+| **all** | **359** | **95** | **88** | **176** | **45** | **18** |
+
+A name in two frames counts in each row, so the frame rows sum past the total. The column that
+decides the feature is the last pair: of the 45 names both national files answered with nobody,
+ORCID answered 18 (10 with one person, 8 with several) and 27 with nobody. 12 further names
+found nobody while one national file did not answer, and are outside that count. Nine of the 18 are Brazilian, the
+academic authors of the Brazil frame. Over the whole population ORCID answers a name 183 times
+of 359, which says nothing about this feature: it is asked for none of the 302 names a national
+file found, and for a novelist those answers are homonyms.
+
+**Accepted, each for its reason:**
+
+- `_item_for` takes Wikidata's first search hit (`srlimit` 1) for a GND number, so where two
+  items carry one `P227` search rank picks the item compared and stored; how many GND numbers
+  share a `P227` between two items is unmeasured, and the comparison against the record's own
+  link reports a disagreement wherever the two differ.
+
+## Poland's National Library and LIBRIS join the roster, placed by the marginal rule (2026-11-16)
+
+Two SRU 1.2 catalogues answering MARC21 in `marcxml`, each a target row and no new reader:
+the Biblioteka Narodowa on Alma (`bn-nl.alma.exlibrisgroup.com/view/sru/48OMNIS_NLOP`,
+`alma.isbn`) and LIBRIS, the Swedish union catalogue (`libris.kb.se/sru/libris`,
+`bath.isbn`). Both lookup only, for the BNE's reason: nobody measured what a search there
+would find.
+
+**Measured, 2026-11-16, production reader (`metadata._sru_lookup`), one serial pass per host
+over all 500 ISBNs of the committed sample; committed as `bn_pl` and `libris` columns.**
+
+| | answered of 500 | unique over the chain | marginal (of 278 the pair misses) | p90 | largest frame | concentration |
+|---|---|---|---|---|---|---|
+| BN_PL | 9 | 0 | 3 | 0.446s | 4 (Czech) | 44% |
+| LIBRIS | 70 | 1 (9788806017019, Italian) | 6 | 0.367s | 16 (Austrian) | 23% |
+
+**Where they went: the owner's rule of 2026-11-16.**
+Two adjacent tail rows where one has a remit are compared on that row's ISBNs alone (the
+sample plus its committed frame, the books the leading pair misses), since for a `978` ISBN
+in a named group a swap changes the walk for no other book. Two rows that both have a remit, or neither, are compared on
+`TAIL_MARGINAL` as before (a remitted row counted inside its remit). Pairwise that admits
+two orders wherever a remitted row beats one unremitted row and loses to a later one, so
+the order is built: unremitted rows by `TAIL_MARGINAL`, each remitted row ahead of the
+first unremitted row it strictly beats on its own ISBNs (last if none), remitted rows
+meeting at one place by `TAIL_MARGINAL`. A tie is not a win. The built order satisfies
+every adjacent comparison, so the rule cannot cycle.
+
+| on the remitted row's ISBNs (tier misses) | books | itself | Open Library | NKP | BNE | LIBRIS |
+|---|---|---|---|---|---|---|
+| NLG, Greek | 46 | 34 | 4 | 0 | 0 | 1 |
+| BN_PL, `978-83` | 38 | 30 | 4 | 0 | 0 | 0 |
+| OeNB, `978-3` | 5 | 1 | 3 | 0 | 0 | 0 |
+
+Committed as `sources.TAIL_INSIDE_REMIT`, recomputed by a test. Result:
+**NLG, BN_PL, Open Library, OeNB, NKP, BNE, LIBRIS**, then the BNA, the BNU and Google
+Books. The NLG goes ahead of the BN_PL because both have a remit and `TAIL_MARGINAL` reads
+34 against 30. LIBRIS goes last: 6 against the BNE's 40, and 0 against the OeNB's 1 on
+`978-3`. The OeNB's lead over the NKP is one book of five; it costs nothing outside
+`978-3`, where the OeNB is never asked. Both are free, so both new rows sit ahead of the
+credentialled rows and Google Books.
+
+Why a frame was needed: the BN_PL's 3 on the sample all fall outside `978-83`, and the
+sample holds no `978-83` ISBN, so on the sample alone its in remit figure is 0 and the
+rule would rank it on nothing. The frame is 50 Polish ISBNs (Wikidata by
+publisher country, seed 20261116), committed beside the sample as
+`backend/tests/fixtures/catalogue_frame_poland_2026_11_16.json` rather than in it, because
+every other figure in `sources` is stated over the ten frames. LIBRIS was put to it on
+2026-11-16 (production path, one request at a time, a second between):
+
+| over the Polish frame | LIBRIS | BN_PL |
+|---|---|---|
+| answered, of 50 | 2 | 41 |
+| answered, of the 39 the leading pair misses | 0 | 30 |
+| answered, of the 34 `978-83` ISBNs every source ahead of these two misses | **0** | **26** |
+| answered there that the other does not | 0 | 26 |
+| p90 over the 50 | 0.195s | 0.475s |
+
+(p90 is `analyse.py`'s convention for both: the sorted value one place below index `int(0.9n)`.)
+Both of LIBRIS's 2 are books K10plus and Open Library already hold. Open Library answers 4
+of the 39, the rest of the tail none.
+
+**How the two kinds of figure compare.** A remitted row's in remit figure and an unremitted
+row's figure are counts over one set of books, the ten sample frames and every committed
+frame alike at 50 each; the remitted row is counted on the part inside its remit, the
+unremitted row on all of it. `test_every_remitted_tail_source_is_counted_on_its_own_isbns`
+refuses a remitted tail row whose groups neither file holds, so the next remitted source
+needs a frame or a sample that holds its books.
+
+**What the reorder buys, over the 500** (the remit model, no frame): with remits
+1.373s/779 tail requests becoming **1.272s/684**; the unfiltered arm 1.526s/1,083 becoming
+1.590s/1,316, since the NLG and the BN_PL now head an unfiltered walk. Demotion instead of
+skipping now models at 1.4222s, no longer within three milliseconds of the unfiltered arm,
+so the old argument "ordering alone saves almost nothing" is gone; the argument for
+skipping stands on the 0.150s the failed lookups cost a demoted walk.
+
+Neither enters the tier:
+membership ranks by rate (K10plus 210, DNB 91 lead) and the slot rule refuses a third slot,
+which LIBRIS would earn 6 and BN_PL 3 against `SLOT_MUST_EARN` 10. `TIER_UNION` is now
+{1: 210, 2: 222, 3: 228, 4: 231, 5: 232}; the slot threshold's gap is [7, 12] with 10 at
+60%. Both are the first sources the concentration rule admits to the tier's pool from
+outside the German pair and the OENB: BN_PL only because the sample has no Polish frame,
+LIBRIS genuinely, being a union catalogue.
+
+**Remits.** BN_PL carries `978-83`: it answers 9 of the 500, all outside the group, and every
+one is held elsewhere, so the zero book bar holds. LIBRIS carries none: it alone holds one
+Italian book.
+
+**What each adds on its own country, which the committed sample cannot show.** Frames of 50
+ISBNs from Wikidata by publisher country, seed 20261116 (put through the production reader): BN_PL 41 of 50 Polish, 25 that none of the seven older
+free sources holds, p90 0.475s; LIBRIS 45 of 50 Swedish, 22 new, **p90 2.134s** (union
+holdings make Swedish records up to 156 KB for five). The Polish frame is committed beside the sample (above); the Swedish one is not, as no
+rule reads it.
+
+**Coverage.** Stock install 407 -> 408 of 500 (LIBRIS's Italian book); outside German
+language publishing misses 89 -> 88 of 400; the sources needing no credential 395 -> 396.
+Remit model 1.435s/872 (before) -> 1.590s/1,316 unfiltered and 1.272s/684 with remits.
+
+**Probes.** BN_PL: unknown index answers diagnostic `200801` (not the catalogue, not silence);
+honest miss has no diagnostic; ISBN-10 form also matches (a record with `020 $a 0000000000`
+answers `9780000000002`); `identity` honoured (11,573 vs 1,917 gzip). LIBRIS: unknown index
+and unknown context set answer 0 records, no diagnostic (a typo would be a quiet miss);
+unknown `recordSchema` ignored; `maximumRecords` capped at 10; `identity` honoured (14,660 vs
+2,651 gzip). Component parts: 0 of 57 BN_PL and 0 of 119 LIBRIS records are leader/07 `a`;
+`refuses_component_parts` set anyway for the BNE's reason.
+
+**MARC 040.** BN_PL writes `PlWaBN` (MARC Code List for Organizations, record 15546, looked
+up 2026-11-16; BN's own records write `WA N`, a NUKAT symbol). For the table under the 040
+decision: `| Polish National Library | PlWaBN | MARC Code List, record 15546 |`. LIBRIS writes
+none: a union catalogue, the K10plus rule.
+
+**Accepted, each for its reason:**
+
+- A `979` ISBN, or one whose group `isbn.registration_group` cannot name, reaches every
+  remitted catalogue, so such a lookup asks the NLG and the BN_PL ahead of Open Library, about
+  0.2s to 0.45s more on a lookup the leading two missed; the owner accepted it on 2026-11-16,
+  unmeasured because the sample holds no `979` ISBN.
+- `test_every_remitted_tail_source_is_counted_on_its_own_isbns` asks for one ISBN inside a
+  remit and sets no floor, so two incidental ISBNs could rank a new remitted row; today the
+  NLG, the BN_PL and the OeNB are counted on 46, 38 and 5 tier misses, so no action.
+- LIBRIS's `MEASURED` p90 of 0.367s sits inside `FIRST_TIER_BUDGET_SECONDS` while its p90 on
+  Swedish books is 2.134s; harmless while the slot rule refuses a third tier slot, and the
+  row's comment says so, so no action.

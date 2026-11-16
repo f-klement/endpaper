@@ -1937,6 +1937,104 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 # reader that learns to strip qualifiers has to learn this case first. K10plus
 # and Open Library both hold the set.
 
+# ── The Polish National Library ───────────────────────────────────────────────
+#
+# **The Biblioteka Narodowa, over Alma's SRU, and the BNE's row again**: SRU
+# 1.2, CQL, `alma.isbn`, `marcxml`, MARC21 read by `_dnb_record`. No adapter, no
+# reader, no new door. Measured 2026-11-16 against
+# `targets.SEEDED[CatalogueSource.BN_PL].base_url`:
+#
+#   * **An unknown index is refused, not answered with the catalogue.**
+#     `alma.zzz=...` answers HTTP 200 carrying diagnostic `200801`, "Catalog
+#     search has encountered an error", and no records. So the OENB's and the
+#     BNE's failure, a mistyped index answering with millions of records, does
+#     not reproduce at this Alma tenant; `_sru_refusal` reads the diagnostic as
+#     `UNAVAILABLE`, and `requires_isbn_claim` stays on regardless. The `200801`
+#     is not a URI, so the refusal is logged as an empty one.
+#   * **An honest miss carries no diagnostic**: `numberOfRecords 0` and 420
+#     bytes, the shape `_sru_refusal`'s docstring measured at every other SRU
+#     lookup target.
+#   * **The index also matches the ISBN-10 form**, so a record catalogued only
+#     under the ten digit number is found by the thirteen digit query. The
+#     cost of that is a record whose `020 $a` is the placeholder `0000000000`,
+#     which `alma.isbn=9780000000002` returns: no real scan asks for that ISBN.
+#   * It honours `accept-encoding: identity`, 11,573 bytes against 1,917 under
+#     gzip for one record, so `fetch` reads it uncompressed.
+#
+# **What it answers, over all 500 ISBNs of the sample committed at
+# `tests/fixtures/catalogue_survey_2026_08_31.json`**, one serial pass on
+# 2026-11-16 with nothing else in flight against the host, committed as a
+# `bn_pl` column:
+#
+#   * **9 of 500**, in four frames: Czech 4, Italian 2, German 2, Spanish 1.
+#     The sample has no Polish frame, so this is a national catalogue measured
+#     on everybody else's books, and it holds **none** that no other source in
+#     the chain holds. That is what clears `sources.SERVES_GROUPS`' bar for a
+#     `978-83` remit.
+#   * Every hit survives the reader: 9 responses with records, 9 found.
+#   * Lookup latency min 0.135s, median 0.202s, p90 0.446s, max 1.953s.
+#
+# **What it answers on Polish books**, which is the reason it is here and which
+# the committed sample cannot show. Fifty ISBNs drawn from Wikidata by publisher
+# country, Poland, seed 20261116, put through this same reader on 2026-11-16:
+# **41 of 50**, all in `978-83`, where the seven sources that need no credential
+# answer 16 between them. **25 are books none of the seven holds.** Lookup
+# latency median 0.352s, p90 0.513s. The frame is committed beside the sample
+# rather than in it, as `tests/fixtures/catalogue_frame_poland_2026_11_16.json`:
+# `sources.TAIL_MARGINAL` and `TAIL_INSIDE_REMIT` read it to place this row, and
+# every other figure in `sources` is stated over the ten frames.
+#
+# **Component parts**: 0 of 57 records across both passes are leader/07 `a`, so
+# `refuses_component_parts` is set for the BNE's reason rather than on a
+# measurement here.
+
+# ── LIBRIS ────────────────────────────────────────────────────────────────────
+#
+# **The Swedish union catalogue, on SRU at its own server**: SRU 1.2, CQL,
+# `bath.isbn`, `marcxml`, MARC21 read by `_dnb_record`. So Sweden needs no
+# Z39.50 client, which an earlier survey assumed it did. No adapter, no reader,
+# no new door. Measured 2026-11-16 against
+# `targets.SEEDED[CatalogueSource.LIBRIS].base_url`:
+#
+#   * **An unknown index answers an empty result, not a diagnostic and not the
+#     catalogue.** `bath.zzzqqq=...` and an unknown context set both answer
+#     `numberOfRecords 0` under HTTP 200. That is the safe direction of the
+#     OENB's trap, and it is still a trap: a mistyped index here would make
+#     every lookup a quiet miss rather than a refusal. `targets._INDEX` and the
+#     row's tests are what hold the name.
+#   * An unknown `recordSchema` is ignored and MARC21 comes back anyway.
+#   * `maximumRecords` is capped at 10 whatever is asked, so the row's five
+#     is honoured.
+#   * An honest miss carries no diagnostic: `numberOfRecords 0`, 193 bytes.
+#   * It honours `accept-encoding: identity`, 14,660 bytes against 2,651
+#     under gzip for one record.
+#
+# **What it answers, over all 500 ISBNs of the sample committed at
+# `tests/fixtures/catalogue_survey_2026_08_31.json`**, one serial pass on
+# 2026-11-16 with nothing else in flight against the host, committed as a
+# `libris` column:
+#
+#   * **70 of 500, in all ten frames**, Austrian 16 the most of them, because a
+#     union catalogue holds foreign editions. **1** is a book no other source in
+#     the chain holds, `9788806017019`, an Italian edition. So it carries no
+#     remit: a `978-91` one would stop it being asked about that book.
+#   * Every hit survives the reader: 70 responses with records, 70 found.
+#   * Lookup latency min 0.149s, median 0.168s, p90 0.367s, max 1.534s.
+#
+# **What it answers on Swedish books**, which is the reason it is here. Fifty
+# ISBNs drawn from Wikidata by publisher country, Sweden, seed 20261116, put
+# through this same reader on 2026-11-16: **45 of 50**, all in `978-91`, where
+# the seven older sources that need no credential answer 24 between them. **22
+# are books none of the seven holds.** **The latency is a different
+# catalogue's**: median 0.821s, p90 2.134s, max 2.938s, against 0.367s on the
+# committed sample, because a Swedish book is held by many member libraries
+# and its record carries every holding, up to 156,436 bytes for five records.
+# That is inside `fetch`'s byte and time bounds, and it is why this source is
+# in the tail rather than the gathered tier whatever the committed p90 says.
+#
+# **Component parts**: 0 of 119 records across both passes are leader/07 `a`,
+# so `refuses_component_parts` is set for the BNE's reason.
+
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -1987,13 +2085,16 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 # **What this chain covers without a Google Books key, which is what a default
 # install runs.** Three sources need a credential (`sources.NEEDS_A_KEY`), two
 # of them ship the login their library publishes and Google Books does not, so
-# the chain most deployments actually run is the nine sources a stock install
-# asks. Measured over 500 domestic ISBNs across ten frames, it answers 407 and
-# misses 93, and outside German language publishing it misses 89 of 400.
+# the chain most deployments actually run is the eleven sources a stock install
+# asks. Measured over 500 domestic ISBNs across ten frames, it answers 408 and
+# misses 92, and outside German language publishing it misses 88 of 400.
 #
-# The twelve books between that and the seven sources that need nothing, which
-# answer 395 and miss 105, are the two credentialled rows above: the Argentine
-# one uniquely adds 4 and the Uruguayan one 8.
+# The twelve books between that and the nine sources that need nothing, which
+# answer 396 and miss 104, are the two credentialled rows above: the Argentine
+# one uniquely adds 4 and the Uruguayan one 8. Of the nine, the Polish and
+# Swedish rows add one book to the 395 the first seven answered, an Italian
+# edition only LIBRIS holds; the sample has neither a Polish nor a Swedish
+# frame, and each row's block says what it adds there.
 #
 # The same 500 books
 # under the roster of three releases
@@ -3645,17 +3746,20 @@ _LANGUAGE_WEIGHT: Final = 3
 #: promoting, so a point comes off. One point is less than a single term match,
 #: so this only ever breaks a tie.
 #:
-#: **The NKP, BNE, BNA and BNU entries are inert and are here so they stay
-#: correct if that changes.** This set is read only from `_relevance`, which
-#: scores **search** rows, and none of the four answers a title search:
-#: `sources.SEARCH_SOURCES` leaves all four out, the NKP, the BNA and the BNU
+#: **The NKP, BNE, BNA, BNU, BN_PL and LIBRIS entries are inert and are here so
+#: they stay correct if that changes.** This set is read only from `_relevance`,
+#: which scores **search** rows, and none of the six answers a title search:
+#: `sources.SEARCH_SOURCES` leaves all six out, the NKP, the BNA and the BNU
 #: because their server renders one populated record per response whatever page
-#: size is asked, the BNE because its search gain was never measured. So none
-#: can reach this comparison today. Listing them costs nothing and omitting them
-#: would put a wrong default in place the day one does, which is the same
-#: reasoning `_MATCH_PRECEDENCE` records for the same four. A reader meeting
-#: this line should not conclude that any of them appears in search results.
-_SECONDARY_SOURCES: Final = frozenset({"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna", "bnu"})
+#: size is asked, the BNE, the BN_PL and LIBRIS because their search gain was
+#: never measured. So none can reach this comparison today. Listing them costs
+#: nothing and omitting them would put a wrong default in place the day one
+#: does, which is the same reasoning `_MATCH_PRECEDENCE` records for the same six. A reader
+#: meeting this line should not conclude that any of them appears in search
+#: results.
+_SECONDARY_SOURCES: Final = frozenset(
+    {"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna", "bnu", "bn_pl", "libris"}
+)
 _SECONDARY_PENALTY: Final = 1
 
 #: Fields that make a search row pickable rather than a stub. Scored
@@ -4238,29 +4342,32 @@ _MATCH_PRECEDENCE: Final = (
     "dnb",
     "bnf",
     "loc",
-    # Last six, and named rather than left to the default so that a reader can
+    # Last eight, and named rather than left to the default so that a reader can
     # see it was decided. They are the newest and the least compared of the
-    # twelve, and the field any of them would win is a field the DNB or K10plus
-    # has already filled for any book all six hold. Where one is the only
+    # fourteen, and the field any of them would win is a field the DNB or K10plus
+    # has already filled for any book all eight hold. Where one is the only
     # catalogue with a row, precedence never runs.
     #
-    # **The order among the six national catalogues is arbitrary**, which is
+    # **The order among the eight national and union catalogues is arbitrary**, which is
     # worth saying rather than implying a comparison nobody made. They collect
     # different countries, so a book two of them hold is a book the primary
     # three hold as well, and the tie this would break has not been observed.
     #
-    # The NKP, the BNE, the BNA and the BNU are here rather than absent because
-    # a source missing from this tuple sorts last by default and silently, which
-    # is the thing `test_precedence_names_every_source_and_nothing_else` exists
-    # to catch. It caught the NKP. None of the four answers a title search, so
-    # none can reach this comparison today; see `_SECONDARY_SOURCES`, which
-    # carries the same four for the same reason.
+    # The NKP, the BNE, the BNA, the BNU, the BN_PL and LIBRIS are here rather
+    # than absent because a source missing from this tuple sorts last by default
+    # and silently, which is the thing
+    # `test_precedence_names_every_source_and_nothing_else` exists to catch. It
+    # caught the NKP. None of the six answers a title search, so none can reach
+    # this comparison today; see `_SECONDARY_SOURCES`, which carries the same
+    # six for the same reason.
     "oenb",
     "nlg",
     "nkp",
     "bne",
     "bna",
     "bnu",
+    "bn_pl",
+    "libris",
 )
 
 

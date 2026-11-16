@@ -110,6 +110,7 @@ class AuthorityDisagreementOut(BaseModel):
     #: Which cross reference they disagree about, `wikidata` or `viaf`. What a
     #: reader has to look up, rather than which service said what.
     about: str
+    #: None where the GND record links several values, so it names no single one.
     lobid: str | None = None
     wikidata: str | None = None
 
@@ -148,7 +149,8 @@ class AuthorityCandidateOut(BaseModel):
     scheme: AuthorityScheme
     identifier: str
     #: The authority's own spelling, which is the suggestion. In catalogue order
-    #: (`Stevenson, Robert Louis`), because that is how both files write a name.
+    #: (`Stevenson, Robert Louis`), because that is how the national files write
+    #: a name, and ORCID's two name fields are joined the same way.
     name: str
     #: The authority's other spellings. Shown, and deliberately not written to
     #: `author_aliases`: an alias row is this Household's decision and this is a
@@ -156,11 +158,12 @@ class AuthorityCandidateOut(BaseModel):
     #: curated list into a generated one.
     variants: list[str] = Field(default_factory=list)
     #: As the file writes them, which is often partial (`1850`, `1850-11-13`) and
-    #: often absent. Strings rather than dates: nothing sorts or subtracts them.
+    #: often absent; ORCID never carries them. Strings rather than dates:
+    #: nothing sorts or subtracts them.
     born: str | None = None
     died: str | None = None
-    #: Every cross reference a GND record lists, and none for an LCNAF record,
-    #: whose are not read. Recorded and shown, never fetched. This is where a
+    #: Every cross reference a GND record lists, and none for an LCNAF or ORCID
+    #: record, whose are not read. Recorded and shown, never fetched. This is where a
     #: VIAF cluster id arrives without VIAF being called.
     same_as: list[str] = Field(default_factory=list)
     certain: bool = False

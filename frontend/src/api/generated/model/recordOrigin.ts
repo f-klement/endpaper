@@ -33,6 +33,8 @@ export const RecordOrigin = {
   bne: "bne",
   bna: "bna",
   bnu: "bnu",
+  bn_pl: "bn_pl",
+  libris: "libris",
   manual: "manual",
   file: "file",
   csv_import: "csv_import",

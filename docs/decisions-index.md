@@ -439,13 +439,13 @@ repeat the argument.
 |  | [A subject label keeps the place of its first occurrence](decisions.md#a-subject-label-keeps-the-place-of-its-first-occurrence) | 105 |
 |  | [The first `$0` is the authority file's number, and `Subfields.gnd_identifier` asks a different question](decisions.md#the-first-0-is-the-authority-files-number-and-subfieldsgnd_identifier-asks-a-different-question) | 316 |
 |  | [A label under two vocabularies is two subjects; a label restated undeclared is one](decisions.md#a-label-under-two-vocabularies-is-two-subjects-a-label-restated-undeclared-is-one) | 154 |
-|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,118 |
+|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,120 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every Python file is compiled, and the warning is recorded rather than raised](decisions.md#every-python-file-is-compiled-and-the-warning-is-recorded-rather-than-raised) | 448 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every field a request body carries is bounded, and the value comes from one place each](decisions.md#every-field-a-request-body-carries-is-bounded-and-the-value-comes-from-one-place-each) | 816 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The guard is three questions asked of every request body, not a table of fields](decisions.md#the-guard-is-three-questions-asked-of-every-request-body-not-a-table-of-fields) | 50 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [`BodySizeLimitMiddleware` promises a bound it does not apply, and the gap is stated](decisions.md#bodysizelimitmiddleware-promises-a-bound-it-does-not-apply-and-the-gap-is-stated) | 89 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Two bounds this entry does not close](decisions.md#two-bounds-this-entry-does-not-close) | 155 |
-| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The roster count is guarded by a census with a verdict, not by a scan and not by a list](decisions.md#the-roster-count-is-guarded-by-a-census-with-a-verdict-not-by-a-scan-and-not-by-a-list) | 709 |
+| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The roster count is guarded by a census with a verdict, not by a scan and not by a list](decisions.md#the-roster-count-is-guarded-by-a-census-with-a-verdict-not-by-a-scan-and-not-by-a-list) | 711 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The hole a reviewer should know about](decisions.md#the-hole-a-reviewer-should-know-about) | 52 |
 |  | [A stale count outside the census grammar is fixed by rewriting the sentence, not by widening the census](decisions.md#a-stale-count-outside-the-census-grammar-is-fixed-by-rewriting-the-sentence-not-by-widening-the-census) | 278 |
 |  | [Four figures in the roster census are snapshots rather than recomputed, deliberately](decisions.md#four-figures-in-the-roster-census-are-snapshots-rather-than-recomputed-deliberately) | 172 |
@@ -1024,7 +1024,9 @@ repeat the argument.
 |  | [Resident growth on the smallest CI worker past the suite pod's spare is accepted (2026-11-12)](decisions.md#resident-growth-on-the-smallest-ci-worker-past-the-suite-pods-spare-is-accepted-2026-11-12) | 287 |
 |  | [The architecture check runs on the patch branch as well as the tag](decisions.md#the-architecture-check-runs-on-the-patch-branch-as-well-as-the-tag) | 172 |
 |  | [A record's provenance is written at every door, and the flag counts only the description](decisions.md#a-records-provenance-is-written-at-every-door-and-the-flag-counts-only-the-description) | 763 |
-|  | [MARC `040` names only an agency that can be cited](decisions.md#marc-040-names-only-an-agency-that-can-be-cited) | 321 |
+|  | [MARC `040` names only an agency that can be cited](decisions.md#marc-040-names-only-an-agency-that-can-be-cited) | 336 |
 |  | [A test module's caches live as long as its tests, not as long as the worker](decisions.md#a-test-modules-caches-live-as-long-as-its-tests-not-as-long-as-the-worker) | 416 |
 |  | [The Library of Congress name authority file is the second file a name search asks (2026-11-16)](decisions.md#the-library-of-congress-name-authority-file-is-the-second-file-a-name-search-asks-2026-11-16) | 873 |
+|  | [ORCID is the last file a name search asks, and never compared with ISNI (2026-11-16)](decisions.md#orcid-is-the-last-file-a-name-search-asks-and-never-compared-with-isni-2026-11-16) | 1,234 |
+|  | [Poland's National Library and LIBRIS join the roster, placed by the marginal rule (2026-11-16)](decisions.md#polands-national-library-and-libris-join-the-roster-placed-by-the-marginal-rule-2026-11-16) | 1,346 |
 <!-- index: end -->

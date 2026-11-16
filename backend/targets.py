@@ -856,7 +856,7 @@ class Target:
 #: is on `enums.SourceFamily`.
 FAMILY: Final = SourceFamily.CATALOGUE
 
-#: The twelve catalogues this application ships knowing about.
+#: The fourteen catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
 #: migrations write every one of these rows into `catalogue_targets` and
@@ -964,7 +964,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OPEN_LIBRARY: Target(
             source=CatalogueSource.OPEN_LIBRARY,
-            rank=2,
+            rank=4,
             transport=Transport.BESPOKE,
             base_url="https://openlibrary.org",
             reader=Reader.OPEN_LIBRARY,
@@ -976,7 +976,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.NKP: Target(
             source=CatalogueSource.NKP,
-            rank=3,
+            rank=6,
             transport=Transport.SRU,
             # The database path is load bearing: `aleph.nkp.cz:9991` alone, and
             # `/biblios`, both answer SRU diagnostic 1/235, "database does not
@@ -1008,7 +1008,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNE: Target(
             source=CatalogueSource.BNE,
-            rank=4,
+            rank=7,
             transport=Transport.SRU,
             # **The OPAC hostname, and that is the whole finding.** This library was
             # recorded as having no open interface, measured against
@@ -1046,7 +1046,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.NLG: Target(
             source=CatalogueSource.NLG,
-            rank=5,
+            rank=2,
             transport=Transport.SRU,
             # Plaintext by necessity: port 210 speaks no TLS, and
             # `https://catalogue.nlg.gr` on 443 is a different service that answers
@@ -1077,9 +1077,71 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             search_cap=50,
             refuses_component_parts=True,
         ),
+        CatalogueSource.LIBRIS: Target(
+            source=CatalogueSource.LIBRIS,
+            rank=8,
+            transport=Transport.SRU,
+            # SRU on LIBRIS's own server, so Sweden needs no Z39.50 client. The
+            # same records answer Z39.50 on port 210 of this host.
+            base_url="https://libris.kb.se/sru/libris",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            # **Empty, and measured**: it alone answers one book of the 500, and
+            # that book is Italian, so a `978-91` remit would stop it being asked
+            # about the one book only it holds. A union catalogue holds foreign
+            # editions, which is the whole of why it answers 70 of the 500.
+            serves_groups=frozenset(),
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="bath.isbn",
+            # The server caps `maximumRecords` at 10, so five is inside it.
+            lookup_records=5,
+            # 0 of 119 live records on 2026-11-16 were leader/07 `a`. Refused
+            # for the BNE's reason: an article is never a book.
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.BN_PL: Target(
+            source=CatalogueSource.BN_PL,
+            rank=3,
+            transport=Transport.SRU,
+            # The `bn-nl` host and Alma's SRU path. `eu.alma.exlibrisgroup.com`,
+            # the address a public Z39.50 registry lists, answers access control
+            # failure 101; `bn-nl` answers both doors. Measured 2026-11-16.
+            base_url="https://bn-nl.alma.exlibrisgroup.com/view/sru/48OMNIS_NLOP",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason, not the NKP's: nobody has measured what a search
+            # here would find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            # **Polish publishing, and the bar is met on the committed sample
+            # rather than on a hope.** All 500 were put to it: it answers 9, all
+            # outside `978-83`, and every one of the 9 is held by another source
+            # in the chain, so the remit loses no book. `metadata`'s block for
+            # this row carries the pass.
+            serves_groups=frozenset({"978-83"}),
+            sru_version="1.2",
+            query_parameter="query",
+            query_language=QueryLanguage.CQL,
+            record_schema="marcxml",
+            isbn_index="alma.isbn",
+            lookup_records=5,
+            # 0 of 57 live records on 2026-11-16 were leader/07 `a`. Refused for
+            # the BNE's reason: an article is never a book, and reading one
+            # leader costs nothing.
+            refuses_component_parts=True,
+        ),
         CatalogueSource.OENB: Target(
             source=CatalogueSource.OENB,
-            rank=6,
+            rank=5,
             transport=Transport.SRU,
             base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
             reader=Reader.MARC_GND,
@@ -1106,7 +1168,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNA: Target(
             source=CatalogueSource.BNA,
-            rank=7,
+            rank=9,
             transport=Transport.SRU,
             # **Plaintext by necessity and an IP address by necessity**, which are
             # two separate compromises: port 9991 speaks no TLS, and the library
@@ -1159,7 +1221,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNU: Target(
             source=CatalogueSource.BNU,
-            rank=8,
+            rank=10,
             transport=Transport.SRU,
             # **The BNA's two compromises again**: port 9992 speaks no TLS and the
             # library publishes a bare address. That row's comment carries what
@@ -1203,7 +1265,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.GOOGLE_BOOKS: Target(
             source=CatalogueSource.GOOGLE_BOOKS,
-            rank=9,
+            rank=11,
             transport=Transport.BESPOKE,
             base_url="https://www.googleapis.com/books/v1/volumes",
             reader=Reader.GOOGLE_BOOKS,
@@ -1220,7 +1282,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNF: Target(
             source=CatalogueSource.BNF,
-            rank=10,
+            rank=12,
             transport=Transport.SRU,
             base_url="https://catalogue.bnf.fr/api/SRU",
             reader=Reader.DUBLIN_CORE,
@@ -1240,7 +1302,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LOC: Target(
             source=CatalogueSource.LOC,
-            rank=11,
+            rank=13,
             transport=Transport.SRU,
             base_url="http://lx2.loc.gov:210/lcdb",
             reader=Reader.MODS,
@@ -1324,9 +1386,9 @@ def origin(base_url: str) -> str:
 #: * it raises a `fetch.FetchRefused` subclass, which is an `httpx.HTTPError`, so
 #:   it lands in every existing handler and costs no new arm;
 #: * and **this set is not the whole allowlist**. `fetch.py` is every outbound
-#:   door but covers, and `authority.py` is a caller at three sites with three
-#:   origins of its own, `lobid.org`, `viaf.org` and `wikidata.org`, none of them
-#:   here. A check derived from this set alone refuses every author identity
+#:   door but covers, and `authority.py` is a caller with four origins of its
+#:   own, `lobid.org`, `viaf.org`, `wikidata.org` and `pub.orcid.org`, none of
+#:   them here. A check derived from this set alone refuses every author identity
 #:   lookup in the application.
 #:
 #: Not merged with `covers.COVER_HOSTS`, which is a different question with a

@@ -58,10 +58,11 @@ deliberately not exposed.
 
 **Which catalogues, and in what order by default.** For a scanned or typed ISBN, the German
 National Library and K10plus are asked together and their records merged. When neither
-answers, the rest are asked in turn until one does: Open Library, the Czech National
-Library, the Spanish National Library, the National Library of Greece, the Austrian National
-Library, the Argentine National Library, the Uruguayan National Library and Google Books.
-The Greek, Austrian and Uruguayan libraries are asked only about ISBNs in the registration
+answers, the rest are asked in turn until one does: the National Library of Greece, the
+Polish National Library, Open Library, the Austrian National Library, the Czech National
+Library, the Spanish National Library, LIBRIS (the Swedish union catalogue), the Argentine
+National Library, the Uruguayan National Library and Google Books. The Greek, Polish, Austrian and Uruguayan libraries are
+asked only about ISBNs in the registration
 groups they collect, so a German book does not wait on Athens, and Settings names the groups
 beside each. A title search asks the German National Library, K10plus, Open Library, the
 Greek and Austrian libraries and Google Books at once, and also the National Library of
@@ -408,7 +409,9 @@ stack takes.
 **No author biographies or portraits.** The shelf stores a name and, where a
 catalogue asserted one or somebody confirmed one, that spelling's number in an
 authority file. Confirming a GND number keeps the ISNI, Library of Congress
-number, VIAF cluster and Wikidata item the same record carries, **and the
+number, VIAF cluster and ORCID iD the same record carries, each only where it
+carries exactly one, the Wikidata item where the record links at most one and
+Wikidata names no other for that GND number, **and the
 national library numbers for Brazil, Argentina, Spain, Portugal, Italy and
 Chile**, which the GND record does not carry and the VIAF cluster it names does.
 That is what lets an author be looked up outside German. Dates and a one line
