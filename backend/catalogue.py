@@ -1195,17 +1195,8 @@ def _folded_subjects(subjects: Iterable[Subject]) -> tuple[Subject, ...]:
     overwritten, which is `_union`'s rule for a caption applied to the half a
     record more often omits.
     """
-    kept: dict[tuple[str, str | None], Subject] = {}
-    for subject in subjects:
-        key = (subject.label, subject.vocabulary)
-        existing = kept.get(key)
-        if existing is None:
-            kept[key] = subject
-        elif existing.identifier is None and subject.identifier is not None:
-            kept[key] = dataclasses.replace(existing, identifier=subject.identifier)
-
     by_label: dict[str, list[Subject]] = {}
-    for (label, _), subject in kept.items():
+    for (label, _), subject in _one_per_vocabulary(subjects).items():
         by_label.setdefault(label, []).append(subject)
 
     return tuple(
@@ -1214,6 +1205,21 @@ def _folded_subjects(subjects: Iterable[Subject]) -> tuple[Subject, ...]:
         for subject in entries
         if subject.vocabulary is not None or not _restates(subject, entries)
     )
+
+
+def _one_per_vocabulary(subjects: Iterable[Subject]) -> dict[tuple[str, str | None], Subject]:
+    """`_folded_subjects`' first pass: one subject per label and vocabulary, in
+    first occurrence order, its identifier filled from a later occurrence and
+    never overwritten."""
+    kept: dict[tuple[str, str | None], Subject] = {}
+    for subject in subjects:
+        key = (subject.label, subject.vocabulary)
+        existing = kept.get(key)
+        if existing is None:
+            kept[key] = subject
+        elif existing.identifier is None and subject.identifier is not None:
+            kept[key] = dataclasses.replace(existing, identifier=subject.identifier)
+    return kept
 
 
 def _distinct(assertions: Iterable[AuthorityAssertion]) -> tuple[AuthorityAssertion, ...]:

@@ -106,67 +106,9 @@ export default function BookList({
   return (
     <>
       <ul className="card divide-y divide-paper-100 dark:divide-paper-800">
-        {books.map((book) => {
-          const status = book.my_status ?? ReadStatus.unread;
-          const line = subtitleOf(book, t);
-          return (
-            <li key={book.id}>
-              {/* One link for the whole row rather than a link on the title.
-                  The table links the title alone because a reader copying a
-                  publisher out of a cell should not navigate; a row here holds
-                  nothing to copy and is a single target, which is also what
-                  makes it usable on a phone. */}
-              <Link
-                to={`/book/${book.id}`}
-                className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-paper-50 dark:hover:bg-paper-800/50"
-              >
-                <CoverImage
-                  src={book.cover_url}
-                  alt=""
-                  loading="lazy"
-                  className="h-12 w-8 shrink-0 rounded bg-paper-100 object-cover dark:bg-paper-800"
-                  iconClassName="w-4 h-4 opacity-40"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-paper-900 dark:text-paper-100">
-                    {book.title}
-                  </p>
-                  {line && (
-                    <p className="truncate text-xs text-paper-600 dark:text-paper-400">
-                      {line}
-                    </p>
-                  )}
-                </div>
-                {/* The two exceptions to the muted rule below, and they earn
-                    it by being rare: a loan and an unconfirmed book are the
-                    minority of a shelf, so a coloured marker on one is a signal
-                    rather than a field. The grid uses the same two colours for
-                    the same two facts. */}
-                {book.active_loan && (
-                  <span className="shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs font-medium text-white">
-                    {t("library.loaned")}
-                  </span>
-                )}
-                {book.ownership === OwnershipStatus.unknown && (
-                  <span className="shrink-0 rounded-full bg-amber-500/90 px-1.5 py-0.5 text-xs font-medium text-white">
-                    {t("ownership.unknown")}
-                  </span>
-                )}
-                {/* Plain muted text, not the coloured pill the card uses. One
-                    pill among covers is a marker; thirty of them stacked is a
-                    colour field with no signal, and the pill's ink is below the
-                    4.5 floor as it draws where this pairing clears it on every
-                    palette. Both halves of that are recomputed by
-                    `tests/theme/palettes.test.ts::the status pill's ink, as it
-                    draws`, and the two tiers used here are in that file's
-                    contract. The word is the information either way. */}
-                <span className="shrink-0 text-xs text-paper-600 dark:text-paper-400">
-                  {t(STATUS_LABELS[status])}
-                </span>
-              </Link>
-            </li>
-          );
-        })}
+        {books.map((book) => (
+          <BookRow key={book.id} book={book} />
+        ))}
       </ul>
 
       {hasMore && (
@@ -181,5 +123,69 @@ export default function BookList({
         </div>
       )}
     </>
+  );
+}
+
+/** One book as a row: cover, title, subtitle, and the markers a shelf scan wants. */
+function BookRow({ book }: { book: BookOut }) {
+  const { t } = useTranslation();
+  const status = book.my_status ?? ReadStatus.unread;
+  const line = subtitleOf(book, t);
+  return (
+    <li>
+      {/* One link for the whole row rather than a link on the title.
+          The table links the title alone because a reader copying a
+          publisher out of a cell should not navigate; a row here holds
+          nothing to copy and is a single target, which is also what
+          makes it usable on a phone. */}
+      <Link
+        to={`/book/${book.id}`}
+        className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-paper-50 dark:hover:bg-paper-800/50"
+      >
+        <CoverImage
+          src={book.cover_url}
+          alt=""
+          loading="lazy"
+          className="h-12 w-8 shrink-0 rounded bg-paper-100 object-cover dark:bg-paper-800"
+          iconClassName="w-4 h-4 opacity-40"
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-paper-900 dark:text-paper-100">
+            {book.title}
+          </p>
+          {line && (
+            <p className="truncate text-xs text-paper-600 dark:text-paper-400">
+              {line}
+            </p>
+          )}
+        </div>
+        {/* The two exceptions to the muted rule below, and they earn
+            it by being rare: a loan and an unconfirmed book are the
+            minority of a shelf, so a coloured marker on one is a signal
+            rather than a field. The grid uses the same two colours for
+            the same two facts. */}
+        {book.active_loan && (
+          <span className="shrink-0 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs font-medium text-white">
+            {t("library.loaned")}
+          </span>
+        )}
+        {book.ownership === OwnershipStatus.unknown && (
+          <span className="shrink-0 rounded-full bg-amber-500/90 px-1.5 py-0.5 text-xs font-medium text-white">
+            {t("ownership.unknown")}
+          </span>
+        )}
+        {/* Plain muted text, not the coloured pill the card uses. One
+            pill among covers is a marker; thirty of them stacked is a
+            colour field with no signal, and the pill's ink is below the
+            4.5 floor as it draws where this pairing clears it on every
+            palette. Both halves of that are recomputed by
+            `tests/theme/palettes.test.ts::the status pill's ink, as it
+            draws`, and the two tiers used here are in that file's
+            contract. The word is the information either way. */}
+        <span className="shrink-0 text-xs text-paper-600 dark:text-paper-400">
+          {t(STATUS_LABELS[status])}
+        </span>
+      </Link>
+    </li>
   );
 }

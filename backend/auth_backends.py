@@ -331,23 +331,29 @@ def _reapply_directory_assertions(
             source.value,
         )
     if email_moved:
-        # The fact, never the address: this goes to a log an operator
-        # reads, and an address is the one part of an envelope worth
-        # keeping out of one. `mailer._deliver` logs a refused recipient
-        # count for the same reason.
-        logger.info(
-            "The %s directory %s the address for %s",
-            source.value,
-            "cleared" if asserted is None else "set",
-            clipped(username),
-        )
-        user.email = asserted
+        _take_the_asserted_email(user, username, source, asserted)
     user.is_admin = is_admin
     # An account that predates the switch to a directory keeps its rows and
     # its history; it simply stops being authenticated locally.
     user.auth_source = source.value
     db.commit()
     db.refresh(user)
+
+
+def _take_the_asserted_email(user: User, username: str, source: AuthMode, asserted: str | None) -> None:
+    """Store the address the directory asserts, and log that it moved.
+
+    The fact, never the address: this goes to a log an operator reads, and an
+    address is the one part of an envelope worth keeping out of one.
+    `mailer._deliver` logs a refused recipient count for the same reason.
+    """
+    logger.info(
+        "The %s directory %s the address for %s",
+        source.value,
+        "cleared" if asserted is None else "set",
+        clipped(username),
+    )
+    user.email = asserted
 
 
 def upsert_directory_user(
@@ -584,17 +590,24 @@ def _connect(user: str | None = None, password: str | None = None) -> Connection
         # one fails the login closed; `authenticate_ldap` logs why.
         auto_referrals=False,
     )
-    # **The return value is the whole point.** ldap3 answers `False` when it did
-    # not upgrade, and ignoring it sends the bind, password and all, over the
-    # plain connection StartTLS was meant to protect. An `ldaps://` URL is TLS
-    # before anything is sent, and ldap3 answers `False` to StartTLS on one, so
-    # it is not asked.
+    _upgrade_or_refuse(server, connection)
+    return connection
+
+
+def _upgrade_or_refuse(server: Server, connection: Connection) -> None:
+    """Run StartTLS where it is configured, and refuse a connection it did not upgrade.
+
+    **The return value is the whole point.** ldap3 answers `False` when it did
+    not upgrade, and ignoring it sends the bind, password and all, over the
+    plain connection StartTLS was meant to protect. An `ldaps://` URL is TLS
+    before anything is sent, and ldap3 answers `False` to StartTLS on one, so
+    it is not asked.
+    """
     if ldap_start_tls() and not server.ssl and not connection.start_tls():
         raise LDAPException(
             "LDAP_START_TLS is set and the directory connection was not upgraded, "
             "so no bind is sent on it rather than a password in cleartext."
         )
-    return connection
 
 
 def _is_member_of_admin_group(entry: object, groups: list[str]) -> bool:

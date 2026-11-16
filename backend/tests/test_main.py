@@ -540,6 +540,39 @@ class TestTheShellServesClientRoutes:
         assert res.status_code == 200
         assert SHELL_MARKER in res.text
 
+    def test_a_build_with_a_404_page_still_answers_a_navigation_with_the_shell(self, tmp_path):
+        """Starlette returns a build's `404.html` rather than raising, so this is
+        the returned 404 reaching the shell, with the shell's own policy."""
+        (build_output(tmp_path) / "404.html").write_text("not found page")
+        app = FastAPI()
+        main.mount_spa(app, tmp_path)
+
+        res = TestClient(app).get("/book/12", headers=NAVIGATION)
+
+        assert res.status_code == 200
+        assert SHELL_MARKER in res.text
+        assert res.headers["cache-control"] == "no-cache"
+
+    def test_a_build_with_a_404_page_answers_a_fetch_with_that_page(self, tmp_path):
+        (build_output(tmp_path) / "404.html").write_text("not found page")
+        app = FastAPI()
+        main.mount_spa(app, tmp_path)
+
+        res = TestClient(app).get("/book/12", headers={"Accept": "application/json"})
+
+        assert res.status_code == 404
+        assert res.text == "not found page"
+
+    def test_a_build_without_a_shell_answers_a_navigation_404(self, tmp_path):
+        """A deep link to a build missing index.html is a 404, never a 500."""
+        (build_output(tmp_path) / "index.html").unlink()
+        app = FastAPI()
+        main.mount_spa(app, tmp_path)
+
+        res = TestClient(app).get("/book/12", headers=NAVIGATION)
+
+        assert res.status_code == 404
+
 
 class TestTheFrontendCanBeSwitchedOff:
     """`SERVE_FRONTEND=false`, which is how a relay asks for API-only.

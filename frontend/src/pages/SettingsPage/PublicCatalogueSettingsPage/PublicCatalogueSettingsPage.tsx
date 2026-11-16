@@ -163,18 +163,33 @@ function PublishSection({ settings, state, onConfirm }: SectionProps) {
         </p>
       )}
 
-      <div className="mt-4">
-        <ToggleField
-          label={t("settings.public.indexingLabel")}
-          hint={t("settings.public.indexingHint")}
-          checked={settings.public_catalogue_indexing_enabled ?? false}
-          disabled={state.isSaving || !settings.public_catalogue_published}
-          onChange={(checked) =>
-            state.save({ public_catalogue_indexing_enabled: checked })
-          }
-        />
-      </div>
+      <IndexingField settings={settings} state={state} />
     </SettingsSection>
+  );
+}
+
+/** Whether search engines may index the catalogue: disabled until it is live. */
+function IndexingField({
+  settings,
+  state,
+}: {
+  settings: SettingsOut;
+  state: UseSettingsResult;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="mt-4">
+      <ToggleField
+        label={t("settings.public.indexingLabel")}
+        hint={t("settings.public.indexingHint")}
+        checked={settings.public_catalogue_indexing_enabled ?? false}
+        disabled={state.isSaving || !settings.public_catalogue_published}
+        onChange={(checked) =>
+          state.save({ public_catalogue_indexing_enabled: checked })
+        }
+      />
+    </div>
   );
 }
 

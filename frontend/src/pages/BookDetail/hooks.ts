@@ -1172,13 +1172,8 @@ export function useBookSections(
   // section links straight to a sibling copy) reuses the component instance:
   // a ref that only ever arms once would hand the second book the first one's
   // loan, its copy count and its blurb.
-  const arrival = useRef<{
-    bookId: number;
-    defaults: Record<BookSection, boolean>;
-  } | null>(null);
-  if (defaults !== null && arrival.current?.bookId !== bookId)
-    arrival.current = { bookId, defaults };
-  const onArrival = arrival.current?.defaults;
+  const arrival = useRef<Arrival | null>(null);
+  const onArrival = arrivalDefaults(arrival, bookId, defaults);
 
   const isOpen = (section: BookSection) =>
     resolveOpen(choices[section], onArrival?.[section] ?? false);
@@ -1194,4 +1189,24 @@ export function useBookSections(
       }));
     },
   };
+}
+
+/** The defaults one book arrived with, frozen for as long as it is on screen. */
+interface Arrival {
+  bookId: number;
+  defaults: Record<BookSection, boolean>;
+}
+
+/**
+ * Arm `arrival` with `defaults` the first render they exist for `bookId`, and
+ * read back what it holds. `useBookSections` says why it is keyed on the id.
+ */
+function arrivalDefaults(
+  arrival: { current: Arrival | null },
+  bookId: number,
+  defaults: Record<BookSection, boolean> | null,
+): Record<BookSection, boolean> | undefined {
+  if (defaults !== null && arrival.current?.bookId !== bookId)
+    arrival.current = { bookId, defaults };
+  return arrival.current?.defaults;
 }

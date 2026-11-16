@@ -17,6 +17,7 @@ import {
   AuthMode,
   type AuthConfigOut,
   type RegistrationOut,
+  type UserCreate,
   type UserOut,
 } from "../../api/generated/model";
 
@@ -61,11 +62,12 @@ type DeploymentPolicy = Pick<
  * form demand a field the deployment does not want. Absent means offer less.
  */
 function deploymentPolicy(config: AuthConfigOut | undefined): DeploymentPolicy {
+  const answered: Partial<AuthConfigOut> = config ?? {};
   return {
-    registrationEnabled: config?.registration_enabled ?? true,
-    isDirectoryLogin: config?.auth_mode === AuthMode.ldap,
-    passwordResetEnabled: config?.password_reset_enabled ?? false,
-    verificationRequired: config?.verification_required ?? false,
+    registrationEnabled: answered.registration_enabled ?? true,
+    isDirectoryLogin: answered.auth_mode === AuthMode.ldap,
+    passwordResetEnabled: answered.password_reset_enabled ?? false,
+    verificationRequired: answered.verification_required ?? false,
   };
 }
 
@@ -117,9 +119,7 @@ export function useLoginForm(
 
     // **The address goes only to registration.** `LoginRequest` has no such
     // field, and sending one would be a payload the sign in route never asked
-    // for. An empty string is sent as nothing at all: `UserCreate` reads "" as
-    // no address, and this keeps the two ends agreeing rather than relying on
-    // it.
+    // for.
     //
     // The branch is `active`, the one derived above, rather than a second read
     // of `mode`: two derivations of one fact a line apart is how they come to
@@ -127,9 +127,7 @@ export function useLoginForm(
     submit: (username, password, email) => {
       setDismissed(false);
       if (active === register) {
-        register.mutate({
-          data: { username, password, ...(email ? { email } : {}) },
-        });
+        register.mutate({ data: registration(username, password, email) });
         return;
       }
       login.mutate({ data: { username, password } });
@@ -138,6 +136,19 @@ export function useLoginForm(
     error: dismissed ? null : active.error,
     clearError: () => setDismissed(true),
   };
+}
+
+/**
+ * What registration sends. An empty address is sent as nothing at all:
+ * `UserCreate` reads "" as no address, and this keeps the two ends agreeing
+ * rather than relying on it.
+ */
+function registration(
+  username: string,
+  password: string,
+  email: string,
+): UserCreate {
+  return { username, password, ...(email ? { email } : {}) };
 }
 
 export interface UseLoginBackgroundResult {

@@ -163,40 +163,88 @@ export default function AuthorsPage() {
             className="w-full px-3 py-2 mb-4 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
           />
 
-          {matching.length === 0 ? (
-            <EmptyState icon="search" title={t("authors.noMatches")} />
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {matching.map((author) => (
-                <AuthorCard
-                  key={author.key}
-                  author={author}
-                  isBusy={isBusy}
-                  isSelected={selected.includes(author.key)}
-                  onToggleSelect={(picked) =>
-                    setSelected((current) => toggled(current, picked.key))
-                  }
-                  onUndo={authors.undo}
-                  wikipedia={authors.wikipedia.get(author.key)}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Below the list rather than above it, and only while something is
-              selected: the bar is the answer to a selection, not a control
-              that waits for one. */}
-          {chosen.length > 0 && (
-            <MergeBar
-              selected={chosen}
-              isMerging={authors.isMerging}
-              onMerge={merge}
-              onClear={() => setSelected([])}
-            />
-          )}
+          <AuthorIndex
+            matching={matching}
+            chosen={chosen}
+            selected={selected}
+            isBusy={isBusy}
+            isMerging={authors.isMerging}
+            wikipedia={authors.wikipedia}
+            onToggleSelect={(picked) =>
+              setSelected((current) => toggled(current, picked.key))
+            }
+            onUndo={authors.undo}
+            onMerge={merge}
+            onClear={() => setSelected([])}
+          />
         </>
       )}
     </Page>
+  );
+}
+
+interface AuthorIndexProps {
+  matching: AuthorOut[];
+  chosen: AuthorOut[];
+  selected: string[];
+  isBusy: boolean;
+  isMerging: boolean;
+  wikipedia: UseAuthorsResult["wikipedia"];
+  onToggleSelect: (author: AuthorOut) => void;
+  onUndo: UseAuthorsResult["undo"];
+  onMerge: (keys: string[], keepName: string) => void;
+  onClear: () => void;
+}
+
+/**
+ * The names the search leaves, and the bar that merges a selection of them.
+ * The selection itself stays with the page, which reads it across searches.
+ */
+function AuthorIndex({
+  matching,
+  chosen,
+  selected,
+  isBusy,
+  isMerging,
+  wikipedia,
+  onToggleSelect,
+  onUndo,
+  onMerge,
+  onClear,
+}: AuthorIndexProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {matching.length === 0 ? (
+        <EmptyState icon="search" title={t("authors.noMatches")} />
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {matching.map((author) => (
+            <AuthorCard
+              key={author.key}
+              author={author}
+              isBusy={isBusy}
+              isSelected={selected.includes(author.key)}
+              onToggleSelect={onToggleSelect}
+              onUndo={onUndo}
+              wikipedia={wikipedia.get(author.key)}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Below the list rather than above it, and only while something is
+          selected: the bar is the answer to a selection, not a control
+          that waits for one. */}
+      {chosen.length > 0 && (
+        <MergeBar
+          selected={chosen}
+          isMerging={isMerging}
+          onMerge={onMerge}
+          onClear={onClear}
+        />
+      )}
+    </>
   );
 }
 

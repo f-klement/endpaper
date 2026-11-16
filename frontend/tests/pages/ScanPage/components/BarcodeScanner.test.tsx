@@ -433,6 +433,27 @@ describe("the camera light", () => {
     ).toHaveBeenLastCalledWith({ advanced: [{ torch: false }] });
   });
 
+  it("asks nothing of a camera that has since dropped its track", async () => {
+    // The light was offered off the track the stream opened with; a press
+    // after that track is gone has nothing to switch, and must not throw.
+    const stream = fakeStream({ torch: true });
+    const [track] = stream.getVideoTracks();
+    getUserMedia.mockResolvedValue(stream);
+    const user = userEvent.setup();
+    renderLocalised(<BarcodeScanner active onDetected={vi.fn<OnDetected>()} />);
+    const button = await screen.findByRole("button", { name: "Camera light" });
+
+    Object.assign(stream, { getVideoTracks: () => [] });
+    await user.click(button);
+
+    await act(async () => {});
+
+    expect(track!.applyConstraints).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Camera light" }),
+    ).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("withdraws the control when the camera refuses the light", async () => {
     // A camera that reported the capability and then refused it: the scan
     // works without light, so the control goes rather than an error appearing.

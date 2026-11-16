@@ -56,6 +56,10 @@ return {
     expect(table.get("t")).toBe('say "hi"\nnext\ttab\\');
   });
 
+  it("reads a single quoted string", () => {
+    expect(read("return { ['t'] = 'say \"hi\"' }").get("t")).toBe('say "hi"');
+  });
+
   it("keeps UTF-8 text written directly", () => {
     expect(read('return { ["t"] = "Straße, café" }').get("t")).toBe(
       "Straße, café",

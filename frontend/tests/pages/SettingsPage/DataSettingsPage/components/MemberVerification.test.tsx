@@ -96,6 +96,20 @@ describe("MemberVerification", () => {
     expect(screen.getByText(/no address/i)).toBeInTheDocument();
   });
 
+  it("says nothing about an address once an account is confirmed", () => {
+    // A confirmed account needs no code, so a missing address is no news.
+    draw([
+      {
+        ...waiting,
+        verified_at: "2026-09-06T10:00:00Z",
+        verification_source: VerificationProvenance.email,
+        has_address: false,
+      },
+    ]);
+
+    expect(screen.queryByText(/no address/i)).not.toBeInTheDocument();
+  });
+
   it("shows no address anywhere", () => {
     // The schema carries none, and this asserts the screen does not acquire one
     // by some other route: an address belongs to the account page.

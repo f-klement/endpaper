@@ -364,21 +364,39 @@ function acquisitionOf(
   row: SqliteRow,
   present: Set<string>,
 ): KoboAcquisition | null {
-  if (present.has("___ExpirationStatus")) {
-    if (integer(row["___ExpirationStatus"]) === EXPIRED) return null;
-  }
+  if (expired(row, present)) return null;
   if (!present.has("Accessibility")) return "unrecorded";
   const accessibility = integer(row["Accessibility"]);
   if (accessibility === null) return null;
   const acquisition = ACCESSIBILITY.get(accessibility);
   if (acquisition === undefined) return null;
-  if (acquisition === "sideloaded") {
-    // A sideloaded book that is no longer downloaded is one the member deleted:
-    // Kobo keeps the row and clears the flag rather than removing it.
-    if (present.has("IsDownloaded") && !isTrue(row["IsDownloaded"]))
-      return null;
-  }
+  if (deletedSideload(row, present, acquisition)) return null;
   return acquisition;
+}
+
+/** A loan that has run out, on a device recording expiry at all. */
+function expired(row: SqliteRow, present: Set<string>): boolean {
+  return (
+    present.has("___ExpirationStatus") &&
+    integer(row["___ExpirationStatus"]) === EXPIRED
+  );
+}
+
+/**
+ * A sideloaded book that is no longer downloaded is one the member deleted:
+ * Kobo keeps the row and clears the flag rather than removing it. A device
+ * without the column cannot say so, and keeps the book.
+ */
+function deletedSideload(
+  row: SqliteRow,
+  present: Set<string>,
+  acquisition: KoboAcquisition,
+): boolean {
+  return (
+    acquisition === "sideloaded" &&
+    present.has("IsDownloaded") &&
+    !isTrue(row["IsDownloaded"])
+  );
 }
 
 /**

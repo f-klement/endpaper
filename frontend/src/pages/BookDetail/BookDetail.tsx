@@ -58,7 +58,9 @@ import {
   type UseBookActionsResult,
   type UseBookCustomFieldsResult,
   type UseBookEnrichmentResult,
+  type UseBookKosyncResult,
   type UseBookLoanResult,
+  type UseBookProgressResult,
   type UseBookResult,
   type UseBookSectionsResult,
 } from "./hooks";
@@ -138,16 +140,6 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
     );
   }
 
-  const pageError = firstError([
-    actions.error,
-    notes.error,
-    quotes.error,
-    highlights.error,
-    loan.error,
-    access.error,
-    progress.error,
-  ]);
-
   return (
     <div className="max-w-lg mx-auto">
       <BookHeader
@@ -162,7 +154,17 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
       />
 
       <div className="px-4 py-5 space-y-4">
-        {pageError != null && <ErrorState error={pageError} />}
+        <PageError
+          errors={[
+            actions.error,
+            notes.error,
+            quotes.error,
+            highlights.error,
+            loan.error,
+            access.error,
+            progress.error,
+          ]}
+        />
 
         <PrivacyControl
           book={book}
@@ -173,50 +175,14 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
         {book.active_loan && <LoanBadge loan={book.active_loan} />}
 
         <div>
-          <CollapsibleSection
-            id="reading"
-            title={t("section.reading")}
-            isOpen={sections.isOpen("reading")}
-            onToggle={() => sections.toggle("reading")}
-          >
-            <StatusPicker
-              current={book.my_status ?? ReadStatus.unread}
-              onChange={actions.setStatus}
-            />
-
-            <ReadingPanel book={book} onRate={actions.setRating} />
-
-            {/* Under the status and the rating, because it is the third thing
-                this reader has to say about this book, and the only one
-                anybody else gets to see. Not in the lending group: it is a
-                fact about a reader, not about where the object is. */}
-            <DiscussToggle
-              book={book}
-              currentUserId={currentUser.id}
-              onChange={actions.setDiscuss}
-            />
-
-            {/* Below the status buttons, because the first entry promotes an
-                unstarted book to reading: the control that asserts that sits
-                next to the one that says so. */}
-            <ProgressPanel
-              book={book}
-              entries={progress.entries}
-              isRecording={progress.isRecording}
-              onRecord={progress.record}
-              onRemove={progress.remove}
-            />
-
-            {/* Under the log it writes to: a linked device adds a row there. */}
-            <KosyncDocuments
-              linked={kosync.linked}
-              waiting={kosync.waiting}
-              onLink={kosync.link}
-              onUnlink={kosync.unlink}
-              isSaving={kosync.isSaving}
-              error={kosync.error}
-            />
-          </CollapsibleSection>
+          <ReadingSection
+            book={book}
+            currentUserId={currentUser.id}
+            actions={actions}
+            progress={progress}
+            kosync={kosync}
+            sections={sections}
+          />
 
           <FilingSection
             book={book}
@@ -345,8 +311,10 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
  * The first error any of the page's own requests raised, in the order the page
  * reports them: one banner, never a stack of them.
  */
-function firstError(errors: readonly unknown[]): unknown {
-  return errors.find((error) => error != null);
+function PageError({ errors }: { errors: readonly unknown[] }) {
+  const first = errors.find((error) => error != null);
+  if (first == null) return null;
+  return <ErrorState error={first} />;
 }
 
 interface PrivacyControlProps {
@@ -388,6 +356,74 @@ function PrivacyControl({
     <span className="inline-flex items-center gap-1 text-xs text-paper-600 bg-paper-100 px-2 py-0.5 rounded dark:text-paper-400 dark:bg-paper-800">
       <Icon name="lock" className="w-3.5 h-3.5" /> {t("book.privateBadge")}
     </span>
+  );
+}
+
+interface ReadingSectionProps {
+  book: BookOut;
+  currentUserId: number;
+  actions: UseBookActionsResult;
+  progress: UseBookProgressResult;
+  kosync: UseBookKosyncResult;
+  sections: UseBookSectionsResult;
+}
+
+/** What this reader has to say about the book: status, rating, progress. */
+function ReadingSection({
+  book,
+  currentUserId,
+  actions,
+  progress,
+  kosync,
+  sections,
+}: ReadingSectionProps) {
+  const { t } = useTranslation();
+
+  return (
+    <CollapsibleSection
+      id="reading"
+      title={t("section.reading")}
+      isOpen={sections.isOpen("reading")}
+      onToggle={() => sections.toggle("reading")}
+    >
+      <StatusPicker
+        current={book.my_status ?? ReadStatus.unread}
+        onChange={actions.setStatus}
+      />
+
+      <ReadingPanel book={book} onRate={actions.setRating} />
+
+      {/* Under the status and the rating, because it is the third thing
+          this reader has to say about this book, and the only one
+          anybody else gets to see. Not in the lending group: it is a
+          fact about a reader, not about where the object is. */}
+      <DiscussToggle
+        book={book}
+        currentUserId={currentUserId}
+        onChange={actions.setDiscuss}
+      />
+
+      {/* Below the status buttons, because the first entry promotes an
+          unstarted book to reading: the control that asserts that sits
+          next to the one that says so. */}
+      <ProgressPanel
+        book={book}
+        entries={progress.entries}
+        isRecording={progress.isRecording}
+        onRecord={progress.record}
+        onRemove={progress.remove}
+      />
+
+      {/* Under the log it writes to: a linked device adds a row there. */}
+      <KosyncDocuments
+        linked={kosync.linked}
+        waiting={kosync.waiting}
+        onLink={kosync.link}
+        onUnlink={kosync.unlink}
+        isSaving={kosync.isSaving}
+        error={kosync.error}
+      />
+    </CollapsibleSection>
   );
 }
 

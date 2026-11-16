@@ -11,6 +11,8 @@ library, with a count" publishes what is on other people's private books without
 returning one of them.
 """
 
+from dependencies import MAX_HEADING_CHARS
+
 FACETS = "/api/books/classifications"
 
 
@@ -258,6 +260,28 @@ class TestTheHeadingFilter:
         make_book(admin["headers"], title="Kept")
 
         res = client.get("/api/books", params={"classification": "bogus:004"}, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert [row["title"] for row in res.json()["items"]] == ["Kept"]
+
+    def test_a_scheme_with_no_heading_is_ignored_rather_than_refused(self, client, admin, make_book):
+        make_book(admin["headers"], title="Kept")
+
+        res = client.get("/api/books", params={"classification": "lcsh"}, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert [row["title"] for row in res.json()["items"]] == ["Kept"]
+
+    def test_a_heading_too_long_to_match_a_row_is_ignored(self, client, admin, make_book):
+        """Kept, it would narrow the shelf to nothing; the parameter bounds the
+        number of values and this is the only bound on their length."""
+        make_book(admin["headers"], title="Kept")
+
+        res = client.get(
+            "/api/books",
+            params={"classification": "lcsh:" + "x" * MAX_HEADING_CHARS},
+            headers=admin["headers"],
+        )
 
         assert res.status_code == 200
         assert [row["title"] for row in res.json()["items"]] == ["Kept"]

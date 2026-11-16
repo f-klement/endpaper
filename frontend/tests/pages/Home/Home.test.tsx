@@ -278,6 +278,22 @@ describe("Home as the wishlist", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("says how a book reaches the wishlist, not to adjust the filters", async () => {
+    // The view is two filters, so the library's own empty hint would tell a
+    // reader to loosen the very filters that make it the wishlist.
+    api.on(/\/api\/books\?/, { body: makeBookPage([]) });
+    renderWithProviders(<Home />, { route: WISHLIST });
+
+    expect(
+      await screen.findByText(
+        "A book you want but do not own yet: mark it as want to read and not owned.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Try adjusting your filters"),
+    ).not.toBeInTheDocument();
+  });
+
   it("stays the wishlist when a search is typed into it", async () => {
     // Only the two fields that define the view are compared, so narrowing it
     // does not throw you back to the library.

@@ -632,6 +632,25 @@ describe("a schema this reader does not have all of", () => {
       seriesIndex: null,
     });
   });
+
+  it("keeps a sideloaded book on a device too old to record a download", async () => {
+    // Schema 16 to 32: `Accessibility` is there and `IsDownloaded` is not, so
+    // nothing on the device says the member deleted the book.
+    const read = await device(
+      [
+        `CREATE TABLE content (
+           ContentID TEXT NOT NULL PRIMARY KEY,
+           BookID TEXT,
+           Title TEXT,
+           Accessibility INTEGER
+         )`,
+      ],
+      `INSERT INTO content (ContentID, Title, Accessibility)
+         VALUES ('1', 'Dune', -1)`,
+    );
+
+    expect(read.ok && read.library.books[0]?.acquisition).toBe("sideloaded");
+  });
 });
 
 describe("an unreadable store is one skipped source, never a broken import", () => {

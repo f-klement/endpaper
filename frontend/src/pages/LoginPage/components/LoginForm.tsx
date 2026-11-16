@@ -89,41 +89,11 @@ export default function LoginForm({
           every account here has been.
         */}
         {mode === "register" && (
-          <div>
-            <label
-              htmlFor="email"
-              className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-            >
-              {t("login.email")}{" "}
-              {!addressRequired && (
-                <span className="font-normal text-paper-600 dark:text-paper-400">
-                  ({t("login.emailOptional")})
-                </span>
-              )}
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              // Required only where the deployment confirms new accounts. The
-              // server refuses the same case with a 400, so this is the form
-              // saying so before the round trip rather than the control.
-              required={addressRequired}
-              autoComplete="email"
-              aria-describedby="email-hint"
-              className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
-              placeholder={t("login.emailPlaceholder")}
-            />
-            <p
-              id="email-hint"
-              className="mt-1 text-xs text-paper-600 dark:text-paper-400"
-            >
-              {addressRequired
-                ? t("login.emailRequiredHint")
-                : t("login.emailHint")}
-            </p>
-          </div>
+          <EmailField
+            email={email}
+            onEmailChange={setEmail}
+            addressRequired={addressRequired}
+          />
         )}
 
         {error != null && (
@@ -142,6 +112,57 @@ export default function LoginForm({
               : t("login.createAccount")}
         </button>
       </form>
+    </div>
+  );
+}
+
+interface EmailFieldProps {
+  email: string;
+  onEmailChange: (email: string) => void;
+  addressRequired: boolean;
+}
+
+/** The address a new account gives, optional unless the deployment confirms it. */
+function EmailField({
+  email,
+  onEmailChange,
+  addressRequired,
+}: EmailFieldProps) {
+  const { t } = useTranslation();
+
+  return (
+    <div>
+      <label
+        htmlFor="email"
+        className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+      >
+        {t("login.email")}{" "}
+        {!addressRequired && (
+          <span className="font-normal text-paper-600 dark:text-paper-400">
+            ({t("login.emailOptional")})
+          </span>
+        )}
+      </label>
+      <input
+        id="email"
+        type="email"
+        value={email}
+        onChange={(event) => onEmailChange(event.target.value)}
+        // Required only where the deployment confirms new accounts. The
+        // server refuses the same case with a 400, so this is the form
+        // saying so before the round trip rather than the control.
+        required={addressRequired}
+        autoComplete="email"
+        aria-describedby="email-hint"
+        className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
+        placeholder={t("login.emailPlaceholder")}
+      />
+      <p
+        id="email-hint"
+        className="mt-1 text-xs text-paper-600 dark:text-paper-400"
+      >
+        {addressRequired ? t("login.emailRequiredHint") : t("login.emailHint")}
+      </p>
     </div>
   );
 }

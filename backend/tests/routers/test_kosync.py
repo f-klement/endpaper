@@ -213,6 +213,7 @@ class TestAPushAndAPull:
             ({"document": None}, 2004),
             ({"document": "has:colon"}, 2004),
             ({"document": "has-a-hyphen"}, 2007),
+            ({"document": "caf\u00e9"}, 2007),
             ({"document": "x" * 65}, 2007),
             ({"percentage": "most"}, 2003),
             ({"percentage": None}, 2003),

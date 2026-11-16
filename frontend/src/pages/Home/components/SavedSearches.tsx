@@ -71,24 +71,12 @@ export default function SavedSearches({
 
       {canSave &&
         (naming ? (
-          <span className="inline-flex items-center gap-1">
-            <input
-              autoFocus
-              value={name}
-              maxLength={MAX_NAME_LENGTH}
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") commit();
-                if (event.key === "Escape") setNaming(false);
-              }}
-              placeholder={t("saved.namePlaceholder")}
-              aria-label={t("saved.nameLabel")}
-              className="field h-8 w-44 text-xs"
-            />
-            <Button size="sm" onClick={commit} disabled={!name.trim()}>
-              {t("common.save")}
-            </Button>
-          </span>
+          <NameField
+            name={name}
+            onChange={setName}
+            onCommit={commit}
+            onEscape={() => setNaming(false)}
+          />
         ) : (
           <button
             type="button"
@@ -100,5 +88,40 @@ export default function SavedSearches({
           </button>
         ))}
     </div>
+  );
+}
+
+/** The box a view's name is typed into, with the button that keeps it. */
+function NameField({
+  name,
+  onChange,
+  onCommit,
+  onEscape,
+}: {
+  name: string;
+  onChange: (name: string) => void;
+  onCommit: () => void;
+  onEscape: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        autoFocus
+        value={name}
+        maxLength={MAX_NAME_LENGTH}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") onCommit();
+          if (event.key === "Escape") onEscape();
+        }}
+        placeholder={t("saved.namePlaceholder")}
+        aria-label={t("saved.nameLabel")}
+        className="field h-8 w-44 text-xs"
+      />
+      <Button size="sm" onClick={onCommit} disabled={!name.trim()}>
+        {t("common.save")}
+      </Button>
+    </span>
   );
 }

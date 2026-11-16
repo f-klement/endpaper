@@ -166,6 +166,31 @@ describe("SuggestionCard", () => {
     expect(first).toBeDisabled();
   });
 
+  it("cannot keep a name once it is the only one still ticked", async () => {
+    // A merge of one name into itself folds nothing, so the button that would
+    // send it is closed rather than left to the confirm guard behind it.
+    renderLocalised(<Card group={GROUP} onMerge={vi.fn<OnMerge>()} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText("Include J. Smith"));
+    await user.click(screen.getByLabelText("Include James Smith"));
+
+    const [, , third] = screen.getAllByRole("button", {
+      name: "Keep this name",
+    });
+    expect(third).toBeDisabled();
+  });
+
+  it("says it is merging, on every button, while a merge is in flight", () => {
+    renderLocalised(
+      <Card group={GROUP} isMerging onMerge={vi.fn<OnMerge>()} />,
+    );
+
+    const buttons = screen.getAllByRole("button", { name: "Merging..." });
+    expect(buttons).toHaveLength(GROUP.keys.length);
+    for (const button of buttons) expect(button).toBeDisabled();
+  });
+
   it("sends nothing when the reader cancels", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     const onMerge = vi.fn<OnMerge>();

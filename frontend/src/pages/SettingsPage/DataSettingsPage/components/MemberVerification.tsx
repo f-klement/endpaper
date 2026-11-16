@@ -60,38 +60,57 @@ export default function MemberVerification({
 
       <ul className="space-y-2">
         {members.map((member) => (
-          <li
+          <MemberRow
             key={member.id}
-            className="flex items-center gap-3 rounded-lg border border-paper-100 p-3 dark:border-paper-800"
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium text-paper-900 dark:text-paper-100">
-                {member.username}
-              </span>
-              <span className="block text-xs text-paper-600 dark:text-paper-400">
-                {describe(member, t)}
-              </span>
-              {member.verified_at === null && !member.has_address && (
-                <span className="block text-xs text-paper-600 dark:text-paper-400">
-                  {t("settings.verificationNoAddress")}
-                </span>
-              )}
-            </span>
-            {member.applies && member.verified_at === null && (
-              <Button
-                onClick={() => onConfirm(member.id)}
-                disabled={isConfirming}
-                aria-label={t("settings.verificationConfirmFor", {
-                  name: member.username,
-                })}
-              >
-                {t("settings.verificationConfirm")}
-              </Button>
-            )}
-          </li>
+            member={member}
+            onConfirm={onConfirm}
+            isConfirming={isConfirming}
+          />
         ))}
       </ul>
     </div>
+  );
+}
+
+/** One account: its name, its state, and the override where it applies. */
+function MemberRow({
+  member,
+  onConfirm,
+  isConfirming,
+}: {
+  member: MemberVerificationOut;
+  onConfirm: (userId: number) => void;
+  isConfirming: boolean;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <li className="flex items-center gap-3 rounded-lg border border-paper-100 p-3 dark:border-paper-800">
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium text-paper-900 dark:text-paper-100">
+          {member.username}
+        </span>
+        <span className="block text-xs text-paper-600 dark:text-paper-400">
+          {describe(member, t)}
+        </span>
+        {member.verified_at === null && !member.has_address && (
+          <span className="block text-xs text-paper-600 dark:text-paper-400">
+            {t("settings.verificationNoAddress")}
+          </span>
+        )}
+      </span>
+      {member.applies && member.verified_at === null && (
+        <Button
+          onClick={() => onConfirm(member.id)}
+          disabled={isConfirming}
+          aria-label={t("settings.verificationConfirmFor", {
+            name: member.username,
+          })}
+        >
+          {t("settings.verificationConfirm")}
+        </Button>
+      )}
+    </li>
   );
 }
 

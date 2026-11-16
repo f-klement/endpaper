@@ -137,6 +137,23 @@ describe("the cache", () => {
     expect(readCachedAppearance()).toEqual(DOOR_APPEARANCE);
   });
 
+  it("takes no last account that is not written as a name", () => {
+    localStorage.setItem(
+      "appearance",
+      JSON.stringify({ last: 3, accounts: { "3": GRUVBOX } }),
+    );
+    expect(readCachedAppearance()).toEqual(DOOR_APPEARANCE);
+  });
+
+  it("takes no accounts that are not a record of them", () => {
+    // A string indexed by the last account's name answers its first letter.
+    localStorage.setItem(
+      "appearance",
+      JSON.stringify({ last: "0", accounts: "gruvbox" }),
+    );
+    expect(readCachedAppearance()).toEqual(DOOR_APPEARANCE);
+  });
+
   it("survives storage that refuses to be written", () => {
     // A choice is already stored, so finding it unchanged afterwards can only
     // mean the write was refused rather than skipped.

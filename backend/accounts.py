@@ -437,6 +437,24 @@ def end_every_session(user: User) -> None:
     kosync.revoke(user)
 
 
+def _redeemable_reset(db: Session, username: str) -> tuple[User, PasswordResetRequest] | None:
+    """The account and the reset a code could redeem for it, or None.
+
+    None for an account the app does not hold the password of, for no live
+    approved request, and for an approved code past its hour. The caller spends
+    a comparison on every None, so none of the three is told apart by time.
+    """
+    user = db.query(User).filter(User.username == username).first()
+    if user is None or not app_holds_the_password(user):
+        return None
+    request = live_request(db, user.id)
+    if request is None or request.approved_at is None:
+        return None
+    if request.code_expires_at is None or request.code_expires_at <= now():
+        return None
+    return user, request
+
+
 def redeem_reset(db: Session, username: str, code: str, new_password: str) -> bool:
     """Set a new password if the code was this account's live approved one.
 
@@ -457,17 +475,11 @@ def redeem_reset(db: Session, username: str, code: str, new_password: str) -> bo
     member signs in with the password they just set, which is also the check that
     it works.
     """
-    user = db.query(User).filter(User.username == username).first()
-    if user is None or not app_holds_the_password(user):
+    redeemable = _redeemable_reset(db, username)
+    if redeemable is None:
         spend_a_comparison(code)
         return False
-    request = live_request(db, user.id)
-    if request is None or request.approved_at is None:
-        spend_a_comparison(code)
-        return False
-    if request.code_expires_at is None or request.code_expires_at <= now():
-        spend_a_comparison(code)
-        return False
+    user, request = redeemable
     if not _code_matches(code, request.code_hash):
         return False
 

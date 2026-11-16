@@ -109,10 +109,16 @@ def authenticate(db: Session, username: str | None, key: str | None) -> User | N
     """
     member = db.query(User).filter(User.username == username).first() if username and key else None
     stored = member.kosync_key_digest if member is not None else None
-    presented = key_digest(key or "")
-    if not hmac.compare_digest(presented, stored or _NOBODY) or stored is None:
+    if not _key_matches(key, stored):
         return None
     return member
+
+
+def _key_matches(key: str | None, stored: str | None) -> bool:
+    """Whether `key` digests to `stored`. A digest is compared even when there
+    is nothing stored, so a missing member costs the same work as a wrong key."""
+    presented = key_digest(key or "")
+    return hmac.compare_digest(presented, stored or _NOBODY) and stored is not None
 
 
 # ── A push ────────────────────────────────────────────────────────────────────
@@ -173,11 +179,14 @@ def checked_document(document: object) -> str:
     """
     if not isinstance(document, str) or not document or ":" in document:
         raise _no_document()
-    if len(document) > KOSYNC_DOCUMENT_MAX or not all(
-        character.isascii() and (character.isalnum() or character == "_") for character in document
-    ):
+    if len(document) > KOSYNC_DOCUMENT_MAX or not _routable(document):
         raise _unservable_document()
     return document
+
+
+def _routable(document: str) -> bool:
+    """Whether every character is one the reference's `[A-Za-z0-9_]+` read route matches."""
+    return all(character.isascii() and (character.isalnum() or character == "_") for character in document)
 
 
 def _text(value: object, ceiling: int) -> str:

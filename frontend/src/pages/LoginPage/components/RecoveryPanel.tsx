@@ -24,20 +24,6 @@ interface RecoveryPanelProps {
  */
 export default function RecoveryPanel({ state, onBack }: RecoveryPanelProps) {
   const { t } = useTranslation();
-  const [askUsername, setAskUsername] = useState("");
-  const [username, setUsername] = useState("");
-  const [code, setCode] = useState("");
-  const [password, setPassword] = useState("");
-
-  function submitAsk(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    state.ask(askUsername.trim());
-  }
-
-  function submitRedeem(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    state.redeem(username.trim(), code, password);
-  }
 
   return (
     <div className="bg-paper-0 rounded-2xl shadow-sm border border-paper-100 p-6 space-y-6 dark:bg-paper-900 dark:border-paper-800">
@@ -50,131 +36,11 @@ export default function RecoveryPanel({ state, onBack }: RecoveryPanelProps) {
         </p>
       </div>
 
-      <form onSubmit={submitAsk} className="space-y-3">
-        <div>
-          <label
-            htmlFor="recovery-ask-username"
-            className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-          >
-            {t("login.username")}
-          </label>
-          <input
-            id="recovery-ask-username"
-            type="text"
-            value={askUsername}
-            onChange={(event) => setAskUsername(event.target.value)}
-            required
-            autoComplete="username"
-            className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
-            placeholder={t("login.usernamePlaceholder")}
-          />
-        </div>
-        {state.askError != null && (
-          <ErrorState error={state.askError} fallback={t("recovery.failed")} />
-        )}
-        {state.hasAsked && state.askError == null && (
-          <p
-            role="status"
-            className="text-sm text-paper-700 dark:text-paper-300"
-          >
-            {t("recovery.asked")}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={state.isAsking}
-          className="w-full py-2.5 bg-accent-fill hover:bg-accent-fill-hover disabled:bg-accent-300 text-on-accent font-semibold rounded-lg transition-colors text-sm"
-        >
-          {state.isAsking ? t("login.pleaseWait") : t("recovery.ask")}
-        </button>
-      </form>
+      <AskForm state={state} />
 
       <hr className="border-paper-100 dark:border-paper-800" />
 
-      <form onSubmit={submitRedeem} className="space-y-3">
-        <div>
-          <label
-            htmlFor="recovery-username"
-            className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-          >
-            {t("login.username")}
-          </label>
-          <input
-            id="recovery-username"
-            type="text"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            required
-            autoComplete="username"
-            className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
-            placeholder={t("login.usernamePlaceholder")}
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="recovery-code"
-            className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-          >
-            {t("recovery.codeLabel")}
-          </label>
-          <input
-            id="recovery-code"
-            type="text"
-            value={code}
-            onChange={(event) => setCode(event.target.value)}
-            required
-            // Off, and not a slip: a one time code is never worth a browser
-            // remembering, and a suggestion list under this field would be the
-            // previous member's code offered to the next one on a shared
-            // machine.
-            autoComplete="off"
-            spellCheck={false}
-            className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm font-mono tracking-wider dark:border-paper-700"
-            placeholder={t("recovery.codePlaceholder")}
-          />
-        </div>
-        <div>
-          <label
-            htmlFor="recovery-password"
-            className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
-          >
-            {t("recovery.newPassword")}
-          </label>
-          <input
-            id="recovery-password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            autoComplete="new-password"
-            className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
-            placeholder={t("recovery.newPasswordPlaceholder")}
-          />
-        </div>
-        {state.redeemError != null && (
-          <ErrorState
-            error={state.redeemError}
-            fallback={t("recovery.failed")}
-          />
-        )}
-        {state.hasRedeemed && state.redeemError == null && (
-          <p
-            role="status"
-            className="text-sm text-green-800 dark:text-green-400"
-          >
-            {t("recovery.done")}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={state.isRedeeming}
-          className="w-full py-2.5 bg-accent-fill hover:bg-accent-fill-hover disabled:bg-accent-300 text-on-accent font-semibold rounded-lg transition-colors text-sm"
-        >
-          {state.isRedeeming
-            ? t("login.pleaseWait")
-            : t("recovery.setPassword")}
-        </button>
-      </form>
+      <RedeemForm state={state} />
 
       <button
         type="button"
@@ -184,5 +50,146 @@ export default function RecoveryPanel({ state, onBack }: RecoveryPanelProps) {
         {t("login.backToSignIn")}
       </button>
     </div>
+  );
+}
+
+/** The first half: asking an admin to approve a reset. */
+function AskForm({ state }: { state: UseRecoveryResult }) {
+  const { t } = useTranslation();
+  const [askUsername, setAskUsername] = useState("");
+
+  function submitAsk(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    state.ask(askUsername.trim());
+  }
+
+  return (
+    <form onSubmit={submitAsk} className="space-y-3">
+      <div>
+        <label
+          htmlFor="recovery-ask-username"
+          className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+        >
+          {t("login.username")}
+        </label>
+        <input
+          id="recovery-ask-username"
+          type="text"
+          value={askUsername}
+          onChange={(event) => setAskUsername(event.target.value)}
+          required
+          autoComplete="username"
+          className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
+          placeholder={t("login.usernamePlaceholder")}
+        />
+      </div>
+      {state.askError != null && (
+        <ErrorState error={state.askError} fallback={t("recovery.failed")} />
+      )}
+      {state.hasAsked && state.askError == null && (
+        <p role="status" className="text-sm text-paper-700 dark:text-paper-300">
+          {t("recovery.asked")}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={state.isAsking}
+        className="w-full py-2.5 bg-accent-fill hover:bg-accent-fill-hover disabled:bg-accent-300 text-on-accent font-semibold rounded-lg transition-colors text-sm"
+      >
+        {state.isAsking ? t("login.pleaseWait") : t("recovery.ask")}
+      </button>
+    </form>
+  );
+}
+
+/** The second half: spending the code the admin read out on a new password. */
+function RedeemForm({ state }: { state: UseRecoveryResult }) {
+  const { t } = useTranslation();
+  const [username, setUsername] = useState("");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+
+  function submitRedeem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    state.redeem(username.trim(), code, password);
+  }
+
+  return (
+    <form onSubmit={submitRedeem} className="space-y-3">
+      <div>
+        <label
+          htmlFor="recovery-username"
+          className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+        >
+          {t("login.username")}
+        </label>
+        <input
+          id="recovery-username"
+          type="text"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          required
+          autoComplete="username"
+          className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
+          placeholder={t("login.usernamePlaceholder")}
+        />
+      </div>
+      <div>
+        <label
+          htmlFor="recovery-code"
+          className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+        >
+          {t("recovery.codeLabel")}
+        </label>
+        <input
+          id="recovery-code"
+          type="text"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          required
+          // Off, and not a slip: a one time code is never worth a browser
+          // remembering, and a suggestion list under this field would be the
+          // previous member's code offered to the next one on a shared
+          // machine.
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm font-mono tracking-wider dark:border-paper-700"
+          placeholder={t("recovery.codePlaceholder")}
+        />
+      </div>
+      <div>
+        <label
+          htmlFor="recovery-password"
+          className="block text-sm font-medium text-paper-700 mb-1 dark:text-paper-200"
+        >
+          {t("recovery.newPassword")}
+        </label>
+        <input
+          id="recovery-password"
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+          autoComplete="new-password"
+          className="w-full px-3 py-2.5 rounded-lg border border-paper-200 text-sm dark:border-paper-700"
+          placeholder={t("recovery.newPasswordPlaceholder")}
+        />
+      </div>
+      {state.redeemError != null && (
+        <ErrorState error={state.redeemError} fallback={t("recovery.failed")} />
+      )}
+      {state.hasRedeemed && state.redeemError == null && (
+        <p role="status" className="text-sm text-green-800 dark:text-green-400">
+          {t("recovery.done")}
+        </p>
+      )}
+      <button
+        type="submit"
+        disabled={state.isRedeeming}
+        className="w-full py-2.5 bg-accent-fill hover:bg-accent-fill-hover disabled:bg-accent-300 text-on-accent font-semibold rounded-lg transition-colors text-sm"
+      >
+        {state.isRedeeming ? t("login.pleaseWait") : t("recovery.setPassword")}
+      </button>
+    </form>
   );
 }

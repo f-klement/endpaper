@@ -402,6 +402,14 @@ class TestANulIsRefusedWhereverAPublishedRouteTakesText:
         assert res.status_code == 422
         assert all(entry["type"] != "value_error" for entry in res.json()["detail"])
 
+    def test_a_nul_in_an_object_s_key_is_refused_by_its_location(self, client) -> None:
+        res = client.post("/auth/login", json={"user\u0000name": "reader", "password": "x"})
+
+        assert res.status_code == 422
+        assert res.json()["detail"] == [
+            {"type": "value_error", "loc": ["body", "user\u0000name"], "msg": f"Value error, {NUL_REFUSED}"}
+        ]
+
     def test_a_nul_nested_past_the_recursion_limit_is_refused_by_its_location(self, client) -> None:
         """`json.loads` parses a body nested past Python's recursion limit, and a
         recursive walk of it raised `RecursionError` before any session was asked

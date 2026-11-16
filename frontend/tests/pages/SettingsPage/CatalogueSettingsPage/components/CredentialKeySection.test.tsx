@@ -114,6 +114,22 @@ describe("making one", () => {
     expect(await screen.findByText(PHRASE)).toBeInTheDocument();
   });
 
+  it("offers no second key while the words are on screen", async () => {
+    // The answer to the GET still says no key is held, as a refetch racing the
+    // write would, so only the phrase withholds the button here.
+    render();
+    await userEvent
+      .setup()
+      .click(
+        await screen.findByRole("button", { name: "Create an encryption key" }),
+      );
+    await screen.findByText(PHRASE);
+
+    expect(
+      screen.queryByRole("button", { name: "Create an encryption key" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("says they are shown only this once", async () => {
     render();
     await userEvent

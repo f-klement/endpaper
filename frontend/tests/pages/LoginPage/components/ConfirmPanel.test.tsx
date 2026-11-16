@@ -97,4 +97,21 @@ describe("ConfirmPanel", () => {
       screen.getByText("Your account is confirmed. Sign in."),
     ).toBeInTheDocument();
   });
+
+  it("shows a refused code in place of the confirmation", () => {
+    renderLocalised(
+      <ConfirmPanel
+        state={state({
+          hasConfirmed: true,
+          confirmError: new Error("That code is not valid."),
+        })}
+        onBack={vi.fn<OnBack>()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "That code is not valid.",
+    );
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
 });

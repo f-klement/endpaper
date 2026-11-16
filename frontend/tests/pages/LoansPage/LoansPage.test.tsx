@@ -446,7 +446,22 @@ describe("LoansPage overdue handling", () => {
     renderWithProviders(<LoansPage />);
 
     await screen.findByText("Dune");
-    expect(screen.queryByText(/loans are overdue/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/need chasing/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Show them" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says nothing while the reminder is off, whatever count comes with it", async () => {
+    // The count is only the overdue page's while the channel is on.
+    api.on("/api/loans/overdue/mine", { body: { enabled: false, count: 3 } });
+    api.on(/\/api\/loans\?/, {
+      body: makeLoanPage([makeLoan({ book: makeBook({ title: "Dune" }) })]),
+    });
+    renderWithProviders(<LoansPage />);
+
+    await screen.findByText("Dune");
+    expect(screen.queryByText(/chasing/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("link", { name: "Show them" }),
     ).not.toBeInTheDocument();
@@ -457,7 +472,7 @@ describe("LoansPage overdue handling", () => {
     renderWithProviders(<LoansPage />);
 
     await screen.findByText("Dune");
-    expect(screen.queryByText(/loans are overdue/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/need chasing/)).not.toBeInTheDocument();
   });
 
   it("filters to the overdue ones", async () => {
@@ -528,7 +543,7 @@ describe("LoansPage overdue handling", () => {
       .click(screen.getByRole("button", { name: "Overdue only" }));
 
     await waitFor(() =>
-      expect(screen.queryByText(/loans are overdue/)).not.toBeInTheDocument(),
+      expect(screen.queryByText(/need chasing/)).not.toBeInTheDocument(),
     );
   });
 

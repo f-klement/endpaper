@@ -581,7 +581,32 @@ def suggest_merges(
         for edge in rule.edges(by_key, spines or {}, budget)
     ]
 
-    parent = {key: key for key in by_key}
+    grouped, reasons = _connected(by_key, edges)
+    suggestions = [
+        AuthorSuggestion(
+            keys=tuple(sorted(keys)),
+            names=tuple(by_key[key].name for key in sorted(keys)),
+            reasons=tuple(sorted(reasons[root])),
+        )
+        for root, keys in grouped.items()
+        if len(keys) > 1
+    ]
+    # Biggest first, then by name, so the order does not depend on dictionary
+    # insertion and the cap below takes the same tail on every run.
+    suggestions.sort(key=lambda group: (-len(group.keys), group.names))
+    return suggestions[:MAX_SUGGESTIONS]
+
+
+#: One suggested pairing: two author keys and the rule that produced it.
+_Edge = tuple[str, str, SuggestionReason]
+
+
+def _connected(
+    keys: Iterable[str], edges: Sequence[_Edge]
+) -> tuple[dict[str, list[str]], dict[str, set[SuggestionReason]]]:
+    """`suggest_merges`' union: each group's keys and the reasons that joined
+    them, both filed under the group's root."""
+    parent = {key: key for key in keys}
 
     def find(key: str) -> str:
         while parent[key] != key:
@@ -603,26 +628,9 @@ def suggest_merges(
         reasons[find(left)].add(reason)
 
     grouped: defaultdict[str, list[str]] = defaultdict(list)
-    for key in by_key:
+    for key in parent:
         grouped[find(key)].append(key)
-
-    suggestions = [
-        AuthorSuggestion(
-            keys=tuple(sorted(keys)),
-            names=tuple(by_key[key].name for key in sorted(keys)),
-            reasons=tuple(sorted(reasons[root])),
-        )
-        for root, keys in grouped.items()
-        if len(keys) > 1
-    ]
-    # Biggest first, then by name, so the order does not depend on dictionary
-    # insertion and the cap below takes the same tail on every run.
-    suggestions.sort(key=lambda group: (-len(group.keys), group.names))
-    return suggestions[:MAX_SUGGESTIONS]
-
-
-#: One suggested pairing: two author keys and the rule that produced it.
-_Edge = tuple[str, str, SuggestionReason]
+    return grouped, reasons
 
 
 class _Rule(Protocol):

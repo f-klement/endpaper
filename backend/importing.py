@@ -198,13 +198,8 @@ def _settle_one(
         case recognition.Hidden() if create_missing:
             tally.unmatched_private += 1
             return None
-        case recognition.InTrash():
-            tally.in_trash += 1
-            _report_title(tally.in_trash_titles, unmatched_title)
-            return None
-        case recognition.Tied():
-            tally.ambiguous += 1
-            _report_title(tally.ambiguous_titles, unmatched_title)
+        case recognition.InTrash() | recognition.Tied():
+            _list_unsettled(answer, tally, unmatched_title)
             return None
         case recognition.Unknown() if create_missing:
             created = create()
@@ -214,6 +209,17 @@ def _settle_one(
 
     _report_title(tally.unmatched, unmatched_title)
     return None
+
+
+def _list_unsettled(answer: recognition.InTrash | recognition.Tied, tally: _Tally, title: str) -> None:
+    """`_settle_one`'s two rows listed with nothing written: a Book in the
+    trash, and a row matching more than one Book."""
+    if isinstance(answer, recognition.InTrash):
+        tally.in_trash += 1
+        _report_title(tally.in_trash_titles, title)
+    else:
+        tally.ambiguous += 1
+        _report_title(tally.ambiguous_titles, title)
 
 
 def _settle_seen(
@@ -518,14 +524,23 @@ class Import:
             existing.rating = row.rating
             changed = True
 
-        # Only for Books the export says were finished. A date on a
-        # currently-reading row would be a finish date for a Book nobody
-        # finished.
-        if row.status is ReadStatus.READ and row.date_read is not None and existing.finished_at is None:
-            existing.finished_at = datetime.combine(row.date_read, time.min)
+        finished_at = _finish_to_fill(row, existing.finished_at)
+        if finished_at is not None:
+            existing.finished_at = finished_at
             changed = True
-
         return changed
+
+
+def _finish_to_fill(row: csv_import.ImportRow, finished_at: datetime | None) -> datetime | None:
+    """The finish date the row gives a record finished at `finished_at`, or None
+    where it gives none: a stored date is never overwritten.
+
+    Only for Books the export says were finished. A date on a currently-reading
+    row would be a finish date for a Book nobody finished.
+    """
+    if row.status is ReadStatus.READ and row.date_read is not None and finished_at is None:
+        return datetime.combine(row.date_read, time.min)
+    return None
 
 
 def _carries_nothing_personal(row: csv_import.ImportRow) -> bool:

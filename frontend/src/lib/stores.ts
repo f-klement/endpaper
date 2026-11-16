@@ -93,6 +93,7 @@ import type { MoonReaderFailure, MoonReaderLibrary } from "./moonReader";
 import type { KindleFailure, KindleLibrary } from "./kindle";
 import type { KoboAcquisition, KoboFailure, KoboLibrary } from "./kobo";
 import type { SqliteFailure } from "./sqlite";
+import type { ZipArchive } from "./zip";
 import type { SourceRecord } from "./sourceRecord";
 import type { TakeoutFailure, TakeoutLibrary } from "./takeout";
 
@@ -932,22 +933,10 @@ async function openMoonReader(file: File): Promise<StoreReading> {
   // property, which is what found it.
   let database: File;
   try {
-    const archive = await openZip(file);
-    const namesEntry = moon.namesEntryIn(archive.entries);
-    if (namesEntry === null)
+    const found = await moonDatabaseIn(await openZip(file), moon);
+    if (found === null)
       return { ok: false, failure: "not-a-moon-reader-backup" };
-    const names = archive.find(namesEntry);
-    if (names === undefined)
-      return { ok: false, failure: "not-a-moon-reader-backup" };
-    const tag = moon.databaseTagName(
-      namesEntry,
-      new TextDecoder().decode(await archive.read(names, MOON_INDEX_LIMIT)),
-    );
-    if (tag === null) return { ok: false, failure: "not-a-moon-reader-backup" };
-    const entry = archive.find(tag);
-    if (entry === undefined)
-      return { ok: false, failure: "not-a-moon-reader-backup" };
-    database = new File([await archive.read(entry, MOON_DATABASE_LIMIT)], tag);
+    database = found;
   } catch (error) {
     if (!(error instanceof ZipError)) throw error;
     return {
@@ -964,6 +953,29 @@ async function openMoonReader(file: File): Promise<StoreReading> {
   } finally {
     opened.database.close();
   }
+}
+
+/**
+ * The database a Moon+ backup holds, found through the archive's own index,
+ * or `null` where the index or the entry it names is missing. A refusal by the
+ * seam rejects, as `openMoonReader` expects.
+ */
+async function moonDatabaseIn(
+  archive: ZipArchive,
+  moon: typeof import("./moonReader"),
+): Promise<File | null> {
+  const namesEntry = moon.namesEntryIn(archive.entries);
+  if (namesEntry === null) return null;
+  const names = archive.find(namesEntry);
+  if (names === undefined) return null;
+  const tag = moon.databaseTagName(
+    namesEntry,
+    new TextDecoder().decode(await archive.read(names, MOON_INDEX_LIMIT)),
+  );
+  if (tag === null) return null;
+  const entry = archive.find(tag);
+  if (entry === undefined) return null;
+  return new File([await archive.read(entry, MOON_DATABASE_LIMIT)], tag);
 }
 
 /**

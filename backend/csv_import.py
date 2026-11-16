@@ -1078,25 +1078,46 @@ def _guessing_reader(column: str | None = None, unpack: UnpackCell | None = None
             # which is a count beside a blank on the one file the bound is for.
             exclusion_column=(exclusions[0].strip()[:_MAX_HEADER_QUOTED] if exclusions else None),
         )
-        for raw in table.rows:
-            # Before the title is looked at, so the two counts stay apart: what
-            # the file asked for is `excluded`, what a row lacks is `skipped`,
-            # and a deleted row with no title is the file's answer rather than
-            # this module's.
-            if any(_means_deleted(raw.get(header)) for header in exclusions):
-                parsed.excluded += 1
-                continue
-            row = _row_from(raw, mapping, display_order)
-            if row is None:
-                parsed.skipped += 1
-                continue
-            if unpack is not None and compound is not None:
-                unpack(_clean(raw.get(compound)), row)
-            _infer_status_from_the_date(row)
-            parsed.rows.append(row)
+        _read_rows(
+            parsed,
+            table.rows,
+            exclusions,
+            display_order=display_order,
+            compound=compound,
+            unpack=unpack,
+        )
         return parsed
 
     return read
+
+
+def _read_rows(
+    parsed: ParsedFile,
+    rows: list[dict[str, str]],
+    exclusions: list[str],
+    *,
+    display_order: bool,
+    compound: str | None,
+    unpack: UnpackCell | None,
+) -> None:
+    """`_guessing_reader`'s rows, each counted into `parsed` as excluded,
+    skipped or read."""
+    for raw in rows:
+        # Before the title is looked at, so the two counts stay apart: what
+        # the file asked for is `excluded`, what a row lacks is `skipped`,
+        # and a deleted row with no title is the file's answer rather than
+        # this module's.
+        if any(_means_deleted(raw.get(header)) for header in exclusions):
+            parsed.excluded += 1
+            continue
+        row = _row_from(raw, parsed.mapping, display_order)
+        if row is None:
+            parsed.skipped += 1
+            continue
+        if unpack is not None and compound is not None:
+            unpack(_clean(raw.get(compound)), row)
+        _infer_status_from_the_date(row)
+        parsed.rows.append(row)
 
 
 #: The two compound cells, named once each.
@@ -1144,7 +1165,12 @@ def _unpack_publication(value: str, row: ImportRow) -> None:
 
     # The last, not the first: a publisher named after a year would otherwise
     # take the anchor, and the year of publication is written last here.
-    year_at = found[-1]
+    _unpack_around_the_year(text, found[-1], row)
+
+
+def _unpack_around_the_year(text: str, year_at: re.Match[str], row: ImportRow) -> None:
+    """`_unpack_publication`'s cell with its year found: the year, what stands
+    before it as the publisher, and a format after it, each only into a gap."""
     if row.year is None:
         row.year = _int(year_at.group(1), minimum=1, maximum=2200)
 

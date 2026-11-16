@@ -242,16 +242,7 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
 
     # A book the library said it does not lend. Refused once, then allowed:
     # see `_refuse_unless_acknowledged`.
-    if book.lending == LendingWillingness.NEVER and not payload.acknowledge_not_lendable:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": (
-                    "This book is marked as never lent. Send acknowledge_not_lendable to lend it anyway."
-                ),
-                "code": NOT_LENDABLE,
-            },
-        )
+    _refuse_unless_acknowledged(book, payload)
 
     # `Loans.open_on`, which has no viewer and needs none: the book was
     # resolved through the Shelf three statements above, so whether this
@@ -272,6 +263,22 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     db.commit()
     db.refresh(loan)
     return _loan_with_relations(loan.id, db, current_user.id, _now())
+
+
+def _refuse_unless_acknowledged(book: Book, payload: LoanCreate) -> None:
+    """Refuse a loan of a book marked `lending = never` with a 409, unless the
+    request acknowledges the mark. Why once and not for ever is
+    `create_loan`'s docstring."""
+    if book.lending == LendingWillingness.NEVER and not payload.acknowledge_not_lendable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": (
+                    "This book is marked as never lent. Send acknowledge_not_lendable to lend it anyway."
+                ),
+                "code": NOT_LENDABLE,
+            },
+        )
 
 
 @router.get("/overdue", response_model=Page[LoanOut])

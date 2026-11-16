@@ -205,6 +205,33 @@ async function readSpending(
 }
 
 /**
+ * The package document's entry, as `META-INF/container.xml` names it, or
+ * undefined where the container, its rootfile or the entry it names is missing.
+ * The container's bytes are charged like the package's.
+ */
+async function packageEntry(
+  archive: ZipArchive,
+  charge: EpubCharge | undefined,
+): Promise<ZipEntry | undefined> {
+  const container = archive.find(CONTAINER_PATH);
+  if (container === undefined) return undefined;
+  const containerBytes = await readSpending(
+    archive,
+    container,
+    MAX_CONTAINER_BYTES,
+    charge,
+  );
+  const path = packagePath(utf8.decode(containerBytes));
+  if (path === null) return undefined;
+
+  // The path is a URI reference, so a producer may have escaped a space or a
+  // non ASCII character in it; zip entry names carry the character itself.
+  // Exact match first, because unescaping a name that was never escaped is
+  // how a literal `%20` in a filename stops matching.
+  return archive.find(path) ?? archive.find(unescapePath(path));
+}
+
+/**
  * Read one EPUB's metadata.
  *
  * Never throws for anything the file did, which is the contract
@@ -223,22 +250,7 @@ export async function readEpub(
   try {
     const archive = await openZip(file);
 
-    const container = archive.find(CONTAINER_PATH);
-    if (container === undefined) return { ok: false, failure: "not-an-epub" };
-    const containerBytes = await readSpending(
-      archive,
-      container,
-      MAX_CONTAINER_BYTES,
-      charge,
-    );
-    const path = packagePath(utf8.decode(containerBytes));
-    if (path === null) return { ok: false, failure: "not-an-epub" };
-
-    // The path is a URI reference, so a producer may have escaped a space or a
-    // non ASCII character in it; zip entry names carry the character itself.
-    // Exact match first, because unescaping a name that was never escaped is
-    // how a literal `%20` in a filename stops matching.
-    const entry = archive.find(path) ?? archive.find(unescapePath(path));
+    const entry = await packageEntry(archive, charge);
     if (entry === undefined) return { ok: false, failure: "not-an-epub" };
 
     const packageBytes = await readSpending(

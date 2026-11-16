@@ -761,13 +761,28 @@ def parse(stored: dict[str, Any]) -> Plan:
     if not isinstance(entries, list):
         return DEFAULT_PLAN
 
+    preferences, seen = _stored_preferences(entries)
+
+    if not preferences:
+        return DEFAULT_PLAN
+
+    # Every source the stored value did not mention, in the default order. A
+    # release that adds a source must not leave it unasked for every library
+    # that saved a list before it existed.
+    preferences.extend(Preference(source, True) for source in DEFAULT_ORDER if source not in seen)
+    return Plan(tuple(preferences))
+
+
+def _stored_preferences(entries: list[Any]) -> tuple[list[Preference], set[CatalogueSource]]:
+    """`parse`'s reading of the stored entries: each recognised source once, in
+    the order stored, and the set of sources it named."""
     preferences: list[Preference] = []
     seen: set[CatalogueSource] = set()
     for entry in entries:
         # **No truncation, deliberately, and it was here once.** A cap of 100
         # entries read against a roster of nine looks like a bound on a hostile
         # row and is an **on switch**: a hundred unrecognised entries followed by
-        # `google_books` switched off drops the real entry, and the tail below
+        # `google_books` switched off drops the real entry, and `parse`'s tail
         # then appends google_books enabled. The bound meant to contain a
         # corrupt row would have defeated the off switch, which is the one thing
         # this value exists to make true.
@@ -789,17 +804,9 @@ def parse(stored: dict[str, Any]) -> Plan:
         # off switch would fail open on the most probable way of getting it
         # wrong. The default is `True` because an entry that names a source and
         # says nothing about it is the same case as a source the value never
-        # named at all, which the tail below enables.
+        # named at all, which `parse`'s tail enables.
         preferences.append(Preference(source, entry.get("enabled", True) is True))
-
-    if not preferences:
-        return DEFAULT_PLAN
-
-    # Every source the stored value did not mention, in the default order. A
-    # release that adds a source must not leave it unasked for every library
-    # that saved a list before it existed.
-    preferences.extend(Preference(source, True) for source in DEFAULT_ORDER if source not in seen)
-    return Plan(tuple(preferences))
+    return preferences, seen
 
 
 def _named_source(entry: object) -> CatalogueSource | None:

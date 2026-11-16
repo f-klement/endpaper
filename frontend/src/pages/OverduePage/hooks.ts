@@ -11,13 +11,20 @@ import {
   useMyOverdue,
 } from "../../api/generated/endpoints/loans/loans";
 import { useGetSenderHealth } from "../../api/generated/endpoints/settings/settings";
-import type { LoanOut, SenderHealth } from "../../api/generated/model";
+import type {
+  LoanOut,
+  PageLoanOut,
+  SenderHealth,
+} from "../../api/generated/model";
 import { ApiError } from "../../api/mutator";
 import { useLoanReturn } from "../hooks";
 import type { DeliveryRecord } from "./types";
 
 /** Rows per request. The page is read top-down, so a page is generous. */
 export const PAGE_SIZE = 50;
+
+/** What the list reads before its first page has arrived. */
+const NO_ROWS: Pick<PageLoanOut, "items" | "total"> = { items: [], total: 0 };
 
 export interface UseOverdueResult {
   /** Most overdue first: the server orders by the date the book was due. */
@@ -77,10 +84,11 @@ export function useOverdue(): UseOverdueResult {
   });
 
   const returning = useLoanReturn();
+  const page = overdue.data ?? NO_ROWS;
 
   return {
-    loans: overdue.data?.items ?? [],
-    total: overdue.data?.total ?? 0,
+    loans: page.items,
+    total: page.total,
     enabled: channel.data?.enabled ?? true,
     channels: deliveryRecord(health),
 

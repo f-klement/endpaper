@@ -70,16 +70,38 @@ export function FilePicker({
         }}
       />
       {offered && (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => input.current?.click()}
-          className={`w-full ${compact ? "py-2" : "py-2.5"} rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 disabled:opacity-50 transition-colors dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800`}
-        >
-          {busy ? busyLabel : label}
-        </button>
+        <PickerButton
+          busy={busy}
+          label={busy ? busyLabel : label}
+          compact={compact}
+          onOpen={() => input.current?.click()}
+        />
       )}
     </>
+  );
+}
+
+/** The button that opens the hidden input. */
+function PickerButton({
+  busy,
+  label,
+  compact,
+  onOpen,
+}: {
+  busy: boolean;
+  label: string;
+  compact: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={onOpen}
+      className={`w-full ${compact ? "py-2" : "py-2.5"} rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 disabled:opacity-50 transition-colors dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800`}
+    >
+      {label}
+    </button>
   );
 }
 

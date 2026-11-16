@@ -81,28 +81,7 @@ export default function ConfirmPanel({ state, onBack }: ConfirmPanelProps) {
           />
         </div>
 
-        {state.confirmError != null && (
-          <ErrorState
-            error={state.confirmError}
-            fallback={t("verify.failed")}
-          />
-        )}
-        {state.hasConfirmed && state.confirmError == null && (
-          <p
-            role="status"
-            className="text-sm text-green-800 dark:text-green-400"
-          >
-            {t("verify.done")}
-          </p>
-        )}
-        {state.hasResent && state.resendError == null && (
-          <p
-            role="status"
-            className="text-sm text-paper-700 dark:text-paper-300"
-          >
-            {t("verify.resent")}
-          </p>
-        )}
+        <ConfirmOutcome state={state} />
 
         <button
           type="submit"
@@ -129,5 +108,31 @@ export default function ConfirmPanel({ state, onBack }: ConfirmPanelProps) {
         {t("login.backToSignIn")}
       </button>
     </div>
+  );
+}
+
+/**
+ * What the last confirm or resend came to. A fragment, so its lines sit in the
+ * form's own spacing above the submit button.
+ */
+function ConfirmOutcome({ state }: { state: UseAddressConfirmationResult }) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      {state.confirmError != null && (
+        <ErrorState error={state.confirmError} fallback={t("verify.failed")} />
+      )}
+      {state.hasConfirmed && state.confirmError == null && (
+        <p role="status" className="text-sm text-green-800 dark:text-green-400">
+          {t("verify.done")}
+        </p>
+      )}
+      {state.hasResent && state.resendError == null && (
+        <p role="status" className="text-sm text-paper-700 dark:text-paper-300">
+          {t("verify.resent")}
+        </p>
+      )}
+    </>
   );
 }

@@ -142,6 +142,65 @@ function LookupFailure({
   );
 }
 
+/** The spinner shown while a code is being looked up. */
+function LookingUp({ scan }: { scan: Pick<UseScanFlowResult, "isLookingUp"> }) {
+  const { t } = useTranslation();
+  if (!scan.isLookingUp) return null;
+  return (
+    <div className="text-center py-12">
+      <Spinner label={t("scan.lookingUp")} />
+      <p className="text-paper-600 text-sm mt-3 dark:text-paper-400">
+        {t("scan.lookingUp")}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The pending book once there is a draft: the fields carried over from the
+ * last one, then the card that confirms it.
+ *
+ * One condition over both, as a fragment, so they stay siblings: the carried
+ * fields sit above the confirm card rather than inside it, so the privacy
+ * notice is read before the book is, and before the button that adds it.
+ */
+function Drafted({
+  scan,
+  onCancel,
+}: {
+  scan: UseScanFlowResult;
+  onCancel: () => void;
+}) {
+  const { draft } = scan.pending;
+  if (!draft) return null;
+  return (
+    <>
+      <CarriedFields
+        pending={scan.pending}
+        onChange={scan.update}
+        collections={scan.collections}
+        privacyCarried={scan.privacyCarried}
+      />
+      <LookupResult
+        pending={{ ...scan.pending, draft }}
+        onChange={scan.update}
+        tags={scan.tags}
+        locations={scan.locations}
+        isAdding={scan.isAdding}
+        error={scan.error}
+        onToggleTag={scan.toggleTag}
+        onCreateTag={scan.createTag}
+        onForgetTagName={scan.forgetTagName}
+        onConfirm={scan.confirm}
+        onCancel={onCancel}
+        onAddCopy={scan.addCopy}
+        isAddingCopy={scan.isAddingCopy}
+        enteredByHand={scan.enteredByHand}
+      />
+    </>
+  );
+}
+
 /** The camera, idle or reading, its switch, and what it last refused. */
 function CameraPanel({
   isOn,
@@ -409,14 +468,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
         </>
       )}
 
-      {scan.isLookingUp && (
-        <div className="text-center py-12">
-          <Spinner label={t("scan.lookingUp")} />
-          <p className="text-paper-600 text-sm mt-3 dark:text-paper-400">
-            {t("scan.lookingUp")}
-          </p>
-        </div>
-      )}
+      <LookingUp scan={scan} />
 
       {showSearchHelp && (
         <GoogleBooksHelp
@@ -425,36 +477,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
         />
       )}
 
-      {/* One condition over both, as a fragment, so they stay siblings: the
-          carried fields sit above the confirm card rather than inside it, so
-          the privacy notice is read before the book is, and before the button
-          that adds it. */}
-      {draft && (
-        <>
-          <CarriedFields
-            pending={scan.pending}
-            onChange={scan.update}
-            collections={scan.collections}
-            privacyCarried={scan.privacyCarried}
-          />
-          <LookupResult
-            pending={{ ...scan.pending, draft }}
-            onChange={scan.update}
-            tags={scan.tags}
-            locations={scan.locations}
-            isAdding={scan.isAdding}
-            error={scan.error}
-            onToggleTag={scan.toggleTag}
-            onCreateTag={scan.createTag}
-            onForgetTagName={scan.forgetTagName}
-            onConfirm={scan.confirm}
-            onCancel={handleCancel}
-            onAddCopy={scan.addCopy}
-            isAddingCopy={scan.isAddingCopy}
-            enteredByHand={scan.enteredByHand}
-          />
-        </>
-      )}
+      <Drafted scan={scan} onCancel={handleCancel} />
     </div>
   );
 }

@@ -72,15 +72,7 @@ export default function OverduePage() {
         // Two empties, and they are not the same news. The switch being off is
         // a household decision somebody can undo; nothing being late is the
         // answer the reader wanted.
-        <EmptyState
-          icon="check"
-          title={overdue.enabled ? t("overdue.none") : t("overdue.switchedOff")}
-          hint={
-            overdue.enabled
-              ? t("overdue.noneHint")
-              : t("overdue.switchedOffHint")
-          }
-        />
+        <OverdueEmpty enabled={overdue.enabled} />
       ) : (
         <div className="space-y-3">
           {overdue.loans.map((loan) => (
@@ -115,5 +107,17 @@ export default function OverduePage() {
         </div>
       )}
     </Page>
+  );
+}
+
+/** No overdue rows, saying whether nothing is late or the reminder is off. */
+function OverdueEmpty({ enabled }: { enabled: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <EmptyState
+      icon="check"
+      title={enabled ? t("overdue.none") : t("overdue.switchedOff")}
+      hint={enabled ? t("overdue.noneHint") : t("overdue.switchedOffHint")}
+    />
   );
 }

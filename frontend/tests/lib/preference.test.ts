@@ -210,6 +210,23 @@ describe("reading", () => {
     expect(brittle.read()).toBe("safe");
   });
 
+  it("decodes a string whose decode threw only once", () => {
+    const decode = vi.fn<(raw: string) => string>(() => {
+      throw new Error("bad");
+    });
+    const brittle = declarePreference<string>("test.brittle.once", {
+      decode,
+      encode: (value) => value,
+      fallback: () => "safe",
+    });
+    localStorage.setItem("test.brittle.once", "anything");
+
+    brittle.read();
+    brittle.read();
+
+    expect(decode).toHaveBeenCalledTimes(1);
+  });
+
   it("sees a value written past it", () => {
     // A test seeding storage, or another tab. The snapshot is held against the
     // exact string it was decoded from, so it is correct rather than fresh.

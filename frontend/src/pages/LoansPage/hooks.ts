@@ -4,11 +4,18 @@ import {
   useListLoans,
   useMyOverdue,
 } from "../../api/generated/endpoints/loans/loans";
-import type { LoanOut } from "../../api/generated/model";
+import type {
+  LoanOut,
+  MyOverdueOut,
+  PageLoanOut,
+} from "../../api/generated/model";
 import { useLoanReturn } from "../hooks";
 
 /** Rows per request. The list is read top-down, so a page is generous. */
 export const PAGE_SIZE = 50;
+
+/** What the list reads before its first page has arrived. */
+const NO_ROWS: Pick<PageLoanOut, "items" | "total"> = { items: [], total: 0 };
 
 export interface UseLoansResult {
   loans: LoanOut[];
@@ -63,14 +70,15 @@ export function useLoans(): UseLoansResult {
   const overdue = useMyOverdue({ query: { staleTime: 60_000 } });
 
   const returning = useLoanReturn();
+  const page = loans.data ?? NO_ROWS;
 
   return {
-    loans: loans.data?.items ?? [],
-    total: loans.data?.total ?? 0,
+    loans: page.items,
+    total: page.total,
     showAll,
     overdueOnly,
     setOverdueOnly,
-    overdueCount: overdue.data?.enabled ? (overdue.data.count ?? 0) : 0,
+    overdueCount: overdueCount(overdue.data),
     setShowAll,
 
     isLoading: loans.isPending,
@@ -80,4 +88,9 @@ export function useLoans(): UseLoansResult {
     returningIds: returning.returningIds,
     markReturned: returning.markReturned,
   };
+}
+
+/** The overdue count the nudge shows: none while the in app channel is off. */
+function overdueCount(answer: MyOverdueOut | undefined): number {
+  return answer?.enabled ? (answer.count ?? 0) : 0;
 }

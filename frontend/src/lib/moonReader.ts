@@ -290,20 +290,33 @@ export function readMoonReaderLibrary(db: SqliteDatabase): MoonReaderReading {
     const asked = WANTED.filter((column) => present.has(column));
     const read = db.query(`SELECT ${asked.join(", ")} FROM ${table}`);
     rows += read.length;
-    for (const row of read) {
-      const path = text(row["filename"]);
-      if (path === null) {
-        skipped += 1;
-        continue;
-      }
-      const book = bookOf(row, path);
-      const seen = books.get(path);
-      books.set(path, seen === undefined ? book : preferring(seen, book));
-    }
+    skipped += mergeInto(books, read);
   }
   if (rows === 0) return { ok: false, failure: "empty" };
 
   return { ok: true, library: { books: [...books.values()], skipped } };
+}
+
+/**
+ * One table's rows merged into `books` by path, the later row preferred.
+ * Returns how many rows named no file and were skipped.
+ */
+function mergeInto(
+  books: Map<string, MoonReaderBook>,
+  rows: readonly SqliteRow[],
+): number {
+  let skipped = 0;
+  for (const row of rows) {
+    const path = text(row["filename"]);
+    if (path === null) {
+      skipped += 1;
+      continue;
+    }
+    const book = bookOf(row, path);
+    const seen = books.get(path);
+    books.set(path, seen === undefined ? book : preferring(seen, book));
+  }
+  return skipped;
 }
 
 /**

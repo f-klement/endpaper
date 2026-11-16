@@ -293,22 +293,27 @@ def _write(book: Book, values: Mapping[str, object], policy: Policy) -> list[str
     changed: list[str] = []
     for name, incoming in values.items():
         current = getattr(book, name)
+        if _policy_keeps(name, incoming, current, policy):
+            continue
         if is_empty(incoming):
-            # An absent value asserts nothing, except where a refresh reads the
-            # source's silence as the source no longer asserting it.
-            if not (policy is Policy.REFRESH and name in _CLEARED_BY_REFRESH):
-                continue
             # Compared as null, which is what `Book` stores for a blank:
             # compared as the blank, a column already null would be reported
             # changed on every refresh.
             incoming = None
-        elif policy is Policy.FILL_GAPS and not is_empty(current):
-            continue
         if current == incoming:
             continue
         setattr(book, name, incoming)
         changed.append(name)
     return changed
+
+
+def _policy_keeps(name: str, incoming: object, current: object, policy: Policy) -> bool:
+    """Whether `policy` leaves the column `name` as it is, whatever `incoming` says."""
+    if is_empty(incoming):
+        # An absent value asserts nothing, except where a refresh reads the
+        # source's silence as the source no longer asserting it.
+        return not (policy is Policy.REFRESH and name in _CLEARED_BY_REFRESH)
+    return policy is Policy.FILL_GAPS and not is_empty(current)
 
 
 def _write_cover(book: Book, incoming: str | None, policy: Policy) -> bool:

@@ -44,6 +44,17 @@ export default function AdminSettings({ state, children }: AdminSettingsProps) {
 
       {state.settings && children(state.settings)}
 
+      <SaveBanner state={state} />
+    </>
+  );
+}
+
+/** What the last save came to, said under the record. A fragment. */
+function SaveBanner({ state }: { state: UseSettingsResult }) {
+  const { t } = useTranslation();
+
+  return (
+    <>
       {state.saveError != null && (
         <ErrorState
           error={state.saveError}

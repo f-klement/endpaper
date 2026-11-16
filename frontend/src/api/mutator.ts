@@ -159,6 +159,33 @@ function objectDetail(
 }
 
 /**
+ * A `detail` read by its shape, or undefined where none of the three says
+ * anything readable and the status text is all there is.
+ */
+function detailOf(
+  detail: unknown,
+  statusText: string,
+): { message: string; bookId?: number; code?: string } | undefined {
+  if (readable(detail)) return { message: detail };
+  // A list with no readable `msg` in it says nothing, and is not then read as
+  // an object, which a list also is.
+  if (Array.isArray(detail)) return fieldMessages(detail);
+  // An object detail: a message plus whatever the route could say about it.
+  if (detail && typeof detail === "object") {
+    return objectDetail(detail, statusText);
+  }
+  return undefined;
+}
+
+/** A 422's per field objects, as one message of every readable `msg`. */
+function fieldMessages(detail: unknown[]): { message: string } | undefined {
+  const messages = detail
+    .map((item) => (item as { msg?: unknown }).msg)
+    .filter(readable);
+  return messages.length > 0 ? { message: messages.join(", ") } : undefined;
+}
+
+/**
  * Read what a failed response says, and anything it says about what to do.
  *
  * FastAPI puts it in `detail`, which is a string for a raised
@@ -171,22 +198,11 @@ async function errorDetail(
 ): Promise<{ message: string; bookId?: number; code?: string }> {
   try {
     const body: unknown = await response.json();
-    const detail = (body as { detail?: unknown }).detail;
-
-    if (readable(detail)) return { message: detail };
-
-    if (Array.isArray(detail)) {
-      const messages = detail
-        .map((item) => (item as { msg?: unknown }).msg)
-        .filter(readable);
-      if (messages.length > 0) return { message: messages.join(", ") };
-    }
-
-    // An object detail: a message plus whatever the route could say about it.
-    // Not a list, which is an object too and is read above.
-    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-      return objectDetail(detail, response.statusText);
-    }
+    const read = detailOf(
+      (body as { detail?: unknown }).detail,
+      response.statusText,
+    );
+    if (read !== undefined) return read;
   } catch {
     // Body was not JSON, so fall through to the status text.
   }
@@ -568,8 +584,7 @@ export async function downloadFile(
     throw new ApiError((await errorDetail(response)).message, response.status);
   }
 
-  const disposition = response.headers.get("content-disposition") ?? "";
-  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName;
+  const filename = savedName(response, fallbackName);
 
   const objectUrl = URL.createObjectURL(await response.blob());
   const anchor = document.createElement("a");
@@ -577,6 +592,12 @@ export async function downloadFile(
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(objectUrl);
+}
+
+/** The name a download is saved under: the server's, or the caller's fallback. */
+function savedName(response: Response, fallbackName: string): string {
+  const disposition = response.headers.get("content-disposition") ?? "";
+  return /filename="([^"]+)"/.exec(disposition)?.[1] ?? fallbackName;
 }
 
 export default customFetch;

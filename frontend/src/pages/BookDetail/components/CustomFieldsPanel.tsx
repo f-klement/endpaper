@@ -135,10 +135,6 @@ function draftsFor(
  * makes the message actionable: the error rendered above a closed panel
  * still showing the old value, and the only way forward was to reopen and
  * retype.
- *
- * `left` and `ok` are plain closure variables rather than state: every
- * callback below belongs to this one invocation, and a `setState` counter
- * would be read stale by the ones that settle in the same tick.
  */
 function writeChanged(
   definitions: CustomFieldOut[],
@@ -147,35 +143,62 @@ function writeChanged(
   onSave: CustomFieldsPanelProps["onSave"],
   report: { started: () => void; landed: () => void; refused: () => void },
 ) {
-  // Only what changed. Writing every field would send up to
-  // MAX_CUSTOM_FIELDS requests to store what is already stored, and each one
-  // would invalidate the list again.
-  const changed = definitions.filter(
-    (field) => (drafts[field.id] ?? "") !== (current.get(field.id) ?? ""),
-  );
+  const changed = changedFields(definitions, current, drafts);
   if (changed.length === 0) {
     // Nothing to write is a save that landed, so the editor closes.
     report.landed();
     return;
   }
 
-  let left = changed.length;
-  let ok = true;
   report.started();
-  const settle = (succeeded: boolean) => {
-    ok = ok && succeeded;
-    left -= 1;
-    if (left > 0) return;
-    if (ok) report.landed();
-    else report.refused();
-  };
-
+  const settle = settler(changed.length, report);
   for (const field of changed) {
     onSave(field.id, drafts[field.id] ?? "", {
       onSuccess: () => settle(true),
       onError: () => settle(false),
     });
   }
+}
+
+/**
+ * The fields whose draft differs from what the book holds, an absent value
+ * reading as empty on both sides.
+ *
+ * Only what changed. Writing every field would send up to MAX_CUSTOM_FIELDS
+ * requests to store what is already stored, and each one would invalidate the
+ * list again.
+ */
+function changedFields(
+  definitions: CustomFieldOut[],
+  current: Map<number, string>,
+  drafts: Record<number, string>,
+): CustomFieldOut[] {
+  return definitions.filter(
+    (field) => (drafts[field.id] ?? "") !== (current.get(field.id) ?? ""),
+  );
+}
+
+/**
+ * The callback each of `count` writes settles through: once the last one has,
+ * `landed` if every write succeeded and `refused` if any did not.
+ *
+ * `left` and `ok` are plain closure variables rather than state: every
+ * callback belongs to one save, and a `setState` counter would be read stale
+ * by the ones that settle in the same tick.
+ */
+function settler(
+  count: number,
+  report: { landed: () => void; refused: () => void },
+): (succeeded: boolean) => void {
+  let left = count;
+  let ok = true;
+  return (succeeded) => {
+    ok = ok && succeeded;
+    left -= 1;
+    if (left > 0) return;
+    if (ok) report.landed();
+    else report.refused();
+  };
 }
 
 /** The book's values as read, with the button that opens the editor. */

@@ -218,16 +218,7 @@ function snapshot<TScope, TValue>(
     // **Cached against the string that failed, not only against one that
     // read.** A string this version cannot decode is decoded once rather than
     // on every render, which matters most when the decode is what threw.
-    let value: TValue;
-    try {
-      value =
-        raw === null
-          ? codec.fallback(scope)
-          : (codec.decode(raw, scope) ?? codec.fallback(scope));
-    } catch {
-      value = codec.fallback(scope);
-    }
-    const frozen = freeze(value);
+    const frozen = freeze(decoded(raw, scope, codec));
     snapshots.set(key, { raw, value: frozen });
     return frozen;
   } catch {
@@ -235,6 +226,24 @@ function snapshot<TScope, TValue>(
     // one. Kept because React calls this while rendering, so the cost of being
     // wrong about that is a blank screen rather than a wrong value.
     return refusedValue(key, scope, codec);
+  }
+}
+
+/**
+ * The stored string as this version reads it: the default for nothing stored,
+ * for a string the codec refuses, and for one whose decode threw.
+ */
+function decoded<TScope, TValue>(
+  raw: string | null,
+  scope: TScope,
+  codec: Codec<TScope, TValue>,
+): TValue {
+  try {
+    return raw === null
+      ? codec.fallback(scope)
+      : (codec.decode(raw, scope) ?? codec.fallback(scope));
+  } catch {
+    return codec.fallback(scope);
   }
 }
 

@@ -175,15 +175,9 @@ function Asking({
       </p>
     );
   if (isAdder && latest === undefined) return null;
-  const line = latest && {
-    ...ASK_LINE[latest.status],
-    holder: latest.holder.username,
-  };
   return (
     <>
-      {line && (
-        <p className={line.className}>{t(line.key, { holder: line.holder })}</p>
-      )}
+      <AskLine latest={latest} />
       {mayAsk(isAdder, holder, latest) && (
         <button
           onClick={onRequest}
@@ -194,6 +188,18 @@ function Asking({
         </button>
       )}
     </>
+  );
+}
+
+/** Where the requester's latest request stands, naming the holder it went to. */
+function AskLine({ latest }: { latest: AccessRequestOut | undefined }) {
+  const { t } = useTranslation();
+  if (latest === undefined) return null;
+  const line = ASK_LINE[latest.status];
+  return (
+    <p className={line.className}>
+      {t(line.key, { holder: latest.holder.username })}
+    </p>
   );
 }
 

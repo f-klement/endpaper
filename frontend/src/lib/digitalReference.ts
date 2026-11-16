@@ -152,6 +152,17 @@ function sizeOf(picked: PickedEntry): number | null {
 }
 
 /**
+ * The picked directory's name and the path beneath it, split at the first
+ * separator, or `null` for no path or an empty half either side of it.
+ */
+function halvesOf(path: unknown): { root: string; beneath: string } | null {
+  if (typeof path !== "string" || path === "") return null;
+  const cut = path.indexOf("/");
+  if (cut <= 0 || cut === path.length - 1) return null;
+  return { root: path.slice(0, cut), beneath: path.slice(cut + 1) };
+}
+
+/**
  * Where this file is, as the server takes it, or `null` where this browser
  * cannot honestly say.
  *
@@ -198,13 +209,9 @@ export function referenceFor(
   picked: PickedEntry,
   partialMd5: string | null = null,
 ): DigitalReferenceIn | null {
-  const path = picked.webkitRelativePath;
-  if (typeof path !== "string" || path === "") return null;
-
-  const cut = path.indexOf("/");
-  if (cut <= 0 || cut === path.length - 1) return null;
-  const root = path.slice(0, cut);
-  const beneath = path.slice(cut + 1);
+  const halves = halvesOf(picked.webkitRelativePath);
+  if (halves === null) return null;
+  const { root, beneath } = halves;
 
   // **Counted in code points, never in UTF-16 units**, which is the trap
   // `bookBounds.ts` states at its own site and this one inherited by spelling

@@ -628,6 +628,16 @@ describe("a MOBI header too short to hold its own fields", () => {
     expect(reading.ok).toBe(true);
     expect(reading.ok && reading.metadata.title).toBeNull();
   });
+
+  it("is refused where record 0 ends inside the header length field", async () => {
+    // Twenty bytes hold the encryption field and the magic, so nineteen is
+    // damaged rather than not a MOBI; the header length four bytes past the
+    // magic takes twenty four, which is read.
+    const at = recordZeroStart();
+    expect(verdict(await read({ recordOneAt: at + 19 }))).toBe("damaged");
+    expect(verdict(await read({ recordOneAt: at + 23 }))).toBe("damaged");
+    expect((await read({ recordOneAt: at + 24 })).ok).toBe(true);
+  });
 });
 
 describe("no file makes the reader throw", () => {

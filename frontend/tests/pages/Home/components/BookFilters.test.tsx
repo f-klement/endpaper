@@ -192,6 +192,12 @@ describe("the copy filters", () => {
     expect(props.onFilterChange).toHaveBeenCalledWith({ format: null });
   });
 
+  it("shows the format being filtered on", () => {
+    renderFilters({ filters: { ...DEFAULT_FILTERS, format: "ebook" } });
+
+    expect(screen.getByLabelText("Format")).toHaveValue("ebook");
+  });
+
   it("reports a chosen lending answer", async () => {
     const props = renderFilters();
 

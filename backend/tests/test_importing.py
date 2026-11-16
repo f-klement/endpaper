@@ -88,9 +88,10 @@ def row(
     rating: int = 0,
     shelves: str = "",
     review: str = "",
+    date_read: str = "",
 ) -> str:
     quoted = f'="{isbn}"' if isbn else '=""'
-    return f'"{title}","An Author",{quoted},{rating},Pub,300,2000,,"{shelves}",{shelf},"{review}"'
+    return f'"{title}","An Author",{quoted},{rating},Pub,300,2000,{date_read},"{shelves}",{shelf},"{review}"'
 
 
 @pytest.fixture
@@ -416,6 +417,19 @@ class TestReadingRecordsArePersonal:
         Import.for_member(db, member.id).apply(parse(row("Dune", isbn="9780441013593", rating=2)))
 
         assert db.query(UserBook).one().rating == 5
+
+    def test_an_existing_finish_date_is_never_overwritten(self, db, member):
+        book = Book(title="Dune", isbn="9780441013593", added_by_user_id=member.id)
+        db.add(book)
+        db.commit()
+        db.add(UserBook(book_id=book.id, user_id=member.id, finished_at=datetime(2019, 1, 1)))
+        db.commit()
+
+        Import.for_member(db, member.id).apply(
+            parse(row("Dune", isbn="9780441013593", date_read="2021/03/04"))
+        )
+
+        assert db.query(UserBook).one().finished_at == datetime(2019, 1, 1)
 
     def test_two_rows_for_one_book_do_not_take_the_import_down(self, db, member):
         """A rating on the first row and a status on the second.

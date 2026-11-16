@@ -630,6 +630,20 @@ async function asDuplicate<Body>(
   // Before the tie, because the trash refusal names no Book either.
   if (refusedForTheTrash(thrown)) return { kind: "in-trash", thrown };
   if (typeof bookId !== "number") return { kind: "tie", thrown };
+  return ontoTheNamedBook(request, ports, bookId, thrown);
+}
+
+/**
+ * A duplicate's files, taken onto the copy of their kind on the Book the 409
+ * named. Nothing is sent where there is nothing to send, the file's identifier
+ * was not read, or the holder's copies cannot be read.
+ */
+async function ontoTheNamedBook<Body>(
+  request: LandingRequest<Body>,
+  ports: LandingPorts<Body>,
+  bookId: number,
+  thrown: unknown,
+): Promise<Landing> {
   if (request.references.length === 0 || !request.identifierWasRead) {
     return { kind: "failed", thrown };
   }

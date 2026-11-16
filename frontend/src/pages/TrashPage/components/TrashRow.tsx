@@ -51,11 +51,7 @@ export default function TrashRow({
             {t("trash.deletedOn", { date: deletedOn })}
           </span>
         )}
-        {!canPurge && (
-          <span className="mt-0.5 block text-xs text-paper-600 dark:text-paper-400">
-            {t(book.added_by == null ? "trash.noAdder" : "trash.notYours")}
-          </span>
-        )}
+        {!canPurge && <PurgeRefusal book={book} />}
       </span>
 
       <Button
@@ -68,18 +64,43 @@ export default function TrashRow({
         {t("trash.restore")}
       </Button>
       {canPurge && (
-        <button
-          type="button"
-          disabled={isBusy}
-          onClick={() => {
-            if (confirm(t("trash.deleteForeverConfirm", { title: book.title })))
-              onPurge();
-          }}
-          className="shrink-0 text-xs text-paper-600 underline hover:text-danger-600 disabled:opacity-50 dark:text-paper-400 dark:hover:text-danger-300"
-        >
-          {t("trash.deleteForever")}
-        </button>
+        <PurgeButton title={book.title} isBusy={isBusy} onPurge={onPurge} />
       )}
     </li>
+  );
+}
+
+/** Why this caller cannot delete the book for good: nobody added it, or somebody else did. */
+function PurgeRefusal({ book }: { book: BookOut }) {
+  const { t } = useTranslation();
+  return (
+    <span className="mt-0.5 block text-xs text-paper-600 dark:text-paper-400">
+      {t(book.added_by == null ? "trash.noAdder" : "trash.notYours")}
+    </span>
+  );
+}
+
+/** Delete for good, after asking: the one verb here that cannot be taken back. */
+function PurgeButton({
+  title,
+  isBusy,
+  onPurge,
+}: {
+  title: string;
+  isBusy: boolean;
+  onPurge: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      disabled={isBusy}
+      onClick={() => {
+        if (confirm(t("trash.deleteForeverConfirm", { title }))) onPurge();
+      }}
+      className="shrink-0 text-xs text-paper-600 underline hover:text-danger-600 disabled:opacity-50 dark:text-paper-400 dark:hover:text-danger-300"
+    >
+      {t("trash.deleteForever")}
+    </button>
   );
 }

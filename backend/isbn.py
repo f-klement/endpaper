@@ -69,12 +69,20 @@ def is_valid_isbn10(candidate: str) -> bool:
     body, check = candidate[:9], candidate[9]
     if not (body.isascii() and body.isdigit()):
         return False
-    if not (check.isascii() and (check.isdigit() or check == "X")):
+    check_value = _isbn10_check_value(check)
+    if check_value is None:
         return False
 
     total = sum(int(digit) * (10 - position) for position, digit in enumerate(body))
-    total += 10 if check == "X" else int(check)
-    return total % 11 == 0
+    return (total + check_value) % 11 == 0
+
+
+def _isbn10_check_value(check: str) -> int | None:
+    """What an ISBN-10's final character counts for, `X` being ten, or None
+    where it is no check character at all."""
+    if not (check.isascii() and (check.isdigit() or check == "X")):
+        return None
+    return 10 if check == "X" else int(check)
 
 
 def is_valid_isbn13(candidate: str) -> bool:

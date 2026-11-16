@@ -302,6 +302,21 @@ describe("reading a Calibre index", () => {
     expect(result.current.failure).toBe("not-a-database");
     expect(result.current.preview).toBeNull();
   });
+
+  it("reports a file that cannot be read and stops reading", async () => {
+    const { result } = importHook();
+    const gone = new File(["x"], "metadata.db");
+    const thrown = new Error("the file is gone");
+    Object.defineProperty(gone, "arrayBuffer", {
+      value: () => Promise.reject(thrown),
+    });
+
+    await act(async () => result.current.choose(gone));
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+
+    expect(result.current.error).toBe(thrown);
+    expect(result.current.preview).toBeNull();
+  });
 });
 
 describe("checking against the files beside the books", () => {
@@ -367,6 +382,19 @@ describe("checking against the files beside the books", () => {
       crossChecked: 1,
       filled: 1,
     });
+  });
+
+  it("drops its progress once the folder is read", async () => {
+    const { result } = importHook();
+    await act(async () => result.current.choose(await libraryFile(1)));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    await act(async () =>
+      result.current.crossCheck([opfFile("Author/Book 1 (1)", "<package/>")]),
+    );
+    await waitFor(() => expect(result.current.isReading).toBe(false));
+
+    expect(result.current.progress).toBeNull();
   });
 
   it("leaves a book alone when no file sits beside it", async () => {

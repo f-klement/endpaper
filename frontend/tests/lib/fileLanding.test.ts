@@ -202,6 +202,17 @@ describe("landing one book", () => {
     expect(stubs.report).not.toHaveBeenCalled();
   });
 
+  it("puts no file on a duplicate's holder whose copies cannot be read", async () => {
+    const duplicate = new ApiError("already", 409, 77);
+    const stubs = ports(() => Promise.reject(duplicate));
+    stubs.copiesOf.mockRejectedValue(new Error("offline"));
+
+    const landing = await land(request(null), stubs);
+
+    expect(landing).toEqual({ kind: "failed", thrown: duplicate });
+    expect(stubs.report).not.toHaveBeenCalled();
+  });
+
   it("answers a tie, and lands no file, for a duplicate naming no Book", async () => {
     // Two Books outside one copy group carry the identifier, so naming the
     // lower would pick between two different Books.

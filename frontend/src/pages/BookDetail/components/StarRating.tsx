@@ -30,27 +30,7 @@ export default function StarRating({
   // the emoji this replaced and would leave every star the same size here.
   const starSize = size === "sm" ? "w-3.5 h-3.5" : "w-6 h-6";
 
-  if (readOnly) {
-    return (
-      <span
-        className="inline-flex items-center gap-0.5"
-        aria-label={t("rating.label")}
-      >
-        {STARS.map((star) => (
-          <Icon
-            key={star}
-            name="star"
-            filled={star <= current}
-            className={`${starSize} ${
-              star <= current
-                ? "text-amber-400"
-                : "text-paper-300 dark:text-paper-700"
-            }`}
-          />
-        ))}
-      </span>
-    );
-  }
+  if (readOnly) return <ReadOnlyStars current={current} starSize={starSize} />;
 
   return (
     <div
@@ -90,5 +70,35 @@ export default function StarRating({
         </button>
       )}
     </div>
+  );
+}
+
+/** The rating drawn as five stars nobody can press. */
+function ReadOnlyStars({
+  current,
+  starSize,
+}: {
+  current: number;
+  starSize: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <span
+      className="inline-flex items-center gap-0.5"
+      aria-label={t("rating.label")}
+    >
+      {STARS.map((star) => (
+        <Icon
+          key={star}
+          name="star"
+          filled={star <= current}
+          className={`${starSize} ${
+            star <= current
+              ? "text-amber-400"
+              : "text-paper-300 dark:text-paper-700"
+          }`}
+        />
+      ))}
+    </span>
   );
 }

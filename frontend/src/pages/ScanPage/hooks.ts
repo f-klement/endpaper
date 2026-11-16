@@ -863,7 +863,21 @@ export function useBookSearch(): UseBookSearchResult {
       }
       setHarder(true);
     },
-    isSearchingHarder: harder && search.isFetching,
+    ...harderStatus(harder, search.isFetching, answer),
+  };
+}
+
+/**
+ * Where the longer search stands: running now, or answered. Both are false
+ * until the reader has asked for it on the question on screen.
+ */
+function harderStatus(
+  harder: boolean,
+  isFetching: boolean,
+  answer: unknown,
+): Pick<UseBookSearchResult, "isSearchingHarder" | "hasSearchedHarder"> {
+  return {
+    isSearchingHarder: harder && isFetching,
     hasSearchedHarder: harder && answer !== undefined,
   };
 }

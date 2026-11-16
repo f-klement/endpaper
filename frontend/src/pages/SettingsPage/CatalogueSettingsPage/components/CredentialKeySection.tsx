@@ -258,6 +258,24 @@ function KeyErrors({
   );
 }
 
+/**
+ * Whether making a key and forgetting it are offered. Making one needs none
+ * held, a server able to make one, and no phrase still on screen. Forgetting
+ * needs a key held somewhere other than the environment, and no discard
+ * question already open.
+ */
+function offered(
+  held: CredentialKeyOut,
+  phrase: string,
+  confirmingDiscard: boolean,
+): { create: boolean; forget: boolean } {
+  return {
+    create: !held.configured && held.can_generate === true && !phrase,
+    forget:
+      held.configured === true && held.location !== "env" && !confirmingDiscard,
+  };
+}
+
 /** The button row: make a key, restore one from its phrase, discard it. */
 function KeyButtons({
   held,
@@ -279,10 +297,11 @@ function KeyButtons({
   onConfirmDiscard: () => void;
 }) {
   const { t } = useTranslation();
+  const offer = offered(held, phrase, confirmingDiscard);
 
   return (
     <div className="flex flex-wrap gap-2">
-      {!held.configured && held.can_generate && !phrase && (
+      {offer.create && (
         <button
           type="button"
           disabled={isWorking}
@@ -301,7 +320,7 @@ function KeyButtons({
           {t("settings.credentialKeyRestore")}
         </button>
       )}
-      {held.configured && held.location !== "env" && !confirmingDiscard && (
+      {offer.forget && (
         <button
           type="button"
           onClick={onConfirmDiscard}

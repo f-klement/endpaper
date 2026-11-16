@@ -48,69 +48,84 @@ export default function FolderSweepNotice({
       {swept && swept.length > 0 && (
         <div role="status" className="mt-2 space-y-2">
           {swept.map((one) => (
-            <div
+            <SweptRoot
               key={one.root}
-              className="text-xs text-paper-700 bg-paper-50 rounded-lg px-3 py-2 space-y-1 dark:text-paper-200 dark:bg-paper-900"
-            >
-              {one.kind === "different" ? (
-                <p>
-                  {t("files.sweptDifferent", {
-                    root: plainName(one.root),
-                    count: one.saved,
-                  })}
-                </p>
-              ) : (
-                <>
-                  <p>
-                    {t("files.swept", {
-                      root: plainName(one.root),
-                      seen: one.seen,
-                      missing: one.notFound.length,
-                    })}
-                  </p>
-                  {one.moved > 0 && (
-                    <p>{t("files.sweptMoved", { count: one.moved })}</p>
-                  )}
-                  {one.notFound.length > 0 && (
-                    <details>
-                      <summary className="cursor-pointer">
-                        {t("files.sweptNotFound", {
-                          count: one.notFound.length,
-                        })}
-                      </summary>
-                      <ul className="mt-1 space-y-0.5">
-                        {one.notFound.map((file) => (
-                          <li key={file.referenceId} className="break-all">
-                            <Link
-                              to={`/book/${file.bookId}`}
-                              className="underline"
-                            >
-                              {plainName(file.path)}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                  {one.notFound.length > 0 &&
-                    (one.marked === null ? (
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        isLoading={isMarking}
-                        onClick={() => onMarkMissing(one.root)}
-                      >
-                        {t("files.markMissing")}
-                      </Button>
-                    ) : (
-                      <p>{t("files.markedMissing", { count: one.marked })}</p>
-                    ))}
-                </>
-              )}
-            </div>
+              one={one}
+              isMarking={isMarking}
+              onMarkMissing={onMarkMissing}
+            />
           ))}
         </div>
       )}
     </>
+  );
+}
+
+/** What one root's sweep found, and the press that marks the rest missing. */
+function SweptRoot({
+  one,
+  isMarking,
+  onMarkMissing,
+}: {
+  one: FolderSweep;
+  isMarking: boolean;
+  onMarkMissing: (root: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="text-xs text-paper-700 bg-paper-50 rounded-lg px-3 py-2 space-y-1 dark:text-paper-200 dark:bg-paper-900">
+      {one.kind === "different" ? (
+        <p>
+          {t("files.sweptDifferent", {
+            root: plainName(one.root),
+            count: one.saved,
+          })}
+        </p>
+      ) : (
+        <>
+          <p>
+            {t("files.swept", {
+              root: plainName(one.root),
+              seen: one.seen,
+              missing: one.notFound.length,
+            })}
+          </p>
+          {one.moved > 0 && (
+            <p>{t("files.sweptMoved", { count: one.moved })}</p>
+          )}
+          {one.notFound.length > 0 && (
+            <details>
+              <summary className="cursor-pointer">
+                {t("files.sweptNotFound", {
+                  count: one.notFound.length,
+                })}
+              </summary>
+              <ul className="mt-1 space-y-0.5">
+                {one.notFound.map((file) => (
+                  <li key={file.referenceId} className="break-all">
+                    <Link to={`/book/${file.bookId}`} className="underline">
+                      {plainName(file.path)}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {one.notFound.length > 0 &&
+            (one.marked === null ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                isLoading={isMarking}
+                onClick={() => onMarkMissing(one.root)}
+              >
+                {t("files.markMissing")}
+              </Button>
+            ) : (
+              <p>{t("files.markedMissing", { count: one.marked })}</p>
+            ))}
+        </>
+      )}
+    </div>
   );
 }

@@ -12,6 +12,7 @@ from fastapi import (
     Response,
     status,
 )
+from sqlalchemy.orm import Session
 
 import accounts
 import mailer
@@ -106,28 +107,7 @@ def register(
     if db.query(User).filter(User.username == payload.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
 
-    # Whoever registers first becomes the admin. There is no other way to
-    # become one, and no endpoint grants the flag afterwards.
-    is_first = db.query(User).count() == 0
-    # **The policy is read once, here, and stamped onto the row.** An account is
-    # made under the policy in force when it is made: turning the switch on later
-    # gates the accounts created after it and never strands a member already in
-    # the library, and turning it off never quietly admits somebody who
-    # registered while it was on and never confirmed. See `docs/decisions.md`.
-    #
-    # **Never the first account**, which is the one nobody could confirm: it is
-    # the admin, so there is no admin to override it and no mailbox configured
-    # yet to send it anything. A deployment that switched the policy on before
-    # anybody registered would otherwise be a library with no way in at all.
-    must_confirm = settings_store.accounts_are_open_to_outsiders(db) and not is_first
-    if must_confirm and payload.email is None:
-        # Before the account is made rather than after: an account with nothing
-        # to send a code to, on a deployment that requires one, is one only an
-        # admin can ever let in.
-        raise HTTPException(
-            status_code=400,
-            detail="An address is required: this library confirms new accounts.",
-        )
+    is_first, must_confirm = _admission(db, payload)
 
     # **The address is set here rather than only on the settings screen**, which
     # is the one moment somebody is already typing their details. `UserCreate`
@@ -159,6 +139,34 @@ def register(
         verification_required=False,
         token=Token(access_token=token, user=UserOut.model_validate(user)),
     )
+
+
+def _admission(db: Session, payload: UserCreate) -> tuple[bool, bool]:
+    """Whether this account is the first, which makes it the admin, and whether
+    it must confirm its address; refused with a 400 where it must and gave none."""
+    # Whoever registers first becomes the admin. There is no other way to
+    # become one, and no endpoint grants the flag afterwards.
+    is_first = db.query(User).count() == 0
+    # **The policy is read once, here, and stamped onto the row.** An account is
+    # made under the policy in force when it is made: turning the switch on later
+    # gates the accounts created after it and never strands a member already in
+    # the library, and turning it off never quietly admits somebody who
+    # registered while it was on and never confirmed. See `docs/decisions.md`.
+    #
+    # **Never the first account**, which is the one nobody could confirm: it is
+    # the admin, so there is no admin to override it and no mailbox configured
+    # yet to send it anything. A deployment that switched the policy on before
+    # anybody registered would otherwise be a library with no way in at all.
+    must_confirm = settings_store.accounts_are_open_to_outsiders(db) and not is_first
+    if must_confirm and payload.email is None:
+        # Before the account is made rather than after: an account with nothing
+        # to send a code to, on a deployment that requires one, is one only an
+        # admin can ever let in.
+        raise HTTPException(
+            status_code=400,
+            detail="An address is required: this library confirms new accounts.",
+        )
+    return is_first, must_confirm
 
 
 def _post_the_code(

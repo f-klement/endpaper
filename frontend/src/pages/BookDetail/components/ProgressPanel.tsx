@@ -60,16 +60,7 @@ function ProgressSummary({ book }: { book: BookOut }) {
   return (
     <div className="space-y-1.5">
       <p className="text-sm text-paper-700 dark:text-paper-200">
-        {book.my_progress_page != null
-          ? book.page_count
-            ? t("progress.onPageOf", {
-                page: book.my_progress_page,
-                total: book.page_count,
-              })
-            : t("progress.onPage", { page: book.my_progress_page })
-          : t("progress.atPercent", {
-              percent: book.my_progress_percent ?? 0,
-            })}
+        <Position book={book} />
       </p>
       {percent != null && (
         <div
@@ -88,6 +79,19 @@ function ProgressSummary({ book }: { book: BookOut }) {
       )}
     </div>
   );
+}
+
+/** The latest position in words: a page, of a total when one is known, or a percentage. */
+function Position({ book }: { book: BookOut }) {
+  const { t } = useTranslation();
+  if (book.my_progress_page == null)
+    return t("progress.atPercent", { percent: book.my_progress_percent ?? 0 });
+  return book.page_count
+    ? t("progress.onPageOf", {
+        page: book.my_progress_page,
+        total: book.page_count,
+      })
+    : t("progress.onPage", { page: book.my_progress_page });
 }
 
 /** Every recorded position, in the order the caller passes, each removable. */

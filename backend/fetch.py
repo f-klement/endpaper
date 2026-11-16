@@ -990,6 +990,27 @@ def _same_host_hop(response: httpx.Response) -> str:
     return str(there)
 
 
+async def _read_capped(response: httpx.Response, url: str, cap: int) -> Fetched:
+    """The body of a final answer, refused past `cap` bytes or in an encoding nobody asked for.
+
+    Read raw, so `cap` bounds the bytes on the wire, and refused the moment the
+    running total passes it rather than after the whole body has arrived.
+    """
+    encoding = response.headers.get("content-encoding", "").strip().lower()
+    if encoding not in ("", "identity"):
+        raise UnrequestedEncoding(f"{url[:200]} answered with {encoding!r}")
+
+    total = 0
+    chunks: list[bytes] = []
+    async for chunk in response.aiter_raw():
+        total += len(chunk)
+        if total > cap:
+            logger.warning("Refused a catalogue answer over %d bytes: %s", cap, url[:200])
+            raise ResponseTooLarge(f"{url[:200]} answered with more than {cap} bytes")
+        chunks.append(chunk)
+    return Fetched(response.status_code, b"".join(chunks), response.charset_encoding)
+
+
 async def _walk_hops(
     client: httpx.AsyncClient,
     url: str,
@@ -1026,20 +1047,7 @@ async def _walk_hops(
                     # original query string would duplicate every parameter.
                     query = None
                     continue
-
-                encoding = response.headers.get("content-encoding", "").strip().lower()
-                if encoding not in ("", "identity"):
-                    raise UnrequestedEncoding(f"{url[:200]} answered with {encoding!r}")
-
-                total = 0
-                chunks: list[bytes] = []
-                async for chunk in response.aiter_raw():
-                    total += len(chunk)
-                    if total > cap:
-                        logger.warning("Refused a catalogue answer over %d bytes: %s", cap, url[:200])
-                        raise ResponseTooLarge(f"{url[:200]} answered with more than {cap} bytes")
-                    chunks.append(chunk)
-                return Fetched(response.status_code, b"".join(chunks), response.charset_encoding)
+                return await _read_capped(response, url, cap)
         except UnicodeError as error:
             # **A malformed `Location` host raises here, not in `_same_host_hop`,
             # and the hop guard never runs.** httpx builds the redirect request

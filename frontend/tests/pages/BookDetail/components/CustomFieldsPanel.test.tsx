@@ -291,6 +291,27 @@ describe("CustomFieldsPanel", () => {
     expect(screen.getByLabelText("Bought from")).toHaveValue("Oxfam");
   });
 
+  it("waits for the last write before closing, even when the first landed", async () => {
+    // The first of two answers is not the verdict: closing on it would throw
+    // away the draft the second answer refuses.
+    renderPanel({
+      onSave: vi.fn<OnSave>((id, _value, callbacks) =>
+        id === 1 ? callbacks.onSuccess() : callbacks.onError(),
+      ),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit details" }));
+    await userEvent.clear(screen.getByLabelText("Calibre-web"));
+    await userEvent.type(
+      screen.getByLabelText("Calibre-web"),
+      "https://x.example",
+    );
+    await userEvent.type(screen.getByLabelText("Bought from"), "Oxfam");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByLabelText("Bought from")).toHaveValue("Oxfam");
+  });
+
   it("says so when the book has nothing filled in", () => {
     renderPanel({ values: [] });
 

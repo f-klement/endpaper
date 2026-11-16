@@ -21,6 +21,7 @@ look at anything.
 """
 
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -351,36 +352,38 @@ def holders(db: Session, member_id: int, files: list[AskedFileIn]) -> list[Holde
         if row.partial_md5 is not None:
             by_digest[row.partial_md5].append(row)
 
-    answers: list[HoldersOut] = []
-    for file in files:
-        located = (
-            by_location.get((file.root_label, file.relative_path), [])
-            if file.root_label is not None and file.relative_path is not None
-            else []
-        )
-        digested = by_digest.get(file.partial_md5, []) if file.partial_md5 else []
-        at = {row.id for row in located}
-        carrying = {row.id for row in digested}
-        # A reference matching on both keys is one holder, not two.
-        rows = sorted(
-            {row.id: row for row in [*located, *digested]}.values(),
-            key=lambda row: (row.book_id, row.id),
-        )
-        answers.append(
-            HoldersOut(
-                holders=[
-                    HolderOut(
-                        book_id=row.book_id,
-                        reference_id=row.id,
-                        format=row.format,
-                        same_location=row.id in at,
-                        same_partial_md5=row.id in carrying,
-                    )
-                    for row in rows
-                ]
+    return [_holders_of(file, by_location, by_digest) for file in files]
+
+
+def _holders_of(
+    file: AskedFileIn, by_location: Mapping[tuple[str, str], list[Any]], by_digest: Mapping[str, list[Any]]
+) -> HoldersOut:
+    """`holders`' answer for one file, from the rows it read for the whole list."""
+    located = (
+        by_location.get((file.root_label, file.relative_path), [])
+        if file.root_label is not None and file.relative_path is not None
+        else []
+    )
+    digested = by_digest.get(file.partial_md5, []) if file.partial_md5 else []
+    at = {row.id for row in located}
+    carrying = {row.id for row in digested}
+    # A reference matching on both keys is one holder, not two.
+    rows = sorted(
+        {row.id: row for row in [*located, *digested]}.values(),
+        key=lambda row: (row.book_id, row.id),
+    )
+    return HoldersOut(
+        holders=[
+            HolderOut(
+                book_id=row.book_id,
+                reference_id=row.id,
+                format=row.format,
+                same_location=row.id in at,
+                same_partial_md5=row.id in carrying,
             )
-        )
-    return answers
+            for row in rows
+        ]
+    )
 
 
 def books_carrying(db: Session, member_id: int, digest: str, *, limit: int) -> set[int]:

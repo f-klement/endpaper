@@ -803,6 +803,27 @@ type Landed = KindOf<
 type KindOf<Union extends { kind: string }, Kind extends Union["kind"]> = Kind;
 
 /**
+ * One of the Calibre card's two reads, under the reading flag: the error
+ * cleared before it, set to whatever it throws, and the flag down after it
+ * whichever way it ends.
+ */
+async function whileReading(
+  setIsReading: (reading: boolean) => void,
+  setError: (error: unknown) => void,
+  step: () => Promise<void>,
+): Promise<void> {
+  setIsReading(true);
+  setError(null);
+  try {
+    await step();
+  } catch (thrown) {
+    setError(thrown);
+  } finally {
+    setIsReading(false);
+  }
+}
+
+/**
  * Bringing a Calibre library across, by the route that holds no lock on it.
  *
  * **The safety rule is the shape of this hook.** The household's library has
@@ -855,14 +876,12 @@ export function useCalibreImport(): UseCalibreImportResult {
 
   /** Read the index, and report what it turned out to be. */
   async function read(file: File) {
-    setIsReading(true);
     setFailure(null);
-    setError(null);
     setResult(null);
     setBooks(null);
     setLocated(new Map());
     setPreview(null);
-    try {
+    await whileReading(setIsReading, setError, async () => {
       const reading = await openCalibreLibrary(file);
       if (!reading.ok) {
         setFailure(reading.failure);
@@ -870,11 +889,7 @@ export function useCalibreImport(): UseCalibreImportResult {
       }
       setBooks(reading.books);
       setPreview(summariseCalibre(reading.books, 0, 0, 0, 0));
-    } catch (thrown) {
-      setError(thrown);
-    } finally {
-      setIsReading(false);
-    }
+    });
   }
 
   /**
@@ -888,35 +903,32 @@ export function useCalibreImport(): UseCalibreImportResult {
    */
   async function check(files: readonly File[]) {
     if (books === null) return;
-    setIsReading(true);
-    setError(null);
-    try {
-      const { crossCheckFolder, filesOfEachBook } =
-        await import("../../../lib/calibreFolder");
-      const merged = await crossCheckFolder(books, files, (done, total) =>
-        setProgress({ done, total }),
-      );
-      const references = await locateEachBook(
-        filesOfEachBook(merged.books, files),
-      );
+    await whileReading(setIsReading, setError, async () => {
+      try {
+        const { crossCheckFolder, filesOfEachBook } =
+          await import("../../../lib/calibreFolder");
+        const merged = await crossCheckFolder(books, files, (done, total) =>
+          setProgress({ done, total }),
+        );
+        const references = await locateEachBook(
+          filesOfEachBook(merged.books, files),
+        );
 
-      setBooks(merged.books);
-      setLocated(references);
-      setPreview(
-        summariseCalibre(
-          merged.books,
-          references.size,
-          merged.crossChecked,
-          merged.filled,
-          merged.disagreed,
-        ),
-      );
-    } catch (thrown) {
-      setError(thrown);
-    } finally {
-      setProgress(null);
-      setIsReading(false);
-    }
+        setBooks(merged.books);
+        setLocated(references);
+        setPreview(
+          summariseCalibre(
+            merged.books,
+            references.size,
+            merged.crossChecked,
+            merged.filled,
+            merged.disagreed,
+          ),
+        );
+      } finally {
+        setProgress(null);
+      }
+    });
   }
 
   /**
@@ -1392,6 +1404,23 @@ function asRequested(mark: SidecarHighlight): KoreaderHighlightIn {
 }
 
 /**
+ * The marks as request bodies, grouped by the second they were made in, in the
+ * order each second first appears. A mark with no time is a group of its own.
+ */
+function bySecond(
+  highlights: readonly SidecarHighlight[],
+): Iterable<KoreaderHighlightIn[]> {
+  const groups = new Map<string, KoreaderHighlightIn[]>();
+  highlights.forEach((mark, index) => {
+    const second = mark.highlightedAt ?? `no time ${index}`;
+    const group = groups.get(second) ?? [];
+    group.push(asRequested(mark));
+    groups.set(second, group);
+  });
+  return groups.values();
+}
+
+/**
  * One sidecar's marks as request bodies, each under both bounds: the count
  * the server takes and `BYTES_PER_REQUEST`. A single mark is always far under
  * the byte bound, since every field of it is bounded.
@@ -1405,17 +1434,10 @@ function asRequested(mark: SidecarHighlight): KoreaderHighlightIn {
 export function requestChunks(
   highlights: readonly SidecarHighlight[],
 ): KoreaderHighlightIn[][] {
-  const groups = new Map<string, KoreaderHighlightIn[]>();
-  highlights.forEach((mark, index) => {
-    const second = mark.highlightedAt ?? `no time ${index}`;
-    const group = groups.get(second) ?? [];
-    group.push(asRequested(mark));
-    groups.set(second, group);
-  });
   const chunks: KoreaderHighlightIn[][] = [];
   let current: KoreaderHighlightIn[] = [];
   let bytes = 0;
-  for (const group of groups.values()) {
+  for (const group of bySecond(highlights)) {
     const size = group.reduce(
       (total, wire) => total + ENCODER.encode(JSON.stringify(wire)).length + 1,
       0,

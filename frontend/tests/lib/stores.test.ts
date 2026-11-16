@@ -1881,6 +1881,16 @@ describe("any file a member picks for a store", () => {
       },
     });
 
+  it("answers a Moon+ backup with no index it may read as not a backup", async () => {
+    // An index under a parent segment is refused by name, so the archive has
+    // none, and the answer is not the SQLite seam's.
+    const { outcome } = await moonBackup({ directory: "../" });
+
+    expect(outcome).toEqual({
+      answered: { ok: false, failure: "not-a-moon-reader-backup" },
+    });
+  });
+
   // Deleting the `tag === null` check leaves this green: `find(null)` answers
   // nothing and the next guard returns the same refusal, so it pins the answer,
   // not that check.

@@ -74,38 +74,44 @@ export default function KoreaderHighlightImport({
       {rows !== null && (
         <ul className="space-y-2" aria-live="polite">
           {rows.map((row) => (
-            <li
-              key={row.key}
-              className="text-sm text-paper-700 dark:text-paper-200"
-            >
-              <span className="font-medium">{row.title ?? row.name}</span>
-              <span className="block text-paper-600 dark:text-paper-400">
-                {row.outcome.kind === "imported"
-                  ? [
-                      t("highlights.outcomeImported", {
-                        created: row.outcome.created,
-                        updated: row.outcome.updated,
-                        unchanged: row.outcome.unchanged,
-                      }),
-                      row.outcome.left_deleted > 0
-                        ? t("highlights.outcomeLeftDeleted", {
-                            count: row.outcome.left_deleted,
-                          })
-                        : null,
-                      row.outcome.oversized > 0
-                        ? t("highlights.outcomeOversized", {
-                            count: row.outcome.oversized,
-                          })
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" ")
-                  : t(REFUSED[row.outcome.kind])}
-              </span>
-            </li>
+            <SidecarLine key={row.key} row={row} />
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+/** One picked sidecar: its book, and what became of it. */
+function SidecarLine({ row }: { row: SidecarRow }) {
+  const { t } = useTranslation();
+
+  return (
+    <li className="text-sm text-paper-700 dark:text-paper-200">
+      <span className="font-medium">{row.title ?? row.name}</span>
+      <span className="block text-paper-600 dark:text-paper-400">
+        {row.outcome.kind === "imported"
+          ? [
+              t("highlights.outcomeImported", {
+                created: row.outcome.created,
+                updated: row.outcome.updated,
+                unchanged: row.outcome.unchanged,
+              }),
+              row.outcome.left_deleted > 0
+                ? t("highlights.outcomeLeftDeleted", {
+                    count: row.outcome.left_deleted,
+                  })
+                : null,
+              row.outcome.oversized > 0
+                ? t("highlights.outcomeOversized", {
+                    count: row.outcome.oversized,
+                  })
+                : null,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : t(REFUSED[row.outcome.kind])}
+      </span>
+    </li>
   );
 }

@@ -233,6 +233,21 @@ interface ReminderDaysFieldProps {
   onSave: (patch: SettingsUpdate) => void;
 }
 
+/**
+ * The draft as a number of days, or null when the server would refuse it.
+ *
+ * The server refuses anything outside these bounds with a 422, so the button
+ * is withheld rather than offering a save that can only fail. Zero in
+ * particular would mean resending the same list on every tick.
+ */
+function reminderDays(draft: string): number | null {
+  return /^\d+$/.test(draft.trim()) &&
+    Number(draft) >= 1 &&
+    Number(draft) <= 365
+    ? Number(draft)
+    : null;
+}
+
 /** How long to wait before chasing the same loan again. */
 function ReminderDaysField({
   stored,
@@ -243,13 +258,7 @@ function ReminderDaysField({
   const [days, setDays] = useState(String(stored ?? 7));
 
   const daysDirty = days !== String(stored ?? 7);
-  // The server refuses anything outside these bounds with a 422, so the button
-  // is withheld rather than offering a save that can only fail. Zero in
-  // particular would mean resending the same list on every tick.
-  const parsedDays =
-    /^\d+$/.test(days.trim()) && Number(days) >= 1 && Number(days) <= 365
-      ? Number(days)
-      : null;
+  const parsedDays = reminderDays(days);
 
   return (
     <div className="space-y-1.5">

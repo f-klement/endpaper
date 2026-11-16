@@ -14,6 +14,7 @@ import {
   useMyEmail,
   useMySecurity,
   useReadwiseAccount,
+  type UseMyEmailResult,
 } from "./hooks";
 
 interface AccountSettingsPageProps {
@@ -76,30 +77,7 @@ export default function AccountSettingsPage({
           />
         )}
 
-        {/* The 409 is explained rather than reported: nothing the member did is
-            wrong, and the remedy is in the directory. */}
-        {mine.isDirectoryOwned && (
-          <p
-            role="status"
-            className="text-sm text-paper-700 dark:text-paper-300"
-          >
-            {t("account.email.directoryRefused")}
-          </p>
-        )}
-        {mine.saveError != null && !mine.isDirectoryOwned && (
-          <ErrorState
-            error={mine.saveError}
-            fallback={t("account.email.couldNotSave")}
-          />
-        )}
-        {mine.hasSaved && mine.saveError == null && (
-          <p
-            role="status"
-            className="text-sm text-green-800 dark:text-green-400"
-          >
-            {t("settings.saved")}
-          </p>
-        )}
+        <SaveOutcome mine={mine} />
       </SettingsSection>
 
       <SettingsSection title={t("account.security.title")} icon="user">
@@ -120,5 +98,36 @@ export default function AccountSettingsPage({
 
       <MemberAddresses state={members} />
     </SettingsSubPage>
+  );
+}
+
+/**
+ * What saving the member's own address came to. A fragment, so its lines sit
+ * in the section's own spacing.
+ */
+function SaveOutcome({ mine }: { mine: UseMyEmailResult }) {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      {/* The 409 is explained rather than reported: nothing the member did is
+          wrong, and the remedy is in the directory. */}
+      {mine.isDirectoryOwned && (
+        <p role="status" className="text-sm text-paper-700 dark:text-paper-300">
+          {t("account.email.directoryRefused")}
+        </p>
+      )}
+      {mine.saveError != null && !mine.isDirectoryOwned && (
+        <ErrorState
+          error={mine.saveError}
+          fallback={t("account.email.couldNotSave")}
+        />
+      )}
+      {mine.hasSaved && mine.saveError == null && (
+        <p role="status" className="text-sm text-green-800 dark:text-green-400">
+          {t("settings.saved")}
+        </p>
+      )}
+    </>
   );
 }

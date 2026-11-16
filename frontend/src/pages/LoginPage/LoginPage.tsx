@@ -26,16 +26,6 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
   const { t } = useTranslation();
   const form = useLoginForm(onSignIn);
   const background = useLoginBackground();
-  const recovery = useRecovery();
-  const confirmation = useAddressConfirmation();
-
-  // Which card the page is showing. **A local state rather than a route**,
-  // because none of the three is a place: they are three things to do with one
-  // set of credentials, nothing links to them from outside, and a route would
-  // put "I forgot my password" in somebody's browser history.
-  const [panel, setPanel] = useState<"credentials" | "recovery" | "confirm">(
-    "credentials",
-  );
 
   // Read from the cached account rather than /auth/me: this page also renders
   // when nobody is signed in, and the upload control is admin-only.
@@ -77,26 +67,7 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
           </p>
         </div>
 
-        {panel === "recovery" && (
-          <RecoveryPanel
-            state={recovery}
-            onBack={() => setPanel("credentials")}
-          />
-        )}
-        {panel === "confirm" && (
-          <ConfirmPanel
-            state={confirmation}
-            onBack={() => setPanel("credentials")}
-          />
-        )}
-
-        {panel === "credentials" && (
-          <CredentialsPanel
-            form={form}
-            onRecover={() => setPanel("recovery")}
-            onConfirm={() => setPanel("confirm")}
-          />
-        )}
+        <ActiveCard form={form} />
 
         {form.isDirectoryLogin && (
           <p className="text-center text-xs text-paper-600 mt-4 dark:text-paper-400">
@@ -124,6 +95,47 @@ export default function LoginPage({ onSignIn }: LoginPageProps) {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Whichever of the three cards the page is showing.
+ *
+ * **A local state rather than a route**, because none of the three is a place:
+ * they are three things to do with one set of credentials, nothing links to
+ * them from outside, and a route would put "I forgot my password" in somebody's
+ * browser history. A fragment, so the card sits directly in the page's column.
+ */
+function ActiveCard({ form }: { form: UseLoginFormResult }) {
+  const recovery = useRecovery();
+  const confirmation = useAddressConfirmation();
+  const [panel, setPanel] = useState<"credentials" | "recovery" | "confirm">(
+    "credentials",
+  );
+
+  return (
+    <>
+      {panel === "recovery" && (
+        <RecoveryPanel
+          state={recovery}
+          onBack={() => setPanel("credentials")}
+        />
+      )}
+      {panel === "confirm" && (
+        <ConfirmPanel
+          state={confirmation}
+          onBack={() => setPanel("credentials")}
+        />
+      )}
+
+      {panel === "credentials" && (
+        <CredentialsPanel
+          form={form}
+          onRecover={() => setPanel("recovery")}
+          onConfirm={() => setPanel("confirm")}
+        />
+      )}
+    </>
   );
 }
 

@@ -123,18 +123,22 @@ interface Cache {
   accounts: Record<string, Appearance>;
 }
 
+/** A parsed entry as a cache, each field dropped alone where it has the wrong type. */
+function cacheOf(parsed: Partial<Cache> | null): Cache {
+  const accounts = parsed?.accounts;
+  return {
+    last: typeof parsed?.last === "string" ? parsed.last : null,
+    accounts:
+      accounts && typeof accounts === "object"
+        ? (accounts as Cache["accounts"])
+        : {},
+  };
+}
+
 function read(): Cache {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Partial<Cache>) : null;
-    const accounts = parsed?.accounts;
-    return {
-      last: typeof parsed?.last === "string" ? parsed.last : null,
-      accounts:
-        accounts && typeof accounts === "object"
-          ? (accounts as Cache["accounts"])
-          : {},
-    };
+    return cacheOf(raw ? (JSON.parse(raw) as Partial<Cache>) : null);
   } catch {
     // A half-written entry, or a private window with no storage at all. Both
     // mean "no cache", and neither is worth breaking the first render over.

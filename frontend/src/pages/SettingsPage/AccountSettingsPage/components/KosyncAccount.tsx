@@ -44,26 +44,7 @@ export default function KosyncAccount({ state }: KosyncAccountProps) {
         minted={minted}
       />
       <PasswordStatus account={account} minted={minted} />
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          onClick={state.mint}
-          isLoading={state.isSaving}
-          disabled={state.isSaving}
-        >
-          {account.has_password ? t("kosync.remint") : t("kosync.mint")}
-        </Button>
-        {account.has_password && (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={state.revoke}
-            disabled={state.isSaving}
-          >
-            {t("kosync.revoke")}
-          </Button>
-        )}
-      </div>
+      <PasswordButtons account={account} state={state} />
       {state.waiting > 0 && (
         <p className="text-sm text-paper-800 dark:text-paper-200">
           {t("kosync.waiting", { count: state.waiting })}
@@ -74,6 +55,40 @@ export default function KosyncAccount({ state }: KosyncAccountProps) {
           error={state.saveError}
           fallback={t("kosync.couldNotSave")}
         />
+      )}
+    </div>
+  );
+}
+
+/** Make the password, or make another, and revoke it once there is one. */
+function PasswordButtons({
+  account,
+  state,
+}: {
+  account: KosyncAccountOut;
+  state: UseKosyncAccountResult;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        size="sm"
+        onClick={state.mint}
+        isLoading={state.isSaving}
+        disabled={state.isSaving}
+      >
+        {account.has_password ? t("kosync.remint") : t("kosync.mint")}
+      </Button>
+      {account.has_password && (
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={state.revoke}
+          disabled={state.isSaving}
+        >
+          {t("kosync.revoke")}
+        </Button>
       )}
     </div>
   );

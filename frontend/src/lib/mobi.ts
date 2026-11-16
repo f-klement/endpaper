@@ -604,6 +604,30 @@ function recordZeroEnd(
 }
 
 /**
+ * The MOBI header's length, read from record 0, or why the record is refused:
+ * too short, encrypted, or not MOBI at all.
+ */
+function mobiHeaderLength(record: DataView): number | MobiFailure {
+  // **Asserted on what arrived, not on what was asked for.** A `Blob` whose
+  // backing file shrank under it yields a shorter slice rather than an error,
+  // and a record 0 too short to hold a header is a MOBI that is broken rather
+  // than a file of some other kind: the container already said which it was.
+  // Everything past here reads inside this buffer.
+  if (record.byteLength < MIN_RECORD_ZERO_BYTES) return "damaged";
+
+  // **Before the magic**, so that a DRM bound file is told apart from a file of
+  // some other kind. Both are refusals; only one of them is worth a member
+  // going to look for a different copy.
+  const encryption = u16(record, ENCRYPTION_AT);
+  if (encryption === null) return "damaged";
+  if (encryption !== 0) return "protected";
+
+  if (ascii(record, MOBI_MAGIC_AT, 4) !== MOBI_MAGIC) return "not-a-mobi";
+
+  return u32(record, HEADER_LENGTH_AT) ?? "damaged";
+}
+
+/**
  * Read one Kindle or Mobipocket file's metadata.
  *
  * Never throws for anything the file did, which is the contract
@@ -625,28 +649,10 @@ export async function readMobi(file: Blob): Promise<MobiReading> {
   const record = new DataView(
     await file.slice(extent.from, extent.to).arrayBuffer(),
   );
-  // **Asserted on what arrived, not on what was asked for.** A `Blob` whose
-  // backing file shrank under it yields a shorter slice rather than an error,
-  // and a record 0 too short to hold a header is a MOBI that is broken rather
-  // than a file of some other kind: the container already said which it was.
-  // Everything past here reads inside this buffer.
-  if (record.byteLength < MIN_RECORD_ZERO_BYTES) {
-    return { ok: false, failure: "damaged" };
+  const headerLength = mobiHeaderLength(record);
+  if (typeof headerLength === "string") {
+    return { ok: false, failure: headerLength };
   }
-
-  // **Before the magic**, so that a DRM bound file is told apart from a file of
-  // some other kind. Both are refusals; only one of them is worth a member
-  // going to look for a different copy.
-  const encryption = u16(record, ENCRYPTION_AT);
-  if (encryption === null) return { ok: false, failure: "damaged" };
-  if (encryption !== 0) return { ok: false, failure: "protected" };
-
-  if (ascii(record, MOBI_MAGIC_AT, 4) !== MOBI_MAGIC) {
-    return { ok: false, failure: "not-a-mobi" };
-  }
-
-  const headerLength = u32(record, HEADER_LENGTH_AT);
-  if (headerLength === null) return { ok: false, failure: "damaged" };
 
   const decode = decoderFor(u32(record, CODEPAGE_AT));
   const exth = readExth(record, MOBI_MAGIC_AT + headerLength);

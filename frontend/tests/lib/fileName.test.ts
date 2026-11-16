@@ -214,6 +214,12 @@ describe("an ISBN in the name", () => {
     expect(clues("0019780441013593.pdf").isbn).toBe("9780441013593");
   });
 
+  it("is taken from a whole token before a window of a longer run", () => {
+    expect(clues("Dune 0441013597 19781593276850.epub").isbn).toBe(
+      "9780441013593",
+    );
+  });
+
   it("is not invented from a date stamp", () => {
     // The refusal that matters: a random ten digit run passes modulus 11 about
     // one time in eleven, so a ten is taken only as a whole token and never

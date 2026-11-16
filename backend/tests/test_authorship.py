@@ -290,6 +290,17 @@ class TestAKeyIsPerSpellingNotPerPerson:
         keys = {row.alias_key for row in db.query(AuthorAlias).all()}
         assert keys == {author_key("Le Guin"), author_key("Ursula K. Le Guin")}
 
+    def test_folding_a_kept_name_away_brings_the_rows_naming_it_along(self, db, user):
+        """Fold A into B, then B into C: A's row names C, so the map stays flat."""
+        shelve(db, user, "Le Guin", "Ursula K. Le Guin")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.merge([author_key("Le Guin")], "Ursula K. Le Guin", by_user_id=user.id)
+
+        authorship.merge([author_key("Ursula K. Le Guin")], "U. K. Le Guin", by_user_id=user.id)
+
+        names = {row.alias_key: row.canonical_name for row in db.query(AuthorAlias).all()}
+        assert names[author_key("Le Guin")] == "U. K. Le Guin"
+
     def test_the_kept_spelling_is_not_listed_as_folded_into_itself(self, db, user):
         """It put "Folded in: Ursula K. Le Guin" under the heading "Ursula K.
         Le Guin", with an undo beside it."""
@@ -1163,6 +1174,20 @@ class TestTheCrossReferencesStoredWithAConfirmation:
             AuthorityScheme.VIAF,
             AuthorityScheme.WIKIDATA,
         }
+
+    def test_references_that_all_collide_store_nothing(self, db, user):
+        shelve(db, user, "Jorge Luis Borges")
+        authorship = Authorship.seen_by(db, user.id)
+        authorship.confirm_identifier(
+            "Jorge Luis Borges", AuthorityScheme.ISNI, "0000000000000001", by_user_id=user.id
+        )
+
+        recorded = authorship.record_cross_references(
+            "Jorge Luis Borges", {AuthorityScheme.ISNI: "0000000121429031"}, by_user_id=user.id
+        )
+
+        assert recorded.stored == []
+        assert [refused.kept for refused in recorded.refused] == ["0000000000000001"]
 
     def test_running_it_twice_writes_nothing_the_second_time(self, db, user):
         """A re-confirmation is an ordinary thing to do and must not produce a

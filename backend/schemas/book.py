@@ -548,9 +548,7 @@ class BookCreate(BaseModel):
             return data
         if len(names) > MAX_AUTHORS_PER_BOOK or not all(isinstance(n, str) for n in names):
             return data
-        if line == CREDIT_SEPARATOR.join(names):
-            return data
-        if blank_as_none(line) is None and all(blank_as_none(n) is None for n in names):
+        if _agreeing(line, names):
             return data
         raise ValueError(
             "author and authors name different credits: send authors alone, or "
@@ -575,6 +573,14 @@ class BookCreate(BaseModel):
             )
         self.author = line
         return self
+
+
+def _agreeing(line: str, names: list[str]) -> bool:
+    """Whether `BookCreate.a_pair_names_one_credit` accepts this pair: the line
+    is the names joined, character for character, or both name nobody."""
+    return line == CREDIT_SEPARATOR.join(names) or (
+        blank_as_none(line) is None and all(blank_as_none(n) is None for n in names)
+    )
 
 
 #: Fields of `BookCreate` the `Book` constructor is never handed, because every

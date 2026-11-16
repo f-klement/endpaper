@@ -279,34 +279,39 @@ def _plain_host(parsed: SplitResult) -> str | None:
     host = parsed.hostname or ""
     for separator, plain in _HOST_SEPARATORS.items():
         host = host.replace(separator, plain)
-    if not host or "%" in host or ".." in host or host.startswith(".") or host.endswith("."):
-        # An empty host is `https:///x`. The rest are what the separator
-        # mapping can produce out of a host that was already malformed, and a
-        # label that is empty on one side of the wire and not the other is the
-        # divergence this whole function exists to close.
-        #
-        # **`%` is the separator mapping one step earlier, and refusing it is
-        # what closes the mapping at all.** WHATWG percent-decodes the host
-        # *before* it runs IDNA, so `%2e` reaches the same place `\u3002` does
-        # and `_HOST_SEPARATORS` never sees it. Measured 2026-08-27 against
-        # `new URL(...).host`, every one of these was stored as a link and
-        # resolved to `evil.example`:
-        #
-        #     calibre.example%2eevil.example      -> calibre.example.evil.example
-        #     calibre.example%2Eevil.example      -> calibre.example.evil.example
-        #     calibre.example%ef%bc%8eevil.example -> calibre.example.evil.example
-        #
-        # It cannot be repaired the way a literal separator can, because
-        # decoding is recursive (`%252e`) and encodes more than separators
-        # (`%00`, `%2f`, both of which stored as links a browser then throws
-        # on). So it joins whitespace and the backslash: not something anybody
-        # typed on purpose, and not reconcilable between the two parsers.
-        #
-        # **The path and the query are untouched by this.** A percent escape
-        # there is ordinary and both parsers agree about it;
-        # `https://calibre.example/book/12%20a` is a link.
+    if _malformed_host(host):
         return None
     return host
+
+
+def _malformed_host(host: str) -> bool:
+    """Whether a host, after the separator mapping, is empty or malformed."""
+    # An empty host is `https:///x`. The rest are what the separator
+    # mapping can produce out of a host that was already malformed, and a
+    # label that is empty on one side of the wire and not the other is the
+    # divergence `_plain_host` exists to close.
+    #
+    # **`%` is the separator mapping one step earlier, and refusing it is
+    # what closes the mapping at all.** WHATWG percent-decodes the host
+    # *before* it runs IDNA, so `%2e` reaches the same place `\u3002` does
+    # and `_HOST_SEPARATORS` never sees it. Measured 2026-08-27 against
+    # `new URL(...).host`, every one of these was stored as a link and
+    # resolved to `evil.example`:
+    #
+    #     calibre.example%2eevil.example      -> calibre.example.evil.example
+    #     calibre.example%2Eevil.example      -> calibre.example.evil.example
+    #     calibre.example%ef%bc%8eevil.example -> calibre.example.evil.example
+    #
+    # It cannot be repaired the way a literal separator can, because
+    # decoding is recursive (`%252e`) and encodes more than separators
+    # (`%00`, `%2f`, both of which stored as links a browser then throws
+    # on). So it joins whitespace and the backslash: not something anybody
+    # typed on purpose, and not reconcilable between the two parsers.
+    #
+    # **The path and the query are untouched by this.** A percent escape
+    # there is ordinary and both parsers agree about it;
+    # `https://calibre.example/book/12%20a` is a link.
+    return not host or "%" in host or ".." in host or host.startswith(".") or host.endswith(".")
 
 
 def _stored_form(kind: CustomFieldKind, value: str) -> str | None:

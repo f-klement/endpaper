@@ -319,31 +319,37 @@ def validate_auth_config() -> None:
     mode = auth_mode()
 
     if mode is AuthMode.LDAP:
-        missing = [
-            name
-            for name, value in (
-                ("LDAP_URL", ldap_url()),
-                ("LDAP_USER_BASE_DN", ldap_user_base_dn()),
-            )
-            if not value
-        ]
-        if missing:
-            raise RuntimeError(f"AUTH_MODE=ldap requires {' and '.join(missing)} to be set.")
-
-        # A bind DN with no password is an "unauthenticated bind", which the
-        # directory treats as anonymous. It would appear to work while quietly
-        # searching with anonymous rights, so it fails startup instead.
-        if ldap_bind_dn() and not ldap_bind_password().strip():
-            raise RuntimeError(
-                "LDAP_BIND_DN is set but LDAP_BIND_PASSWORD is empty. The directory "
-                "would treat that as an anonymous bind. Set the password, or clear "
-                "LDAP_BIND_DN to search anonymously on purpose."
-            )
-
-        _validate_ldap_transport()
+        _validate_ldap_config()
 
     if mode is AuthMode.PROXY and not proxy_user_header():
         raise RuntimeError("AUTH_MODE=proxy requires PROXY_USER_HEADER to name a header.")
+
+
+def _validate_ldap_config() -> None:
+    """Refuse an `AUTH_MODE=ldap` deployment missing what a sign in needs, or
+    binding as a service account without its password."""
+    missing = [
+        name
+        for name, value in (
+            ("LDAP_URL", ldap_url()),
+            ("LDAP_USER_BASE_DN", ldap_user_base_dn()),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(f"AUTH_MODE=ldap requires {' and '.join(missing)} to be set.")
+
+    # A bind DN with no password is an "unauthenticated bind", which the
+    # directory treats as anonymous. It would appear to work while quietly
+    # searching with anonymous rights, so it fails startup instead.
+    if ldap_bind_dn() and not ldap_bind_password().strip():
+        raise RuntimeError(
+            "LDAP_BIND_DN is set but LDAP_BIND_PASSWORD is empty. The directory "
+            "would treat that as an anonymous bind. Set the password, or clear "
+            "LDAP_BIND_DN to search anonymously on purpose."
+        )
+
+    _validate_ldap_transport()
 
 
 def _validate_ldap_transport() -> None:

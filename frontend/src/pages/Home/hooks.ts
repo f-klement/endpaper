@@ -24,7 +24,7 @@
  * writing, are now `useCatalogueScope` in `app/hooks.ts`.
  */
 
-import { keepPreviousData } from "@tanstack/react-query";
+import { keepPreviousData, type InfiniteData } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -217,14 +217,11 @@ function useBookPages(
     },
   });
 
-  const flatBooks = useMemo(
-    () => books.data?.pages.flatMap((page) => page.items) ?? [],
-    [books.data],
-  );
+  const shelf = useMemo(() => shelfOf(books.data), [books.data]);
 
   return {
-    books: flatBooks,
-    total: books.data?.pages[0]?.total ?? 0,
+    books: shelf.books,
+    total: shelf.total,
 
     // True only when there is genuinely nothing to draw. With previous results
     // held, a re-search is no longer a loading state, it is a stale one.
@@ -236,6 +233,20 @@ function useBookPages(
     hasMore: books.hasNextPage,
     isLoadingMore: books.isFetchingNextPage,
     loadMore: () => void books.fetchNextPage(),
+  };
+}
+
+/**
+ * The pages fetched so far as one list, and the match count the first one
+ * reports; empty before any page has arrived.
+ */
+function shelfOf(data: InfiniteData<PageBookOut> | undefined): {
+  books: BookOut[];
+  total: number;
+} {
+  return {
+    books: data?.pages.flatMap((page) => page.items) ?? [],
+    total: data?.pages[0]?.total ?? 0,
   };
 }
 

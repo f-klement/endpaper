@@ -222,6 +222,35 @@ describe("BookDetail", () => {
       );
     });
 
+    it("names the others who want to talk about it, and not the reader", async () => {
+      stubLoad({
+        book: makeBook({
+          id: 1,
+          added_by: OWNER,
+          discuss_with: [OWNER, OTHER],
+        }),
+      });
+      renderDetail();
+
+      expect(
+        await screen.findByText("Ask other about this book."),
+      ).toBeInTheDocument();
+    });
+
+    it("reports a progress log that could not be read", async () => {
+      // The last of the requests the page reports in its one banner.
+      stubLoad();
+      api.on("/api/books/1/progress", {
+        status: 500,
+        body: { detail: "Progress unavailable" },
+      });
+      renderDetail();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Progress unavailable",
+      );
+    });
+
     it("surfaces a failed status change", async () => {
       stubLoad();
       api.on("/api/books/1/status", {

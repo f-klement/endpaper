@@ -94,17 +94,12 @@ export default function SecretField({
         {/* Not offered when pinned: the box is disabled and empty, so there
             is nothing to unmask. */}
         {!pinned && (
-          <button
-            type="button"
-            onClick={() => setShown((was) => !was)}
-            aria-label={shown ? hideLabel : showLabel}
-            aria-pressed={shown}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-600 hover:text-paper-800 text-sm leading-none dark:text-paper-400 dark:hover:text-paper-300"
-          >
-            <span aria-hidden="true">
-              <Icon name={shown ? "eyeOff" : "eye"} className="w-4 h-4" />
-            </span>
-          </button>
+          <RevealButton
+            shown={shown}
+            onToggle={() => setShown((was) => !was)}
+            showLabel={showLabel}
+            hideLabel={hideLabel}
+          />
         )}
       </div>
       <p className="text-xs text-paper-600 dark:text-paper-400">{status}</p>
@@ -131,6 +126,33 @@ export default function SecretField({
       )}
       {children}
     </div>
+  );
+}
+
+/** The eye that unmasks the draft, named for the secret it reveals. */
+function RevealButton({
+  shown,
+  onToggle,
+  showLabel,
+  hideLabel,
+}: {
+  shown: boolean;
+  onToggle: () => void;
+  showLabel: string;
+  hideLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={shown ? hideLabel : showLabel}
+      aria-pressed={shown}
+      className="absolute right-2 top-1/2 -translate-y-1/2 text-paper-600 hover:text-paper-800 text-sm leading-none dark:text-paper-400 dark:hover:text-paper-300"
+    >
+      <span aria-hidden="true">
+        <Icon name={shown ? "eyeOff" : "eye"} className="w-4 h-4" />
+      </span>
+    </button>
   );
 }
 

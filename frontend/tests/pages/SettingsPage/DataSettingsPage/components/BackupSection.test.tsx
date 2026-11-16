@@ -88,6 +88,21 @@ describe("BackupSection", () => {
     expect(props.onRestore).toHaveBeenCalledWith(ARCHIVE);
   });
 
+  it("empties the picker once a restore is sent", async () => {
+    // Otherwise choosing the same archive again fires no change, and the
+    // button that restores it never comes back.
+    renderSection();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const user = userEvent.setup();
+    const picker = screen.getByLabelText<HTMLInputElement>("Backup file");
+
+    await user.upload(picker, ARCHIVE);
+    expect(picker.value).not.toBe("");
+    await user.click(screen.getByRole("button", { name: /Restore from/ }));
+
+    expect(picker.value).toBe("");
+  });
+
   it("names the file on the button, so the wrong one is visible first", async () => {
     renderSection();
     await userEvent

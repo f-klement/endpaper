@@ -596,6 +596,11 @@ class Target:
             self._check_no_sru()
         if self.reader not in MARC_READERS:
             self._check_no_marc_knobs()
+        self._check_waivers()
+        self._check_secret()
+
+    def _check_waivers(self) -> None:
+        """Refuses a waived ISBN claim off the DNB, and a shipped login on a row needing none."""
         if not self.requires_isbn_claim and self.source not in _MAY_WAIVE_THE_ISBN_CLAIM:
             raise ValueError(f"{self.source}: only the DNB may waive the ISBN identity check")
         if self.shipped_credential is not None and not self.needs_key:
@@ -605,7 +610,6 @@ class Target:
             # asks for nothing. Refused at construction rather than ignored,
             # which is the rule the bespoke fields above already follow.
             raise ValueError(f"{self.source}: a shipped login on a row that needs no credential")
-        self._check_secret()
 
     def _check_reader(self) -> None:
         """Refuses a reader that is not a `Reader`, and one of the import family."""

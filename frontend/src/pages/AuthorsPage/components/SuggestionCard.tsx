@@ -2,7 +2,7 @@ import type {
   AuthorSuggestionOut,
   SuggestionReason,
 } from "../../../api/generated/model";
-import { useTranslation, type MessageKey } from "../../../i18n";
+import { useTranslation, type MessageKey, type Translate } from "../../../i18n";
 
 interface SuggestionCardProps {
   group: AuthorSuggestionOut;
@@ -88,80 +88,136 @@ export default function SuggestionCard({
 
   return (
     <div className="bg-paper-0 border border-paper-200 rounded-2xl p-4 space-y-3 dark:bg-paper-900 dark:border-paper-700">
-      {group.keep_name != null ? (
-        <label className="flex items-center gap-2 text-sm text-paper-700 dark:text-paper-200">
-          <input
-            type="checkbox"
-            checked={isBatched}
-            onChange={onToggleBatch}
-            className="shrink-0"
-          />
-          <span className="min-w-0 truncate">
-            {t("authors.wouldKeep", { name: group.keep_name })}
-          </span>
-        </label>
-      ) : (
-        <p className="text-sm text-paper-600 dark:text-paper-400">
-          {t("authors.heldBack")}
-        </p>
-      )}
+      <BatchChoice
+        keepName={group.keep_name}
+        isBatched={isBatched}
+        onToggleBatch={onToggleBatch}
+      />
 
       <p className="text-xs text-paper-600 dark:text-paper-400">
-        {group.reasons
-          // `Object.hasOwn` before the read, because the key is a server
-          // string: `toString` indexes the prototype to a function, which
-          // passes the `undefined` filter below and reaches `t`.
-          .map((reason) =>
-            Object.hasOwn(REASONS, reason) ? REASONS[reason] : undefined,
-          )
-          // **A reason this build does not know is dropped, never rendered
-          // raw.** The type above makes that unreachable for a client and
-          // server built together, and this is the version skew case: an older
-          // page against a newer API used to print the bare value, which is how
-          // `identity` reached a reader as a debug string.
-          //
-          // **Both the whole line and part of it are dropped this way**, and
-          // the partial case is the one worth being clear about: a group built
-          // by a known rule and an unknown one renders only the known reason,
-          // so the reader is told less than the group's edges support. Taken
-          // deliberately. Every name keeps its own checkbox and a merge is
-          // reversible, so under-explaining a reversible action beats printing
-          // a word that means nothing to a reader, and the window is a skew
-          // window rather than a steady state.
-          .filter((key) => key !== undefined)
-          .map((key) => t(key))
-          .join(" · ")}
+        {reasonsLine(group.reasons, t)}
       </p>
 
       <ul className="space-y-2">
         {group.keys.map((key) => (
-          <li
+          <NameRow
             key={key}
-            className="flex items-center gap-3 border border-paper-100 rounded-xl p-2 dark:border-paper-800"
-          >
-            <input
-              type="checkbox"
-              checked={!excluded.includes(key)}
-              onChange={() => onToggleName(key)}
-              aria-label={t("authors.include", { name: nameFor(key) })}
-              className="shrink-0"
-            />
-            <span className="min-w-0 flex-1 text-sm text-paper-900 truncate dark:text-paper-100">
-              {nameFor(key)}
-            </span>
-            <button
-              type="button"
-              disabled={
-                isMerging || excluded.includes(key) || included.length < 2
-              }
-              onClick={() => confirmAndMerge(nameFor(key), included)}
-              className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
-            >
-              {isMerging ? t("authors.merging") : t("authors.keepThis")}
-            </button>
-          </li>
+            name={nameFor(key)}
+            isIncluded={!excluded.includes(key)}
+            isMerging={isMerging}
+            canMerge={included.length >= 2}
+            onToggle={() => onToggleName(key)}
+            onKeep={() => confirmAndMerge(nameFor(key), included)}
+          />
         ))}
       </ul>
     </div>
+  );
+}
+
+/**
+ * The checkbox that puts the group in the batch, or for a group the server held
+ * back, the sentence saying why there is none.
+ */
+function BatchChoice({
+  keepName,
+  isBatched,
+  onToggleBatch,
+}: {
+  keepName: AuthorSuggestionOut["keep_name"];
+  isBatched: boolean;
+  onToggleBatch: () => void;
+}) {
+  const { t } = useTranslation();
+  if (keepName == null)
+    return (
+      <p className="text-sm text-paper-600 dark:text-paper-400">
+        {t("authors.heldBack")}
+      </p>
+    );
+  return (
+    <label className="flex items-center gap-2 text-sm text-paper-700 dark:text-paper-200">
+      <input
+        type="checkbox"
+        checked={isBatched}
+        onChange={onToggleBatch}
+        className="shrink-0"
+      />
+      <span className="min-w-0 truncate">
+        {t("authors.wouldKeep", { name: keepName })}
+      </span>
+    </label>
+  );
+}
+
+/** Why the server grouped these names, in the reader's language. */
+function reasonsLine(reasons: SuggestionReason[], t: Translate): string {
+  return (
+    reasons
+      // `Object.hasOwn` before the read, because the key is a server
+      // string: `toString` indexes the prototype to a function, which
+      // passes the `undefined` filter below and reaches `t`.
+      .map((reason) =>
+        Object.hasOwn(REASONS, reason) ? REASONS[reason] : undefined,
+      )
+      // **A reason this build does not know is dropped, never rendered
+      // raw.** The type above makes that unreachable for a client and
+      // server built together, and this is the version skew case: an older
+      // page against a newer API used to print the bare value, which is how
+      // `identity` reached a reader as a debug string.
+      //
+      // **Both the whole line and part of it are dropped this way**, and
+      // the partial case is the one worth being clear about: a group built
+      // by a known rule and an unknown one renders only the known reason,
+      // so the reader is told less than the group's edges support. Taken
+      // deliberately. Every name keeps its own checkbox and a merge is
+      // reversible, so under-explaining a reversible action beats printing
+      // a word that means nothing to a reader, and the window is a skew
+      // window rather than a steady state.
+      .filter((key) => key !== undefined)
+      .map((key) => t(key))
+      .join(" · ")
+  );
+}
+
+/** One name in the group: whether it is folded in, and the button keeping it. */
+function NameRow({
+  name,
+  isIncluded,
+  isMerging,
+  canMerge,
+  onToggle,
+  onKeep,
+}: {
+  name: string;
+  isIncluded: boolean;
+  isMerging: boolean;
+  /** At least two names are still ticked, so a merge has something to fold. */
+  canMerge: boolean;
+  onToggle: () => void;
+  onKeep: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <li className="flex items-center gap-3 border border-paper-100 rounded-xl p-2 dark:border-paper-800">
+      <input
+        type="checkbox"
+        checked={isIncluded}
+        onChange={onToggle}
+        aria-label={t("authors.include", { name })}
+        className="shrink-0"
+      />
+      <span className="min-w-0 flex-1 text-sm text-paper-900 truncate dark:text-paper-100">
+        {name}
+      </span>
+      <button
+        type="button"
+        disabled={isMerging || !isIncluded || !canMerge}
+        onClick={onKeep}
+        className="shrink-0 px-3 py-1.5 rounded-lg bg-accent-fill text-on-accent text-xs font-medium hover:bg-accent-fill-hover disabled:opacity-40 transition-colors"
+      >
+        {isMerging ? t("authors.merging") : t("authors.keepThis")}
+      </button>
+    </li>
   );
 }

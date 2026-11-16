@@ -190,6 +190,21 @@ DivisionList = Annotated[
 ]
 
 
+def _heading(value: str) -> tuple[ClassificationScheme, str] | None:
+    """One `scheme:number` value as its pair, or None where `headings` drops it."""
+    if len(value) > MAX_HEADING_CHARS:
+        return None
+    scheme_name, separator, number = value.partition(":")
+    if not separator:
+        return None
+    try:
+        scheme = ClassificationScheme(scheme_name.strip().lower())
+    except ValueError:
+        return None
+    collapsed = one_line(number)
+    return (scheme, collapsed) if collapsed else None
+
+
 def headings(raw: list[str] | None) -> list[tuple[ClassificationScheme, str]]:
     """`["lcsh:Mental health"]` as the pairs the shelf filters on.
 
@@ -228,18 +243,9 @@ def headings(raw: list[str] | None) -> list[tuple[ClassificationScheme, str]]:
         return []
     found: dict[tuple[ClassificationScheme, str], None] = {}
     for value in raw:
-        if len(value) > MAX_HEADING_CHARS:
-            continue
-        scheme_name, separator, number = value.partition(":")
-        if not separator:
-            continue
-        try:
-            scheme = ClassificationScheme(scheme_name.strip().lower())
-        except ValueError:
-            continue
-        collapsed = one_line(number)
-        if collapsed:
-            found.setdefault((scheme, collapsed), None)
+        heading = _heading(value)
+        if heading is not None:
+            found.setdefault(heading, None)
     if len(found) > MAX_IDS_IN_A_FILTER:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -480,14 +486,21 @@ def _nuls_in(value: object, loc: tuple[str | int, ...]) -> list[tuple[str | int,
         if isinstance(item, str):
             if "\x00" in item:
                 found.append((*loc, *path))
-        elif isinstance(item, list):
-            stack.extend((child, len(path), index) for index, child in reversed(list(enumerate(item))))
-        elif isinstance(item, dict):
-            for key, child in reversed(list(item.items())):
-                stack.append((child, len(path), key))
-                # A key is checked as a string at its own value's place, ahead of the value.
-                stack.append((key, len(path), key))
+        else:
+            _push_the_children(stack, item, len(path))
     return found
+
+
+def _push_the_children(stack: list[tuple[object, int, str | int | None]], item: object, depth: int) -> None:
+    """Push a list's items or a dict's keys and values onto `_nuls_in`'s stack,
+    reversed so they pop in document order. Anything else has no children."""
+    if isinstance(item, list):
+        stack.extend((child, depth, index) for index, child in reversed(list(enumerate(item))))
+    elif isinstance(item, dict):
+        for key, child in reversed(list(item.items())):
+            stack.append((child, depth, key))
+            # A key is checked as a string at its own value's place, ahead of the value.
+            stack.append((key, depth, key))
 
 
 async def _nuls_in_the_body(request: Request, route: APIRoute) -> list[tuple[str | int, ...]]:

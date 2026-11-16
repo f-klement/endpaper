@@ -100,12 +100,22 @@ class Reader {
     this.space();
     const char = this.source[this.at];
     if (char === "{") return this.table(depth + 1);
+    const string = this.literal(char);
+    if (string !== null) return string;
+    if (char === "-") return this.negative();
+    return this.number() ?? this.keyword();
+  }
+
+  /**
+   * A quoted or long bracket string starting at `char`, consuming it, or null
+   * with nothing consumed where none starts here.
+   */
+  private literal(char: string | undefined): string | null {
     if (char === '"' || char === "'") return this.quoted(char);
     if (char === "[" && this.longOpening() >= 0) {
       return this.longBody(this.lastLevel);
     }
-    if (char === "-") return this.negative();
-    return this.number() ?? this.keyword();
+    return null;
   }
 
   /** A minus sign, which Lua allows only before a number here. */

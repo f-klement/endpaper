@@ -197,19 +197,7 @@ function LibraryResults({
       />
     );
   if (!library.isLoading && library.books.length === 0)
-    return (
-      <EmptyState
-        icon="inbox"
-        title={t(wishlist ? "wishlist.empty" : "library.noBooks")}
-        hint={
-          wishlist
-            ? t("wishlist.emptyHint")
-            : filtered
-              ? t("library.adjustFilters")
-              : t("library.scanFirstBook")
-        }
-      />
-    );
+    return <LibraryEmpty wishlist={wishlist} filtered={filtered} />;
   return (
     // Dimmed rather than emptied while a newer search runs. Replacing the
     // grid with skeletons on every keystroke is the flicker this avoids.
@@ -228,6 +216,33 @@ function LibraryResults({
         selection={selection}
       />
     </div>
+  );
+}
+
+/**
+ * An empty shelf, saying which empty it is: a wishlist, a filter that matches
+ * nothing, or a library with no books yet.
+ */
+function LibraryEmpty({
+  wishlist,
+  filtered,
+}: {
+  wishlist: boolean;
+  filtered: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <EmptyState
+      icon="inbox"
+      title={t(wishlist ? "wishlist.empty" : "library.noBooks")}
+      hint={
+        wishlist
+          ? t("wishlist.emptyHint")
+          : filtered
+            ? t("library.adjustFilters")
+            : t("library.scanFirstBook")
+      }
+    />
   );
 }
 

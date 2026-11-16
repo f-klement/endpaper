@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import Future, wait
 from datetime import UTC, datetime
 from functools import partial
-from typing import Annotated, Any, Final, Literal, NamedTuple, NoReturn, cast
+from typing import Annotated, Any, Final, Literal, NamedTuple, NoReturn, Protocol, cast
 
 from fastapi import (
     APIRouter,
@@ -132,7 +132,7 @@ from ratelimit import (
     cover_backfill_limiter,
     export_limiter,
 )
-from reading import Reading
+from reading import Reading, Records
 from refusals import refuses
 from schemas import (
     DUPLICATE_BOOKS_SHOWN,
@@ -1308,7 +1308,7 @@ def _csv_chunks(db: Session, viewer_id: int) -> Iterator[str]:
             # member who exports and imports their own shelf loses every
             # rating and every read date, which is data the importer has
             # always been able to read back.
-            reading = statuses.get(book.id)
+            rating, read_on = _reading_cells(statuses, book.id)
 
             # **Every cell goes through `_csv_safe`, with no exceptions and no
             # list of them.** Eight used to be exempt on the argument that
@@ -1349,10 +1349,8 @@ def _csv_chunks(db: Session, viewer_id: int) -> Iterator[str]:
                     _csv_safe(book.description),
                     _csv_safe("; ".join(tag.name for tag in book.tags)),
                     _csv_safe(statuses.status_of(book.id)),
-                    _csv_safe(reading.rating if reading else None),
-                    _csv_safe(
-                        reading.finished_at.date().isoformat() if reading and reading.finished_at else None
-                    ),
+                    _csv_safe(rating),
+                    _csv_safe(read_on),
                     _csv_safe(_added_on(book)),
                     _csv_safe(_added_by(book)),
                     _csv_safe(book.format),
@@ -1373,6 +1371,15 @@ def _csv_chunks(db: Session, viewer_id: int) -> Iterator[str]:
                 ]
             )
         yield _drain(buffer)
+
+
+def _reading_cells(statuses: Records, book_id: int) -> tuple[int | None, str | None]:
+    """The CSV export's rating and read date, off this member's own row, or
+    None where they never touched the book."""
+    reading = statuses.get(book_id)
+    if reading is None:
+        return None, None
+    return reading.rating, reading.finished_at.date().isoformat() if reading.finished_at else None
 
 
 def _text_chunks(db: Session, viewer_id: int) -> Iterator[str]:
@@ -6306,9 +6313,7 @@ async def enrich_book(
     if found is None:
         # No ISBN, no resolvable store identifier, or nobody carries this
         # edition under either.
-        query = " ".join(part for part in (book.title, book.author) if part)
-        matches = await enquiry.search(query, limit=1)
-        found = matches[0] if matches else None
+        found = await _found_by_title(book, enquiry.search)
 
     if found is None:
         return BookEnrichmentOut(
@@ -6356,6 +6361,21 @@ async def enrich_book(
         updated_fields=updated,
         found=True,
     )
+
+
+class _TitleSearch(Protocol):
+    """`Enquiry.search`'s exact signature. A `Callable` cannot spell a keyword
+    only `limit`, and `Callable[..., ...]` stops mypy reading the call."""
+
+    async def __call__(self, query: str, *, limit: int) -> list[catalogue.Record]: ...
+
+
+async def _found_by_title(book: Book, search: _TitleSearch) -> catalogue.Record | None:
+    """The record `enrich_book` falls back on: the best of a ranked search for
+    the book's title and author, or None where nothing answers."""
+    query = " ".join(part for part in (book.title, book.author) if part)
+    matches = await search(query, limit=1)
+    return matches[0] if matches else None
 
 
 async def _found_by_exact_key(

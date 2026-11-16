@@ -80,6 +80,17 @@ describe("StarRating", () => {
       expect(screen.queryByRole("button")).not.toBeInTheDocument();
     });
 
+    it("fills as many stars as the rating", () => {
+      renderLocalised(<StarRating value={3} />);
+      const stars = screen
+        .getByLabelText("Your rating")
+        .querySelectorAll("svg");
+
+      expect(
+        [...stars].map((star) => star.getAttribute("fill") === "currentColor"),
+      ).toEqual([true, true, true, false, false]);
+    });
+
     it("treats a missing rating as zero stars rather than crashing", () => {
       renderLocalised(<StarRating value={undefined} />);
       expect(screen.getByLabelText("Your rating")).toBeInTheDocument();

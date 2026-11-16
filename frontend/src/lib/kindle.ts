@@ -519,22 +519,7 @@ export function readKindleLibrary(xml: string): KindleReading {
     return { ok: false, failure: "not-a-kindle-library" };
   }
 
-  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
-  // does not choose may throw where the specification answers `parsererror`.
-  let document: Document;
-  try {
-    document = new DOMParser().parseFromString(xml, "application/xml");
-  } catch {
-    return { ok: false, failure: "not-a-kindle-library" };
-  }
-  // Both halves are needed. A parse error yields a document whose root is
-  // `parsererror`, and a well formed document that is not this catalogue yields
-  // a root that is simply something else.
-  const root = document.documentElement;
-  if (!root || root.localName !== ROOT) {
-    return { ok: false, failure: "not-a-kindle-library" };
-  }
-  const list = childrenNamed(root, LIST)[0];
+  const list = listIn(xml);
   if (list === undefined) return { ok: false, failure: "not-a-kindle-library" };
 
   // **Walked down from the list rather than searched for by name.** A document
@@ -544,6 +529,27 @@ export function readKindleLibrary(xml: string): KindleReading {
   const entries = childrenNamed(list, ENTRY);
   if (entries.length === 0) return { ok: false, failure: "empty" };
   return { ok: true, library: libraryOf(entries) };
+}
+
+/**
+ * The catalogue's list element, or undefined where the text does not parse,
+ * or parses as something other than this catalogue.
+ */
+function listIn(xml: string): Element | undefined {
+  // Caught for `fb2.ts::readFb2Description`'s reason: a parser this reader
+  // does not choose may throw where the specification answers `parsererror`.
+  let document: Document;
+  try {
+    document = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return undefined;
+  }
+  // Both halves are needed. A parse error yields a document whose root is
+  // `parsererror`, and a well formed document that is not this catalogue yields
+  // a root that is simply something else.
+  const root = document.documentElement;
+  if (!root || root.localName !== ROOT) return undefined;
+  return childrenNamed(root, LIST)[0];
 }
 
 /**

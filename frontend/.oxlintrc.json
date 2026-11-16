@@ -234,7 +234,7 @@
     // The other row is a habit: an index used as a key.
     "react/no-array-index-key": "off", // 11
     "react/set-state-in-effect": "off", // 10
-    "react/refs": "off", // 6
+    "react/refs": "off", // 3
     "react/exhaustive-effect-dependencies": "off" // 4
   }
 }

@@ -12,13 +12,16 @@
  * unpublished catalogue must not confirm that this deployment has one.
  */
 
-import { keepPreviousData } from "@tanstack/react-query";
+import { keepPreviousData, type InfiniteData } from "@tanstack/react-query";
 
 import {
   useGetPublicBook,
   useListPublicBooksInfinite,
 } from "../../api/generated/endpoints/public/public";
-import type { PublicBookOut } from "../../api/generated/model";
+import type {
+  PagePublicBookOut,
+  PublicBookOut,
+} from "../../api/generated/model";
 import { ApiError } from "../../api/mutator";
 
 /** How many records one page of the public catalogue holds. */
@@ -68,24 +71,13 @@ export function usePublicCatalogue(query: string): UsePublicCatalogueResult {
         // after three attempts at a 404 that is never going to change.
         retry: false,
         staleTime: 60_000,
-        // Stop asking once the pages so far account for every matching row.
-        // Returning undefined is what tells React Query there is no next page.
-        getNextPageParam: (lastPage, allPages) => {
-          const loaded = allPages.reduce(
-            (count, page) => count + page.items.length,
-            0,
-          );
-          return loaded < lastPage.total ? allPages.length + 1 : undefined;
-        },
+        getNextPageParam: nextPageParam,
       },
     },
   );
 
-  const books = result.data?.pages.flatMap((page) => page.items) ?? [];
-
   return {
-    books,
-    total: result.data?.pages[0]?.total ?? 0,
+    ...catalogueOf(result.data),
     isLoading: result.isLoading,
     error: result.error,
     isClosed: isNotFound(result.error),
@@ -94,6 +86,33 @@ export function usePublicCatalogue(query: string): UsePublicCatalogueResult {
     hasMore: result.hasNextPage,
     isLoadingMore: result.isFetchingNextPage,
     loadMore: () => void result.fetchNextPage(),
+  };
+}
+
+/**
+ * Stop asking once the pages so far account for every matching row.
+ *
+ * Returning undefined is what tells React Query there is no next page.
+ */
+function nextPageParam(
+  lastPage: PagePublicBookOut,
+  allPages: PagePublicBookOut[],
+): number | undefined {
+  const loaded = allPages.reduce((count, page) => count + page.items.length, 0);
+  return loaded < lastPage.total ? allPages.length + 1 : undefined;
+}
+
+/**
+ * The pages fetched so far as one list, and the match count the first one
+ * reports; empty before any page has arrived.
+ */
+function catalogueOf(data: InfiniteData<PagePublicBookOut> | undefined): {
+  books: PublicBookOut[];
+  total: number;
+} {
+  return {
+    books: data?.pages.flatMap((page) => page.items) ?? [],
+    total: data?.pages[0]?.total ?? 0,
   };
 }
 

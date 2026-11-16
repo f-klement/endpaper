@@ -699,6 +699,23 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
     if _coded_as(leader, _RECORD_TYPE_POSITION, _NOT_A_BOOK_RECORD_TYPES):
         return False
 
+    carriers = _carriers_unless_008_refuses(record)
+    if carriers is None:
+        return False
+
+    # **A record that declares a text carrier is a text**, whatever other `007`
+    # it also carries. Not whatever else it declares: the 008 and the leader have
+    # returned already, above, and a `tu` does not outrank either. See the two
+    # 007 note in the docstring for why that asymmetry is deliberate, and for the
+    # measurement that it costs nothing, 0 of the 1,484 records carrying a text
+    # 007 also carry a refusing leader/06 or 008/23. Without this clause the 48
+    # Austrian Books Online records are refused, and they are real prints.
+    return _TEXT_CARRIER in carriers or not any(carrier in _NOT_A_BOOK_CARRIERS for carrier in carriers)
+
+
+def _carriers_unless_008_refuses(record: ElementTree.Element) -> list[str] | None:
+    """The first character of every `007`, or None where the `008`'s form of
+    item says the record is not a book, for `_marc_carrier_is_book`."""
     carriers: list[str] = []
     for control in record.findall(f"{_MARC}controlfield"):
         # `control.text` and never `_marc_text`, which collapses whitespace.
@@ -716,16 +733,8 @@ def _marc_carrier_is_book(record: ElementTree.Element) -> bool:
         if tag == "007":
             carriers.append(value[:1])
         elif tag == "008" and _coded_as(value, _FORM_OF_ITEM_POSITION, _NOT_A_BOOK_FORMS_OF_ITEM):
-            return False
-
-    # **A record that declares a text carrier is a text**, whatever other `007`
-    # it also carries. Not whatever else it declares: the 008 and the leader have
-    # returned already, above, and a `tu` does not outrank either. See the two
-    # 007 note in the docstring for why that asymmetry is deliberate, and for the
-    # measurement that it costs nothing, 0 of the 1,484 records carrying a text
-    # 007 also carry a refusing leader/06 or 008/23. Without this clause the 48
-    # Austrian Books Online records are refused, and they are real prints.
-    return _TEXT_CARRIER in carriers or not any(carrier in _NOT_A_BOOK_CARRIERS for carrier in carriers)
+            return None
+    return carriers
 
 
 #: `856`'s second indicator, where it states a relation. Blank and `8` do not.

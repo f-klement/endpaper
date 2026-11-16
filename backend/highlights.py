@@ -226,10 +226,7 @@ def _write_mark(
         "page": mark.page,
         "highlighted_at": mark.highlighted_at,
     }
-    row = held.get(key)
-    if row is None and mark.former_key is not None and mark.former_key in held:
-        row = held[mark.former_key]
-        row.source_key = key
+    row = _held_under(key, mark, held)
     if row is None:
         db.add(Highlight(user_id=member_id, source=source, source_key=key, **fields))
         return "created"
@@ -237,6 +234,16 @@ def _write_mark(
     if private:
         fields["is_shared"] = False
     return "updated" if _update_row(db, row, fields, private=private) else "unchanged"
+
+
+def _held_under(key: str, mark: Mark, held: Mapping[str, Highlight]) -> Highlight | None:
+    """The row held under `key`, or failing that the one under the mark's
+    former key, given `key` in its place."""
+    row = held.get(key)
+    if row is None and mark.former_key is not None and mark.former_key in held:
+        row = held[mark.former_key]
+        row.source_key = key
+    return row
 
 
 def _update_row(db: Session, row: Highlight, fields: Mapping[str, object], *, private: bool) -> bool:

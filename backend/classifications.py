@@ -287,10 +287,7 @@ def add_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) 
     """
     if not headings:
         return []
-    if inspect(book).persistent and _headings_to_add(book.classifications, headings):
-        hold_book_ceilings(db, book.id)
-        db.flush()
-        db.refresh(book, ["classifications"])
+    _hold_if_adding(book, headings, db)
     adds = _headings_to_add(book.classifications, headings)
     existing = {_key(entry.scheme, entry.number): entry for entry in book.classifications}
     changed: list[str] = []
@@ -321,6 +318,18 @@ def add_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) 
         existing[key] = row
         changed.append(heading.number)
     return changed
+
+
+def _hold_if_adding(book: Book, headings: Sequence[ClassificationIn], db: Session) -> None:
+    """Take `add_headings`' lock and re-read the stored headings, where this
+    call would add a row to a Book already in the database.
+
+    The two conditions and why each is there are `add_headings`' last two
+    paragraphs."""
+    if inspect(book).persistent and _headings_to_add(book.classifications, headings):
+        hold_book_ceilings(db, book.id)
+        db.flush()
+        db.refresh(book, ["classifications"])
 
 
 def _fill_in(stored: Classification, heading: ClassificationIn) -> bool:

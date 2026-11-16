@@ -21,6 +21,7 @@ import {
   libraryPathOf,
   MAX_OPF_BYTES,
   type CalibreBook,
+  type CalibreCrossCheck,
 } from "./calibre";
 import { readOpf } from "./opf";
 
@@ -66,12 +67,28 @@ export async function crossCheckFolder(
       return opf === null ? null : crossCheck(book, opf);
     }),
   );
-  return {
-    books: merged.map((one, at) => one?.book ?? books[at]!),
-    crossChecked: merged.filter((one) => one !== null).length,
-    filled: merged.reduce((sum, one) => sum + (one?.filled ?? 0), 0),
-    disagreed: merged.reduce((sum, one) => sum + (one?.disagreed ?? 0), 0),
-  };
+  return tally(books, merged);
+}
+
+/**
+ * The checks summed, each book in its index position: the checked one where a
+ * file was read, the database's own where none was.
+ */
+function tally(
+  books: readonly CalibreBook[],
+  merged: readonly (CalibreCrossCheck | null)[],
+): FolderCrossCheck {
+  let crossChecked = 0;
+  let filled = 0;
+  let disagreed = 0;
+  const kept = merged.map((one, at) => {
+    if (one === null) return books[at]!;
+    crossChecked += 1;
+    filled += one.filled;
+    disagreed += one.disagreed;
+    return one.book;
+  });
+  return { books: kept, crossChecked, filled, disagreed };
 }
 
 /** The package document beside one book, or `null` for every way there is not one. */

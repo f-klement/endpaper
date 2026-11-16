@@ -182,6 +182,16 @@ class TestUploadLimits:
         assert config.MAX_UPLOAD_BYTES >= 2 * 1024 * 1024
 
 
+class TestLdapStartupNamesWhatIsMissing:
+    def test_a_missing_url_and_base_dn_are_each_named(self, monkeypatch):
+        monkeypatch.setenv("AUTH_MODE", "ldap")
+        monkeypatch.delenv("LDAP_URL", raising=False)
+        monkeypatch.delenv("LDAP_USER_BASE_DN", raising=False)
+
+        with pytest.raises(RuntimeError, match="requires LDAP_URL and LDAP_USER_BASE_DN to be set"):
+            config.validate_auth_config()
+
+
 class TestLdapStartupRefusesCleartext:
     """`validate_auth_config` under `AUTH_MODE=ldap`, on how the directory is
     reached. The bind credentials have their own arms in

@@ -3,7 +3,7 @@ the signed in member.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 import bcrypt
 import jwt
@@ -156,19 +156,15 @@ def clear_cover_cookie(response: Response) -> None:
     response.delete_cookie(COVER_COOKIE_NAME, path=COVER_COOKIE_PATH)
 
 
-def _user_from_token(token: str, db: Session, *, scope: str | None = None) -> User | None:
-    """The account a token names, or None if it does not name one usable here.
-
-    `scope` defaults to None, which means a full access token: a scoped token
-    is refused everywhere its scope is not asked for. Defaulting the other way
-    would make every new call site accept the cover cookie by omission.
-    """
+def _token_claims(token: str, db: Session, scope: str | None) -> dict[str, Any] | None:
+    """The token's claims if it is genuine, carries a subject, carries `scope`
+    and was minted since the last restore; otherwise None. Whether that
+    subject is an account here is for the caller to look up."""
     try:
-        payload = jwt.decode(token, secret_key(), algorithms=[ALGORITHM])
+        payload: dict[str, Any] = jwt.decode(token, secret_key(), algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         return None
-    user_id = payload.get("sub")
-    if user_id is None:
+    if payload.get("sub") is None:
         return None
     if payload.get("scope") != scope:
         return None
@@ -176,7 +172,20 @@ def _user_from_token(token: str, db: Session, *, scope: str | None = None) -> Us
     # longer exists. See settings_store.bump_token_epoch.
     if payload.get("epoch") != settings_store.token_epoch(db):
         return None
-    user = db.get(User, int(user_id))
+    return payload
+
+
+def _user_from_token(token: str, db: Session, *, scope: str | None = None) -> User | None:
+    """The account a token names, or None if it does not name one usable here.
+
+    `scope` defaults to None, which means a full access token: a scoped token
+    is refused everywhere its scope is not asked for. Defaulting the other way
+    would make every new call site accept the cover cookie by omission.
+    """
+    payload = _token_claims(token, db, scope)
+    if payload is None:
+        return None
+    user = db.get(User, int(payload["sub"]))
     if user is None:
         return None
     # Imported here rather than at module scope, for the reason
@@ -222,6 +231,22 @@ def _switch_session(token: str | None, db: Session, *, scope: str | None = None)
     return user if is_switch_target(user) else None
 
 
+def _cover_user_behind_a_proxy(request: Request, token: str | None, db: Session) -> User | None:
+    """The cover route's identity under proxy auth: a switch session, else the proxy's header."""
+    from auth_backends import user_from_proxy_headers
+
+    # A switch session wins over the header here too, and the cookie is the
+    # half that matters: an <img> sends no Authorization header, so without
+    # it a switched admin sees the test account's library with a hole where
+    # every cover it may see and the proxy identity may not used to be.
+    switched = _switch_session(token, db)
+    if switched is None:
+        switched = _switch_session(request.cookies.get(COVER_COOKIE_NAME), db, scope=COVER_SCOPE)
+    if switched is not None:
+        return switched
+    return user_from_proxy_headers(db, request)
+
+
 @refuses(401)
 def get_current_user_for_cover(
     request: Request,
@@ -241,30 +266,14 @@ def get_current_user_for_cover(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    # Outside proxy mode, the header still wins where there is one, so a
+    # fetch() for a cover behaves identically to every other call. Each source
+    # is checked against the scope it is supposed to carry: a full token from
+    # the header, a covers-scoped one from the cookie, and neither accepted in
+    # the other's place.
     if auth_mode() is AuthMode.PROXY:
-        from auth_backends import user_from_proxy_headers
-
-        # A switch session wins over the header here too, and the cookie is the
-        # half that matters: an <img> sends no Authorization header, so without
-        # it a switched admin sees the test account's library with a hole where
-        # every cover it may see and the proxy identity may not used to be.
-        switched = _switch_session(token, db)
-        if switched is None:
-            switched = _switch_session(request.cookies.get(COVER_COOKIE_NAME), db, scope=COVER_SCOPE)
-        if switched is not None:
-            return switched
-
-        proxied = user_from_proxy_headers(db, request)
-        if proxied is None:
-            raise credentials_exception
-        return proxied
-
-    # The header still wins where there is one, so a fetch() for a cover
-    # behaves identically to every other call. Each source is checked against
-    # the scope it is supposed to carry: a full token from the header, a
-    # covers-scoped one from the cookie, and neither accepted in the other's
-    # place.
-    if token is not None:
+        user = _cover_user_behind_a_proxy(request, token, db)
+    elif token is not None:
         user = _user_from_token(token, db)
     else:
         cookie = request.cookies.get(COVER_COOKIE_NAME)

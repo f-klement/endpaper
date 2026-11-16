@@ -32,8 +32,6 @@ export default function BackupSection({
   onRestore,
 }: BackupSectionProps) {
   const { t } = useTranslation();
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<File | null>(null);
 
   return (
     <SettingsSection title={t("backup.title")} icon="inbox">
@@ -68,6 +66,48 @@ export default function BackupSection({
         {t("backup.restoreWarning")}
       </p>
 
+      <RestorePicker isRestoring={isRestoring} onRestore={onRestore} />
+
+      {restoreError != null && (
+        <div className="mt-2">
+          <ErrorState
+            error={restoreError}
+            fallback={t("backup.restoreFailed")}
+          />
+        </div>
+      )}
+      {restored && (
+        <p
+          role="status"
+          className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-950 dark:text-green-200"
+        >
+          {t("backup.restored", {
+            books: restored.books,
+            covers: restored.covers,
+          })}
+        </p>
+      )}
+    </SettingsSection>
+  );
+}
+
+/**
+ * The archive to restore from, and the one button that restores it, behind a
+ * confirm. A fragment, in the section's spacing.
+ */
+function RestorePicker({
+  isRestoring,
+  onRestore,
+}: {
+  isRestoring: boolean;
+  onRestore: (file: File) => void;
+}) {
+  const { t } = useTranslation();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<File | null>(null);
+
+  return (
+    <>
       <input
         ref={fileInput}
         type="file"
@@ -93,26 +133,6 @@ export default function BackupSection({
           {t("backup.restoreAction", { name: pending.name })}
         </Button>
       )}
-
-      {restoreError != null && (
-        <div className="mt-2">
-          <ErrorState
-            error={restoreError}
-            fallback={t("backup.restoreFailed")}
-          />
-        </div>
-      )}
-      {restored && (
-        <p
-          role="status"
-          className="mt-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-950 dark:text-green-200"
-        >
-          {t("backup.restored", {
-            books: restored.books,
-            covers: restored.covers,
-          })}
-        </p>
-      )}
-    </SettingsSection>
+    </>
   );
 }

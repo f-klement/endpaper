@@ -158,24 +158,29 @@ def _ssl_connect_args(url: str, mode: str, ca_file: str) -> dict[str, Any]:
         )
 
     if ca_file:
-        if _SSL_MODES[chosen].verify_mode is not ssl.CERT_REQUIRED:
-            raise RuntimeError(
-                f"DATABASE_SSL_ROOT_CERT is set and DATABASE_SSL_MODE={chosen} checks "
-                "no certificate, so the file would never be read. Set "
-                "DATABASE_SSL_MODE=verify-ca or verify-full, or unset the CA file."
-            )
-        # **Read it here rather than letting the context raise.** This runs in
-        # the container, and the overwhelmingly likely failure is a path that
-        # exists on the host and was never mounted, which `ssl` reports as a
-        # bare `FileNotFoundError` naming neither the variable nor the reason.
-        if not Path(ca_file).is_file():
-            raise RuntimeError(
-                f"DATABASE_SSL_ROOT_CERT={ca_file!r} is not a file this process can "
-                "see. In a container the CA has to be mounted in, and the path is the "
-                "one inside the container rather than the one on the host."
-            )
+        _check_the_ca_file(chosen, ca_file)
 
     return {"ssl_context": _ssl_context(chosen, ca_file)}
+
+
+def _check_the_ca_file(chosen: str, ca_file: str) -> None:
+    """Refuse a CA file the mode would never read, or one this process cannot see."""
+    if _SSL_MODES[chosen].verify_mode is not ssl.CERT_REQUIRED:
+        raise RuntimeError(
+            f"DATABASE_SSL_ROOT_CERT is set and DATABASE_SSL_MODE={chosen} checks "
+            "no certificate, so the file would never be read. Set "
+            "DATABASE_SSL_MODE=verify-ca or verify-full, or unset the CA file."
+        )
+    # **Read it here rather than letting the context raise.** This runs in
+    # the container, and the overwhelmingly likely failure is a path that
+    # exists on the host and was never mounted, which `ssl` reports as a
+    # bare `FileNotFoundError` naming neither the variable nor the reason.
+    if not Path(ca_file).is_file():
+        raise RuntimeError(
+            f"DATABASE_SSL_ROOT_CERT={ca_file!r} is not a file this process can "
+            "see. In a container the CA has to be mounted in, and the path is the "
+            "one inside the container rather than the one on the host."
+        )
 
 
 def _connect_args(url: str, mode: str, ca_file: str) -> dict[str, Any]:

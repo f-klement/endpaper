@@ -52,37 +52,13 @@ export default function CopiesPanel({
 
       {hasMore && (
         <ul className="space-y-1 mb-2">
-          {copies.map((copy) => {
-            const isThisOne = copy.id === book.id;
-            return (
-              <li
-                key={copy.id}
-                className="flex items-center justify-between gap-2 text-sm bg-paper-100 rounded-lg px-3 py-2 dark:bg-paper-800"
-              >
-                <span className="text-paper-700 truncate dark:text-paper-200">
-                  {copy.location || t("copies.noShelf")}
-                  {copy.active_loan && (
-                    <span className="text-paper-600 dark:text-paper-300">
-                      {" "}
-                      ({t("copies.onLoan")})
-                    </span>
-                  )}
-                </span>
-                {isThisOne ? (
-                  <span className="shrink-0 text-xs text-paper-600 dark:text-paper-300">
-                    {t("copies.thisOne")}
-                  </span>
-                ) : (
-                  <Link
-                    to={`/book/${copy.id}`}
-                    className="shrink-0 text-xs font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
-                  >
-                    {t("copies.open")}
-                  </Link>
-                )}
-              </li>
-            );
-          })}
+          {copies.map((copy) => (
+            <CopyRow
+              key={copy.id}
+              copy={copy}
+              isThisOne={copy.id === book.id}
+            />
+          ))}
         </ul>
       )}
 
@@ -106,5 +82,35 @@ export default function CopiesPanel({
         {isAdding ? t("copies.adding") : t("copies.add")}
       </button>
     </div>
+  );
+}
+
+/** One copy: its shelf, whether it is out, and a link unless it is this one. */
+function CopyRow({ copy, isThisOne }: { copy: BookOut; isThisOne: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <li className="flex items-center justify-between gap-2 text-sm bg-paper-100 rounded-lg px-3 py-2 dark:bg-paper-800">
+      <span className="text-paper-700 truncate dark:text-paper-200">
+        {copy.location || t("copies.noShelf")}
+        {copy.active_loan && (
+          <span className="text-paper-600 dark:text-paper-300">
+            {" "}
+            ({t("copies.onLoan")})
+          </span>
+        )}
+      </span>
+      {isThisOne ? (
+        <span className="shrink-0 text-xs text-paper-600 dark:text-paper-300">
+          {t("copies.thisOne")}
+        </span>
+      ) : (
+        <Link
+          to={`/book/${copy.id}`}
+          className="shrink-0 text-xs font-medium text-accent-600 hover:text-accent-700 dark:text-accent-400 dark:hover:text-accent-300"
+        >
+          {t("copies.open")}
+        </Link>
+      )}
+    </li>
   );
 }

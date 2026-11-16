@@ -62,6 +62,13 @@ describe("OverduePage", () => {
     expect(screen.getByTestId("overdue-skeletons")).toBeInTheDocument();
   });
 
+  it("counts nothing in the header before the first page lands", () => {
+    api.on(/\/api\/loans\/overdue(\?|$)/, heldOpen().respond);
+    renderWithProviders(<OverduePage />);
+
+    expect(screen.queryByText("1")).not.toBeInTheDocument();
+  });
+
   it("lists the books that are late", async () => {
     api.on(/\/api\/loans\/overdue(\?|$)/, {
       body: makeLoanPage([overdueLoan()]),
@@ -188,6 +195,16 @@ describe("the two empty states are not the same news", () => {
       await screen.findByText("The in app reminder is switched off"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Nothing is overdue")).not.toBeInTheDocument();
+  });
+
+  it("says who can switch the reminder back on", async () => {
+    api.on("/api/loans/overdue/mine", { body: { enabled: false, count: 0 } });
+    api.on(/\/api\/loans\/overdue(\?|$)/, { body: makeLoanPage([]) });
+    renderWithProviders(<OverduePage />);
+
+    expect(
+      await screen.findByText(/An admin can switch it back on under Lending/),
+    ).toBeInTheDocument();
   });
 });
 

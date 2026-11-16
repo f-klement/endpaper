@@ -296,6 +296,21 @@ describe("LoginPage", () => {
       );
     });
 
+    it("requires the address, unmarked as optional, where new accounts confirm one", async () => {
+      api.on("/auth/config", { body: { verification_required: true } });
+      renderWithProviders(<LoginPage onSignIn={vi.fn<OnSignIn>()} />);
+
+      const user = userEvent.setup();
+      // The confirmation link is drawn only once the config has arrived.
+      await screen.findByRole("button", { name: "I have a confirmation code" });
+      await user.click(
+        screen.getByRole("button", { name: "Switch to registration" }),
+      );
+
+      expect(screen.getByLabelText(/email address/i)).toBeRequired();
+      expect(screen.queryByText("(optional)")).not.toBeInTheDocument();
+    });
+
     it("clears a previous error when switching tabs", async () => {
       api.on("/auth/login", {
         status: 401,

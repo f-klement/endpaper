@@ -96,6 +96,10 @@ class TestIsbn10Checksum:
     def test_rejects_a_wrong_check_digit(self):
         assert is_valid_isbn10("0441013590") is False
 
+    def test_rejects_a_lowercase_x_check_digit(self):
+        """A caller that wants `x` read as ten uppercases before asking."""
+        assert is_valid_isbn10(X_CHECK_10.lower()) is False
+
     def test_rejects_x_anywhere_but_the_end(self):
         assert is_valid_isbn10("X441013597") is False
 

@@ -9,6 +9,7 @@ from typing import Final
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 import credentials
 import readwise
@@ -117,21 +118,25 @@ async def save_readwise_token(
         )
     if current_user.id in readwise.running():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_RUNNING)
-    envelope = readwise.seal(current_user.id, payload.token)
-    login = readwise.login_of(db, current_user.id)
+    _store_the_token(db, current_user.id, readwise.seal(current_user.id, payload.token))
+    return _account(db, current_user.id)
+
+
+def _store_the_token(db: Session, user_id: int, envelope: str) -> None:
+    """Insert the member's sealed token, or replace the one already stored."""
+    login = readwise.login_of(db, user_id)
     if login is None:
-        db.add(readwise.new_login(current_user.id, envelope))
+        db.add(readwise.new_login(user_id, envelope))
         try:
             db.commit()
         except IntegrityError:
             # A first save from another process won the insert; replace its
             # token with this one, as a second save would.
             db.rollback()
-            login = readwise.login_of(db, current_user.id)
+            login = readwise.login_of(db, user_id)
     if login is not None:
         readwise.replace_token(db, login, envelope)
         db.commit()
-    return _account(db, current_user.id)
 
 
 @router.delete("/token", status_code=status.HTTP_204_NO_CONTENT)

@@ -510,7 +510,31 @@ class Authorship:
 
         keep_name = self._resolved_keep_name(keep_name, requested, aliases)
         keep_key = author_key(keep_name)
+        self._fold_into(keep_name, requested, aliases, by_user_id=by_user_id)
+        self._db.commit()
 
+        entries, aliases = self._load()
+        alias_ids = {row.alias_key: row.id for row in aliases}
+        merged = next((entry for entry in entries if entry.key == keep_key), None)
+        if merged is None:
+            # Unreachable while every requested key named an author with a
+            # visible Book, which is what the check above enforces. It is here
+            # for the race: another Member trashing the last of those Books
+            # between the two index reads leaves an author with nothing to show.
+            raise AuthorNotFound
+        return self._out(merged, alias_ids, self._identifiers_by_key())
+
+    def _fold_into(
+        self,
+        keep_name: str,
+        requested: set[str],
+        aliases: list[AuthorAlias],
+        *,
+        by_user_id: int,
+    ) -> None:
+        """`merge`'s writes, uncommitted: every requested key, and every row
+        pointing at one, made to name `keep_name`."""
+        keep_key = author_key(keep_name)
         for row in aliases:
             # Rows that pointed at a name being folded away have to come along,
             # or they are left naming somebody who is now a spelling of
@@ -531,19 +555,6 @@ class Authorship:
                         created_by_user_id=by_user_id,
                     )
                 )
-
-        self._db.commit()
-
-        entries, aliases = self._load()
-        alias_ids = {row.alias_key: row.id for row in aliases}
-        merged = next((entry for entry in entries if entry.key == keep_key), None)
-        if merged is None:
-            # Unreachable while every requested key named an author with a
-            # visible Book, which is what the check above enforces. It is here
-            # for the race: another Member trashing the last of those Books
-            # between the two index reads leaves an author with nothing to show.
-            raise AuthorNotFound
-        return self._out(merged, alias_ids, self._identifiers_by_key())
 
     @staticmethod
     def _resolved_keep_name(keep_name: str, requested: set[str], aliases: list[AuthorAlias]) -> str:
@@ -944,21 +955,25 @@ class Authorship:
             if not _storable_identifier(identifier):
                 logger.info("Dropped an unstorable cross reference: %r", scheme)
                 continue
-            existing = self._identifier_row(key, scheme)
-            if existing is not None:
-                if existing.identifier != identifier:
-                    refused.append(
-                        RefusedAssertion(
-                            name=entry.name,
-                            scheme=scheme,
-                            asserted=identifier,
-                            kept=existing.identifier,
-                            kept_provenance=AuthorityProvenance(existing.provenance),
-                        )
-                    )
-                    continue
-                stored.append(existing)
-                continue
+            outcome = self._cross_reference_row(key, entry.name, scheme, identifier, by_user_id=by_user_id)
+            if isinstance(outcome, RefusedAssertion):
+                refused.append(outcome)
+            else:
+                stored.append(outcome)
+        if stored:
+            self._db.commit()
+        return RecordedAssertions(stored=stored, refused=refused)
+
+    def _cross_reference_row(
+        self, key: str, name: str, scheme: AuthorityScheme, identifier: str, *, by_user_id: int
+    ) -> AuthorIdentifier | RefusedAssertion:
+        """The row this cross reference is stored as, the row that already
+        agrees, or the refusal: `_catalogue_row`'s answer, filed as `MEMBER`.
+
+        A new row is added uncommitted; `record_cross_references` commits.
+        """
+        existing = self._identifier_row(key, scheme)
+        if existing is None:
             row = AuthorIdentifier(
                 author_key=key,
                 scheme=scheme,
@@ -967,10 +982,16 @@ class Authorship:
                 created_by_user_id=by_user_id,
             )
             self._db.add(row)
-            stored.append(row)
-        if stored:
-            self._db.commit()
-        return RecordedAssertions(stored=stored, refused=refused)
+            return row
+        if existing.identifier != identifier:
+            return RefusedAssertion(
+                name=name,
+                scheme=scheme,
+                asserted=identifier,
+                kept=existing.identifier,
+                kept_provenance=AuthorityProvenance(existing.provenance),
+            )
+        return existing
 
     def forget_identifier(self, identifier_id: int) -> None:
         """Remove a wrong identifier. A later import may write it again.

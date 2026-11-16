@@ -45,10 +45,6 @@ export default function TestAccounts({
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newEmail, setNewEmail] = useState("");
-  // Which row has its password field open. One at a time, so the field is
-  // never ambiguous about which account it is for.
-  const [selected, setSelected] = useState<string | null>(null);
-  const [password, setPassword] = useState("");
 
   function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -56,17 +52,6 @@ export default function TestAccounts({
     setNewUsername("");
     setNewPassword("");
     setNewEmail("");
-  }
-
-  function submitSwitch(event: FormEvent<HTMLFormElement>, username: string) {
-    event.preventDefault();
-    onSwitch(username, password);
-  }
-
-  // Opening a row closes any other, and either way the password starts empty.
-  function toggle(username: string) {
-    setSelected(selected === username ? null : username);
-    setPassword("");
   }
 
   return (
@@ -94,27 +79,12 @@ export default function TestAccounts({
         </p>
       )}
 
-      <ul className="space-y-2">
-        {accounts.map((account) => (
-          <TestAccountRow
-            key={account.id}
-            account={account}
-            isOpen={selected === account.username}
-            onToggle={() => toggle(account.username)}
-            password={password}
-            onPasswordChange={setPassword}
-            onSubmit={(event) => submitSwitch(event, account.username)}
-            isSwitching={isSwitching}
-          />
-        ))}
-      </ul>
-
-      {switchError != null && (
-        <ErrorState
-          error={switchError}
-          fallback={t("settings.testAccountsSwitchFailed")}
-        />
-      )}
+      <AccountList
+        accounts={accounts}
+        onSwitch={onSwitch}
+        isSwitching={isSwitching}
+        switchError={switchError}
+      />
 
       <form onSubmit={create} className="space-y-2 pt-1">
         <div className="flex gap-2">
@@ -194,6 +164,64 @@ export default function TestAccounts({
         />
       )}
     </div>
+  );
+}
+
+interface AccountListProps {
+  accounts: UserOut[];
+  onSwitch: (username: string, password: string) => void;
+  isSwitching: boolean;
+  switchError: unknown;
+}
+
+/** The accounts, each with its switch, and what the last switch came to. */
+function AccountList({
+  accounts,
+  onSwitch,
+  isSwitching,
+  switchError,
+}: AccountListProps) {
+  const { t } = useTranslation();
+  // Which row has its password field open. One at a time, so the field is
+  // never ambiguous about which account it is for.
+  const [selected, setSelected] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+
+  function submitSwitch(event: FormEvent<HTMLFormElement>, username: string) {
+    event.preventDefault();
+    onSwitch(username, password);
+  }
+
+  // Opening a row closes any other, and either way the password starts empty.
+  function toggle(username: string) {
+    setSelected(selected === username ? null : username);
+    setPassword("");
+  }
+
+  return (
+    <>
+      <ul className="space-y-2">
+        {accounts.map((account) => (
+          <TestAccountRow
+            key={account.id}
+            account={account}
+            isOpen={selected === account.username}
+            onToggle={() => toggle(account.username)}
+            password={password}
+            onPasswordChange={setPassword}
+            onSubmit={(event) => submitSwitch(event, account.username)}
+            isSwitching={isSwitching}
+          />
+        ))}
+      </ul>
+
+      {switchError != null && (
+        <ErrorState
+          error={switchError}
+          fallback={t("settings.testAccountsSwitchFailed")}
+        />
+      )}
+    </>
   );
 }
 

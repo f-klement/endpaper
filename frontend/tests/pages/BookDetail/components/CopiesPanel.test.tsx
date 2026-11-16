@@ -54,6 +54,13 @@ describe("CopiesPanel", () => {
     expect(screen.getByText(/Loft/)).toBeInTheDocument();
   });
 
+  it("says so for a copy with no shelf", () => {
+    const book = makeBook({ location: "Loft" });
+    renderPanel(book, [book, makeBook({ location: null })]);
+
+    expect(screen.getByText("No shelf recorded")).toBeInTheDocument();
+  });
+
   it("marks the copy being looked at", () => {
     const book = makeBook();
     renderPanel(book, [book, makeBook()]);

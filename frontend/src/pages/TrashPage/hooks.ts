@@ -12,7 +12,7 @@ import {
   useEmptyTrash,
   useListTrash,
 } from "../../api/generated/endpoints/books/books";
-import type { BookOut } from "../../api/generated/model";
+import type { BookOut, PageBookOut } from "../../api/generated/model";
 import { useInvalidate } from "../../api/invalidate";
 import { useToast } from "../../app/toast";
 import { useTranslation } from "../../i18n";
@@ -20,6 +20,9 @@ import { useRowWrite } from "../hooks";
 
 /** Rows per request. The trash is small and read top-down. */
 export const PAGE_SIZE = 50;
+
+/** What the list reads before its first page has arrived. */
+const NO_ROWS: Pick<PageBookOut, "items" | "total"> = { items: [], total: 0 };
 
 export interface UseTrashResult {
   books: BookOut[];
@@ -67,10 +70,11 @@ export function useTrash(): UseTrashResult {
     },
   });
   const busyIds = new Set([...restore.pendingRows, ...purge.pendingRows]);
+  const page = trash.data ?? NO_ROWS;
 
   return {
-    books: trash.data?.items ?? [],
-    total: trash.data?.total ?? 0,
+    books: page.items,
+    total: page.total,
     isLoading: trash.isPending,
     error: trash.error ?? restore.error ?? purge.error ?? empty.error,
     refetch: () => void trash.refetch(),

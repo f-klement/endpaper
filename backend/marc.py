@@ -1003,8 +1003,27 @@ def read(content: bytes) -> ParsedMarc:
     where an unusable entry is dropped, one layer later, with the whole record
     in hand.
     """
-    root = _parsed(content)
+    nodes = _record_nodes(_parsed(content))
 
+    records = []
+    links = []
+    skipped = 0
+    for node in nodes:
+        fields = Fields(node)
+        record = _record(fields)
+        if record is None:
+            skipped += 1
+        else:
+            records.append(record)
+            links.append(tuple(fields.online_links()))
+    if skipped:
+        logger.info("Skipped %d MARC records with no title", skipped)
+    return ParsedMarc(records=tuple(records), skipped=skipped, links=tuple(links))
+
+
+def _record_nodes(root: ElementTree.Element) -> list[ElementTree.Element]:
+    """Every `<record>` in a parsed file, or `read`'s `MarcError` where there is
+    none to read or more than `MAX_RECORDS`."""
     # `iter` rather than `findall`, so a `<record>` reached through a wrapper
     # is found: an SRU response nests them under `<recordData>`, and a
     # cataloguer exporting from their own system may hand over either shape.
@@ -1025,18 +1044,4 @@ def read(content: bytes) -> ParsedMarc:
             f"That file holds {len(nodes)} records and the limit is "
             f"{MAX_RECORDS}. Split it and import the parts."
         )
-
-    records = []
-    links = []
-    skipped = 0
-    for node in nodes:
-        fields = Fields(node)
-        record = _record(fields)
-        if record is None:
-            skipped += 1
-        else:
-            records.append(record)
-            links.append(tuple(fields.online_links()))
-    if skipped:
-        logger.info("Skipped %d MARC records with no title", skipped)
-    return ParsedMarc(records=tuple(records), skipped=skipped, links=tuple(links))
+    return nodes

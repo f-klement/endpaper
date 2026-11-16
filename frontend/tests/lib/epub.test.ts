@@ -108,6 +108,18 @@ describe("a file that is not an EPUB", () => {
     expect(verdict(await readEpub(new Blob([zip])))).toBe("not-an-epub");
   });
 
+  it("refuses a package document that no container names", async () => {
+    const zip = await buildZip({
+      entries: [
+        {
+          name: "content.opf",
+          data: packageDocument("<dc:title>Dune</dc:title>"),
+        },
+      ],
+    });
+    expect(verdict(await readEpub(new Blob([zip])))).toBe("not-an-epub");
+  });
+
   it("refuses a container that names a package document the archive lacks", async () => {
     const reading = await read({
       packagePath: "EPUB/package.opf",

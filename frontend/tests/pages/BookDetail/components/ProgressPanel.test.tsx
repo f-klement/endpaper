@@ -69,6 +69,11 @@ describe("ProgressPanel", () => {
     expect(screen.getByText("Page 64")).toBeInTheDocument();
   });
 
+  it("shows the percentage when no page was recorded", () => {
+    renderPanel({ my_progress_page: null, my_progress_percent: 37 });
+    expect(screen.getByText("37% through")).toBeInTheDocument();
+  });
+
   it("draws a bar at the derived percentage", () => {
     renderPanel({
       my_progress_page: 64,

@@ -43,7 +43,12 @@ import { readCarried, rememberCarried } from "../../../src/lib/carryOver";
 import { clearSession } from "../../../src/api/mutator";
 import { epubFile, packageDocument } from "../../zipFixtures";
 import { id3v2, mp3, plainFrame } from "../../audioFixtures";
-import { mockApi, renderHookWithProviders, type MockApi } from "../../utils";
+import {
+  heldOpen,
+  mockApi,
+  renderHookWithProviders,
+  type MockApi,
+} from "../../utils";
 import { CALIBRE_SCHEMA, databaseOf } from "../../lib/sqliteFixtures";
 import {
   lazyImportsOf,
@@ -361,6 +366,23 @@ describe("useBookSearch", () => {
     ).searchParams;
     // A new question has not been asked harder yet, whatever the last one was.
     expect(query.get("harder")).toBe("false");
+    expect(result.current.hasSearchedHarder).toBe(false);
+  });
+
+  it("claims no harder search for an ordinary one, running or answered", async () => {
+    const reply = heldOpen();
+    api.on("/api/books/search", reply.respond);
+    const { result } = renderHookWithProviders(() => useBookSearch());
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.isSearching).toBe(true));
+    expect(result.current.isSearchingHarder).toBe(false);
+
+    reply.release({
+      body: { matches: [match()], asked: ["open_library"], unasked: ["oenb"] },
+    });
+    await waitFor(() => expect(result.current.matches).toHaveLength(1));
     expect(result.current.hasSearchedHarder).toBe(false);
   });
 

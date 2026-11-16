@@ -2750,6 +2750,14 @@ class TestTheNamesAreTheCreditLine:
         with pytest.raises(ValidationError, match="name different credits"):
             BookCreate(title="t", author="   ", authors=["Frank Herbert"])
 
+    def test_a_line_that_is_the_names_joined_agrees(self):
+        """The browser's confirm step draws the joined line and sends both."""
+        names = ["Frank Herbert", "Brian Herbert"]
+
+        book = BookCreate(title="t", author=CREDIT_SEPARATOR.join(names), authors=names)
+
+        assert book.author == CREDIT_SEPARATOR.join(names)
+
     def test_a_blank_line_beside_nobody_agrees(self):
         assert BookCreate(title="t", author=" ", authors=["", "  "]).author is None
 
@@ -2757,6 +2765,21 @@ class TestTheNamesAreTheCreditLine:
         """The list says nobody and the line says somebody."""
         with pytest.raises(ValidationError, match="name different credits"):
             BookCreate(title="t", author="Frank Herbert", authors=[])
+
+    def test_a_body_that_is_not_an_object_is_refused_by_pydantic(self):
+        with pytest.raises(ValidationError) as refused:
+            BookCreate.model_validate(["t"])
+
+        assert [error["type"] for error in refused.value.errors()] == ["model_type"]
+
+    def test_a_list_past_the_count_is_refused_by_its_bound_and_not_joined(self):
+        """The pair is not compared, so the refusal names the list's length."""
+        names = ["x"] * (schemas_book.MAX_AUTHORS_PER_BOOK + 1)
+
+        with pytest.raises(ValidationError) as refused:
+            BookCreate(title="t", author="y", authors=names)
+
+        assert [error["type"] for error in refused.value.errors()] == ["too_long"]
 
     def test_the_count_refuses_no_list_whose_line_would_fit(self):
         """The narrowest names a line can hold, one character each, fill it

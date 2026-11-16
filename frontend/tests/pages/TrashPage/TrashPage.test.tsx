@@ -142,6 +142,18 @@ describe("TrashPage", () => {
     expect(await screen.findByText("The trash is empty")).toBeInTheDocument();
   });
 
+  it("offers no emptying when the trash could not be read", async () => {
+    // With no page there is nothing unlisted to reach: the total is the empty
+    // page's, not a guess.
+    api.on("/api/books/trash", { status: 500, body: { detail: "Down" } });
+    renderWithProviders(<TrashPage currentUser={ME} />);
+
+    await screen.findByRole("alert");
+    expect(
+      screen.queryByRole("button", { name: "Empty the trash" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers no empty-the-trash button when there is nothing in it", async () => {
     stubTrash([]);
     renderWithProviders(<TrashPage currentUser={ME} />);
@@ -539,6 +551,20 @@ describe("TrashPage", () => {
 
       expect(confirmSpy).toHaveBeenCalled();
       expect(api.lastCall("/api/books/7/permanent", "DELETE")).toBeUndefined();
+    });
+
+    it("names the book in the question it asks", async () => {
+      stubTrash([makeBook({ id: 7, title: "Deleted Book" })]);
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderWithProviders(<TrashPage currentUser={ME} />);
+
+      await userEvent
+        .setup()
+        .click(await screen.findByRole("button", { name: "Delete for good" }));
+
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Deleted Book"),
+      );
     });
 
     it("destroys the book once confirmed", async () => {

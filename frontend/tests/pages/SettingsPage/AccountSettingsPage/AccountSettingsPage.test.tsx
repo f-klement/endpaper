@@ -136,6 +136,15 @@ describe("AccountSettingsPage KOReader sync", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers no sign out before a sync password exists", async () => {
+    render();
+    await screen.findByText("You have no sync password yet.");
+
+    expect(
+      screen.queryByRole("button", { name: "Sign out every device" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("says when the sync password was made, and offers a new one or a sign out", async () => {
     api.on("/api/kosync/account", {
       body: {
@@ -320,6 +329,29 @@ describe("AccountSettingsPage", () => {
     expect(
       await screen.findByText(/the directory's to set/),
     ).toBeInTheDocument();
+  });
+
+  it("draws no error banner beside the explained 409", async () => {
+    api.on(
+      "/api/users/me/email",
+      {
+        status: 409,
+        body: { detail: "This address comes from the directory." },
+      },
+      "PUT",
+    );
+    render();
+    const field = await screen.findByLabelText("Your address");
+
+    await userEvent.type(field, "kim@example.org");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText(/the directory's to set/);
+
+    // The server's own sentence is what an error banner would print. Other
+    // sections on this page draw alerts of their own, so a role is no witness.
+    expect(
+      screen.queryByText("This address comes from the directory."),
+    ).not.toBeInTheDocument();
   });
 
   describe("as an admin", () => {

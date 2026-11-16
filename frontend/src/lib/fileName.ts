@@ -262,13 +262,22 @@ function clean(text: string): string {
  * which no ordinary number in a filename does.
  */
 function isbnIn(stem: string): string | null {
+  return wholeTokenIsbn(stem) ?? windowedIsbn(stem);
+}
+
+/** An ISBN that is a whole token of the name, of either length. */
+function wholeTokenIsbn(stem: string): string | null {
   for (const token of stem.split(/[^0-9Xx-]+/)) {
     const candidate = normaliseIsbn(token);
     if (candidate.length !== 10 && candidate.length !== 13) continue;
     const isbn = parseIsbn(candidate);
     if (isbn) return isbn;
   }
+  return null;
+}
 
+/** A thirteen digit ISBN from anywhere inside a run of fourteen digits or more. */
+function windowedIsbn(stem: string): string | null {
   for (const run of stem.match(/\d{14,}/g) ?? []) {
     for (let start = 0; start + 13 <= run.length; start += 1) {
       const isbn = parseIsbn(run.slice(start, start + 13));

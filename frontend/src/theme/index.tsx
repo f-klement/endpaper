@@ -288,12 +288,24 @@ function watchPreferences(
   const contrast = window.matchMedia?.(CONTRAST_QUERY);
   const dark = mode === "system" ? window.matchMedia?.(DARK_QUERY) : undefined;
 
-  contrast?.addEventListener("change", onChange);
-  dark?.addEventListener("change", onChange);
+  const stopContrast = listen(contrast, onChange);
+  const stopDark = listen(dark, onChange);
   return () => {
-    contrast?.removeEventListener("change", onChange);
-    dark?.removeEventListener("change", onChange);
+    stopContrast();
+    stopDark();
   };
+}
+
+/**
+ * Attaches `onChange` to one query, where this browser has it, and returns the
+ * detach.
+ */
+function listen(
+  query: MediaQueryList | undefined,
+  onChange: () => void,
+): () => void {
+  query?.addEventListener("change", onChange);
+  return () => query?.removeEventListener("change", onChange);
 }
 
 interface ThemeProviderProps {

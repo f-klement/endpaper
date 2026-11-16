@@ -6,7 +6,7 @@ import type {
   LocationOut,
   TagOut,
 } from "../../../api/generated/model";
-import { useTranslation } from "../../../i18n";
+import { useTranslation, type MessageKey } from "../../../i18n";
 import { toggledFilter } from "../../../lib/bookFilters";
 import type { RememberedPerScope } from "../../../app/hooks";
 import type { CatalogueMode } from "../../../lib/catalogueMode";
@@ -274,41 +274,25 @@ function CopyFilters({ filters, onFilterChange }: FilterControlProps) {
   const { t } = useTranslation();
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <select
-        value={filters.format ?? ""}
-        onChange={(event) =>
-          onFilterChange({
-            format: (event.target.value || null) as Filters["format"],
-          })
+      <FilterSelect
+        value={filters.format}
+        options={FORMAT_FILTERS}
+        label={t("copy.format")}
+        onPick={(chosen) =>
+          onFilterChange({ format: chosen as Filters["format"] })
         }
-        aria-label={t("copy.format")}
-        className={SELECT_CLASS}
-      >
-        {FORMAT_FILTERS.map((option) => (
-          <option key={option.label} value={option.value ?? ""}>
-            {t(option.label)}
-          </option>
-        ))}
-      </select>
+      />
 
       {/* Beside the format, because both narrow what kind of copy this is
           rather than what the reader has done with it. */}
-      <select
-        value={filters.lending ?? ""}
-        onChange={(event) =>
-          onFilterChange({
-            lending: (event.target.value || null) as Filters["lending"],
-          })
+      <FilterSelect
+        value={filters.lending}
+        options={LENDING_FILTERS}
+        label={t("lending.label")}
+        onPick={(chosen) =>
+          onFilterChange({ lending: chosen as Filters["lending"] })
         }
-        aria-label={t("lending.label")}
-        className={SELECT_CLASS}
-      >
-        {LENDING_FILTERS.map((option) => (
-          <option key={option.label} value={option.value ?? ""}>
-            {t(option.label)}
-          </option>
-        ))}
-      </select>
+      />
 
       {/* A toggle rather than a third dropdown: it has one useful state.
           The books nobody has offered to talk about are the whole library,
@@ -327,6 +311,38 @@ function CopyFilters({ filters, onFilterChange }: FilterControlProps) {
         {t("discuss.badge")}
       </button>
     </div>
+  );
+}
+
+/**
+ * One select over a list of labelled options, where the empty option stands
+ * for no filter at all and is reported as `null`.
+ */
+function FilterSelect({
+  value,
+  options,
+  label,
+  onPick,
+}: {
+  value: string | null | undefined;
+  options: readonly { label: MessageKey; value: string | null }[];
+  label: string;
+  onPick: (chosen: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <select
+      value={value ?? ""}
+      onChange={(event) => onPick(event.target.value || null)}
+      aria-label={label}
+      className={SELECT_CLASS}
+    >
+      {options.map((option) => (
+        <option key={option.label} value={option.value ?? ""}>
+          {t(option.label)}
+        </option>
+      ))}
+    </select>
   );
 }
 

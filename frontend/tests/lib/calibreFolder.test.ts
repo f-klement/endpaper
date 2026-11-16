@@ -111,6 +111,63 @@ describe("a metadata.opf at the size the walk reads", () => {
   });
 });
 
+describe("a whole library checked against its package documents", () => {
+  it("keeps each book in its index position and sums what the read ones changed", async () => {
+    const unread: CalibreBook = { ...DUNE, id: 2, path: "Somebody/Other (2)" };
+    const messiah: CalibreBook = {
+      ...DUNE,
+      id: 3,
+      path: "Frank Herbert/Dune Messiah (3)",
+      title: "Dune Messiah",
+    };
+    const messiahOpf =
+      '<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="2.0"><metadata><dc:title>Children of Dune</dc:title><dc:publisher>Putnam</dc:publisher></metadata></package>';
+    const duneFile = packageOf(MAX_OPF_BYTES);
+    const dune = crossCheck(DUNE, readOpf(await duneFile.text())!);
+    const second = crossCheck(messiah, readOpf(messiahOpf)!);
+
+    // The unread book between two read ones, the one disagreeing first, so
+    // neither a position nor a sum can be taken from one book alone.
+    const checked = await crossCheckFolder(
+      [messiah, unread, DUNE],
+      [
+        picked(
+          "Calibre/Frank Herbert/Dune Messiah (3)/metadata.opf",
+          messiahOpf,
+        ),
+        duneFile,
+      ],
+    );
+
+    expect(second.disagreed).toBeGreaterThan(0);
+    expect(checked).toEqual({
+      books: [second.book, unread, dune.book],
+      crossChecked: 2,
+      filled: dune.filled + second.filled,
+      disagreed: dune.disagreed + second.disagreed,
+    });
+  });
+
+  it("is reported at the start and at every fiftieth book", async () => {
+    const books = Array.from({ length: 100 }, (_, at) => ({
+      ...DUNE,
+      id: at + 1,
+      path: `Somebody/Book (${at + 1})`,
+    }));
+    const told: [number, number][] = [];
+
+    await crossCheckFolder(books, [], (done, total) =>
+      told.push([done, total]),
+    );
+
+    expect(told).toEqual([
+      [0, 100],
+      [50, 100],
+      [100, 100],
+    ]);
+  });
+});
+
 /**
  * `crossCheckFolder` as a door: the `metadata.opf` beside a book, any text at
  * all, in; the book as the database and that file together say, out. Drawn

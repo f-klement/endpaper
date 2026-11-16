@@ -42,6 +42,18 @@ describe("FolderSweepNotice", () => {
     );
   });
 
+  it("counts the files found elsewhere by their fingerprint", () => {
+    notice([{ ...CHECKED, moved: 2 }]);
+
+    expect(screen.getByText(/^2 not at their saved place/)).toBeInTheDocument();
+  });
+
+  it("says nothing about moved files when none moved", () => {
+    notice([CHECKED]);
+
+    expect(screen.queryByText(/found elsewhere/)).not.toBeInTheDocument();
+  });
+
   it("marks them missing only on the press", async () => {
     const onMarkMissing = vi.fn<(root: string) => void>();
     notice([CHECKED], onMarkMissing);
