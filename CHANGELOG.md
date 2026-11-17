@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## v0.22.0
+
+_2026-11-17_
+
+Book lookups ask more catalogues: the Polish, Uruguayan and Hungarian national libraries, the
+Royal Danish Library, LIBRIS, BIBSYS, Melinda, SBN and PORBASE, and the author authority lookup
+also searches the Library of Congress and ORCID. Deleting for good reaches only books you added,
+a merge of duplicates no longer folds away another member's book, and a book records where its
+record came from and whether it was changed here since. The scan card warns before saving a book
+already in the library, the statistics page shows what the collection cost, the library can be
+exported as a single web page that opens offline, and the stored service keys and passwords are
+encrypted at rest and in backups. Text containing a NUL character, an id past what a Postgres
+column holds and a write the database refuses are answered as refusals rather than failures.
+Release images are built from digest pinned base images alone. New documents cover
+configuration, everyday use and the architecture.
+
 - The author authority lookup also searches the Library of Congress name authority file,
   listed after the GND's people, and an author confirmed by a Library of Congress number alone
   now resolves to that person on the next lookup.
@@ -33,43 +49,6 @@
   catalogues are, and find a third of their books that way.
 - A lookup a Z39.50 catalogue such as the Hungarian national library briefly refuses with a
   temporary error is asked again, up to twice, before the catalogue is reported unavailable.
-
-## v0.21.3
-
-_2026-11-11_
-
-**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for libxslt.
-
-- CVE-2026-87636 (high) in libxslt
-- CVE-2026-9947 (high) in libxslt
-
-The fix for libxslt is in the image rather than in the source: rebuilding at this tag upgrades the operating system packages, and the image is re-scanned and started before anything is published.
-
-## v0.21.2
-
-_2026-10-31_
-
-**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for pyasn1, serialize-javascript.
-
-- GHSA-M5MM-P8H7-M29V (low) in serialize-javascript
-- CVE-2026-119196 (high) in pyasn1
-- CVE-2026-119194 (high) in pyasn1
-- CVE-2026-119197 (high) in pyasn1
-- CVE-2026-119195 (high) in pyasn1
-
-## v0.21.1
-
-_2026-10-25_
-
-**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for fast-uri, happy-dom.
-
-- GHSA-W74X-V6F9-J3XG (medium) in fast-uri
-- GHSA-XHQ7-XMQJ-769H (low) in fast-uri
-- GHSA-WJR9-J795-JXCR (medium) in fast-uri
-- GHSA-333X-W4R6-6CRP (low) in fast-uri
-- GHSA-834V-8H66-3H79 (high) in happy-dom
-
-## Unreleased
 
 - **Deleting for good, one book or the whole trash, now reaches only books you added.** Another
   member's deleted book stays in the trash for them, and the trash page no longer offers to
@@ -200,6 +179,41 @@ _2026-10-25_
 
 - **A book added from the scan queue is recorded as changed here when you edited its subjects or
   other details first, or when a catalogue's record was completed from the file's own details.**
+
+## v0.21.3
+
+_2026-11-11_
+
+**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for libxslt.
+
+- CVE-2026-87636 (high) in libxslt
+- CVE-2026-9947 (high) in libxslt
+
+The fix for libxslt is in the image rather than in the source: rebuilding at this tag upgrades the operating system packages, and the image is re-scanned and started before anything is published.
+
+## v0.21.2
+
+_2026-10-31_
+
+**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for pyasn1, serialize-javascript.
+
+- GHSA-M5MM-P8H7-M29V (low) in serialize-javascript
+- CVE-2026-119196 (high) in pyasn1
+- CVE-2026-119194 (high) in pyasn1
+- CVE-2026-119197 (high) in pyasn1
+- CVE-2026-119195 (high) in pyasn1
+
+## v0.21.1
+
+_2026-10-25_
+
+**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for fast-uri, happy-dom.
+
+- GHSA-W74X-V6F9-J3XG (medium) in fast-uri
+- GHSA-XHQ7-XMQJ-769H (low) in fast-uri
+- GHSA-WJR9-J795-JXCR (medium) in fast-uri
+- GHSA-333X-W4R6-6CRP (low) in fast-uri
+- GHSA-834V-8H66-3H79 (high) in happy-dom
 
 ## v0.21.0
 
