@@ -290,7 +290,7 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
     """
 
     def test_a_marc_knob_on_a_reader_that_reads_no_marc_is_refused(self):
-        with pytest.raises(ValueError, match="a MARC knob on a reader that reads no MARC"):
+        with pytest.raises(ValueError, match="a MARC21 knob on a reader that is not a MARC21 reader"):
             decoders.Decoding(
                 source="a folder of files",
                 reader=decoders.Reader.DUBLIN_CORE,
@@ -300,7 +300,7 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
     def test_the_other_marc_knob_is_refused_the_same_way(self):
         """Both arms, because a version checking one passed with the other
         deleted."""
-        with pytest.raises(ValueError, match="a MARC knob on a reader that reads no MARC"):
+        with pytest.raises(ValueError, match="a MARC21 knob on a reader that is not a MARC21 reader"):
             decoders.Decoding(
                 source="a folder of files",
                 reader=decoders.Reader.MODS,
@@ -357,11 +357,11 @@ class TestADecodingIsValidatedWhereverItIsBuilt:
         The knob refusal below reads the value, and a bare spelling is in
         `MARC_READERS` or out of it exactly as its member is, so with the two
         swapped a decoding built from `"dublin_core"` and a MARC knob is
-        reported as a MARC knob on a reader that reads no MARC. No value is
+        reported as a MARC21 knob on a reader that is not a MARC21 reader. No value is
         admitted either way; what is lost is the diagnosis, and a decoding whose
         field is a string never learns that is what is wrong with it.
 
-        Every reader that reads no MARC, derived from the registry rather than
+        Every reader outside `MARC_READERS`, derived from the registry rather than
         listed. The MARC readers are excluded because the knob is legal on them,
         so the refusal below does not fire and the order cannot be observed.
         """
@@ -691,6 +691,14 @@ class TestEverySerialisationDecodesWithNoSocket:
         "<dc:title>Un livre</dc:title><dc:type>texte imprime</dc:type>"
         "<dc:format>200 p.</dc:format></record>"
     )
+    UNIMARC = (
+        '<record xmlns="http://www.loc.gov/MARC21/slim">'
+        "<leader>00000nam  2200000   4500</leader>"
+        '<datafield tag="200" ind1="1" ind2=" ">'
+        '<subfield code="a">Stoner</subfield></datafield>'
+        '<datafield tag="215" ind1=" " ind2=" ">'
+        '<subfield code="a">278 p.</subfield></datafield></record>'
+    )
     MODS = (
         '<mods xmlns="http://www.loc.gov/mods/v3">'
         "<typeOfResource>text</typeOfResource>"
@@ -706,6 +714,7 @@ class TestEverySerialisationDecodesWithNoSocket:
             (decoders.Reader.MARC_PLAIN, MARC, "Stoner"),
             (decoders.Reader.DUBLIN_CORE, DUBLIN_CORE, "Un livre"),
             (decoders.Reader.MODS, MODS, "Clean Code"),
+            (decoders.Reader.UNIMARC, UNIMARC, "Stoner"),
         ],
     )
     def test_a_record_of_this_serialisation_decodes_from_a_literal(self, reader, document, title):
@@ -755,6 +764,17 @@ def _branch(tag: str, *children: SearchStrategy[Node]) -> SearchStrategy[Node]:
 def _marc_elements() -> SearchStrategy[ElementTree.Element]:
     """A MARC record, parsed inside the namespaced collection that gives it its tag."""
     return marc_records().map(
+        lambda record: ElementTree.fromstring(
+            f'<collection xmlns="{marc.NAMESPACE}">{xml_of(record)}</collection>'
+        )[0]
+    )
+
+
+def _unimarc_elements() -> SearchStrategy[ElementTree.Element]:
+    """A UNIMARC record over every tag the crosswalk converts, `106` included,
+    which it turns into a control field rather than through the table."""
+    tags = sorted({*metadata._UNIMARC_FIELDS, "106"})
+    return marc_records(tags=tags, title_tag="200").map(
         lambda record: ElementTree.fromstring(
             f'<collection xmlns="{marc.NAMESPACE}">{xml_of(record)}</collection>'
         )[0]
@@ -842,6 +862,7 @@ _ELEMENTS: Final[dict[decoders.Reader, SearchStrategy[ElementTree.Element]]] = {
     decoders.Reader.DUBLIN_CORE: _dublin_core_records(),
     decoders.Reader.MODS: _mods_records(),
     decoders.Reader.OPDS_ATOM: _atom_entries(),
+    decoders.Reader.UNIMARC: _unimarc_elements(),
 }
 
 #: Every decoder there is, catalogue and import alike.

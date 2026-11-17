@@ -43,7 +43,7 @@ from tests.corpus import BACKEND, shipped_modules
 from z3950 import Answer, Record, Syntax, Target
 
 TREE_GUARDS = {
-    "TestTheProvisionalClientIsReachedOnlyThroughTheSeam": ("shipped_modules",),
+    "TestTheClientIsReachedOnlyThroughTheSeam": ("shipped_modules",),
 }
 
 TARGET = Target(host="catalogue.example", port=210, database="EXAMPLE")
@@ -73,6 +73,8 @@ class FakeSession:
     records: list[Record] = field(default_factory=lambda: [marc(100)])
     search_error: Exception | None = None
     fetch_error: Exception | None = None
+    #: An error for one position only, raised in place of that record.
+    fetch_errors: dict[int, Exception] = field(default_factory=dict)
     delay: float = 0.0
     #: When given, a search waits on it, and logs `answered` once it is let go. A
     #: search still in the client at the release shows as `search` with no `answered`.
@@ -114,6 +116,8 @@ class FakeSession:
             time.sleep(self.delay)
         if self.fetch_error is not None:
             raise self.fetch_error
+        if index in self.fetch_errors:
+            raise self.fetch_errors[index]
         return self.records[index % len(self.records)]
 
     def close(self) -> None:
@@ -301,6 +305,19 @@ class TestTheThreeDispositionsStayApart:
         with pytest.raises(z3950.Refused):
             await z3950.search_once(TARGET, '@attr 1=4 "x"', client=FakeClient(session))
 
+    async def test_a_record_that_will_not_render_is_dropped_and_the_rest_kept(self, caplog):
+        # Plant B through the seam: position 1 of 3 is malformed. The other two arrive,
+        # and the drop is logged as itself rather than as the target refusing.
+        records = [marc(10, reported="first"), marc(10), marc(10, reported="third")]
+        unrenderable = z3950.Unrenderable("position 1 would not render")
+        session = FakeSession(hits=3, records=records, fetch_errors={1: unrenderable})
+        with caplog.at_level("WARNING", logger="endpaper.z3950"):
+            answer = await z3950.search_once(TARGET, "q", records=3, client=FakeClient(session))
+        assert [record.reported for record in answer.records] == ["first", "third"]
+        assert [entry.getMessage() for entry in caplog.records] == [
+            "Dropped a Z39.50 record from catalogue.example:210 at position 1: position 1 would not render"
+        ]
+
     def test_every_failure_shares_one_base_class(self):
         for failure in (
             z3950.Unreachable,
@@ -309,6 +326,7 @@ class TestTheThreeDispositionsStayApart:
             z3950.DeadlineExceeded,
             z3950.BadQuery,
             z3950.Closed,
+            z3950.Unrenderable,
         ):
             assert issubclass(failure, z3950.Z3950Error)
 
@@ -749,17 +767,17 @@ class TestTheRecordIsReadOffTheResponse:
         assert answer.records[0].raw == raw
 
 
-class TestTheProvisionalClientIsReachedOnlyThroughTheSeam:
+class TestTheClientIsReachedOnlyThroughTheSeam:
     """One import site, so swapping the route is a change to one function.
 
     **Blind spots, listed rather than left to be found.** A module name assembled at
-    runtime from pieces (`"z3950_" + "provisional"`) is not caught, and neither is one
+    runtime from pieces (`"z3950_" + "yaz"`) is not caught, and neither is one
     read from a file. Both are visible in review and neither has ever been written here;
     what this catches is the ordinary import, in every spelling of it, and the string
     form `importlib.import_module` and `__import__` take.
     """
 
-    MODULE = "z3950_provisional"
+    MODULE = "z3950_yaz"
 
     def backend_modules(self) -> list[Path]:
         # **Resolved paths, not basenames.** Excluding by name skipped any file called
@@ -783,7 +801,7 @@ class TestTheProvisionalClientIsReachedOnlyThroughTheSeam:
         assert offenders == []
 
     def test_no_backend_module_names_it_in_a_string_either(self):
-        # `importlib.import_module("z3950_provisional")` is not an `Import` node.
+        # `importlib.import_module("z3950_yaz")` is not an `Import` node.
         offenders = []
         for path in self.backend_modules():
             tree = ast.parse(path.read_text())
@@ -816,7 +834,7 @@ def import_time_names(node: ast.AST) -> list[str]:
     **Descends into everything except a function body**, because a class body, an `if`, a
     `try` and a `with` all run at import. Reading `tree.body` alone missed four of five
     module scope shapes, including
-    `with contextlib.suppress(ImportError): import z3950_provisional`, which is exactly
+    `with contextlib.suppress(ImportError): import z3950_yaz`, which is exactly
     what somebody writes to make a dependency optional and which does load it.
     """
     names: list[str] = []
@@ -838,8 +856,9 @@ class TestTheModuleCanBeImportedWithNoClientInstalled:
         # machines included.
         at_import = import_time_names(ast.parse(Path(z3950.__file__).read_text()))
         assert "ctypes" not in at_import
-        assert "z3950_provisional" not in at_import
+        assert "z3950_yaz" not in at_import
 
+    @pytest.mark.shipped_z3950_client
     def test_the_default_client_is_built_without_loading_a_library(self, monkeypatch):
         # The load waits for the first open, so building the client the seam uses
         # today needs no YAZ on the machine either.
@@ -847,14 +866,28 @@ class TestTheModuleCanBeImportedWithNoClientInstalled:
             raise AssertionError(f"loaded {path} while building the client")
 
         monkeypatch.setattr(ctypes, "CDLL", refuse)
-        assert type(z3950._default_client()).__name__ == "ProvisionalYazClient"
+        assert type(z3950._default_client()).__name__ == "YazClient"
+
+    def test_a_test_supplying_no_client_is_refused_before_the_library_loads(self, monkeypatch):
+        # `conftest.refuse_unsupplied_z3950`. Without it this reaches `YazClient`, which
+        # tries the library, and on a machine holding one would open a real socket.
+        loads: list[str] = []
+
+        def record(path: str) -> None:
+            loads.append(path)
+            raise OSError(path)
+
+        monkeypatch.setattr(ctypes, "CDLL", record)
+        with pytest.raises(z3950.Unreachable, match=r"the suite opens no Z39\.50 association"):
+            asyncio.run(z3950.search_once(TARGET, "q"))
+        assert loads == []
 
     def test_the_walk_sees_past_the_top_level_statement_list(self):
         # The guard above is only as good as this: `tree.body` alone is not a scope.
         hidden = ast.parse(
-            "import contextlib\nwith contextlib.suppress(ImportError):\n    import z3950_provisional\n"
+            "import contextlib\nwith contextlib.suppress(ImportError):\n    import z3950_yaz\n"
         )
-        assert "z3950_provisional" in import_time_names(hidden)
+        assert "z3950_yaz" in import_time_names(hidden)
 
     def test_the_walk_sees_a_branch_that_is_not_the_body(self):
         # `node.body` is not the same as every child: an `else:` is `orelse`, and a
@@ -862,17 +895,17 @@ class TestTheModuleCanBeImportedWithNoClientInstalled:
         # alone misses all three and passes the fixture above, which is why that one is
         # not enough on its own.
         for source in (
-            "if False:\n    pass\nelse:\n    import z3950_provisional\n",
-            "try:\n    pass\nexcept ImportError:\n    import z3950_provisional\n",
-            "try:\n    pass\nfinally:\n    import z3950_provisional\n",
+            "if False:\n    pass\nelse:\n    import z3950_yaz\n",
+            "try:\n    pass\nexcept ImportError:\n    import z3950_yaz\n",
+            "try:\n    pass\nfinally:\n    import z3950_yaz\n",
         ):
-            assert "z3950_provisional" in import_time_names(ast.parse(source)), source
+            assert "z3950_yaz" in import_time_names(ast.parse(source)), source
 
     def test_the_walk_ignores_a_deferred_import(self):
         # And it must not flag the door it exists to promote: `_default_client` imports
         # inside a function, which is the correct shape.
-        deferred = ast.parse("def load():\n    import z3950_provisional\n    return 1\n")
-        assert "z3950_provisional" not in import_time_names(deferred)
+        deferred = ast.parse("def load():\n    import z3950_yaz\n    return 1\n")
+        assert "z3950_yaz" not in import_time_names(deferred)
 
 
 class TestTheBoundsAgreeWithEachOther:

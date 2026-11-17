@@ -61,7 +61,7 @@ from schemas.opds import OpdsServerIn
 from tests import sqlite_only
 from tests.corpus import BACKEND, application_modules
 from tests.helpers import REFUSED_BY_THE_DATABASE, duplicated_key
-from tests.test_dialect import ADDED_RULES, SWAP_CHAIN, THE_SWAPS, _swap_rows
+from tests.test_dialect import ADDED_RULES, SWAP_CHAIN, THE_SWAPS, _swap_rows, first_swap
 from tests.test_filing import CORPUS
 
 TREE_GUARDS = {
@@ -2711,11 +2711,13 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
                 "query_parameter": target.query_parameter,
                 "query_language": (target.query_language.value if target.query_language else None),
                 "record_schema": target.record_schema,
+                "record_charset": (target.record_charset.value if target.record_charset else None),
                 "isbn_index": target.isbn_index,
                 "isbn_attribute": target.isbn_attribute,
                 "title_index": target.title_index,
                 "title_query_shape": (target.title_query_shape.value if target.title_query_shape else None),
                 "lookup_records": target.lookup_records,
+                "retries_as_isbn10": target.retries_as_isbn10,
                 "search_multiplier": target.search_multiplier,
                 "search_cap": target.search_cap,
                 "refuses_component_parts": target.refuses_component_parts,
@@ -2743,7 +2745,17 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
         ("column", "value"),
         [
             ("requires_isbn_claim", False),
+            # A transport no member is, which `ck_catalogue_targets_transport`
+            # refuses; and a Z39.50 transport on an `https` row, and an SRU row
+            # at a `z3950://` address, which only the address rule's coupling to
+            # the transport refuses now that the transport list holds `z3950`.
+            ("transport", "ftp"),
             ("transport", "z3950"),
+            ("base_url", "z3950://catalogue.example:210/db"),
+            ("record_charset", "latin1"),
+            # A charset on an SRU row, which only the charset rule's coupling to
+            # the transport refuses: `utf8` is a member.
+            ("record_charset", "utf8"),
             ("isbn_index", "num=1 or num"),
             ("title_index", "a b"),
             # **These three discriminate and the four above do not**, which a
@@ -2790,6 +2802,33 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
                 ),
                 {"value": value},
             )
+
+    def test_a_restore_cannot_write_a_z3950_row_with_no_charset(self):
+        """The other half of the charset's coupling: a Z39.50 row names one.
+
+        Two columns at once, so it is not a case of the arm above. The address
+        moves with the transport so that only the charset rule is left to refuse.
+        """
+        self._rows()
+        with engine.connect() as connection, pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    "UPDATE catalogue_targets SET transport = 'z3950', "
+                    "base_url = 'z3950://catalogue.example:210/db' WHERE source = 'oenb'"
+                )
+            )
+
+    def test_the_same_row_naming_its_charset_is_written(self):
+        """The control for the arm above, so its refusal is the charset rule's."""
+        self._rows()
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "UPDATE catalogue_targets SET transport = 'z3950', record_charset = 'utf8', "
+                    "base_url = 'z3950://catalogue.example:210/db' WHERE source = 'oenb'"
+                )
+            )
+            connection.commit()
 
     def test_the_dnb_may_waive_the_isbn_claim_and_only_the_dnb(self):
         """The other half of the diagonal above: the constraint states one
@@ -4574,7 +4613,7 @@ class TestTheGlobRulesThatLearnedAboutNul:
         assert "ck_opds_servers_credential_key" in str(borrowed.value)
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as transport:
-            connection.execute(text("UPDATE catalogue_targets SET transport = 'z3950' WHERE source = 'oenb'"))
+            connection.execute(text("UPDATE catalogue_targets SET transport = 'ftp' WHERE source = 'oenb'"))
         assert "ck_catalogue_targets_transport" in str(transport.value)
 
     @pytest.mark.sqlite_only(reason="plants what only SQLite stores: too long, behind a NUL, or raw bytes")
@@ -4786,18 +4825,9 @@ class TestEveryRuleARevisionAddsIsTheModelsRule:
     as a wrong schema, once the revision ran, rather than here as a wrong
     literal at the line that holds it.
 
-    **What it does with an addition a later revision swaps**, which is a chain
-    this treats as a single text: **it reds, naming the addition.** A
-    legitimate swap moves the model, because the model is always the last
-    text, and this compares the addition's literal against whatever the model
-    says now. Driven, by moving the model under the addition: this class reds
-    on that case, and so does its Postgres sibling.
-
-    So the refusal is loud here and says the wrong thing: it names the
-    addition where the fault is the swap. The arm that names the swap is
-    `test_dialect.py::TestTheRevisionsPostgresArmIsTheModelsPostgresArm::test_every_addition_is_still_the_last_text_of_its_chain`,
-    and it is in that file rather than this one, so a run of this file alone
-    gets the red without the explanation.
+    **An addition a later revision swaps is a link, not an endpoint**: it is
+    compared with that swap's `before` rather than with the model, by
+    `test_dialect.first_swap`, which both engines' comparisons read.
     """
 
     @pytest.mark.parametrize(
@@ -4809,7 +4839,13 @@ class TestEveryRuleARevisionAddsIsTheModelsRule:
         """A constraint added rather than swapped has no `before` at all, which
         is why it is a second shape and why its only text is the one being
         installed."""
-        assert " ".join(added.sqlite.split()) == _declared_constraint(added.table, added.constraint)
+        swapped = first_swap(added.constraint)
+        expected = (
+            " ".join(swapped.before.split())
+            if swapped is not None
+            else _declared_constraint(added.table, added.constraint)
+        )
+        assert " ".join(added.sqlite.split()) == expected
 
     @pytest.mark.parametrize("constraint", sorted(SWAP_CHAIN), ids=lambda constraint: constraint)
     def test_the_last_revision_to_swap_a_rule_wrote_the_models_text(self, constraint: str) -> None:

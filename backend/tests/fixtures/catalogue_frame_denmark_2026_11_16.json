@@ -13,7 +13,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -29,7 +32,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -45,7 +51,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -61,7 +70,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -77,7 +89,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -93,7 +108,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -109,7 +127,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -125,7 +146,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -141,7 +165,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -157,7 +184,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -173,7 +203,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -189,7 +222,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -205,7 +241,10 @@
   "libris": "found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -221,7 +260,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -237,7 +279,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -253,7 +298,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -269,7 +317,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -285,7 +336,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -301,7 +355,10 @@
   "libris": "found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -317,7 +374,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -333,7 +393,10 @@
   "libris": "found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "found"
+  "melinda": "found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -349,7 +412,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -365,7 +431,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -381,7 +450,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -397,7 +469,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -413,7 +488,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -429,7 +507,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -445,7 +526,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -461,7 +545,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -477,7 +564,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -493,7 +583,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -509,7 +602,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -525,7 +621,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -541,7 +640,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -557,7 +659,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -573,7 +678,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -589,7 +697,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -605,7 +716,10 @@
   "libris": "found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -621,7 +735,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -637,7 +754,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -653,7 +773,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -669,7 +792,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -685,7 +811,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -701,7 +830,10 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -717,7 +849,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -733,7 +868,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -749,7 +887,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -765,7 +906,10 @@
   "libris": "found",
   "kb_dk": "found",
   "bibsys": "found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -781,7 +925,10 @@
   "libris": "not_found",
   "kb_dk": "found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  },
  {
   "frame": "denmark",
@@ -797,6 +944,9 @@
   "libris": "not_found",
   "kb_dk": "not_found",
   "bibsys": "not_found",
-  "melinda": "not_found"
+  "melinda": "not_found",
+  "sbn": "not_found",
+  "porbase": "not_found",
+  "oszk": "not_found"
  }
 ]

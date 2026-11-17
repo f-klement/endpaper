@@ -6085,9 +6085,9 @@ against kaniko v1.28.3, 2026-08-28: `COPY --from=${ARG}` fails outright with
 ### The runtime `COPY` shipped with the builder image, not with the transport
 
 
-Nothing calls YAZ until the Z39.50 transport lands, so the image carries about
-11 MB it does not yet use. Shipping it now was chosen deliberately, over three
-alternatives, and the reason is verification rather than convenience.
+The library shipped before anything called it: the image carried about 11 MB
+it did not use until the Z39.50 transport landed. That was chosen deliberately,
+over three alternatives, and the reason is verification rather than convenience.
 
 **A builder image nothing consumes is never verified.** The failure the whole
 design exists to prevent is a base image bump that keeps a YAZ compiled against
@@ -6167,7 +6167,7 @@ Up to 5.37.3 YAZ performed no certificate verification: `verify_peers`,
 5.38.0 added it as an opt in, checked with the same grep: `gnutls_certificate_verify_peers3`
 against the system trust, behind the ZOOM option `check_cert`, which defaults to 0. This
 application does not set it (the options it does set are `_options()` in
-`backend/z3950_provisional.py`), so the position is unchanged by the upgrade: an `ssl:`
+`backend/z3950_yaz.py`), so the position is unchanged by the upgrade: an `ssl:`
 target is protected against a passive listener and not against anyone who can answer for
 the address. Recorded rather than acted on: no target this application reaches uses TLS.
 Turning `check_cert` on is an issue in the tracker, not done here, because the first
@@ -6628,7 +6628,7 @@ is still refused; the refusal is the three tests above it, and none is touched.
 
 ---
 
-### The Z39.50 transport is a seam, and the client behind it is not chosen yet
+### The Z39.50 transport is a seam, and the client behind it is the ctypes binding to YAZ
 
 `backend/z3950.py` is a second door beside `fetch.py`, not an extension of it: two of
 `fetch.py`'s four bounds have no equivalent here, because the protocol has no redirects and no
@@ -6644,9 +6644,9 @@ to remember to ask.
 | One absolute deadline for the open, every search and every record | `Association` holds the clock |
 | A member's term cannot change the query's shape | `z3950.query` quotes and escapes it |
 
-**The client is behind a `Session` and `Client` protocol and is not the decision.** The one
-that exists is provisional and says so in its own name; which client fills the seam is still
-open, and the seam is what lets that stay open.
+**The client is behind a `Session` and `Client` protocol.** It is `z3950_yaz.py`, promoted
+as "The Z39.50 client is the one already built, promoted rather than chosen" records; the
+seam is what let that decision wait for the research.
 
 **Three dispositions, kept apart**, because the first target survey conflated two of them:
 refused, unreachable, and answered nothing are three different facts about a catalogue.
@@ -9348,6 +9348,9 @@ read like the same kind of number and are not.
 **A library in any of those countries can still promote its own national catalogue**, which
 is what the provider list is for. The default is what nobody chose.
 
+**The share is now read over the books a source adds to the rest of the tier**, as "The leading
+tier reads concentration on what a source adds, not on everything it answers" records.
+
 ### An internal document declares itself, and the publish gate checks both directions
 
 The publish gate strips a deny list, and a deny entry is configuration: delete the line and
@@ -9404,7 +9407,7 @@ this catalogue. So the refusal was scoped to German and English without saying s
 silently, for every catalogue that is neither.
 
 **Fixed for this source only, deliberately.** Widening the shared pattern is the tempting
-move and it changes what fourteen other sources refuse on the strength of a phrase measured
+move and it changes what seventeen other sources refuse on the strength of a phrase measured
 in one catalogue. `_NKP_ONLINE` states this source's own and a test pins that the shared
 rule is untouched. **Whether the rule should be per source everywhere was a real question
 and a larger one than this ticket.** It is answered below, in "The record's own carrier
@@ -11504,11 +11507,8 @@ bounds arrive **by construction**, so no call site has to remember to ask.
 | `catalogue_client()` | `association()` |
 | every refusal is an `httpx.HTTPError` | every refusal is a `Z3950Error` |
 
-**The client is behind a seam and is not chosen yet.** `Session` and `Client` are the
-whole of what a client has to be, and every bound is enforced on this side of them. The
-one client that exists today is `z3950_provisional.py`, and its name is the status it
-has: it exists so this module can be exercised and the Library of Congress control can be
-checked, not because a route has been picked.
+**The client is behind a seam.** `Session` and `Client` are the whole of what a client has
+to be, and every bound is enforced on this side of them. The client is `z3950_yaz.py`.
 
 **Three dispositions, and the survey conflated two of them once already.**
 
@@ -13163,6 +13163,43 @@ next person to read the roster will otherwise assume it earned its place across 
 Its costs are accepted and named: an FFI boundary this project owns, and a second desktop
 build, since the container's library is compiled against a different libc. No native route
 serves the mobile client, which is a paired instance regardless.
+
+**It is no longer named provisional.** The module is `backend/z3950_yaz.py` and the class
+`YazClient`; the seam still reaches it through `z3950._default_client` alone, and a test
+holds that. The four routes it won over:
+
+| Route | Why it lost |
+|---|---|
+| Subprocess `zoomsh` | A process per query inside a 4.0 second fan out, a text protocol to parse, and a binary the image does not ship today |
+| Subprocess `yaz-client` | Output written for a person to read, a process per query, and an argv boundary, the shape of command line that once deleted every pod in a namespace here |
+| PyZ3950 | An unmaintained BER decoder, never released for Python 3, parsing remote responses in the trust path |
+| An SRU gateway in the image | YAZ ships none; the usual one is Metaproxy, a separate GPL product and a second service to run and patch |
+
+**The library path is fixed and has no override.** `LIBRARY` is `/opt/yaz/lib/libyaz.so.5`,
+the absolute path the image puts it at. `ctypes.CDLL` runs a library's initialisers as it
+loads, so a path read from outside is a switch that runs code in the process. A runtime
+setting would hand that switch to an admin, which is an escalation. An environment variable
+hands it to whoever sets the environment, who could already `LD_PRELOAD`, so it buys that
+person nothing and costs a knob to bound, document and test. A bare soname would ask the
+loader's search path, the same switch spelled differently. **What is refused is a switch at
+run time, not a second build.** The desktop build this entry accepts as a cost would ship the
+library where its bundle puts it, and would change the constant in its own build. The
+prefix is the build's in any case: libtool bakes `/opt/yaz/lib` into the binaries as their
+RUNPATH, so the tree is not relocatable.
+
+**A library that will not load, or loads without an entry point, is `Unreachable`**, so a
+run from source degrades the way an unanswering target does rather than with a 500. Every
+caller reads that disposition as the catalogue being down, so `YazClient` logs it at error
+as the client failing to start, at the one site that can tell the two apart, and the
+message names the fixed path, the file that sets it and the `--prefix` a source run needs.
+
+**Enforced by**: the four load failure tests in `test_z3950_yaz.py` (a missing library, a
+missing entry point, the log line and the message), and
+`TestTheLibraryPathIsWhereTheImagePutsIt` in the same file (the
+recipe's `--prefix`, the runtime subset's copy, the Dockerfile's `COPY --from=yaz` and the
+smoke test's load, each read from executable lines), and the image smoke test, which now
+builds `z3950_yaz.CtypesBindings()` in the finished image under `LD_BIND_NOW`, proving the
+path and every entry point `SIGNATURES` declares.
 
 ## A shipped login is the bottom of one ladder, and the ladder is walked once
 
@@ -26039,3 +26076,323 @@ ISBN-13s (978-9935 twice, 978-9979 once), where the rule needs 50. On all three:
 K10plus 1, nothing else; NEW 1 (`9789935437877`); median 0.200 s. A 3 ISBN frame supports no
 verdict either way; a frame of Icelandic books from another source is needed before it can be
 ranked.
+
+## UNIMARC is read by converting it to MARC21, not by a reader of its own (2026-11-17)
+
+`decoders.Reader.UNIMARC` is a closed set member whose decoder runs the Library of Congress UNIMARC to MARC 21 conversion specification (August 2001, loc.gov/marc/unimarctomarc21.html) over one record and hands the result to the MARC21 reader, through the profile the ÖNB and the NLG use (`_dnb_record`, author identifiers off). Every refusal the MARC21 reader carries (the carrier test, the ISBN claim, the placeholder title, the qualified ISBN) then holds for UNIMARC because it is the same code. A second reader would have been a second copy of every rule `marc_fields.py` carries. Why USEMARCON was not used is the entry "UNIMARC is read from the Library of Congress crosswalk, and not until a source sends one"; nothing was taken from it.
+
+### The reader takes MARCXML with the text already decoded
+
+The Z39.50 client hands raw ISO 2709 bytes. libyaz renders any MARC flavour to MARCXML in the MARC21 slim namespace and converts the character set while it does (`ZOOM_record_get` with `xml; charset=<from>,utf8`, the same code `yaz-marcdump` runs), so ISO 2709 framing and the character set are the client's business and the reader reads elements, as every other catalogue decoder does. PORBASE declares ISO 5426 in `100 $a/26-29` (`0103`) and Italy's SBN ISO 10646 (`50`), measured at the UNIMARC section comment in `backend/metadata.py`. No Python codec reads ISO 5426. So a PORBASE row needs its records rendered with `iso5426` as the source set, and an SBN UNIMARC row with none; the row names it, as "What a Z39.50 row must carry, and what it is refused for" records.
+
+### What the crosswalk covers
+
+Converted: leader/06 (respelled: UNIMARC `m` multimedia is MARC21 `o`, `l` computer media is `m`, `h` microform is `a`, `n` is `r`), leader/07 (`a`, an analytic, refused, the specification's error 01), `010` to `020` (hyphens out, `$b` inline in parentheses, `$z`), `101` to `041`, `106 $a/0` to `008/23`, `200` to `245` by its processing note, `210` to `260`, `215` to `300`, `330` to `520`, `600` to `600`, `606` to `650`, `607` to `651`, `676 $a` to `082 $a`, `700` to `100`, `701` and `702` to `700` (Procedure 1), relator `070` to `aut`.
+
+Deliberate departures from the specification, each because of what the MARC21 reader reads:
+- Every `101 $a` goes to `041`. The specification sends a lone language to `008/35-37` only, which the MARC21 reader does not read, so a monolingual record would lose its language.
+- Only relator `070` is converted; every other `$4` is dropped. The specification converts about a hundred and drops the unknown ones. The only roles read are `aut` and `cre`, and a dropped code reads exactly as its MARC21 code would: not an author.
+- UNIMARC's non sorting markers U+0088 and U+0089 are respelled U+0098 and U+009C. libyaz does that itself when decoding ISO 5426 but not in a UTF-8 record, and the SBN writes them (counted at `_UNIMARC_NON_SORTING`), so without it a title carries two invisible characters.
+- A subject field keeps every subfield except `$3`, with `$y` and `$z` swapped, rather than a listed set. That is the specification's "keep" for `$a`, `$x` and `$2`, and it lets the vocabulary through without a second module naming that subfield (the house rule that `$2` has one reader).
+- `676 $v` (Dewey edition) is not converted: it would become an `082 $2` nothing reads.
+- Indicators are not converted: nothing reads them on these fields.
+- Leader/08 and /09 are copied where the specification blanks them: nothing reads either position.
+
+What is left unread, and why, is the UNIMARC section comment in `backend/metadata.py`, at the trap's site.
+
+### A UNIMARC decoding carries no MARC21 knob
+
+`Reader.UNIMARC` is not in `MARC_READERS`. The component part knob would be redundant, since the crosswalk refuses an analytic whatever the row says, and a UNIMARC record carries no GND number for the author identifier knob to read.
+
+### ISBD's unnumbered sequence in an extent
+
+`bibliographic.pages_from_extent` read nothing from `308, [3] p.`. A second pattern, tried only where the first found nothing, reads the count before an ISBD unnumbered sequence and refuses one after a hyphen (an offprint's range, `p. 129-137, [1] p.`). What it changes on the PORBASE and SBN samples is measured in `pages_from_extent`'s docstring.
+
+## A source's transport is a field, and one table holds the doors (2026-11-17)
+
+`metadata._DOORS` maps every `Transport` to one door: how it looks an ISBN up, how it searches,
+and whether a sealed login rides it. `_lookup_one` and `_search_one` read the table and nothing
+else; the bespoke door keeps its own `match` over the secret, the one door that concerns.
+A transport added without a door fails the import, not a scan.
+
+`carries_a_credential` is now that table's column, so the door and what it carries are one row.
+So are the readers a door can serve for each capability, which `resolve` asks at boot: the
+boot check reads the same row the dispatch does, and a transport added with a door states its
+readers rather than inheriting the XML ones by default. The credential refusal in `resolve` reads
+the door's column too, rather than testing for the bespoke transport.
+
+**Two doors stay two**: SRU through `fetch.py`, Z39.50 through `z3950.py`. One client for both
+would lose the raw byte count, the per request deadline, the off host redirect refusal and the
+unasked content encoding refusal.
+
+### What a Z39.50 row must carry, and what it is refused for
+
+| must carry | how |
+|---|---|
+| address | `base_url` as `z3950://host:port/database`, a closed grammar (lower case host, port 1 to 65535 spelled without a leading zero, one database name); `origin` and `SEEDED_ORIGINS` read it unchanged |
+| record syntax | `record_schema` holding a `z3950.Syntax` value; the row's reader must be one `targets._Z3950_READERS` lists for it (MARC21 by the MARC21 readers, UNIMARC by `Reader.UNIMARC`) |
+| record charset | new column `record_charset`, `enums.RecordCharset` (`utf8`, `marc8`, `iso5426`), required on Z39.50 and NULL elsewhere, in the dataclass and in `ck_catalogue_targets_record_charset` alike (a CASE on the transport, with `IS NOT NULL`, since a CHECK passes on NULL): the client converts from it to UTF-8 when it renders MARCXML |
+| query language | PQF, with a use attribute where it answers a lookup |
+| record counts | `lookup_records` and `search_cap` from 1 to `z3950.MAX_RECORDS`, because the seam raises `ValueError` past it, which no door handler catches |
+
+Refused: any CQL field, a title query shape (a PQF title search has one shape, the seam's phrase on
+BIB-1 attribute 4), and `needs_key`, because `z3950.Client.open` takes no login and one would be
+dropped with the request going out unauthenticated.
+
+Why `record_schema` is reused rather than a `record_syntax` column: it is the same question
+(what format to ask for) in the other protocol's words, and a second column would be empty on
+every row the first is filled on.
+
+Why the charset is data rather than read off the record: the client renders before any reader
+sees a leader, and a set read wrongly is every accented letter wrong with nothing raised.
+What PORBASE and the SBN declare is measured at the UNIMARC section comment in
+`backend/metadata.py`.
+
+### The bounds on the Z39.50 path
+
+| `fetch.py` bound | Z39.50 counterpart | where enforced | test |
+|---|---|---|---|
+| raw byte cap | `z3950.MAX_RESPONSE_BYTES` across one search's records | the seam | `TestTheZ3950DoorIsBehindTheSameDispatch::test_the_byte_bound_holds_on_this_door` |
+| per request deadline | one absolute deadline per association, `z3950.TIMEOUT_SECONDS` | the seam | `::test_the_deadline_holds_on_this_door` |
+| off host redirect | none: the protocol has no redirect | | |
+| unasked content encoding | none: the protocol has no content encoding | | |
+| (count) | `z3950.MAX_RECORDS`, refused at the row | `targets.Target._check_z3950_records` | `::test_the_record_count_is_the_rows_whatever_the_hit_count`, `test_targets.py::TestAZ3950RowCarriesWhatTheDoorNeeds` |
+
+Each rendered record also goes through `metadata._parsed`, which refuses a doctype.
+
+### `Transport` moved to `enums.py`, and `ck_catalogue_targets_transport` is derived
+
+The constraint was the one hand written enum list, exempt because it listed two of three members
+on purpose. With every member admitted it is `_enum_check("transport", Transport)`, and the enum
+moved down to `enums.py` so a foundation module does not import the catalogue layer.
+`targets.Transport` re-exports it. The exemption and its arm in `test_models.py` are deleted.
+
+### The address rule follows the transport
+
+`ck_catalogue_targets_base_url` admits `z3950://` on a Z39.50 row and only there, so a restore
+cannot point an SRU row at a Z39.50 port or the reverse. Revision `6ecb05b436b5`.
+
+### A record the door cannot use is dropped, and the rest of the search kept
+
+Two kinds, each dropped one record at a time and logged at warning, never read and never
+reported as the target refusing:
+
+| the record | where | why not read |
+|---|---|---|
+| in another syntax than the row asked for | `metadata._z3950_root` | the row's reader and charset are the requested format's; LIBRIS answers a UNIMARC request with MARC21 (measured 2026-08-28), and read anyway the record converts from the wrong set and its tags are read under the wrong format, with nothing raised |
+| one libyaz cannot render | `z3950._fetched`, from `z3950.Unrenderable`, which the session raises without latching | the record arrived, so the association is sound; reported as `Refused` it latched the session and lost every other record of the search |
+
+An answer that counted hits and kept no record is `UNAVAILABLE`, not a miss: a miss tells a
+member to type the book in by hand, and a hit count says only that the query matched, so
+whether this target holds the book is unknown. A partial drop reads what survived.
+
+The byte cap stays on the rendered bytes: they are what `_parsed` and the readers consume, and the
+wire bytes were never bounded before arrival (one BER Present).
+
+### The render types are measured live and held in the image
+
+`z3950_yaz._RENDER` (`xml`, `xml; charset=marc8,utf8`, `xml; charset=iso5426,utf8`) measured
+2026-11-16 through `CtypesBindings.record` against YAZ 5.38.1: SBN (UTF-8), PORBASE (ISO 5426)
+and the Library of Congress (MARC-8) each render parseable MARCXML with their accents right under
+their own type. **A misspelled charset is not refused**: `charset=nonsense,utf8` renders the
+record unconverted, so a wrong entry is wrong letters and no error.
+
+The suite's pods carry no libyaz (the backend suite image is the uv Python image), so the check
+lives in the image smoke test, which runs in the finished image: it renders a synthetic
+record per charset, its one accented letter in that set's bytes, through
+`yaz_record_render`, and requires the letter back. `ZOOM_record_get` renders through the same
+function: the two agreed byte for byte on 27 of 27 live renders (three records from each of the
+three targets under each type). It runs on every image built from `main` and on a tag, and
+`:latest` moves only past it, so a wrong entry turns the `main` pipeline red and ships nothing.
+What that leaves: the local gate cannot run it, so such an entry is caught after the push rather
+than refused before it; and it holds the type strings, not that a target sends the set its row
+names, which stays a measurement of the target.
+
+### The suite installs a refusing Z39.50 client
+
+`tests/conftest.py::refuse_unsupplied_z3950` sets `z3950._default_client` to a client refusing
+every open as `Unreachable`, for every test not marked `shipped_z3950_client`, so once a seeded
+row is Z39.50 no whole fan out test opens a socket or loads libyaz. Like the respx router it
+keeps the suite hermetic and does not turn a forgotten client into a red test.
+
+## Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17)
+
+Three rows in `targets.SEEDED`, ISBN lookup only, each asking once more with the ISBN-10:
+
+| row | address | syntax, charset | records | remit |
+|---|---|---|---|---|
+| SBN | `z3950://opac.sbn.it:2100/nopac` | MARC21 view, UTF-8 | 5 | `978-88` |
+| PORBASE | `z3950://z3950.catalogo.bnportugal.gov.pt:210/bn` | UNIMARC, ISO 5426 | 1 | `978-972`, `978-989` |
+| OSZK | `z3950://amicus.oszk.hu:1616/ANY` | MARC21, UTF-8 | 5 | `978-963`, `978-615` |
+
+Measured 2026-11-17 through `metadata._lookup_one` on these rows, 650 ISBNs (the committed 500
+and the Polish, Danish and Hungarian frames), one lookup at a time, each host at least 1.5s
+apart. The figures live in `metadata`'s block for the three; this entry keeps the reasons.
+
+**Charset is a measurement per row**, and that block records it for each: no decode failure in
+1,950 lookups, so MARC-8 is not needed, and PORBASE declares ISO 5426.
+
+**PORBASE asks for one record.** Each further record is a Present of its own, and the extra hits
+measured were copies of the first, so a second record costs time and adds nothing. The ISBN claim
+still checks the one that comes back.
+
+**PORBASE is the slowest row, and nothing bounds a lookup but the association.** It answers no
+title search, so it never meets the search fan out's deadline; a lookup has none, so one that
+reaches PORBASE pays its whole latency, and `z3950.TIMEOUT_SECONDS` bounds the association.
+Behind its remit only Portuguese ISBNs, and `979` or unnamed groups, reach it.
+
+**The byte cap does not bind**: the largest rendered answer was under 1% of
+`z3950.MAX_RESPONSE_BYTES`.
+
+**The plaintext count is eight**: five over HTTP and the three Z39.50 rows, none of which offers
+TLS. `TestThePlaintextSourcesAreCounted` and `SEEDED_ORIGINS` read `origin()` of a `z3950://`
+address and count the three.
+
+### A lookup that misses may ask once more with the ISBN-10, and the row says so
+
+`targets.Target.retries_as_isbn10` is a column like the other "how one is asked" fields, and
+`Target.isbn_forms` turns it into the forms a lookup asks for: the thirteen digit ISBN, then
+the ten digit one where the row retries and the ISBN is `978`. `metadata._first_answer` asks
+each form in turn and stops at the first answer that is not `NOT_FOUND`; both doors that
+build a query call it, so the retry is written once and reads no source and no transport.
+The reader always checks the record against the thirteen digit ISBN, which
+`Fields.claims_isbn` compares in canonical form, so a record stating only the ten digit form
+is claimed.
+
+Why a row field rather than a branch: the three catalogues that need it share nothing but the
+need, and the next one that needs it is a value on its row.
+
+Why only on `NOT_FOUND`: a refusal or an unreachable target answers the second form the same
+way, so a retry there doubles the cost of an outage for nothing.
+
+Why the Z39.50 door asks both forms on one association: one open and one deadline per lookup,
+so `z3950.TIMEOUT_SECONDS` bounds the lookup rather than each form, and the retry costs a
+search rather than a connection.
+
+Why the SRU door honours it though no SRU row sets it: the field is the row's and the door
+must not quietly ignore it; on an SRU row the second form is a second `fetch` request with
+`fetch`'s own bounds.
+
+Refused: on a bespoke row, whose adapter builds its own request, so a retry asks the same
+question twice; and on a row answering no lookup. `targets.Target._check_retry` in Python and
+`ck_catalogue_targets_isbn10_retry` for a restored row.
+
+### A temporary refusal is asked again, at most twice, on the same association
+
+78 of 650 OSZK lookups drew Bib-1 diagnostic 2, a temporary system error, at random, on either
+form and on a fresh association as on a shared one. Asked again on a fresh association about 2s
+later, 70 answered at the second ask and 8 at the third; none needed a fourth. Left alone, each
+would be `UNAVAILABLE`, and `_remember` caches that for `_MISS_TTL_SECONDS` as it caches a miss,
+so a member rescanning a Hungarian book only the OSZK holds would read "unavailable" for five
+minutes of a server that answered within three asks: on the Hungarian frame 12 of 50 books are
+held by no older free source.
+
+So the client marks a Bib-1 diagnostic 2 `z3950.Refused` as `temporary` and does not latch it,
+since the target answered and the association is sound; `z3950.Session` states that exception
+as part of the contract, so another client behind the seam honours it. The Z39.50 door puts the
+same search again on the same association while it is refused that way,
+`metadata._TEMPORARY_REFUSAL_RETRIES` times at most (two, so three asks, the measured worst case
+under the fresh association condition). A third refusal is `UNAVAILABLE` and cached as before.
+A Z39.50 catalogue now takes at most six searches per lookup, two forms of three asks, which the
+security rate row and the limiter's comment count.
+
+**The asks are immediate, not spaced**: every ask shares the association's one deadline,
+`z3950.TIMEOUT_SECONDS`, and spacing them would spend it waiting. That deadline and the bound
+are what stop a target that only ever answers "temporary" from costing a search per tick of it;
+a stuck retry ends as `DeadlineExceeded`, which is `UNAVAILABLE`, today's answer. The info log
+line per retry is what would show a live refusal.
+
+Why the door and not `_first_answer`: only the client sees the diagnostic set, and only the
+Z39.50 door has an association to ask on; nothing above `metadata._DOORS` reads a diagnostic.
+Why diagnostic 2 alone: every other refusal is about the question or the access, and a target
+says it again, which is the ISBN-10 retry's reason for not retrying a refusal. Why not stop
+caching `UNAVAILABLE` instead: an outage would then cost every rescan a request to a host that is
+down. The cache is unchanged.
+
+The yaz session also frees the result set of a refused search, which it never held, so the retry
+does not leave one set per refusal.
+
+**The same association retry is held by tests, not by a live observation.** What was measured is
+a fresh association about two seconds later. A second pass of the 650 through the retrying lookup
+on 2026-11-17, OSZK only, 1.5s apart, drew no refusal in 1,271 searches (42 found, as before), so
+the immediate ask on the same association has not met the diagnostic it answers. What holds it
+is the fake client's arms and the client's own classification of `("Bib-1", 2)`; `Bib-1` is the
+one spelling of that set in the system libyaz the probes load (`strings`, one match), not read
+off a live diagnostic.
+
+### Where the three sit in the tail
+
+By the owner's rule of 2026-11-16, a remitted row against an unremitted one compared on the
+remitted row's ISBNs. A Hungarian frame is committed (50 ISBNs from Wikidata by publisher
+country, seed 20261116, pool 60; incumbent columns from the measure probe on 2026-11-16, the
+three new columns from this pass), since the 500 hold no Hungarian ISBN; the Italian and
+Portuguese books are the sample's own frames.
+
+| remitted row | inside its remit | it | Open Library | TAIL_MARGINAL |
+|---|---|---|---|---|
+| SBN | 30 | 26 | 13 | 26 |
+| PORBASE | 33 | 25 | 11 | 25 |
+| OSZK | 20 | 17 | 3 | 17 |
+
+Each beats Open Library, the first unremitted row, so each goes ahead of it, ordered among the
+remitted rows by `TAIL_MARGINAL`. Each clears the zero book bar: SBN 68 answers outside its
+remit, PORBASE 3, OSZK 2, every one held by a source still asked. `sources.DEFAULT_ORDER` holds
+the order.
+
+The Hungarian frame moves no existing row. Cost: a `979` ISBN or one whose group cannot be named
+now walks six remitted rows before Open Library, inside the cost accepted for that exception but
+larger, and with no overall deadline on a lookup each of the three Z39.50 rows that cannot be
+reached costs up to `z3950.TIMEOUT_SECONDS`. `sources.SERVES_GROUPS` states it, and the remit
+model's figures are beside it.
+
+### The UNIMARC e book coded as text is recorded, not fixed
+
+A UNIMARC e book coded as text passes the carrier test. On PORBASE's live records the shape
+occurred 0 times in 46 records, counted in `metadata`'s PORBASE block. The second shape there,
+multimedia `106 $a` `i` not refused, is a neighbouring gap not run through the reader.
+
+### The UNIMARC reader is under the catalogue property, through PORBASE
+
+The SRU allocation property draws its rows from the seeded SRU lookups, so PORBASE, the one row
+in production driving the UNIMARC reader and over a door with no TLS, was outside it. A Z39.50
+half now draws every seeded Z39.50 lookup row and hands `_z3950_lookup` generated records in the
+row's own syntax through a fake client, UNIMARC on PORBASE, and requires a `Lookup`, no raise,
+inside the same allocation bound. The cover derivation needs no UNIMARC arm: it reads title
+search rows, and no UNIMARC row answers a search, PORBASE being lookup only.
+
+## The leading tier reads concentration on what a source adds, not on everything it answers (2026-11-17)
+
+Owner's ruling, 2026-11-17. `TIER_MAX_CONCENTRATION` (2/3) is now read over the books a source
+adds to the rest of the tier, not over all its answers. It amends "The tier rule counts
+concentration, not frames".
+
+**Why.** A union catalogue holds foreign editions the tier already has, so over all its answers
+it reads general while what it adds is one country's. The SBN measured fast and broad (99 of
+500, more than the DNB's 91; 45% Italian over all its answers), so the rule as written put it in
+the tier: K10plus with the SBN answers 243 against 222 for the shipping pair, and as a third slot
+it earns 30 against `SLOT_MUST_EARN` 10. Of the 30 books it adds to the DNB and K10plus, 26 are
+Italian (87%); of the 33 it adds to K10plus alone, 27 (82%). That is the shape the rule exists
+to refuse: a request to an Italian server on every scan of every install, for Italian books the
+tail reaches anyway.
+
+**What it changes.** Nothing else: the DNB adds 12 to K10plus at 50% (Austria 6) and stays, and
+the NKP, the BNE and the NLG are refused by concentration under either reading (added to the
+shipping pair they add 42 at 95% Czech, 40 at 90% Spanish and 34 at 100% Greek), and every other
+candidate inside the budget adds fewer than `SLOT_MUST_EARN`.
+
+**A source adding fewer than `SLOT_MUST_EARN` books is not read.** The slot rule refuses it on
+its own, and a share of a handful is noise: the BN_PL and Melinda each add 3 at exactly two
+thirds, and read, they would put the bound on the edge of its own gap.
+
+**Checked as a fixed point.** The tests read each source against the tier that ships and require
+the tier the rule then builds to be that tier; `{K10plus, SBN}` is not a fixed point (read
+against it, the SBN's additions over K10plus are 82% Italian). The bound's gap is now [50%, 87%],
+the DNB's to the SBN's, and 2/3 sits 45% into it; just past it the SBN takes the DNB's place.
+
+`Measured.largest_frame` is dropped: it was the all answers figure, a tier dependent figure
+cannot live in a per source table, and nothing read it any more. The tests compute from the
+committed sample.
+
+Refused alternatives, with figures: follow the rule as written (tier DNB, K10plus, SBN; tail
+NLG, BN_PL, KB_DK, PORBASE, OSZK, Open Library, OENB, NKP, BNE, LIBRIS, BIBSYS, Melinda), or
+K10plus with the SBN at two (the DNB to the tail with 14 marginal).

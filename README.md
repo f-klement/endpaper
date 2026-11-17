@@ -69,7 +69,7 @@ other people can reach it are in [the configuration reference](docs/configuratio
 ## Features
 
 - **Barcode scanning** with a phone camera, or type the ISBN.
-- **Records from fifteen catalogues**, asked in an order you choose, with the cover stored here
+- **Records from eighteen catalogues**, asked in an order you choose, with the cover stored here
   rather than linked from somebody else's server.
 - **Bringing a library in** from Goodreads, LibraryThing, StoryGraph, Libib, Openreads,
   Calibre or MARC records, or from a folder of ebook files that are read in your browser and

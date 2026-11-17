@@ -44,10 +44,10 @@ ARG YAZ_SHA256=755835efe8385d88725cc46a3b34dae2f5e784950832cbbe7f09ca0398de344c
 # in /opt/yaz and returns in milliseconds.
 #
 # **Correctness does not depend on which, and it does not depend on the pipeline either.**
-# The build id names the YAZ version, the tarball hash, the recipe and the musl it was
-# linked against, so a prebuilt image that disagrees on any of them is recompiled here,
-# and one that disagrees on musl is refused by the runtime stage below. The pipeline's tag
-# is a performance optimisation on top of that, not the guarantee.
+# The build id names the YAZ version, the tarball hash and the recipe, so a prebuilt image
+# that disagrees on any of them is recompiled here, and a library that does not load
+# against this image's musl and packages is refused by the load check in the runtime
+# stage. The pipeline's tag is a performance optimisation on top of that, not the guarantee.
 ARG YAZ_BUILDER=${BASE}
 FROM ${YAZ_BUILDER} AS yaz
 
@@ -231,8 +231,8 @@ RUN apk upgrade --no-cache
 #
 # **gnutls and its seven dependants are 85% of the package cost, 70% of the total above,
 # and buy Z39.50 over TLS**, which no target measured for #92 uses: every one answers
-# plaintext on 210, 2100 or 9991. Dropping it is a capability decision for whoever writes
-# the transport, not a build tidy-up, so it is recorded rather than taken.
+# plaintext on 210, 2100 or 9991. Dropping it is a capability decision, not a build
+# tidy-up, so it is recorded rather than taken.
 #
 # **AND IT IS TWO EDITS, NOT ONE.** `./configure --without-gnutls` in docker/build-yaz.sh
 # stops libyaz linking it; the 7,704 KiB leaves the image only when `gnutls` also comes
@@ -263,7 +263,7 @@ RUN apk add --no-cache libxml2 libxslt gnutls
 # copied anywhere else cannot find itself. A missing library names itself and exits
 # non-zero.
 #
-# The release smoke test runs the same command again on the finished image. That is not
+# The image smoke test runs the same command again on the finished image. That is not
 # duplication: this line fails the BUILD, in any build including somebody's own
 # `docker build`, while the smoke test proves it in the artefact that is about to be
 # published, after the unprivileged user and the file ownership are in place.

@@ -26,6 +26,8 @@ from sqlalchemy.exc import DataError, IntegrityError
 
 import auth_backends
 import targets
+import z3950
+from enums import CatalogueSource, RecordCharset
 from tests import sqlite_only
 
 #: What a write the database refuses raises, on either engine. A CHECK is an
@@ -285,7 +287,7 @@ def titles(response: httpx.Response) -> list[str]:
 
 # ── Metadata catalogues ───────────────────────────────────────────────────────
 #
-# Seventeen sources answer a lookup or a search, and respx fails a test that makes
+# Twenty sources answer a lookup or a search, and respx fails a test that makes
 # an unmocked request rather than letting it reach the real service. So a test
 # touching either path has to silence all seventeen, and stating them one by one in
 # every test was both noise and a trap: adding a source broke thirty tests in
@@ -359,6 +361,31 @@ SRU_EMPTY = """<?xml version="1.0" encoding="UTF-8"?>
  <zs:numberOfRecords>0</zs:numberOfRecords><zs:records/>
 </zs:searchRetrieveResponse>
 """
+
+
+def z3950_row(**overrides: object) -> targets.Target:
+    """A valid Z39.50 row, so a test can change one field and see what happens."""
+    fields: dict[str, object] = {
+        "source": CatalogueSource.LOC,
+        "rank": 1,
+        "transport": targets.Transport.Z3950,
+        "base_url": "z3950://catalogue.example:2100/nopac",
+        "reader": targets.Reader.MARC_PLAIN,
+        "answers_lookup": True,
+        "answers_search": True,
+        "metered": False,
+        "needs_key": False,
+        "serves_groups": frozenset(),
+        "query_language": targets.QueryLanguage.PQF,
+        "record_schema": z3950.Syntax.MARC21.value,
+        "record_charset": RecordCharset.UTF8,
+        "isbn_attribute": z3950.USE_ISBN,
+        "lookup_records": z3950.MAX_RECORDS,
+        "search_multiplier": 3,
+        "search_cap": z3950.MAX_RECORDS,
+    }
+    fields.update(overrides)
+    return targets.Target(**fields)  # type: ignore[arg-type]
 
 
 def sru_response(body: str = SRU_EMPTY) -> httpx.Response:

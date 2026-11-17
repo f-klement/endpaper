@@ -1,0 +1,482 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Four UNIMARC records from Italy's SBN, captured 2026-11-16 over Z39.50 from
+  opac.sbn.it:2100/nopac, record syntax UNIMARC: two by ISBN (use attribute
+  7), 9788842080510 and 9788845926839, and two from a title search for
+  `amore` (use attribute 4), a sound recording and one track of another.
+
+  The bytes arrived as ISO 2709 in UTF-8, as `100 $a/26-27` declares (`50`).
+  Rendered to MARCXML by `yaz-marcdump -o marcxml`. Unedited but for the run
+  of `899` holdings fields, each library's shelf mark, which no reader reads.
+-->
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+<record>
+  <leader>06355nam0a22019333i 4500</leader>
+  <controlfield tag="001">IT\ICCU\LO1\1076934</controlfield>
+  <controlfield tag="003">http://id.sbn.it/bid/LO11076934</controlfield>
+  <controlfield tag="005">20250901103812.0</controlfield>
+  <datafield tag="010" ind1=" " ind2=" ">
+    <subfield code="a">88-420-8051-9</subfield>
+  </datafield>
+  <datafield tag="010" ind1=" " ind2=" ">
+    <subfield code="a">978-88-420-8051-0</subfield>
+  </datafield>
+  <datafield tag="100" ind1=" " ind2=" ">
+    <subfield code="a">20060918d2006    ||||0itac50      ba</subfield>
+  </datafield>
+  <datafield tag="101" ind1=" " ind2=" ">
+    <subfield code="a">ita</subfield>
+    <subfield code="c">ita</subfield>
+  </datafield>
+  <datafield tag="102" ind1=" " ind2=" ">
+    <subfield code="a">IT</subfield>
+  </datafield>
+  <datafield tag="181" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">i </subfield>
+    <subfield code="b">xxxe  </subfield>
+  </datafield>
+  <datafield tag="182" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">n</subfield>
+  </datafield>
+  <datafield tag="183" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">nc</subfield>
+    <subfield code="2">RDAcarrier</subfield>
+  </datafield>
+  <datafield tag="200" ind1="1" ind2=" ">
+    <subfield code="a">La democrazia di Dio</subfield>
+    <subfield code="e">la religione americana nell&apos;era dell&apos;impero e del terrore</subfield>
+    <subfield code="f">Emilio Gentile</subfield>
+  </datafield>
+  <datafield tag="210" ind1=" " ind2=" ">
+    <subfield code="a">Roma</subfield>
+    <subfield code="a">Bari</subfield>
+    <subfield code="c">GLF editori Laterza</subfield>
+    <subfield code="d">2006</subfield>
+  </datafield>
+  <datafield tag="215" ind1=" " ind2=" ">
+    <subfield code="a">X, 265, [8] c. di tav.</subfield>
+    <subfield code="c">ill.</subfield>
+    <subfield code="d">21 cm</subfield>
+  </datafield>
+  <datafield tag="410" ind1=" " ind2="0">
+    <subfield code="1">001IT\ICCU\LO1\0490342</subfield>
+    <subfield code="1">2001 </subfield>
+    <subfield code="a">I Robinson. Letture</subfield>
+  </datafield>
+  <datafield tag="500" ind1="1" ind2="0">
+    <subfield code="a">La democrazia di Dio</subfield>
+    <subfield code="3">IT\ICCU\RML\0562618</subfield>
+    <subfield code="9">Gentile, Emilio &lt;1946-    &gt;</subfield>
+  </datafield>
+  <datafield tag="606" ind1=" " ind2=" ">
+    <subfield code="a">Religione e politica</subfield>
+    <subfield code="x">Stati Uniti d&apos;America</subfield>
+    <subfield code="x">2001-2006</subfield>
+    <subfield code="2">FI </subfield>
+    <subfield code="3">IT\ICCU\LO1C\756404</subfield>
+  </datafield>
+  <datafield tag="606" ind1=" " ind2=" ">
+    <subfield code="a">Religiosita</subfield>
+    <subfield code="x">Aspetti socio-culturali</subfield>
+    <subfield code="x">Stati Uniti d&apos;America</subfield>
+    <subfield code="x">2001-2006</subfield>
+    <subfield code="2">FI </subfield>
+    <subfield code="3">IT\ICCU\LO1C\756405</subfield>
+  </datafield>
+  <datafield tag="606" ind1=" " ind2=" ">
+    <subfield code="a">Stati Uniti d&apos;America</subfield>
+    <subfield code="x">Politica</subfield>
+    <subfield code="x">2001-2006</subfield>
+    <subfield code="2">FI </subfield>
+    <subfield code="3">IT\ICCU\LO1C\756408</subfield>
+  </datafield>
+  <datafield tag="676" ind1=" " ind2=" ">
+    <subfield code="a">973.931</subfield>
+    <subfield code="c">STORIA. STATI UNITI. 2001-</subfield>
+    <subfield code="v">21</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Religione e politica</subfield>
+    <subfield code="x">Politica</subfield>
+    <subfield code="x">Religione</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Sociologia</subfield>
+    <subfield code="y">Aspetti socio-culturali</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Antropologia culturale</subfield>
+    <subfield code="z">Aspetti socio-culturali</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Sociologia</subfield>
+    <subfield code="z">Aspetti socio-culturali</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Aspetti politici</subfield>
+    <subfield code="y">Politica</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Attività politica</subfield>
+    <subfield code="y">Politica</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Vita politica</subfield>
+    <subfield code="y">Politica</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Aspetti politici</subfield>
+    <subfield code="z">Politica</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Attività politica</subfield>
+    <subfield code="z">Politica</subfield>
+  </datafield>
+  <datafield tag="699" ind1=" " ind2=" ">
+    <subfield code="a">Vita politica</subfield>
+    <subfield code="z">Politica</subfield>
+  </datafield>
+  <datafield tag="700" ind1=" " ind2="1">
+    <subfield code="a">Gentile</subfield>
+    <subfield code="b">, Emilio</subfield>
+    <subfield code="f"> &lt;1946-    &gt;</subfield>
+    <subfield code="3">IT\ICCU\CFIV\098200</subfield>
+    <subfield code="4">070</subfield>
+  </datafield>
+  <datafield tag="801" ind1=" " ind2="3">
+    <subfield code="a">IT</subfield>
+    <subfield code="b">ICCU</subfield>
+    <subfield code="c">20261109</subfield>
+  </datafield>
+</record>
+<record>
+  <leader>04411nam0a22014053i 4500</leader>
+  <controlfield tag="001">IT\ICCU\UBO\3936644</controlfield>
+  <controlfield tag="003">http://id.sbn.it/bid/UBO3936644</controlfield>
+  <controlfield tag="005">20250206091826.4</controlfield>
+  <datafield tag="010" ind1=" " ind2=" ">
+    <subfield code="a">978-88-459-2683-9</subfield>
+  </datafield>
+  <datafield tag="100" ind1=" " ind2=" ">
+    <subfield code="a">20120511d2012    ||||0itac50      ba</subfield>
+  </datafield>
+  <datafield tag="101" ind1=" " ind2=" ">
+    <subfield code="a">ita</subfield>
+    <subfield code="c">spa</subfield>
+  </datafield>
+  <datafield tag="102" ind1=" " ind2=" ">
+    <subfield code="a">IT</subfield>
+  </datafield>
+  <datafield tag="105" ind1=" " ind2=" ">
+    <subfield code="a">||||    |||f|</subfield>
+  </datafield>
+  <datafield tag="181" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">i </subfield>
+    <subfield code="b">xxxe  </subfield>
+  </datafield>
+  <datafield tag="182" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">n</subfield>
+  </datafield>
+  <datafield tag="183" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">nc</subfield>
+    <subfield code="2">RDAcarrier</subfield>
+  </datafield>
+  <datafield tag="200" ind1="1" ind2=" ">
+    <subfield code="a">Chiamate telefoniche</subfield>
+    <subfield code="f">Roberto Bolaňo</subfield>
+    <subfield code="g">traduzione di Barbara Bertoni</subfield>
+  </datafield>
+  <datafield tag="210" ind1=" " ind2=" ">
+    <subfield code="a">Milano</subfield>
+    <subfield code="c">Adelphi</subfield>
+    <subfield code="d">2012</subfield>
+  </datafield>
+  <datafield tag="215" ind1=" " ind2=" ">
+    <subfield code="a">272 p.</subfield>
+    <subfield code="d">18 cm</subfield>
+  </datafield>
+  <datafield tag="410" ind1=" " ind2="0">
+    <subfield code="1">001IT\ICCU\CFI\0003745</subfield>
+    <subfield code="1">2001 </subfield>
+    <subfield code="a">Piccola biblioteca Adelphi</subfield>
+    <subfield code="v">628</subfield>
+  </datafield>
+  <datafield tag="500" ind1="1" ind2="0">
+    <subfield code="a">Llamadas telefónicas</subfield>
+    <subfield code="3">IT\ICCU\CAG\1930602</subfield>
+    <subfield code="9">Bolaño, Roberto</subfield>
+  </datafield>
+  <datafield tag="676" ind1=" " ind2=" ">
+    <subfield code="a">963</subfield>
+    <subfield code="c">STORIA DELL&apos;ETIOPIA E DELL&apos;ERITREA</subfield>
+    <subfield code="v">12</subfield>
+  </datafield>
+  <datafield tag="700" ind1=" " ind2="1">
+    <subfield code="a">Bolaño</subfield>
+    <subfield code="b">, Roberto</subfield>
+    <subfield code="3">IT\ICCU\TO0V\255238</subfield>
+    <subfield code="4">070</subfield>
+  </datafield>
+  <datafield tag="702" ind1=" " ind2="1">
+    <subfield code="a">Bertoni</subfield>
+    <subfield code="b">, Barbara</subfield>
+    <subfield code="3">IT\ICCU\RAVV\081416</subfield>
+    <subfield code="4">730</subfield>
+  </datafield>
+  <datafield tag="801" ind1=" " ind2="3">
+    <subfield code="a">IT</subfield>
+    <subfield code="b">ICCU</subfield>
+    <subfield code="c">20261109</subfield>
+  </datafield>
+</record>
+<record>
+  <leader>01794njm1a22003133i 4500</leader>
+  <controlfield tag="001">IT\ICCU\DDS\0204389</controlfield>
+  <controlfield tag="003">http://id.sbn.it/bid/DDS0204389</controlfield>
+  <controlfield tag="005">20170113143333.9</controlfield>
+  <datafield tag="071" ind1="0" ind2="1">
+    <subfield code="a">HN711</subfield>
+    <subfield code="c">Grammofono</subfield>
+  </datafield>
+  <datafield tag="100" ind1=" " ind2=" ">
+    <subfield code="a">20151215f19001950||||0itac50      ba</subfield>
+  </datafield>
+  <datafield tag="101" ind1=" " ind2=" ">
+    <subfield code="a">ita</subfield>
+  </datafield>
+  <datafield tag="102" ind1=" " ind2=" ">
+    <subfield code="a">IT</subfield>
+  </datafield>
+  <datafield tag="126" ind1=" " ind2=" ">
+    <subfield code="a">ada|d||||||||||</subfield>
+    <subfield code="b">|||</subfield>
+  </datafield>
+  <datafield tag="181" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">d </subfield>
+    <subfield code="b">bxxa  </subfield>
+  </datafield>
+  <datafield tag="182" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">a</subfield>
+  </datafield>
+  <datafield tag="183" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">sd</subfield>
+    <subfield code="2">RDAcarrier</subfield>
+  </datafield>
+  <datafield tag="200" ind1="1" ind2=" ">
+    <subfield code="a">Amore, amore</subfield>
+    <subfield code="a">Fiamme d&apos;amore</subfield>
+    <subfield code="f">N. Lozzi, tenore</subfield>
+    <subfield code="g">Orch. Olivieri</subfield>
+  </datafield>
+  <datafield tag="210" ind1=" " ind2=" ">
+    <subfield code="a">Milano</subfield>
+    <subfield code="c">Grammofono</subfield>
+    <subfield code="d">1900-1950</subfield>
+  </datafield>
+  <datafield tag="215" ind1=" " ind2=" ">
+    <subfield code="a">1 Disco sonoro</subfield>
+    <subfield code="c">78 rpm, Mono</subfield>
+    <subfield code="d">10 in. (25 cm.)</subfield>
+  </datafield>
+  <datafield tag="464" ind1=" " ind2="1">
+    <subfield code="1">001IT\ICCU\DDS\0204390</subfield>
+    <subfield code="1">2001 </subfield>
+    <subfield code="a">Amore, amore</subfield>
+    <subfield code="f">N. Lozzi</subfield>
+    <subfield code="v">1</subfield>
+    <subfield code="1">702 1</subfield>
+    <subfield code="a">Ripa</subfield>
+    <subfield code="b">, Virgilio</subfield>
+    <subfield code="3">IT\ICCU\CUBV\003721</subfield>
+    <subfield code="4">070</subfield>
+    <subfield code="1">71202</subfield>
+    <subfield code="a">Orchestra Dino Olivieri</subfield>
+    <subfield code="3">IT\ICCU\DDSV\002077</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="1">700 1</subfield>
+    <subfield code="a">Lozzi</subfield>
+    <subfield code="b">, Nino</subfield>
+    <subfield code="3">IT\ICCU\DDSV\160427</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="4">T=Tenore</subfield>
+    <subfield code="1">702 1</subfield>
+    <subfield code="a">Di Lazzaro</subfield>
+    <subfield code="b">, Eldo</subfield>
+    <subfield code="f"> &lt;1902-1968&gt;</subfield>
+    <subfield code="3">IT\ICCU\LO1V\138929</subfield>
+    <subfield code="4">070</subfield>
+  </datafield>
+  <datafield tag="464" ind1=" " ind2="1">
+    <subfield code="1">001IT\ICCU\DDS\0204391</subfield>
+    <subfield code="1">2001 </subfield>
+    <subfield code="a">Fiamme d&apos;amore</subfield>
+    <subfield code="f">N. Lozzi</subfield>
+    <subfield code="v">2</subfield>
+    <subfield code="1">71202</subfield>
+    <subfield code="a">Orchestra Dino Olivieri</subfield>
+    <subfield code="3">IT\ICCU\DDSV\002077</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="1">702 1</subfield>
+    <subfield code="a">Colombini,</subfield>
+    <subfield code="3">IT\ICCU\DDSV\016285</subfield>
+    <subfield code="4">070</subfield>
+    <subfield code="1">702 1</subfield>
+    <subfield code="a">Scala,</subfield>
+    <subfield code="3">IT\ICCU\DDSV\035096</subfield>
+    <subfield code="4">070</subfield>
+    <subfield code="1">700 1</subfield>
+    <subfield code="a">Lozzi</subfield>
+    <subfield code="b">, Nino</subfield>
+    <subfield code="3">IT\ICCU\DDSV\160427</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="4">T=Tenore</subfield>
+  </datafield>
+  <datafield tag="700" ind1=" " ind2="1">
+    <subfield code="a">Lozzi</subfield>
+    <subfield code="b">, Nino</subfield>
+    <subfield code="3">IT\ICCU\DDSV\160427</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="4">T=Tenore</subfield>
+  </datafield>
+  <datafield tag="712" ind1="0" ind2="2">
+    <subfield code="a">Orchestra Dino Olivieri</subfield>
+    <subfield code="3">IT\ICCU\DDSV\002077</subfield>
+    <subfield code="4">590</subfield>
+  </datafield>
+  <datafield tag="712" ind1="0" ind2="2">
+    <subfield code="a">Società Nazionale del Grammofono</subfield>
+    <subfield code="c"> &lt;Milano&gt;</subfield>
+    <subfield code="3">IT\ICCU\DDSV\002112</subfield>
+    <subfield code="4">650</subfield>
+  </datafield>
+  <datafield tag="791" ind1="0" ind2="2">
+    <subfield code="a">Orchestra Olivieri</subfield>
+    <subfield code="3">IT\ICCU\SBNV\064473</subfield>
+    <subfield code="z">Orchestra Dino Olivieri</subfield>
+  </datafield>
+  <datafield tag="791" ind1="0" ind2="2">
+    <subfield code="a">Grammofono</subfield>
+    <subfield code="c"> &lt;Milano&gt;</subfield>
+    <subfield code="3">IT\ICCU\SBNV\050234</subfield>
+    <subfield code="z">Società Nazionale del Grammofono &lt;Milano&gt;</subfield>
+  </datafield>
+  <datafield tag="791" ind1="0" ind2="2">
+    <subfield code="a">Disco Grammofono</subfield>
+    <subfield code="3">IT\ICCU\SBNV\053839</subfield>
+    <subfield code="z">Società Nazionale del Grammofono &lt;Milano&gt;</subfield>
+  </datafield>
+  <datafield tag="801" ind1=" " ind2="3">
+    <subfield code="a">IT</subfield>
+    <subfield code="b">ICCU</subfield>
+    <subfield code="c">20261109</subfield>
+  </datafield>
+</record>
+<record>
+  <leader>01286nja2a22002531i 4500</leader>
+  <controlfield tag="001">IT\ICCU\DDS\0204390</controlfield>
+  <controlfield tag="003">http://id.sbn.it/bid/DDS0204390</controlfield>
+  <controlfield tag="005">20190524102358.2</controlfield>
+  <datafield tag="100" ind1=" " ind2=" ">
+    <subfield code="a">20151215f19001950||||0itac50      ba</subfield>
+  </datafield>
+  <datafield tag="101" ind1=" " ind2=" ">
+    <subfield code="a">ita</subfield>
+  </datafield>
+  <datafield tag="126" ind1=" " ind2=" ">
+    <subfield code="a">ada|d||||||||||</subfield>
+    <subfield code="b">|||</subfield>
+  </datafield>
+  <datafield tag="181" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">d </subfield>
+    <subfield code="b">bxxa  </subfield>
+  </datafield>
+  <datafield tag="182" ind1=" " ind2="1">
+    <subfield code="6">z01</subfield>
+    <subfield code="a">a</subfield>
+  </datafield>
+  <datafield tag="200" ind1="1" ind2=" ">
+    <subfield code="a">Amore, amore</subfield>
+    <subfield code="f">N. Lozzi</subfield>
+  </datafield>
+  <datafield tag="463" ind1=" " ind2="1">
+    <subfield code="1">001IT\ICCU\DDS\0204389</subfield>
+    <subfield code="1">2001 </subfield>
+    <subfield code="a">Amore, amore</subfield>
+    <subfield code="a">Fiamme d&apos;amore</subfield>
+    <subfield code="f">N. Lozzi, tenore</subfield>
+    <subfield code="g">Orch. Olivieri</subfield>
+    <subfield code="v">1</subfield>
+    <subfield code="1">71202</subfield>
+    <subfield code="a">Orchestra Dino Olivieri</subfield>
+    <subfield code="3">IT\ICCU\DDSV\002077</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="1">71202</subfield>
+    <subfield code="a">Società Nazionale del Grammofono</subfield>
+    <subfield code="c"> &lt;Milano&gt;</subfield>
+    <subfield code="3">IT\ICCU\DDSV\002112</subfield>
+    <subfield code="4">650</subfield>
+    <subfield code="1">700 1</subfield>
+    <subfield code="a">Lozzi</subfield>
+    <subfield code="b">, Nino</subfield>
+    <subfield code="3">IT\ICCU\DDSV\160427</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="4">T=Tenore</subfield>
+  </datafield>
+  <datafield tag="700" ind1=" " ind2="1">
+    <subfield code="a">Lozzi</subfield>
+    <subfield code="b">, Nino</subfield>
+    <subfield code="3">IT\ICCU\DDSV\160427</subfield>
+    <subfield code="4">590</subfield>
+    <subfield code="4">T=Tenore</subfield>
+  </datafield>
+  <datafield tag="702" ind1=" " ind2="1">
+    <subfield code="a">Ripa</subfield>
+    <subfield code="b">, Virgilio</subfield>
+    <subfield code="3">IT\ICCU\CUBV\003721</subfield>
+    <subfield code="4">070</subfield>
+  </datafield>
+  <datafield tag="702" ind1=" " ind2="1">
+    <subfield code="a">Di Lazzaro</subfield>
+    <subfield code="b">, Eldo</subfield>
+    <subfield code="f"> &lt;1902-1968&gt;</subfield>
+    <subfield code="3">IT\ICCU\LO1V\138929</subfield>
+    <subfield code="4">070</subfield>
+  </datafield>
+  <datafield tag="712" ind1="0" ind2="2">
+    <subfield code="a">Orchestra Dino Olivieri</subfield>
+    <subfield code="3">IT\ICCU\DDSV\002077</subfield>
+    <subfield code="4">590</subfield>
+  </datafield>
+  <datafield tag="790" ind1=" " ind2="0">
+    <subfield code="a">Dôle</subfield>
+    <subfield code="3">IT\ICCU\LO1V\556024</subfield>
+    <subfield code="z">Di Lazzaro, Eldo &lt;1902-1968&gt;</subfield>
+  </datafield>
+  <datafield tag="790" ind1=" " ind2="0">
+    <subfield code="a">Dole</subfield>
+    <subfield code="f"> &lt;1902-1968&gt;</subfield>
+    <subfield code="3">IT\ICCU\SBNV\060152</subfield>
+    <subfield code="z">Di Lazzaro, Eldo &lt;1902-1968&gt;</subfield>
+  </datafield>
+  <datafield tag="791" ind1="0" ind2="2">
+    <subfield code="a">Orchestra Olivieri</subfield>
+    <subfield code="3">IT\ICCU\SBNV\064473</subfield>
+    <subfield code="z">Orchestra Dino Olivieri</subfield>
+  </datafield>
+  <datafield tag="801" ind1=" " ind2="3">
+    <subfield code="a">IT</subfield>
+    <subfield code="b">ICCU</subfield>
+    <subfield code="c">20261109</subfield>
+  </datafield>
+</record>
+</collection>

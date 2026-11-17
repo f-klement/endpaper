@@ -1876,6 +1876,9 @@ export const de: Messages = {
   "providers.name.kb_dk": "Dänische Königliche Bibliothek",
   "providers.name.bibsys": "BIBSYS",
   "providers.name.melinda": "Melinda",
+  "providers.name.sbn": "Italienischer Nationaler Bibliotheksdienst",
+  "providers.name.porbase": "PORBASE",
+  "providers.name.oszk": "Ungarische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

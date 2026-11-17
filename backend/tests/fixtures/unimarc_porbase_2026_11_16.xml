@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Two UNIMARC records from Portugal's PORBASE, captured 2026-11-16 over
+  Z39.50 from z3950.catalogo.bnportugal.gov.pt:210/bn, record syntax UNIMARC,
+  by ISBN (use attribute 7): 9789720036155 and 9789725567456.
+
+  The bytes arrived as ISO 2709 in ISO 5426, as `100 $a/26-29` declares
+  (`0103`). Rendered to MARCXML by libyaz's own MARC code, `yaz-marcdump -f
+  ISO5426 -t UTF-8 -o marcxml`, which is the rendering this reader expects.
+  Unedited.
+-->
+<collection xmlns="http://www.loc.gov/MARC21/slim">
+<record>
+  <leader>00993nam a2200313   4500</leader>
+  <controlfield tag="001">2126132</controlfield>
+  <controlfield tag="003">http://id.bnportugal.gov.pt/bib/catbnp/2126132</controlfield>
+  <datafield tag="010" ind1=" " ind2=" ">
+    <subfield code="a">978-972-0-03615-5</subfield>
+  </datafield>
+  <datafield tag="021" ind1=" " ind2=" ">
+    <subfield code="a">PT</subfield>
+    <subfield code="b">508630/22</subfield>
+  </datafield>
+  <datafield tag="100" ind1=" " ind2=" ">
+    <subfield code="a">20230313d2023    m  y0pory01030103ba</subfield>
+  </datafield>
+  <datafield tag="101" ind1="1" ind2=" ">
+    <subfield code="a">por</subfield>
+    <subfield code="c">swe</subfield>
+  </datafield>
+  <datafield tag="102" ind1=" " ind2=" ">
+    <subfield code="a">PT</subfield>
+  </datafield>
+  <datafield tag="105" ind1=" " ind2=" ">
+    <subfield code="a">y   z   000ay</subfield>
+  </datafield>
+  <datafield tag="106" ind1=" " ind2=" ">
+    <subfield code="a">r</subfield>
+  </datafield>
+  <datafield tag="200" ind1="1" ind2=" ">
+    <subfield code="a">Um homem chamado Ove</subfield>
+    <subfield code="f">Fredrik Backman</subfield>
+    <subfield code="g">trad. Alexandra Soares</subfield>
+  </datafield>
+  <datafield tag="205" ind1=" " ind2=" ">
+    <subfield code="a">1&lt;U+00AA&gt; ed</subfield>
+  </datafield>
+  <datafield tag="210" ind1=" " ind2="9">
+    <subfield code="a">Porto</subfield>
+    <subfield code="c">Porto Editora,</subfield>
+    <subfield code="d">2023</subfield>
+  </datafield>
+  <datafield tag="215" ind1=" " ind2=" ">
+    <subfield code="a">308, [3] p.</subfield>
+    <subfield code="d">24 cm</subfield>
+  </datafield>
+  <datafield tag="304" ind1=" " ind2=" ">
+    <subfield code="a">Tít. orig.: En man som heter Ove</subfield>
+  </datafield>
+  <datafield tag="700" ind1=" " ind2="1">
+    <subfield code="a">Backman,</subfield>
+    <subfield code="b">Fredrik,</subfield>
+    <subfield code="f">1981-</subfield>
+  </datafield>
+  <datafield tag="702" ind1=" " ind2="1">
+    <subfield code="a">Soares,</subfield>
+    <subfield code="b">Alexandra</subfield>
+    <subfield code="4">730</subfield>
+  </datafield>
+  <datafield tag="801" ind1=" " ind2="0">
+    <subfield code="a">PT</subfield>
+    <subfield code="b">BN</subfield>
+    <subfield code="g">RPC</subfield>
+  </datafield>
+  <datafield tag="856" ind1="4" ind2="1">
+    <subfield code="u">http://rnod.bnportugal.gov.pt/ImagesBN/winlibimg.aspx?skey=&amp;doc=2126132&amp;img=176536&amp;save=true</subfield>
+  </datafield>
+  <datafield tag="900" ind1=" " ind2=" ">
+    <subfield code="a">BIBNAC</subfield>
+    <subfield code="d">20230331</subfield>
+  </datafield>
+  <datafield tag="966" ind1=" " ind2=" ">
+    <subfield code="s">L. 164653 V.</subfield>
+    <subfield code="t">FGMON</subfield>
+  </datafield>
+  <datafield tag="971" ind1=" " ind2=" ">
+    <subfield code="c">isantos</subfield>
+    <subfield code="d">20230313</subfield>
+  </datafield>
+  <datafield tag="972" ind1=" " ind2=" ">
+    <subfield code="e">0</subfield>
+    <subfield code="z">0</subfield>
+  </datafield>
+<!-- Separator but not at end of field length=29 -->
+  <datafield tag="973" ind1=" " ind2=" ">
+    <subfield code="c">mcarvalho</subfield>
+    <subfield code="d">20230323</subfield>
+  </datafield>
+  <datafield tag="675" ind1=" " ind2=" ">
+    <subfield code="a">821.113.6-31&quot;20&quot;</subfield>
+    <subfield code="v">BN</subfield>
+    <subfield code="z">por</subfield>
+  </datafield>
+</record>
+<record>
+  <leader>01246nam a2200349   4500</leader>
+  <controlfield tag="001">2102602</controlfield>
+  <controlfield tag="003">http://id.bnportugal.gov.pt/bib/catbnp/2102602</controlfield>
+  <datafield tag="010" ind1=" " ind2=" ">
+    <subfield code="a">978-972-556-745-6</subfield>
+  </datafield>
+  <datafield tag="021" ind1=" " ind2=" ">
+    <subfield code="a">PT</subfield>
+    <subfield code="b">483079/21</subfield>
+  </datafield>
+  <datafield tag="100" ind1=" " ind2=" ">
+    <subfield code="a">20220621d2021    m  a0pory01030103ba</subfield>
+  </datafield>
+  <datafield tag="101" ind1="0" ind2=" ">
+    <subfield code="a">por</subfield>
+  </datafield>
+  <datafield tag="102" ind1=" " ind2=" ">
+    <subfield code="a">PT</subfield>
+  </datafield>
+  <datafield tag="105" ind1=" " ind2=" ">
+    <subfield code="a">a   z   001yy</subfield>
+  </datafield>
+  <datafield tag="106" ind1=" " ind2=" ">
+    <subfield code="a">r</subfield>
+  </datafield>
+  <datafield tag="200" ind1="1" ind2=" ">
+    <subfield code="a">Os constituintes</subfield>
+    <subfield code="e">percursos biográficos e intervenções parlamentares (1975-1976)</subfield>
+    <subfield code="f">coord. Ivo Veiga, Maria Fernanda Rollo, Paula Borges Santos </subfield>
+  </datafield>
+  <datafield tag="210" ind1=" " ind2="9">
+    <subfield code="a">Lisboa</subfield>
+    <subfield code="c">Assembleia da República,</subfield>
+    <subfield code="d">2021</subfield>
+  </datafield>
+  <datafield tag="215" ind1=" " ind2=" ">
+    <subfield code="a">477 p.</subfield>
+    <subfield code="c">il.</subfield>
+    <subfield code="d">24 cm</subfield>
+  </datafield>
+  <datafield tag="225" ind1="2" ind2=" ">
+    <subfield code="a">Parlamento</subfield>
+    <subfield code="v">78</subfield>
+  </datafield>
+  <datafield tag="675" ind1=" " ind2=" ">
+    <subfield code="a">328.1A/Z(=1:469)&quot;1975/1976&quot;</subfield>
+    <subfield code="v">BN</subfield>
+    <subfield code="z">por</subfield>
+  </datafield>
+  <datafield tag="675" ind1=" " ind2=" ">
+    <subfield code="a">321.6(469)&quot;1975/1976&quot;</subfield>
+    <subfield code="v">BN</subfield>
+    <subfield code="z">por</subfield>
+  </datafield>
+  <datafield tag="675" ind1=" " ind2=" ">
+    <subfield code="a">342.4(469)&quot;1975/1976&quot;</subfield>
+    <subfield code="v">BN</subfield>
+    <subfield code="z">por</subfield>
+  </datafield>
+  <datafield tag="702" ind1=" " ind2="1">
+    <subfield code="a">Veiga,</subfield>
+    <subfield code="b">Ivo Teixeira Lima da,</subfield>
+    <subfield code="f">1969-</subfield>
+    <subfield code="4">340</subfield>
+  </datafield>
+  <datafield tag="702" ind1=" " ind2="1">
+    <subfield code="a">Rolo,</subfield>
+    <subfield code="b">Maria Fernanda,</subfield>
+    <subfield code="f">1965-</subfield>
+    <subfield code="4">340</subfield>
+  </datafield>
+  <datafield tag="702" ind1=" " ind2="1">
+    <subfield code="a">Santos,</subfield>
+    <subfield code="b">Paula Borges</subfield>
+    <subfield code="4">340</subfield>
+  </datafield>
+  <datafield tag="801" ind1=" " ind2="0">
+    <subfield code="a">PT</subfield>
+    <subfield code="b">BN</subfield>
+    <subfield code="g">RPC</subfield>
+  </datafield>
+  <datafield tag="856" ind1="4" ind2="1">
+    <subfield code="u">http://rnod.bnportugal.gov.pt/ImagesBN/winlibimg.aspx?skey=&amp;doc=2102602&amp;img=166700&amp;save=true</subfield>
+  </datafield>
+  <datafield tag="900" ind1=" " ind2=" ">
+    <subfield code="a">BIBNAC</subfield>
+    <subfield code="d">20220801</subfield>
+  </datafield>
+  <datafield tag="966" ind1=" " ind2=" ">
+    <subfield code="s">929 A/Z CON</subfield>
+    <subfield code="t">FGMON</subfield>
+  </datafield>
+  <datafield tag="966" ind1=" " ind2=" ">
+    <subfield code="s">S.C. 159043 V.</subfield>
+    <subfield code="t">FGMON</subfield>
+  </datafield>
+  <datafield tag="971" ind1=" " ind2=" ">
+    <subfield code="c">csilva</subfield>
+    <subfield code="d">20220621</subfield>
+  </datafield>
+  <datafield tag="972" ind1=" " ind2=" ">
+    <subfield code="e">0</subfield>
+    <subfield code="z">0</subfield>
+  </datafield>
+<!-- Separator but not at end of field length=30 -->
+  <datafield tag="973" ind1=" " ind2=" ">
+    <subfield code="c">aalmeid</subfield>
+    <subfield code="d">20220721</subfield>
+  </datafield>
+</record>
+</collection>

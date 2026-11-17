@@ -274,7 +274,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,496 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,492 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
@@ -307,7 +307,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [What the fallback refuses to store, and why it is not `_claim`](decisions.md#what-the-fallback-refuses-to-store-and-why-it-is-not-_claim) | 183 |
 | An identifier two files disagree about is shown and never stored | [The budget moved and the statement moved with it](decisions.md#the-budget-moved-and-the-statement-moved-with-it) | 111 |
 | An identifier two files disagree about is shown and never stored | [The author card links out to Wikipedia, and the language is resolved rather than guessed](decisions.md#the-author-card-links-out-to-wikipedia-and-the-language-is-resolved-rather-than-guessed) | 466 |
-| An identifier two files disagree about is shown and never stored | [The Z39.50 transport is a seam, and the client behind it is not chosen yet](decisions.md#the-z3950-transport-is-a-seam-and-the-client-behind-it-is-not-chosen-yet) | 295 |
+| An identifier two files disagree about is shown and never stored | [The Z39.50 transport is a seam, and the client behind it is the ctypes binding to YAZ](decisions.md#the-z3950-transport-is-a-seam-and-the-client-behind-it-is-the-ctypes-binding-to-yaz) | 289 |
 | An identifier two files disagree about is shown and never stored | [The blur calibration is a test now, because the eleventh pattern arrived as six](decisions.md#the-blur-calibration-is-a-test-now-because-the-eleventh-pattern-arrived-as-six) | 304 |
 | An identifier two files disagree about is shown and never stored | [A displacement field repeats with the tile when its supports are disjoint](decisions.md#a-displacement-field-repeats-with-the-tile-when-its-supports-are-disjoint) | 229 |
 | An identifier two files disagree about is shown and never stored | [Curl is Nonpareil worked a second time, and that is the point rather than a shortcut](decisions.md#curl-is-nonpareil-worked-a-second-time-and-that-is-the-point-rather-than-a-shortcut) | 168 |
@@ -422,10 +422,10 @@ repeat the argument.
 |  | [What the three seats caught, this wave](decisions.md#what-the-three-seats-caught-this-wave) | 398 |
 | What the three seats caught, this wave | [A fix round wrote an unmeasured reason into the paragraph about unmeasured reasons](decisions.md#a-fix-round-wrote-an-unmeasured-reason-into-the-paragraph-about-unmeasured-reasons) | 211 |
 | What the three seats caught, this wave | [Both critic seats found the same two things, from opposite ends](decisions.md#both-critic-seats-found-the-same-two-things-from-opposite-ends) | 161 |
-|  | [The Czech National Library, and a server that renders one record a page](decisions.md#the-czech-national-library-and-a-server-that-renders-one-record-a-page) | 1,698 |
+|  | [The Czech National Library, and a server that renders one record a page](decisions.md#the-czech-national-library-and-a-server-that-renders-one-record-a-page) | 1,732 |
 | The Czech National Library, and a server that renders one record a page | [The search path is refused because the server renders one record per response](decisions.md#the-search-path-is-refused-because-the-server-renders-one-record-per-response) | 273 |
 | The Czech National Library, and a server that renders one record a page | [The ticket named the shape correctly, and the first fix dismissed it](decisions.md#the-ticket-named-the-shape-correctly-and-the-first-fix-dismissed-it) | 372 |
-| The Czech National Library, and a server that renders one record a page | [The tier rule counts concentration, not frames](decisions.md#the-tier-rule-counts-concentration-not-frames) | 358 |
+| The Czech National Library, and a server that renders one record a page | [The tier rule counts concentration, not frames](decisions.md#the-tier-rule-counts-concentration-not-frames) | 392 |
 | The Czech National Library, and a server that renders one record a page | [An internal document declares itself, and the publish gate checks both directions](decisions.md#an-internal-document-declares-itself-and-the-publish-gate-checks-both-directions) | 251 |
 | The Czech National Library, and a server that renders one record a page | [The Czech catalogue is plaintext, and it is on the scan path](decisions.md#the-czech-catalogue-is-plaintext-and-it-is-on-the-scan-path) | 211 |
 | The Czech National Library, and a server that renders one record a page | [A refusal written in two languages was refusing in two languages](decisions.md#a-refusal-written-in-two-languages-was-refusing-in-two-languages) | 160 |
@@ -500,7 +500,7 @@ repeat the argument.
 |  | [Which columns an import may fill, column by column](decisions.md#which-columns-an-import-may-fill-column-by-column) | 667 |
 |  | [Which authority schemes exist, and why the list is code rather than rows](decisions.md#which-authority-schemes-exist-and-why-the-list-is-code-rather-than-rows) | 401 |
 |  | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts-1) | 246 |
-|  | [The Z39.50 door's bounds, and which of fetch.py's four have no counterpart](decisions.md#the-z3950-doors-bounds-and-which-of-fetchpys-four-have-no-counterpart) | 658 |
+|  | [The Z39.50 door's bounds, and which of fetch.py's four have no counterpart](decisions.md#the-z3950-doors-bounds-and-which-of-fetchpys-four-have-no-counterpart) | 617 |
 |  | [UNIMARC is read from the Library of Congress crosswalk, and not until a source sends one](decisions.md#unimarc-is-read-from-the-library-of-congress-crosswalk-and-not-until-a-source-sends-one) | 1,441 |
 |  | [ISNI is the identity spine, and VIAF is a discovery route](decisions.md#isni-is-the-identity-spine-and-viaf-is-a-discovery-route) | 455 |
 |  | [A new catalogue gets a lookup slot and no search slot until somebody measures the search](decisions.md#a-new-catalogue-gets-a-lookup-slot-and-no-search-slot-until-somebody-measures-the-search) | 292 |
@@ -564,7 +564,7 @@ repeat the argument.
 |  | [A row exclusion belongs to the generic mapping, not to a service's reader](decisions.md#a-row-exclusion-belongs-to-the-generic-mapping-not-to-a-services-reader) | 274 |
 |  | [A preview names the reader it used, including when it used the generic one](decisions.md#a-preview-names-the-reader-it-used-including-when-it-used-the-generic-one) | 112 |
 |  | [The catalogue that publishes its own login ships with it](decisions.md#the-catalogue-that-publishes-its-own-login-ships-with-it) | 241 |
-|  | [The Z39.50 client is the one already built, promoted rather than chosen](decisions.md#the-z3950-client-is-the-one-already-built-promoted-rather-than-chosen) | 189 |
+|  | [The Z39.50 client is the one already built, promoted rather than chosen](decisions.md#the-z3950-client-is-the-one-already-built-promoted-rather-than-chosen) | 660 |
 |  | [A shipped login is the bottom of one ladder, and the ladder is walked once](decisions.md#a-shipped-login-is-the-bottom-of-one-ladder-and-the-ladder-is-walked-once) | 160 |
 |  | [The pair lives on the target row, so the origin it is bound to is not stored twice](decisions.md#the-pair-lives-on-the-target-row-so-the-origin-it-is-bound-to-is-not-stored-twice) | 84 |
 |  | [The provenance is one field, because the levels are ordered and booleans are not](decisions.md#the-provenance-is-one-field-because-the-levels-are-ordered-and-booleans-are-not) | 77 |
@@ -1032,4 +1032,24 @@ repeat the argument.
 |  | [The Royal Danish Library, BIBSYS and Melinda join the roster, and where the remit placement put them (2026-11-16)](decisions.md#the-royal-danish-library-bibsys-and-melinda-join-the-roster-and-where-the-remit-placement-put-them-2026-11-16) | 1,436 |
 |  | [Refused: the National Library of Norway's view (47BIBSYS_NB)](decisions.md#refused-the-national-library-of-norways-view-47bibsys_nb) | 83 |
 |  | [Refused: Iceland's Leitir (354ILC_NETWORK)](decisions.md#refused-icelands-leitir-354ilc_network) | 64 |
+|  | [UNIMARC is read by converting it to MARC21, not by a reader of its own (2026-11-17)](decisions.md#unimarc-is-read-by-converting-it-to-marc21-not-by-a-reader-of-its-own-2026-11-17) | 695 |
+| UNIMARC is read by converting it to MARC21, not by a reader of its own (2026-11-17) | [The reader takes MARCXML with the text already decoded](decisions.md#the-reader-takes-marcxml-with-the-text-already-decoded) | 127 |
+| UNIMARC is read by converting it to MARC21, not by a reader of its own (2026-11-17) | [What the crosswalk covers](decisions.md#what-the-crosswalk-covers) | 332 |
+| UNIMARC is read by converting it to MARC21, not by a reader of its own (2026-11-17) | [A UNIMARC decoding carries no MARC21 knob](decisions.md#a-unimarc-decoding-carries-no-marc21-knob) | 37 |
+| UNIMARC is read by converting it to MARC21, not by a reader of its own (2026-11-17) | [ISBD's unnumbered sequence in an extent](decisions.md#isbds-unnumbered-sequence-in-an-extent) | 52 |
+|  | [A source's transport is a field, and one table holds the doors (2026-11-17)](decisions.md#a-sources-transport-is-a-field-and-one-table-holds-the-doors-2026-11-17) | 1,183 |
+| A source's transport is a field, and one table holds the doors (2026-11-17) | [What a Z39.50 row must carry, and what it is refused for](decisions.md#what-a-z3950-row-must-carry-and-what-it-is-refused-for) | 283 |
+| A source's transport is a field, and one table holds the doors (2026-11-17) | [The bounds on the Z39.50 path](decisions.md#the-bounds-on-the-z3950-path) | 100 |
+| A source's transport is a field, and one table holds the doors (2026-11-17) | [`Transport` moved to `enums.py`, and `ck_catalogue_targets_transport` is derived](decisions.md#transport-moved-to-enumspy-and-ck_catalogue_targets_transport-is-derived) | 56 |
+| A source's transport is a field, and one table holds the doors (2026-11-17) | [The address rule follows the transport](decisions.md#the-address-rule-follows-the-transport) | 27 |
+| A source's transport is a field, and one table holds the doors (2026-11-17) | [A record the door cannot use is dropped, and the rest of the search kept](decisions.md#a-record-the-door-cannot-use-is-dropped-and-the-rest-of-the-search-kept) | 205 |
+| A source's transport is a field, and one table holds the doors (2026-11-17) | [The render types are measured live and held in the image](decisions.md#the-render-types-are-measured-live-and-held-in-the-image) | 214 |
+| A source's transport is a field, and one table holds the doors (2026-11-17) | [The suite installs a refusing Z39.50 client](decisions.md#the-suite-installs-a-refusing-z3950-client) | 55 |
+|  | [Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17)](decisions.md#italy-portugal-and-hungary-join-the-roster-over-z3950-2026-11-17) | 1,508 |
+| Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [A lookup that misses may ask once more with the ISBN-10, and the row says so](decisions.md#a-lookup-that-misses-may-ask-once-more-with-the-isbn-10-and-the-row-says-so) | 279 |
+| Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [A temporary refusal is asked again, at most twice, on the same association](decisions.md#a-temporary-refusal-is-asked-again-at-most-twice-on-the-same-association) | 506 |
+| Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [Where the three sit in the tail](decisions.md#where-the-three-sit-in-the-tail) | 233 |
+| Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [The UNIMARC e book coded as text is recorded, not fixed](decisions.md#the-unimarc-e-book-coded-as-text-is-recorded-not-fixed) | 47 |
+| Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [The UNIMARC reader is under the catalogue property, through PORBASE](decisions.md#the-unimarc-reader-is-under-the-catalogue-property-through-porbase) | 94 |
+|  | [The leading tier reads concentration on what a source adds, not on everything it answers (2026-11-17)](decisions.md#the-leading-tier-reads-concentration-on-what-a-source-adds-not-on-everything-it-answers-2026-11-17) | 427 |
 <!-- index: end -->

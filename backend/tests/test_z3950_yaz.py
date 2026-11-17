@@ -1,10 +1,10 @@
-"""Tests for backend/z3950_provisional.py.
+"""Tests for backend/z3950_yaz.py.
 
-**The client route is not settled and this module is not it.** What these tests pin is
-therefore deliberately narrow: the rules that any client behind `z3950.Session` has to
-follow, written where they currently live. The suite is hermetic and holds no copy of
-YAZ, so the ctypes wiring runs against `StandInLibrary`, which reaches the conversions on
-this side of each call and nothing about how the real library behaves.
+The suite is hermetic and holds no copy of YAZ, so the ctypes wiring runs against
+`StandInLibrary`, which reaches the conversions on this side of each call and nothing
+about how the real library behaves. Whether the real library loads from `LIBRARY` and
+binds every entry point is the image smoke test's, in the finished image; what this
+file holds is that the path agrees with the build that puts the library there.
 
 The one test here that would be the only warning of a real regression is the latch.
 Measured 2026-08-28 against a closed port on a host that resolves: the connect reports
@@ -15,13 +15,17 @@ already, and it is produced by the library rather than by anything here.
 """
 
 import ctypes
+import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 import z3950
-import z3950_provisional as provisional
+import z3950_yaz as yaz
+from enums import RecordCharset
+from tests.corpus import REPO
 from z3950 import Syntax, Target
 
 TARGET = Target(host="catalogue.example", port=210, database="EXAMPLE")
@@ -33,6 +37,7 @@ CONNECT_FAILED = (10000, "Connect failed", "catalogue.example:210", "ZOOM")
 INVALID_QUERY = (10010, "Invalid query", "", "ZOOM")
 NO_AUTH = (101, "Access-control failure", "Failed to authenticate user.", "Bib-1")
 NO_SYNTAX = (239, "Record syntax not supported", "1.2.840.10003.5.10", "Bib-1")
+TEMPORARY = (2, "Temporary system error", "", "Bib-1")
 
 
 @dataclass
@@ -46,12 +51,16 @@ class FakeBindings:
 
     errors: list[tuple[int, str, str, str]] = field(default_factory=lambda: [CLEAN])
     hits: int = 1
-    record_value: tuple[str, bytes] | None = ("USmarc", b"record")
+    record_value: tuple[str, bytes | None] | None = ("USmarc", b"record")
+    #: Positions the library holds a record for and cannot render.
+    unrenderable: frozenset[int] = frozenset()
     resultset_handle: int = 55
     connection_handle: int = 7
     options: dict[str, str] = field(default_factory=dict)
     connected: list[tuple[str, int]] = field(default_factory=list)
     searched: list[str] = field(default_factory=list)
+    #: The record type each fetch asked the library to render.
+    rendered: list[str] = field(default_factory=list)
     freed_resultsets: list[int] = field(default_factory=list)
     freed_connections: list[int] = field(default_factory=list)
     _errors_read: int = 0
@@ -77,7 +86,10 @@ class FakeBindings:
     def size(self, resultset: int) -> int:
         return self.hits
 
-    def record(self, resultset: int, index: int) -> tuple[str, bytes] | None:
+    def record(self, resultset: int, index: int, render: str) -> tuple[str, bytes | None] | None:
+        self.rendered.append(render)
+        if index in self.unrenderable:
+            return ("USmarc", None)
         return self.record_value
 
     def free_resultset(self, resultset: int) -> None:
@@ -88,7 +100,7 @@ class FakeBindings:
 
 
 def opened(bindings: FakeBindings) -> z3950.Session:
-    return provisional.ProvisionalYazClient(bindings).open(TARGET, timeout=5.0)
+    return yaz.YazClient(bindings).open(TARGET, timeout=5.0)
 
 
 class TestTheFirstFailureIsLatched:
@@ -160,23 +172,44 @@ class TestTheFirstFailureIsLatched:
         assert bindings.searched == ["q"]
 
 
+class TestATemporaryRefusalLeavesTheAssociationOpen:
+    """Bib-1 diagnostic 2 is not latched, so the door's retry reaches the target."""
+
+    def test_the_search_after_a_temporary_refusal_reaches_the_target(self):
+        bindings = FakeBindings(errors=[CLEAN, TEMPORARY, CLEAN], hits=3)
+        session = opened(bindings)
+        with pytest.raises(z3950.Refused) as refused:
+            session.search("q")
+        assert refused.value.temporary
+
+        assert session.search("q") == 3
+        assert bindings.searched == ["q", "q"]
+
+    def test_a_refused_search_frees_its_result_set(self):
+        bindings = FakeBindings(errors=[CLEAN, TEMPORARY])
+        session = opened(bindings)
+        with pytest.raises(z3950.Refused):
+            session.search("q")
+        assert bindings.freed_resultsets == [55]
+
+
 class TestOneDiagnosticBecomesOneDisposition:
     """`classify` is the whole taxonomy, in one place, so the three cannot drift apart."""
 
     def test_a_diagnostic_from_the_target_is_a_refusal_carrying_its_code(self):
-        error = provisional.classify(*NO_AUTH)
+        error = yaz.classify(*NO_AUTH)
         assert isinstance(error, z3950.Refused)
         assert error.code == 101
         assert "Failed to authenticate user." in str(error)
 
     def test_a_client_side_failure_is_unreachable(self):
-        assert isinstance(provisional.classify(*CONNECT_FAILED), z3950.Unreachable)
-        assert isinstance(provisional.classify(*TIMED_OUT), z3950.Unreachable)
+        assert isinstance(yaz.classify(*CONNECT_FAILED), z3950.Unreachable)
+        assert isinstance(yaz.classify(*TIMED_OUT), z3950.Unreachable)
 
     def test_a_query_the_client_could_not_parse_is_ours_and_not_the_targets(self):
         # Classing it as unreachable would blame a catalogue for a bug here. Measured by
         # injecting `@attr 1=4 "moby" @attr 1=4 "dick"`, which never reaches the wire.
-        assert isinstance(provisional.classify(*INVALID_QUERY), z3950.BadQuery)
+        assert isinstance(yaz.classify(*INVALID_QUERY), z3950.BadQuery)
 
     def test_an_unfamiliar_diagnostic_set_is_read_as_the_targets(self):
         # The test is "is it ours", not a list of theirs: YAZ uses more sets than Bib-1,
@@ -184,7 +217,13 @@ class TestOneDiagnosticBecomesOneDisposition:
         # as the target's is the conservative direction, because a refusal is not worth
         # retrying and an unreachable host is.
         for diagset in ("SRU", "info:srw/diagnostic/1", "HTTP", ""):
-            assert isinstance(provisional.classify(7, "whatever", "", diagset), z3950.Refused)
+            assert isinstance(yaz.classify(7, "whatever", "", diagset), z3950.Refused)
+
+    def test_only_bib1_diagnostic_2_is_temporary(self):
+        others = [NO_AUTH, NO_SYNTAX, (3, "Unsupported search", "", "Bib-1"), (2, "x", "", "SRU")]
+        refusals = [yaz.classify(*diagnostic) for diagnostic in [TEMPORARY, *others]]
+        assert all(isinstance(refusal, z3950.Refused) for refusal in refusals)
+        assert [getattr(refusal, "temporary", None) for refusal in refusals] == [True] + [False] * 4
 
 
 class TestWhatIsNegotiatedAtInit:
@@ -217,7 +256,7 @@ class TestWhatIsNegotiatedAtInit:
 
     def test_the_database_comes_from_the_target(self):
         bindings = FakeBindings()
-        provisional.ProvisionalYazClient(bindings).open(
+        yaz.YazClient(bindings).open(
             Target(host="h", port=1, database="NKC", syntax=Syntax.UNIMARC), timeout=5.0
         )
         assert bindings.options["databaseName"] == "NKC"
@@ -227,9 +266,7 @@ class TestWhatIsNegotiatedAtInit:
         # measured across one request and two targets.
         for syntax, wire in ((Syntax.MARC21, "usmarc"), (Syntax.UNIMARC, "unimarc")):
             bindings = FakeBindings()
-            provisional.ProvisionalYazClient(bindings).open(
-                Target(host="h", port=1, database="d", syntax=syntax), timeout=5.0
-            )
+            yaz.YazClient(bindings).open(Target(host="h", port=1, database="d", syntax=syntax), timeout=5.0)
             assert bindings.options["preferredRecordSyntax"] == wire
 
     def test_a_format_that_cannot_be_asked_for_is_refused_rather_than_a_key_error(self):
@@ -237,7 +274,7 @@ class TestWhatIsNegotiatedAtInit:
         # surface as a 500 rather than as a source being unavailable.
         bindings = FakeBindings()
         with pytest.raises(z3950.BadQuery):
-            provisional.ProvisionalYazClient(bindings).open(
+            yaz.YazClient(bindings).open(
                 Target(host="h", port=1, database="d", syntax=Syntax.OTHER), timeout=5.0
             )
         assert bindings.connected == []
@@ -246,12 +283,12 @@ class TestWhatIsNegotiatedAtInit:
         # ZOOM's own option is whole seconds, so 0 would mean "no bound" rather than
         # "immediately". The real sub second bound is `asyncio.timeout` in z3950.py.
         bindings = FakeBindings()
-        provisional.ProvisionalYazClient(bindings).open(TARGET, timeout=0.2)
+        yaz.YazClient(bindings).open(TARGET, timeout=0.2)
         assert bindings.options["timeout"] == "1"
 
     def test_a_longer_budget_is_passed_through(self):
         bindings = FakeBindings()
-        provisional.ProvisionalYazClient(bindings).open(TARGET, timeout=8.9)
+        yaz.YazClient(bindings).open(TARGET, timeout=8.9)
         assert bindings.options["timeout"] == "8"
 
     def test_the_association_names_this_application(self):
@@ -261,6 +298,23 @@ class TestWhatIsNegotiatedAtInit:
 
 
 class TestTheSessionMatchesTheSeam:
+    @pytest.mark.parametrize(
+        ("charset", "render"),
+        [
+            (RecordCharset.UTF8, "xml"),
+            (RecordCharset.MARC8, "xml; charset=marc8,utf8"),
+            (RecordCharset.ISO5426, "xml; charset=iso5426,utf8"),
+        ],
+    )
+    def test_a_record_is_rendered_as_marcxml_from_the_targets_charset(self, charset, render):
+        bindings = FakeBindings()
+        session = yaz.YazClient(bindings).open(
+            Target(host="catalogue.example", port=210, database="EXAMPLE", charset=charset), timeout=5.0
+        )
+        session.search("q")
+        session.fetch(0)
+        assert bindings.rendered == [render]
+
     def test_a_search_returns_the_hit_count(self):
         assert opened(FakeBindings(hits=444)).search("q") == 444
 
@@ -297,6 +351,16 @@ class TestTheSessionMatchesTheSeam:
         with pytest.raises(z3950.Refused):
             session.fetch(0)
 
+    def test_a_record_that_will_not_render_is_unrenderable_and_ends_nothing(self):
+        # Plant B: a malformed record at position 1 of 3, and no diagnostic beside it.
+        bindings = FakeBindings(hits=3, unrenderable=frozenset({1}))
+        session = opened(bindings)
+        session.search("q")
+        session.fetch(0)
+        with pytest.raises(z3950.Unrenderable):
+            session.fetch(1)
+        assert session.fetch(2).raw == b"record"
+
     def test_a_second_search_releases_the_first_result_set(self):
         bindings = FakeBindings()
         session = opened(bindings)
@@ -328,18 +392,18 @@ class TestATargetsLabelIsTranslatedAndKept:
     def test_the_two_measured_spellings_of_marc21_mean_the_same_thing(self):
         # `lx2.loc.gov` says `USmarc` and `libris.kb.se` says `MARC21` for identical
         # bytes. A caller comparing raw labels would read those as two formats.
-        assert provisional.reported_syntax("USmarc") is Syntax.MARC21
-        assert provisional.reported_syntax("MARC21") is Syntax.MARC21
-        assert provisional.reported_syntax("UNIMARC") is Syntax.UNIMARC
+        assert yaz.reported_syntax("USmarc") is Syntax.MARC21
+        assert yaz.reported_syntax("MARC21") is Syntax.MARC21
+        assert yaz.reported_syntax("UNIMARC") is Syntax.UNIMARC
 
     def test_the_label_is_matched_without_regard_to_case_or_padding(self):
-        assert provisional.reported_syntax("  uSmArC  ") is Syntax.MARC21
+        assert yaz.reported_syntax("  uSmArC  ") is Syntax.MARC21
 
     def test_an_unfamiliar_label_is_a_format_and_not_a_failure(self):
         # A target is free to answer in SUTRS, GRS-1 or XML. The caller decides whether
         # it can use it, and `Record.reported` says which it was.
         for label in ("SUTRS", "GRS-1", "XML", ""):
-            assert provisional.reported_syntax(label) is Syntax.OTHER
+            assert yaz.reported_syntax(label) is Syntax.OTHER
 
 
 class TestClosingLatchesBecauseTheAlternativeIsASignal:
@@ -396,12 +460,12 @@ class TestTheCtypesDeclarationsAreComplete:
     def test_the_record_getter_returns_an_opaque_pointer_and_not_a_string(self):
         # `c_char_p` would make ctypes stop at the first NUL, silently truncating a MARC
         # record and leaving the length in its own leader disagreeing with what arrived.
-        declared = {name: restype for name, restype, _ in provisional.SIGNATURES}
+        declared = {name: restype for name, restype, _ in yaz.SIGNATURES}
         assert declared["ZOOM_record_get"] is ctypes.c_void_p
 
     def test_every_call_the_binding_makes_is_declared(self):
-        source = __import__("pathlib").Path(provisional.__file__).read_text()
-        declared = {name for name, _, _ in provisional.SIGNATURES}
+        source = Path(yaz.__file__).read_text()
+        declared = {name for name, _, _ in yaz.SIGNATURES}
         used = {
             line.split("self._lib.")[1].split("(")[0] for line in source.splitlines() if "self._lib." in line
         }
@@ -411,7 +475,7 @@ class TestTheCtypesDeclarationsAreComplete:
         assert declared - used == set()
 
     def test_every_pointer_returning_call_is_declared_as_a_pointer(self):
-        for name, restype, _ in provisional.SIGNATURES:
+        for name, restype, _ in yaz.SIGNATURES:
             if name.endswith(("_create", "_search_pqf", "_record", "_get")):
                 assert restype is ctypes.c_void_p, name
 
@@ -445,7 +509,7 @@ class StandInLibrary:
         self.calls: list[tuple[str, tuple[Any, ...]]] = []
         # Pointers handed to the caller point into these, so they live as long as this.
         self._buffers: dict[bytes, ctypes.Array[ctypes.c_char]] = {}
-        for name, restype, argtypes in provisional.SIGNATURES:
+        for name, restype, argtypes in yaz.SIGNATURES:
             behind = getattr(self, f"_{name}")
             setattr(self, name, ctypes.CFUNCTYPE(restype, *argtypes)(behind))
 
@@ -493,13 +557,11 @@ class StandInLibrary:
         return ctypes.addressof(buffer)
 
 
-def bound(
-    monkeypatch: pytest.MonkeyPatch, **answers: Any
-) -> tuple[provisional.CtypesBindings, StandInLibrary]:
+def bound(monkeypatch: pytest.MonkeyPatch, **answers: Any) -> tuple[yaz.CtypesBindings, StandInLibrary]:
     """`CtypesBindings` over a `StandInLibrary` built from the keywords given."""
     library = StandInLibrary(**answers)
     monkeypatch.setattr(ctypes, "CDLL", lambda path: library)
-    return provisional.CtypesBindings(), library
+    return yaz.CtypesBindings(), library
 
 
 class TestTheCtypesWiringReadsWhatTheLibraryAnswers:
@@ -507,16 +569,18 @@ class TestTheCtypesWiringReadsWhatTheLibraryAnswers:
         # The reason `ZOOM_record_get` is declared `c_void_p` and read with its length:
         # MARC21 is binary, and a read that stops at the first NUL truncates the record.
         bindings, _ = bound(monkeypatch, members={b"raw": b"00\x0000", b"syntax": b"USmarc"})
-        assert bindings.record(55, 0) == ("USmarc", b"00\x0000")
+        assert bindings.record(55, 0, "raw") == ("USmarc", b"00\x0000")
 
     def test_a_position_the_library_holds_no_record_for_is_no_record(self, monkeypatch):
-        assert bound(monkeypatch, record=None)[0].record(55, 0) is None
+        assert bound(monkeypatch, record=None)[0].record(55, 0, "raw") is None
 
-    def test_a_record_with_no_raw_member_is_no_record(self, monkeypatch):
-        assert bound(monkeypatch, members={b"syntax": b"USmarc"})[0].record(55, 0) is None
+    def test_a_record_the_library_cannot_render_is_there_with_nothing_rendered(self, monkeypatch):
+        # Not None: None is a position with no record, which the session reports as the
+        # target refusing.
+        assert bound(monkeypatch, members={b"syntax": b"USmarc"})[0].record(55, 0, "xml") == ("USmarc", None)
 
     def test_a_record_with_no_syntax_member_has_an_empty_label(self, monkeypatch):
-        assert bound(monkeypatch, members={b"raw": b"record"})[0].record(55, 0) == ("", b"record")
+        assert bound(monkeypatch, members={b"raw": b"record"})[0].record(55, 0, "raw") == ("", b"record")
 
     def test_a_diagnostic_arrives_through_its_three_out_parameters(self, monkeypatch):
         bindings, _ = bound(monkeypatch, error=(239, b"Record syntax not supported", b"1.2.840", b"Bib-1"))
@@ -566,15 +630,143 @@ class TestTheCtypesWiringCarriesAnAssociationToTheLibrary:
             return library
 
         monkeypatch.setattr(ctypes, "CDLL", load)
-        client = provisional.ProvisionalYazClient()
+        client = yaz.YazClient()
         assert loaded == []
         session = client.open(TARGET, timeout=5.0)
-        assert loaded == [provisional.LIBRARY]
+        assert loaded == [yaz.LIBRARY]
         assert session.search("q") == 3
+
+    def test_a_library_that_will_not_load_is_an_unreachable_source(self, monkeypatch):
+        # A run from source has no /opt/yaz. An OSError out of the open would reach a
+        # lookup as a 500; `Unreachable` is what every caller already degrades on.
+        def missing(path: str) -> None:
+            raise OSError(f"Error loading shared library {path}: No such file or directory")
+
+        monkeypatch.setattr(ctypes, "CDLL", missing)
+        with pytest.raises(z3950.Unreachable, match="not loaded"):
+            yaz.YazClient().open(TARGET, timeout=5.0)
+
+    def test_a_library_lacking_an_entry_point_is_an_unreachable_source(self, monkeypatch):
+        # A YAZ bump that drops a symbol `SIGNATURES` names loads, then fails in `getattr`.
+        library = StandInLibrary()
+        delattr(library, "ZOOM_record_get")
+        monkeypatch.setattr(ctypes, "CDLL", lambda path: library)
+        with pytest.raises(z3950.Unreachable, match="Another YAZ version") as raised:
+            yaz.YazClient().open(TARGET, timeout=5.0)
+        # The prefix is the remedy for a library that is not there, not for this one.
+        assert "--prefix" not in str(raised.value)
+
+    def test_the_loaders_cause_survives_the_cut(self, monkeypatch):
+        # musl's own words, which name what is wrong and where. The remedy may be cut; the
+        # log line carries it whole.
+        cause = f"Error loading shared library {yaz.LIBRARY}: No such file or directory"
+
+        def missing(path: str) -> None:
+            raise OSError(cause)
+
+        monkeypatch.setattr(ctypes, "CDLL", missing)
+        with pytest.raises(z3950.Unreachable) as raised:
+            yaz.YazClient().open(TARGET, timeout=5.0)
+        assert cause in str(raised.value)
+
+    def test_a_library_that_will_not_load_is_logged_as_the_client_and_not_the_catalogue(
+        self, monkeypatch, caplog
+    ):
+        # Every caller reads `Unreachable` as the catalogue being down; the log is the one
+        # place a broken install shows as itself.
+        def missing(path: str) -> None:
+            raise OSError(f"Error loading shared library {path}: No such file or directory")
+
+        monkeypatch.setattr(ctypes, "CDLL", missing)
+        with caplog.at_level(logging.ERROR, logger="endpaper.z3950"), pytest.raises(z3950.Unreachable):
+            yaz.YazClient().open(TARGET, timeout=5.0)
+        [entry] = [r for r in caplog.records if r.name == "endpaper.z3950"]
+        assert entry.levelno == logging.ERROR
+        assert "client could not start" in entry.getMessage()
+        assert yaz.LIBRARY in entry.getMessage()
+
+    def test_the_load_failure_says_the_path_is_fixed_and_where(self, monkeypatch):
+        def missing(path: str) -> None:
+            raise OSError("gone")
+
+        monkeypatch.setattr(ctypes, "CDLL", missing)
+        with pytest.raises(z3950.Unreachable) as raised:
+            yaz.YazClient().open(TARGET, timeout=5.0)
+        assert yaz.LIBRARY in str(raised.value)
+        assert "backend/z3950_yaz.py" in str(raised.value)
+
+    def test_a_failed_load_is_tried_again_at_the_next_open(self, monkeypatch):
+        attempts: list[str] = []
+        library = StandInLibrary()
+
+        def load(path: str) -> StandInLibrary:
+            attempts.append(path)
+            if len(attempts) == 1:
+                raise OSError("not yet")
+            return library
+
+        monkeypatch.setattr(ctypes, "CDLL", load)
+        client = yaz.YazClient()
+        with pytest.raises(z3950.Unreachable):
+            client.open(TARGET, timeout=5.0)
+        assert client.open(TARGET, timeout=5.0).search("q") == 3
+        assert attempts == [yaz.LIBRARY, yaz.LIBRARY]
+
+
+def executable_lines(path: Path) -> str:
+    """A shell file or a Dockerfile without its comments, which quote the lines below."""
+    return "\n".join(line for line in path.read_text().splitlines() if not line.lstrip().startswith("#"))
+
+
+class TestTheLibraryPathIsWhereTheImagePutsIt:
+    """`LIBRARY` is fixed, so the build and the copy have to agree with it.
+
+    The prefix is written in three places, the recipe's `--prefix`, the Dockerfile's copy
+    and `LIBRARY`, and libtool's RUNPATH means none of them can move alone. Each arm reads
+    the executable lines only: a comment quoting the old line would otherwise keep it green.
+    """
+
+    PREFIX, _, NAME = yaz.LIBRARY.rpartition("/lib/")
+
+    def test_the_library_path_is_absolute(self):
+        # A bare soname asks the loader's search path, which is a second way to choose
+        # which code is loaded.
+        assert yaz.LIBRARY.startswith("/")
+        assert self.NAME.startswith("libyaz.so.")
+
+    def test_the_recipe_installs_yaz_under_that_prefix(self):
+        recipe = executable_lines(REPO / "docker" / "build-yaz.sh")
+        assert f"--prefix={self.PREFIX} " in recipe
+
+    def test_the_runtime_subset_carries_that_library(self):
+        recipe = executable_lines(REPO / "docker" / "build-yaz.sh")
+        assert f"cp -a {self.PREFIX}/lib/{self.NAME}* /opt/yaz-runtime/lib/" in recipe
+
+    def test_the_image_copies_the_subset_back_to_that_prefix(self):
+        dockerfile = executable_lines(REPO / "Dockerfile")
+        assert f"\nCOPY --from=yaz /opt/yaz-runtime {self.PREFIX}\n" in dockerfile
+
+    def test_the_smoke_test_loads_the_client_in_the_finished_image(self):
+        # The only check that the real library loads from this path and holds every
+        # entry point `SIGNATURES` declares. Deleting it leaves both to a member's lookup.
+        smoke = executable_lines(REPO / "ci" / "smoke-test-image.sh")
+        # `LD_BIND_NOW` resolves the library's own dependencies at load rather than at a
+        # member's first call into them.
+        assert "LD_BIND_NOW=1 python -c 'import z3950_yaz; z3950_yaz.CtypesBindings()'" in smoke
+        # The arm and not only the command: an `else` that no longer exits would print
+        # the failure and pass the image.
+        assert 'could not load its library." >&2\n    exit 1\n' in smoke
+
+    def test_the_smoke_test_renders_every_character_set_in_the_finished_image(self):
+        # `_RENDER` meets the real library nowhere else, and a misspelled set renders
+        # wrong letters rather than failing, so deleting this leaves it to a member.
+        smoke = executable_lines(REPO / "ci" / "smoke-test-image.sh")
+        assert 'LD_BIND_NOW=1 python "$(dirname "$0")/smoke-yaz-render.py" "$APP_DIR"' in smoke
+        assert 'render a set wrong." >&2\n    exit 1\n' in smoke
 
 
 def test_the_client_and_the_session_satisfy_the_seams_protocols():
     """A structural mismatch is a mypy error and would not otherwise fail a test."""
-    client: z3950.Client = provisional.ProvisionalYazClient(FakeBindings())
+    client: z3950.Client = yaz.YazClient(FakeBindings())
     session: z3950.Session = client.open(TARGET, timeout=1.0)
     assert session.search("q") == 1

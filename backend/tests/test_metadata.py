@@ -35,9 +35,11 @@ import logging
 import math
 import random
 import re
+import time
 from base64 import b64encode
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Event
 from typing import Any, Final, Literal
 from unittest import mock
 from xml.etree import ElementTree
@@ -47,6 +49,7 @@ import pytest
 import respx
 from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis.strategies import SearchStrategy
 
 import bibliographic
 import covers
@@ -88,6 +91,7 @@ from tests.helpers import (
     silence_other_lookup_catalogues,
     silence_sru_catalogues,
     sru_response,
+    z3950_row,
 )
 from tests.strategies import (
     Node,
@@ -102,6 +106,7 @@ from tests.strategies import (
     xml_characters,
     xml_of,
 )
+from tests.test_z3950 import HELD_SECONDS, FakeClient, FakeSession
 
 TREE_GUARDS = {
     "TestTheCarrierTestIsTheOnlyWayIn": ("application_modules",),
@@ -249,6 +254,15 @@ POLISH_ISBN = "9788365621078"
 #: Danish Library's remit is that group alone. One of the ISBNs it answered on
 #: 2026-11-16.
 DANISH_ISBN = "9788702275551"
+#: A real Italian registration group, 978-88, for the reason above. One of the
+#: ISBNs the SBN answered on 2026-11-17.
+ITALIAN_ISBN = "9788845906169"
+#: A real Portuguese registration group, 978-972, for the reason above. One of
+#: the ISBNs PORBASE answered on 2026-11-17.
+PORTUGUESE_ISBN = "9789720042651"
+#: A real Hungarian registration group, 978-963, for the reason above. One of
+#: the ISBNs the OSZK answered on 2026-11-17.
+HUNGARIAN_ISBN = "9789632765211"
 
 #: One DNB MARC21 record, in the shape the live endpoint returns since the
 #: switch away from Dublin Core. Copied from ISBN 9783446249974's real response
@@ -2787,6 +2801,30 @@ SRU_PROBE_MODS = (
 )
 SRU_PROBE_MODS_IDENTIFIER = '<identifier type="isbn">9783161484100</identifier>'
 
+#: PORBASE's shape, read through the crosswalk to MARC21.
+SRU_PROBE_UNIMARC = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>01533nam  2200505   4500</leader>"
+    "{identifier}"
+    '<datafield tag="101" ind1="0" ind2=" ">'
+    '<subfield code="a">por</subfield></datafield>'
+    '<datafield tag="200" ind1="1" ind2=" ">'
+    '<subfield code="a">Um livro de prova</subfield></datafield>'
+    '<datafield tag="210" ind1=" " ind2=" ">'
+    '<subfield code="a">Lisboa</subfield>'
+    '<subfield code="c">Uma editora</subfield>'
+    '<subfield code="d">2021</subfield></datafield>'
+    '<datafield tag="215" ind1=" " ind2=" ">'
+    '<subfield code="a">237 p.</subfield></datafield>'
+    '<datafield tag="700" ind1=" " ind2="1">'
+    '<subfield code="a">Exemplo,</subfield>'
+    '<subfield code="b">Ana</subfield></datafield>'
+    "</record>"
+)
+SRU_PROBE_UNIMARC_IDENTIFIER = (
+    '<datafield tag="010" ind1=" " ind2=" "><subfield code="a">978-3-16-148410-0</subfield></datafield>'
+)
+
 SRU_PROBE_BODIES = {
     decoders.Reader.MARC_GND: (SRU_PROBE_MARC, SRU_PROBE_MARC_IDENTIFIER),
     decoders.Reader.MARC_PLAIN: (SRU_PROBE_MARC, SRU_PROBE_MARC_IDENTIFIER),
@@ -2795,6 +2833,7 @@ SRU_PROBE_BODIES = {
         SRU_PROBE_DUBLIN_CORE_IDENTIFIER,
     ),
     decoders.Reader.MODS: (SRU_PROBE_MODS, SRU_PROBE_MODS_IDENTIFIER),
+    decoders.Reader.UNIMARC: (SRU_PROBE_UNIMARC, SRU_PROBE_UNIMARC_IDENTIFIER),
 }
 
 #: Every seeded row that answers a title search.
@@ -6025,7 +6064,7 @@ class TestTheCzechNationalLibrary:
     def test_the_shared_online_rule_is_left_alone(self):
         """The Czech phrasing is this source's constant and not a widening of
         `bibliographic._NOT_A_BOOK`, which every other source is filtered by. Widening that on
-        a phrase measured in one catalogue would change what fourteen other sources
+        a phrase measured in one catalogue would change what seventeen other sources
         refuse."""
         assert bibliographic.is_physical_book("1 online zdroj (106 pages) :", "Kniha")
         assert metadata._NKP_ONLINE.search("1 online zdroj (106 pages) :")
@@ -6883,6 +6922,54 @@ _SRU_SEARCHES: Final = sorted(
 )
 
 
+#: Every seeded Z39.50 target that answers a lookup, PORBASE's UNIMARC among
+#: them, in the same fixed order.
+_Z3950_LOOKUPS: Final = sorted(
+    (
+        target
+        for target in targets.SEEDED.values()
+        if target.transport is targets.Transport.Z3950 and target.can(Capability.ANSWERS_ISBN)
+    ),
+    key=lambda target: target.source,
+)
+
+
+def _rendered_records(row: targets.Target) -> SearchStrategy[tuple[z3950.Record, ...]]:
+    """What the client hands this row's door: drawn records in the row's own
+    syntax, UNIMARC over the tags the crosswalk converts where the row asks
+    for it, each written in a drawn charset where the client renders UTF-8."""
+    syntax = row.z3950_target.syntax
+    records = (
+        marc_records(tags=sorted({*metadata._UNIMARC_FIELDS, "106"}), title_tag="200")
+        if syntax is z3950.Syntax.UNIMARC
+        else marc_records()
+    )
+    namespaced = records.map(
+        lambda record: dataclasses.replace(record, attrs=(("xmlns", marc_fields.NAMESPACE),))
+    )
+    return st.lists(
+        st.builds(
+            lambda record, charset: z3950.Record(
+                syntax=syntax, reported=syntax.value, raw=encoded(xml_of(record), charset)
+            ),
+            namespaced,
+            charsets(),
+        ),
+        max_size=2,
+    ).map(tuple)
+
+
+def z3950_asked(row: targets.Target, rendered: tuple[z3950.Record, ...]) -> metadata.Lookup:
+    """What one Z39.50 lookup answers when the client hands over these records.
+
+    Patched with `mock` for the reason `asked` gives. Zero records is zero
+    hits, the miss, so the ISBN-10 retry is asked on its row too.
+    """
+    client = FakeClient(session=FakeSession(hits=len(rendered), records=list(rendered)))
+    with mock.patch.object(z3950, "_default_client", return_value=client):
+        return asyncio.run(metadata._z3950_lookup(row, "9789722040801"))
+
+
 def _parses(response: fetch.Fetched) -> bool:
     """Whether the catalogue parse builds a tree from this response's text."""
     try:
@@ -6939,6 +7026,39 @@ class TestACatalogueAnswerIsReadOrRefusedByName:
         # draw of that charset.
         assert got.peak <= (
             metadata.ALLOCATION_FACTOR * len(response.text.encode()) + xml_parse.ALLOCATION_FLOOR
+        )
+
+    @pytest.mark.property
+    @given(
+        drawn=st.sampled_from(_Z3950_LOOKUPS).flatmap(
+            lambda row: st.tuples(st.just(row), _rendered_records(row))
+        )
+    )
+    def test_a_z3950_lookup_answers_and_does_not_raise_inside_the_allocation_bound(self, drawn):
+        """The Z39.50 door's half, generated at the client seam: the records as
+        `z3950.Record` values, UNIMARC on the row that asks for it. An escape
+        here is the same 500 as at the SRU door, over a door with no TLS."""
+        row, rendered = drawn
+        got = answer_of(z3950_asked, row, rendered, answers=metadata.Lookup, refuses=None)
+        assert got.value is not None
+        assert got.peak <= (
+            metadata.ALLOCATION_FACTOR * sum(len(record.raw) for record in rendered)
+            + xml_parse.ALLOCATION_FLOOR
+        )
+
+    def test_the_z3950_property_reaches_a_unimarc_row_and_a_record_it_reads(self):
+        """Or the UNIMARC reader, the one PORBASE drives, is outside the property.
+        A record the reader reads is not found unless it claims the ISBN, so
+        this asks for a record read at all rather than for a book."""
+        assert any(row.z3950_target.syntax is z3950.Syntax.UNIMARC for row in _Z3950_LOOKUPS)
+        witness(
+            _rendered_records(targets.SEEDED[CatalogueSource.PORBASE]),
+            lambda rendered: (
+                bool(rendered)
+                and z3950_asked(targets.SEEDED[CatalogueSource.PORBASE], rendered).outcome
+                is not Outcome.UNAVAILABLE
+            ),
+            reaches="a UNIMARC record handed to the reader rather than refused before it",
         )
 
     def test_the_generator_still_reaches_a_charset_that_yields_a_lone_surrogate(self):
@@ -7229,6 +7349,38 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
             ),
         }
 
+    @staticmethod
+    def _records() -> dict[str, z3950.Record]:
+        """One rendered record per Z39.50 source, the ISBN-10 in its own identifier field."""
+        isbn10 = '<subfield code="a">0743273567</subfield></datafield>'
+        marc21 = (
+            '<record xmlns="http://www.loc.gov/MARC21/slim">'
+            "<leader>01533nam a2200505 c 4500</leader>"
+            f'<datafield tag="020" ind1=" " ind2=" ">{isbn10}'
+            '<datafield tag="245" ind1="1" ind2="0">'
+            '<subfield code="a">The Great Gatsby</subfield></datafield>'
+            "</record>"
+        )
+        unimarc = SRU_PROBE_UNIMARC.format(identifier=f'<datafield tag="010" ind1=" " ind2=" ">{isbn10}')
+        return {
+            "sbn": z3950.Record(syntax=z3950.Syntax.MARC21, reported="USmarc", raw=marc21.encode()),
+            "oszk": z3950.Record(syntax=z3950.Syntax.MARC21, reported="USmarc", raw=marc21.encode()),
+            "porbase": z3950.Record(syntax=z3950.Syntax.UNIMARC, reported="Unimarc", raw=unimarc.encode()),
+        }
+
+    async def _asked(self, name: str, monkeypatch: pytest.MonkeyPatch) -> metadata.Lookup:
+        """The lookup, with this source's body on whichever door its row names."""
+        target = targets.SEEDED[CatalogueSource(name)]
+        if target.transport is targets.Transport.Z3950:
+            client = FakeClient(session=FakeSession(records=[self._records()[name]]))
+            monkeypatch.setattr(z3950, "_default_client", lambda: client)
+            return await metadata._lookup_one(target, self.ISBN, "a-key", credential=None)
+        host, response = self._bodies()[name]
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=host).mock(return_value=response)
+            return await metadata._lookup_one(target, self.ISBN, "a-key", credential=None)
+
     def test_every_registered_source_has_a_body_here(self):
         """The arming step, and the reason this class is parametrised on `metadata._lookup_one`.
 
@@ -7236,7 +7388,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
         parametrised test skip it in silence. This turns that into a failure, so
         adding a source forces the question the `catalogue.py` docstring asks.
         """
-        missing = sorted(set(sources.LOOKUP_SOURCES) - set(self._bodies()))
+        missing = sorted(set(sources.LOOKUP_SOURCES) - set(self._bodies()) - set(self._records()))
         assert not missing, (
             f"{missing} answers an ISBN lookup with no response body "
             "in this test. Add one, and check the new adapter sets `isbn` from "
@@ -7246,12 +7398,8 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("name", sorted(sources.LOOKUP_SOURCES))
-    async def test_the_record_carries_the_isbn_the_source_was_asked_for(self, name):
-        host, response = self._bodies()[name]
-        with respx.mock(assert_all_called=False) as mock:
-            silence_covers(mock)
-            mock.get(url__startswith=host).mock(return_value=response)
-            result = await metadata._lookup_one(targets.SEEDED[name], self.ISBN, "a-key", credential=None)
+    async def test_the_record_carries_the_isbn_the_source_was_asked_for(self, name, monkeypatch):
+        result = await self._asked(name, monkeypatch)
 
         assert result.outcome is Outcome.FOUND, f"the {name} body no longer resolves, so this asserts nothing"
         assert result.record is not None
@@ -7259,7 +7407,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("name", sorted(sources.LOOKUP_SOURCES))
-    async def test_the_lookup_schema_accepts_what_each_source_produces(self, name):
+    async def test_the_lookup_schema_accepts_what_each_source_produces(self, name, monkeypatch):
         """The other end of the same guarantee: the dictionary must build.
 
         `as_lookup()` names `isbn` as required and coerces only `title`, and
@@ -7267,11 +7415,7 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
         without an ISBN is a 500 rather than a bad answer. This constructs the
         model the route constructs.
         """
-        host, response = self._bodies()[name]
-        with respx.mock(assert_all_called=False) as mock:
-            silence_covers(mock)
-            mock.get(url__startswith=host).mock(return_value=response)
-            result = await metadata._lookup_one(targets.SEEDED[name], self.ISBN, "a-key", credential=None)
+        result = await self._asked(name, monkeypatch)
 
         assert result.record is not None
         assert BookLookup(**result.record.as_lookup()).isbn == self.ISBN
@@ -7281,26 +7425,26 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 #:
 #: **One property of its own, and breadth beyond it.** The rotations carry
 #: position and precedence; what this buys and they cannot is adjacency. The
-#: rotations are one circular arrangement cut seventeen ways, so all seventeen put the
+#: rotations are one circular arrangement cut twenty ways, so all twenty put the
 #: same pairs **next to each other in the lookup chain**: one adjacency per
-#: source, so 15 of the 210 ordered pairs, and the sample takes that to 210 of 210.
+#: source, so 18 of the 306 ordered pairs, and the sample takes that to 306 of 306.
 #:
 #: **"Next to each other" means in the chain and never in the roster**, and the
 #: two are different numbers: `bnf` and `loc` sit side by side at the end of
 #: `DEFAULT_ORDER` and are never asked, so counting roster adjacencies with both
-#: endpoints a lookup source gives 14 rather than 15. The chain is what `lookup`
+#: endpoints a lookup source gives 17 rather than 18. The chain is what `lookup`
 #: walks, and it is what both tests below collect.
 #:
 #: Neither figure is left stated.
-#: `test_the_rotations_are_one_circular_arrangement` recomputes the 15 from the
-#: roster and `test_every_source_is_tried_next_to_every_other` the 210, so lowering
+#: `test_the_rotations_are_one_circular_arrangement` recomputes the 18 from the
+#: roster and `test_every_source_is_tried_next_to_every_other` the 306, so lowering
 #: this constant fails rather than quietly staling the figures below.
 #:
 #: **It is not a coverage figure and must not be read as one**, and the unit is
-#: the trap in it. The 217 orders reach 215 of the **1,307,674,368,000 distinct
-#: lookup chains** the fifteen lookup sources can be put in, which is
-#: 0.00000002%. Measured
-#: 2026-11-16; the figure that stood here quoted a denominator whose unit no
+#: the trap in it. The 220 orders reach 218 of the **6,402,373,705,728,000
+#: distinct lookup chains** the eighteen lookup sources can be put in, which is
+#: 0.000000000003%. Measured
+#: 2026-11-17; the figure that stood here quoted a denominator whose unit no
 #: reader could reconstruct, and it was stale in both numbers besides.
 _SAMPLED_ORDERS = 200
 
@@ -7325,8 +7469,8 @@ def _rotations[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
     **Its own function so the claim can be tested on it alone.** The claims held
     for the whole set with this deleted, because 200 sampled orders happen to
     cover every cell and every pair on their own, so a test over the whole set
-    left this family at "a docstring says so". Re-measured at seventeen sources on
-    2026-11-16 through `Plan.lookup_chain` and it still holds, which is a reason
+    left this family at "a docstring says so". Re-measured at twenty sources on
+    2026-11-17 through `Plan.lookup_chain` and it still holds, which is a reason
     to keep this function rather than a reason to trust the sampling: the
     sample reaches every cell and every ordered pair well inside
     `_SAMPLED_ORDERS`, so the margin it leaves is the roster's to spend and
@@ -7348,11 +7492,11 @@ def _orders_worth_asking[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
 
     **The reversed roster and its rotations were here and were measured out.**
     They cover no cell and no pair the rotations do not, and their only
-    contribution, the 15 mirrored **chain** adjacencies, is inside what the sample
+    contribution, the 18 mirrored **chain** adjacencies, is inside what the sample
     already reaches. The unit is named because this is the one adjacency figure
     in this module no test can recompute: the family it counts is gone. In the
-    roster the same figure reads 14, which is the collision `_SAMPLED_ORDERS`
-    describes. Both re-derived on 2026-11-16 at the seventeen sources the roster
+    roster the same figure reads 17, which is the collision `_SAMPLED_ORDERS`
+    describes. Both re-derived on 2026-11-17 at the twenty sources the roster
     now holds, and both had gone stale unnoticed, which is the reading to take
     from a figure whose family no longer exists. A family kept for a property
     another family already carries is a reason a reviewer agrees with and a hole
@@ -7392,9 +7536,9 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     **This enumerated the roster's permutations and no longer does.** Enumeration
     is factorial in the roster and the roster grows: a ninth source multiplied the
     work ninefold overnight and a tenth would have multiplied it again, with the
-    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is **217**
-    orders where `itertools.permutations` over seventeen sources is
-    **355,687,428,096,000**,
+    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is **220**
+    orders where `itertools.permutations` over twenty sources is
+    **2,432,902,008,176,640,000**,
     and it grows by one per source rather than by a factor of it.
 
     **Both figures are recomputed by
@@ -7445,6 +7589,9 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         CatalogueSource.BNU: URUGUAYAN_ISBN,
         CatalogueSource.BN_PL: POLISH_ISBN,
         CatalogueSource.KB_DK: DANISH_ISBN,
+        CatalogueSource.SBN: ITALIAN_ISBN,
+        CatalogueSource.PORBASE: PORTUGUESE_ISBN,
+        CatalogueSource.OSZK: HUNGARIAN_ISBN,
     }
 
     def _plan(self, order: tuple[CatalogueSource, ...]) -> sources.Plan:
@@ -7572,7 +7719,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         one was copied under two readings at once.
 
         The unit is adjacency **in the lookup chain**. In the roster the answer
-        is 14, because `bnf` and `loc` are adjacent and neither is ever asked, and
+        is 17, because `bnf` and `loc` are adjacent and neither is ever asked, and
         that reading is the one to refuse: it counts positions `lookup` cannot
         see.
         """
@@ -7586,17 +7733,17 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     def test_every_source_is_tried_next_to_every_other(self):
         """The sample's one purchase, recomputed rather than stated.
 
-        The rotations are one circular arrangement cut seventeen ways, so all
-        seventeen put the same 15 of the 210 ordered pairs next to each other in
+        The rotations are one circular arrangement cut twenty ways, so all
+        twenty put the same 18 of the 306 ordered pairs next to each other in
         the chain, which `test_the_rotations_are_one_circular_arrangement` is
-        what says; the other 195 come from the sample. Nothing else here notices
+        what says; the other 288 come from the sample. Nothing else here notices
         `_SAMPLED_ORDERS` being lowered, and three figures in this module move
         with it.
 
         **A red here means the sample is too small for a roster that grew, not
         that the chain is broken**, and that is the one thing to know before
         chasing it: this is the only property the construction reaches
-        statistically rather than by construction. At seed 0 and seventeen sources
+        statistically rather than by construction. At seed 0 and twenty sources
         the sample reaches every adjacency inside `_SAMPLED_ORDERS`; re-derive the
         margin before lowering it, since no figure for it is kept.
         """
@@ -7971,7 +8118,17 @@ class TestThePlaintextSourcesAreCounted:
     #: Number words as the docs spell them. Deliberately not a digit parse: the
     #: docs are prose and spell these out, and a test that accepted either would
     #: pass on a sentence no reviewer would let through.
-    WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five"}
+    WORDS = {
+        1: "one",
+        2: "two",
+        3: "three",
+        4: "four",
+        5: "five",
+        6: "six",
+        7: "seven",
+        8: "eight",
+        9: "nine",
+    }
 
     #: The sentence that went stale, which names no number and so cannot be
     #: caught by counting words.
@@ -8010,11 +8167,14 @@ class TestThePlaintextSourcesAreCounted:
         because what it refused is a plaintext endpoint reintroduced as a
         constant beside the rows, and dropping it to follow the data would be a
         guard that got narrower in the round its subject moved.
+
+        **A row counts unless it is `https://`**, because a `z3950://` address is
+        plaintext too: the protocol here has no TLS form.
         """
         found = {
             f"{target.source.value}.base_url": target.base_url
             for target in targets.SEEDED.values()
-            if target.base_url.startswith("http://")
+            if not target.base_url.startswith("https://")
         }
         for module in (metadata, targets, google_books):
             found.update(
@@ -8025,6 +8185,11 @@ class TestThePlaintextSourcesAreCounted:
                 }
             )
         return found
+
+    def test_a_z3950_row_is_counted_as_plaintext(self, monkeypatch):
+        row = z3950_row()
+        monkeypatch.setattr(targets, "SEEDED", {**targets.SEEDED, row.source: row})
+        assert self.plaintext()[f"{row.source.value}.base_url"] == row.base_url
 
     @staticmethod
     def mentions_only(text: str, phrase: str) -> bool:
@@ -8068,14 +8233,14 @@ class TestThePlaintextSourcesAreCounted:
                 index = flat.find(phrase, index + 1)
         return True
 
-    def test_the_set_is_the_five_this_repository_has_accepted(self):
+    def test_the_set_is_the_eight_this_repository_has_accepted(self):
         """The guard's own subject, pinned.
 
         Without this the test passes on an empty set, which is what it would
         compute if every endpoint moved to HTTPS or was renamed.
 
-        **The last two are the ones that carry a login**, which is a different
-        exposure from the other three rather than more of the same: a plaintext
+        **The BNA and the BNU are the ones that carry a login**, which is a
+        different exposure from the other six rather than more of the same: a plaintext
         request that authenticates puts an `Authorization` header on the wire.
         `targets.SEEDED[CatalogueSource.BNA]` carries what that costs and why the
         library offers nothing else.
@@ -8086,13 +8251,16 @@ class TestThePlaintextSourcesAreCounted:
             "nkp.base_url",
             "bna.base_url",
             "bnu.base_url",
+            "sbn.base_url",
+            "porbase.base_url",
+            "oszk.base_url",
         }
 
     def test_the_legend_states_the_current_count(self):
         legend = (BACKEND.parent / "docs" / "legend.md").read_text(encoding="utf-8")
         expected = self.WORDS[len(self.plaintext())]
 
-        assert f"One of the {expected} sources fetched over plaintext HTTP" in legend
+        assert f"One of the {expected} sources reached without TLS" in legend
 
     def test_the_security_note_states_the_current_count(self):
         security = (BACKEND.parent / "docs" / "security.md").read_text(encoding="utf-8")
@@ -8118,7 +8286,7 @@ class TestThePlaintextSourcesAreCounted:
         # of this test read the raw text and failed on prose that was correct.
         flat = " ".join(module.replace("#:", " ").split())
 
-        assert f"**{expected}** targets are plain HTTP" in flat
+        assert f"**{expected}** targets speak no TLS" in flat
 
     def test_no_document_asserts_a_single_plaintext_catalogue(self):
         """The retired sentence may be quoted, and may not be said.
@@ -8699,7 +8867,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
         (
             name
             for name, row in targets.SEEDED.items()
-            if row.answers_lookup and row.transport is not targets.Transport.SRU
+            if row.answers_lookup and row.transport is targets.Transport.BESPOKE
         ),
         key=lambda name: name.value,
     )
@@ -8816,7 +8984,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
             shipped_credential=targets.ShippedCredential("u", "p"),
         )
 
-        with pytest.raises(ValueError, match="no bespoke door carries one"):
+        with pytest.raises(ValueError, match="its door carries none"):
             metadata.resolve(row)
 
     async def test_the_row_is_read_and_not_the_tables_key_set(self, monkeypatch):
@@ -8942,7 +9110,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
             secret=targets.Secret.NONE,
         )
 
-        with pytest.raises(ValueError, match="no bespoke door carries one"):
+        with pytest.raises(ValueError, match="its door carries none"):
             metadata.resolve(row)
 
     def test_a_lookup_only_row_is_refused_by_the_same_rule(self):
@@ -8962,7 +9130,7 @@ class TestOnlyTheKeysOwnerIsHandedIt:
             secret=targets.Secret.NONE,
         )
 
-        with pytest.raises(ValueError, match="no bespoke door carries one"):
+        with pytest.raises(ValueError, match="its door carries none"):
             metadata.resolve(row)
 
     def test_the_roster_holds_a_door_of_each_kind(self):
@@ -9002,23 +9170,327 @@ class TestWhichDoorCarriesALogin:
         assert self.ASKED
 
     @pytest.mark.parametrize("source", ASKED, ids=lambda source: source.value)
-    async def test_the_rule_predicts_what_reaches_the_wire(self, source):
+    async def test_the_rule_predicts_what_reaches_the_wire(self, source, monkeypatch):
         target = targets.SEEDED[source]
         login = credentials.Credential(credentials.origin_of(target.base_url), "alice", "hunter2")
 
-        with respx.mock(assert_all_called=False) as mock:
-            silence_catalogues(mock)
-            await metadata._lookup_one(target, self.ISBN, "a-key", credential=login)
-            # Read inside the block: respx clears the router's call log on exit,
-            # and an empty log after it looks exactly like a source never asked.
-            asked = [call.request for call in mock.calls if str(call.request.url).startswith(target.base_url)]
+        if target.transport is targets.Transport.Z3950:
+            asked, sent = await self._through_the_z3950_client(target, login, monkeypatch)
+        else:
+            with respx.mock(assert_all_called=False) as mock:
+                silence_catalogues(mock)
+                await metadata._lookup_one(target, self.ISBN, "a-key", credential=login)
+                # Read inside the block: respx clears the router's call log on exit,
+                # and an empty log after it looks exactly like a source never asked.
+                requests = [
+                    call.request for call in mock.calls if str(call.request.url).startswith(target.base_url)
+                ]
+            asked = bool(requests)
+            sent = any("authorization" in request.headers for request in requests)
 
         assert asked, f"{source.value} was never asked, so its verdict is vacuous"
-        sent = any("authorization" in request.headers for request in asked)
 
         assert sent is metadata.carries_a_credential(target), (
             f"{source.value}: the rule says {metadata.carries_a_credential(target)} and the wire says {sent}"
         )
+
+    async def _through_the_z3950_client(
+        self, target: targets.Target, login: credentials.Credential, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[bool, bool]:
+        """Whether the client was asked, and whether the login reached anything it was handed.
+
+        The Z39.50 wire is what `z3950.Client` receives, its target and every
+        query, so the password appearing anywhere in that is the login sent.
+        """
+        client = FakeClient(session=FakeSession(hits=0))
+        monkeypatch.setattr(z3950, "_default_client", lambda: client)
+        await metadata._lookup_one(target, self.ISBN, "a-key", credential=login)
+        handed = repr(client.opens) + repr(client.session.log)
+        return bool(client.opens), "hunter2" in handed or "alice" in handed
+
+
+class _HoldsOnlyTheTenDigitForm(FakeSession):
+    """A target that finds The Great Gatsby only under its ISBN-10."""
+
+    def search(self, pqf: str) -> int:
+        hits = super().search(pqf)
+        return hits if '"0743273567"' in pqf else 0
+
+
+@dataclass
+class _MissesThenRefuses(FakeSession):
+    """A target that answers no hits for the first search and refuses every later one."""
+
+    refused: Exception = field(default_factory=lambda: z3950.Refused(101, "Access-control failure"))
+
+    def search(self, pqf: str) -> int:
+        first = not self.searched
+        super().search(pqf)
+        if first:
+            return 0
+        raise self.refused
+
+
+@dataclass
+class _RefusesAsTemporary(FakeSession):
+    """A target that refuses its first `times` searches with Bib-1 diagnostic 2, then answers."""
+
+    times: int = 1
+
+    def search(self, pqf: str) -> int:
+        hits = super().search(pqf)
+        if len(self.searched) <= self.times:
+            raise z3950.Refused(2, "Temporary system error", temporary=True)
+        return hits
+
+
+class TestTheIsbn10RetryMovesOnFromAMissOnly:
+    """The retry at the SRU door, on a row that sets it: `_first_answer` asks
+    the ten digit form only after a miss, so a refusal is not asked twice and a
+    miss then a hit is found."""
+
+    ISBN = "9780743273565"
+
+    @staticmethod
+    def _row() -> targets.Target:
+        return dataclasses.replace(targets.SEEDED[CatalogueSource.K10PLUS], retries_as_isbn10=True)
+
+    async def _asked(self, *bodies: str) -> tuple[metadata.Lookup, list[str]]:
+        with respx.mock(assert_all_called=False) as mock:
+            route = mock.get(url__startswith=K10PLUS).mock(side_effect=[_xml(body) for body in bodies])
+            result = await metadata._sru_lookup(self._row(), self.ISBN, None)
+            sent = [str(call.request.url) for call in route.calls]
+        return result, sent
+
+    async def test_a_refusal_is_unavailable_and_asked_once(self):
+        result, sent = await self._asked(BNA_UNAUTHENTICATED, K10PLUS_RECORD)
+
+        assert result.outcome is Outcome.UNAVAILABLE
+        assert len(sent) == 1
+
+    async def test_a_miss_then_a_hit_is_found_on_the_second_request(self):
+        result, sent = await self._asked(K10PLUS_EMPTY, K10PLUS_RECORD)
+
+        assert result.outcome is Outcome.FOUND
+        assert len(sent) == 2
+        assert "0743273567" in sent[1]
+
+
+class TestTheZ3950DoorIsBehindTheSameDispatch:
+    """A Z39.50 row reaches its door through `_DOORS`, and the seam's bounds hold there.
+
+    Every client is `test_z3950`'s fake, installed as the seam's default, so
+    nothing here opens a socket. The records arrive as the client renders them,
+    MARCXML in UTF-8.
+    """
+
+    ISBN = "9780743273565"
+
+    @staticmethod
+    def _rendered(*, pad: int = 0) -> z3950.Record:
+        """One record as the client hands it over, with `pad` bytes of comment after it."""
+        raw = _marc_record(isbn=TestTheZ3950DoorIsBehindTheSameDispatch.ISBN).encode()
+        if pad:
+            raw += b"<!--" + b"x" * pad + b"-->"
+        return z3950.Record(syntax=z3950.Syntax.MARC21, reported="USmarc", raw=raw)
+
+    @staticmethod
+    def _install(monkeypatch, session: FakeSession) -> FakeClient:
+        client = FakeClient(session=session)
+        monkeypatch.setattr(z3950, "_default_client", lambda: client)
+        return client
+
+    def _lookup(self, row: targets.Target | None = None) -> metadata.Lookup:
+        return asyncio.run(metadata._lookup_one(row or z3950_row(), self.ISBN, "", credential=None))
+
+    def test_a_lookup_goes_out_of_the_z3950_door_and_is_read_by_the_rows_reader(self, monkeypatch):
+        client = self._install(monkeypatch, FakeSession(records=[self._rendered()]))
+
+        result = self._lookup()
+
+        assert result.outcome is Outcome.FOUND
+        assert result.record is not None
+        assert result.record.title == "The Great Gatsby"
+        assert client.opens[0][0] == z3950_row().z3950_target
+        assert client.session.searched == [z3950.isbn_query(self.ISBN)]
+
+    def test_a_miss_is_asked_again_as_an_isbn10_on_the_same_association(self, monkeypatch):
+        """The row's retry: the catalogue indexes the book under the ten digit
+        form its record states, and the reader still checks the thirteen."""
+        record = z3950.Record(
+            syntax=z3950.Syntax.MARC21, reported="USmarc", raw=_marc_record(isbn="0743273567").encode()
+        )
+        client = self._install(monkeypatch, _HoldsOnlyTheTenDigitForm(records=[record]))
+
+        result = self._lookup(z3950_row(retries_as_isbn10=True))
+
+        assert result.outcome is Outcome.FOUND
+        assert client.session.searched == [z3950.isbn_query(self.ISBN), z3950.isbn_query("0743273567")]
+        assert len(client.opens) == 1
+
+    def test_a_miss_then_a_refusal_is_unavailable_rather_than_a_miss(self, monkeypatch):
+        """The ten digit search refused after the thirteen missed. The retry
+        moves on from a miss only, and the refusal is the answer."""
+        client = self._install(monkeypatch, _MissesThenRefuses())
+
+        result = self._lookup(z3950_row(retries_as_isbn10=True))
+
+        assert result.outcome is Outcome.UNAVAILABLE
+        assert client.session.searched == [z3950.isbn_query(self.ISBN), z3950.isbn_query("0743273567")]
+
+    def test_a_temporary_refusal_then_an_answer_is_found_on_the_same_association(self, monkeypatch):
+        client = self._install(monkeypatch, _RefusesAsTemporary(records=[self._rendered()]))
+
+        assert self._lookup().outcome is Outcome.FOUND
+        assert client.session.searched == [z3950.isbn_query(self.ISBN)] * 2
+        assert len(client.opens) == 1
+
+    def test_three_temporary_refusals_are_unavailable_after_exactly_three_asks(self, monkeypatch):
+        """The bound, `_TEMPORARY_REFUSAL_RETRIES`: a target that keeps saying
+        "temporary" is asked three times and no more, then reads as a refusal."""
+        client = self._install(monkeypatch, _RefusesAsTemporary(times=10**6, records=[self._rendered()]))
+
+        assert self._lookup().outcome is Outcome.UNAVAILABLE
+        assert client.session.searched == [z3950.isbn_query(self.ISBN)] * 3
+
+    @pytest.mark.parametrize(
+        "refused",
+        [z3950.Refused(101, "Access-control failure"), z3950.Refused(2, "Code 2 in a set that is not Bib-1")],
+        ids=["another diagnostic", "code 2 not marked temporary"],
+    )
+    def test_a_refusal_that_is_not_temporary_is_not_asked_again(self, monkeypatch, refused):
+        client = self._install(monkeypatch, FakeSession(search_error=refused))
+
+        assert self._lookup().outcome is Outcome.UNAVAILABLE
+        assert client.session.searched == [z3950.isbn_query(self.ISBN)]
+
+    def test_a_row_that_does_not_retry_asks_once(self, monkeypatch):
+        client = self._install(monkeypatch, _HoldsOnlyTheTenDigitForm())
+
+        assert self._lookup().outcome is Outcome.NOT_FOUND
+        assert client.session.searched == [z3950.isbn_query(self.ISBN)]
+
+    def test_zero_hits_is_a_miss_and_asks_for_no_record(self, monkeypatch):
+        client = self._install(monkeypatch, FakeSession(hits=0))
+
+        assert self._lookup().outcome is Outcome.NOT_FOUND
+        assert client.session.fetched == []
+
+    def test_a_refusal_is_unavailable_rather_than_a_miss(self, monkeypatch):
+        refused = z3950.Refused(101, "Access-control failure")
+        self._install(monkeypatch, FakeSession(search_error=refused))
+
+        assert self._lookup().outcome is Outcome.UNAVAILABLE
+
+    def test_a_record_that_is_not_xml_is_unavailable(self, monkeypatch):
+        """What an unrendered ISO 2709 record would be, had the client handed one over."""
+        raw = z3950.Record(syntax=z3950.Syntax.MARC21, reported="USmarc", raw=b"00042nam a2200025 a 4500\x1e")
+        self._install(monkeypatch, FakeSession(records=[raw]))
+
+        assert self._lookup().outcome is Outcome.UNAVAILABLE
+
+    def test_the_byte_bound_holds_on_this_door(self, monkeypatch):
+        """A record that parses and claims the ISBN, one byte past the seam's cap.
+
+        **The pad is what makes this discriminate**: the record is valid XML
+        either side of the cap, so only `z3950.MAX_RESPONSE_BYTES` refuses it.
+        The control a byte under is found.
+        """
+        under = self._rendered()
+        padding = z3950.MAX_RESPONSE_BYTES - len(under.raw) - len(b"<!---->")
+        self._install(monkeypatch, FakeSession(records=[self._rendered(pad=padding)]))
+        assert self._lookup().outcome is Outcome.FOUND
+
+        self._install(monkeypatch, FakeSession(records=[self._rendered(pad=padding + 1)]))
+        assert self._lookup().outcome is Outcome.UNAVAILABLE
+
+    def test_the_deadline_holds_on_this_door(self, monkeypatch):
+        """A target still answering at the seam's deadline is unavailable, at the deadline."""
+        held = Event()
+        self._install(monkeypatch, FakeSession(held=held))
+        monkeypatch.setattr(z3950, "TIMEOUT_SECONDS", 0.5)
+        started = time.monotonic()
+        try:
+            result = self._lookup()
+        finally:
+            held.set()
+
+        assert result.outcome is Outcome.UNAVAILABLE
+        assert time.monotonic() - started < HELD_SECONDS
+
+    def test_the_record_count_is_the_rows_whatever_the_hit_count(self, monkeypatch):
+        client = self._install(monkeypatch, FakeSession(hits=10_000, records=[self._rendered()]))
+
+        self._lookup(z3950_row(lookup_records=2))
+
+        assert client.session.fetched == [0, 1]
+
+    def test_a_title_search_goes_out_of_the_same_door(self, monkeypatch):
+        client = self._install(monkeypatch, FakeSession(records=[self._rendered()]))
+
+        found = asyncio.run(metadata._search_one(z3950_row(), "great gatsby", 5, "", credential=None))
+
+        assert [record.title for record in found] == ["The Great Gatsby"]
+        assert client.session.searched == [z3950.title_query("great gatsby")]
+
+    def test_a_failed_search_is_no_matches(self, monkeypatch):
+        self._install(monkeypatch, FakeSession(search_error=z3950.Unreachable("down")))
+
+        assert asyncio.run(metadata._search_one(z3950_row(), "great gatsby", 5, "", credential=None)) == []
+
+    def test_the_door_carries_no_login_and_says_so(self):
+        assert metadata.carries_a_credential(z3950_row()) is False
+
+    def test_a_z3950_row_resolves(self):
+        metadata.resolve(z3950_row())
+
+    def test_a_record_in_another_syntax_is_dropped_rather_than_read(self, monkeypatch, caplog):
+        """Plant C: a UNIMARC labelled record on a MARC21 row, ahead of a MARC21 one.
+
+        Both claim the ISBN, so a door reading the substitution answers with its
+        title; the one dropping it answers with the honoured record's.
+        """
+        substituted = z3950.Record(
+            syntax=z3950.Syntax.UNIMARC,
+            reported="Unimarc",
+            raw=_marc_record(isbn=self.ISBN, title='<subfield code="a">Substituted</subfield>').encode(),
+        )
+        self._install(monkeypatch, FakeSession(hits=2, records=[substituted, self._rendered()]))
+
+        with caplog.at_level(logging.WARNING, logger=metadata.logger.name):
+            result = self._lookup()
+
+        assert result.record is not None
+        assert result.record.title == "The Great Gatsby"
+        assert "answered a marc21 request with a Unimarc record (unimarc); dropped" in caplog.text
+
+    def test_hits_with_every_record_dropped_is_unavailable_rather_than_a_miss(self, monkeypatch):
+        """A miss tells a member to type the book in by hand; this target holds it.
+
+        The one record is substituted, so nothing survives the drop while the
+        target counted a hit. Read as zero hits, a target that always
+        substitutes, or one whose records the client cannot render, would be
+        a miss on every lookup with only a log line saying otherwise.
+        """
+        substituted = z3950.Record(syntax=z3950.Syntax.UNIMARC, reported="Unimarc", raw=self._rendered().raw)
+        self._install(monkeypatch, FakeSession(hits=1, records=[substituted]))
+
+        assert self._lookup().outcome is Outcome.UNAVAILABLE
+
+    def test_resolve_reads_the_readers_off_the_rows_door(self, monkeypatch):
+        """The boot check asks the same row of `_DOORS` the dispatch does.
+
+        A door that serves no reader refuses a row naming one; before, `resolve`
+        served every non bespoke transport the XML tables whatever its door said.
+        """
+        doors = dict(metadata._DOORS)
+        doors[targets.Transport.Z3950] = dataclasses.replace(
+            doors[targets.Transport.Z3950], lookup_readers=lambda _target: frozenset()
+        )
+        monkeypatch.setattr(metadata, "_DOORS", doors)
+
+        with pytest.raises(ValueError, match="answers a lookup"):
+            metadata.resolve(z3950_row())
 
 
 class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
@@ -9445,3 +9917,179 @@ class TestLookupVolume:
 
         assert result.outcome is metadata.Outcome.NOT_FOUND
         assert route.call_count == 0
+
+
+# ── UNIMARC ───────────────────────────────────────────────────────────────────
+
+#: Captured 2026-11-16 over Z39.50 as ISO 2709 and rendered to MARCXML by
+#: libyaz; each file's header names its target, its queries and the rendering.
+PORBASE_UNIMARC: Final = BACKEND / "tests" / "fixtures" / "unimarc_porbase_2026_11_16.xml"
+SBN_UNIMARC: Final = BACKEND / "tests" / "fixtures" / "unimarc_sbn_2026_11_16.xml"
+
+_UNIMARC: Final = decoders.Decoding(source="porbase", reader=decoders.Reader.UNIMARC)
+
+
+def _unimarc_book(leader: str, *fields: str) -> ElementTree.Element:
+    """A UNIMARC record titled `Stoner`, with `fields` after the title."""
+    return ElementTree.fromstring(
+        f'<record xmlns="{marc_fields.NAMESPACE}"><leader>{leader}</leader>'
+        '<datafield tag="200" ind1="1" ind2=" "><subfield code="a">Stoner</subfield></datafield>'
+        f"{''.join(fields)}</record>"
+    )
+
+
+class TestAUnimarcRecordIsReadThroughTheCrosswalk:
+    """`metadata._marc21_from_unimarc`, read by the MARC21 reader, on records
+    from both catalogues measured to answer UNIMARC: one in ISO 5426, one in
+    UTF-8. Each assertion is a field the crosswalk moves or respells."""
+
+    def test_a_porbase_record_reads_as_the_book_it_describes(self):
+        """The primary author is `700` and the translator a `702` with `$4 730`,
+        which is not an author. `308, [3] p.` is ISBD's unnumbered sequence."""
+        node = ElementTree.parse(PORBASE_UNIMARC).getroot()[0]
+
+        record = metadata.READERS[decoders.Reader.UNIMARC](node, _UNIMARC)
+
+        assert record is not None
+        assert (record.isbn, record.title, record.author) == (
+            "9789720036155",
+            "Um homem chamado Ove",
+            "Fredrik Backman",
+        )
+        assert (record.publisher, record.year, record.language, record.page_count) == (
+            "Porto Editora",
+            2023,
+            "pt",
+            308,
+        )
+
+    def test_an_sbn_record_loses_its_non_sorting_markers(self):
+        """The SBN writes U+0088 and U+0089 around a leading article in UTF-8,
+        which `marc_fields` does not strip unless the crosswalk respells them."""
+        node = ElementTree.parse(SBN_UNIMARC).getroot()[0]
+
+        record = metadata.READERS[decoders.Reader.UNIMARC](node, _UNIMARC)
+
+        assert record is not None
+        assert (record.title, record.subtitle, record.author) == (
+            "La democrazia di Dio",
+            "la religione americana nell'era dell'impero e del terrore",
+            "Emilio Gentile",
+        )
+        assert record.subjects[0] == Subject("Religione e politica", "fi", None)
+        assert [heading.number for heading in record.headings] == ["973.931"]
+
+    @pytest.mark.parametrize(
+        ("position", "why"),
+        [(2, "a sound recording, leader/06 j"), (3, "an analytic, leader/07 a")],
+    )
+    def test_a_record_that_is_not_a_book_is_refused(self, position, why):
+        node = ElementTree.parse(SBN_UNIMARC).getroot()[position]
+
+        assert metadata.READERS[decoders.Reader.UNIMARC](node, _UNIMARC) is None, why
+
+    @pytest.mark.parametrize(
+        ("record_type", "is_a_book"),
+        [
+            # UNIMARC `m` is multimedia, which MARC21 spells `o` and admits.
+            ("m", True),
+            # UNIMARC `l` is computer media, which MARC21 spells `m` and refuses.
+            ("l", False),
+        ],
+    )
+    def test_the_record_type_is_respelled_before_it_is_read(self, record_type, is_a_book):
+        node = _unimarc_book(f"00000n{record_type}m  2200000   4500")
+
+        record = metadata.READERS[decoders.Reader.UNIMARC](node, _UNIMARC)
+
+        assert (record is not None) is is_a_book
+
+    def test_an_electronic_form_of_item_is_refused(self):
+        """`106 $a s` reaches `008/23`, where MARC21's `s` is electronic too."""
+        electronic = '<datafield tag="106" ind1=" " ind2=" "><subfield code="a">s</subfield></datafield>'
+
+        read = metadata.READERS[decoders.Reader.UNIMARC]
+
+        assert read(_unimarc_book("00000nam  2200000   4500"), _UNIMARC)
+        assert read(_unimarc_book("00000nam  2200000   4500", electronic), _UNIMARC) is None
+
+    def test_a_701_or_702_is_a_co_author_only_when_its_relator_is_070(self):
+        """Relator `070` is what the crosswalk turns into `aut`, and a MARC21
+        `700` with no author relator is not counted; the UNIMARC `700` becomes
+        `100`, the main author. `730` is a translator."""
+        credits = (
+            '<datafield tag="700" ind1=" " ind2="1"><subfield code="a">Exemplo,</subfield>'
+            '<subfield code="b">Ana</subfield></datafield>'
+            '<datafield tag="701" ind1=" " ind2="1"><subfield code="a">Outra,</subfield>'
+            '<subfield code="b">Bea</subfield><subfield code="4">070</subfield></datafield>'
+            '<datafield tag="702" ind1=" " ind2="1"><subfield code="a">Terceira,</subfield>'
+            '<subfield code="b">Cris</subfield><subfield code="4">070</subfield></datafield>'
+            '<datafield tag="702" ind1=" " ind2="1"><subfield code="a">Tradutor,</subfield>'
+            '<subfield code="b">Tom</subfield><subfield code="4">730</subfield></datafield>'
+        )
+
+        node = _unimarc_book("00000nam  2200000   4500", credits)
+
+        record = metadata.READERS[decoders.Reader.UNIMARC](node, _UNIMARC)
+
+        assert record is not None
+        assert record.author == "Ana Exemplo, Bea Outra, Cris Terceira"
+
+    @pytest.mark.parametrize(
+        ("title", "expected"),
+        [
+            # `$h` and `$i` are the volume's number and name: `245 $n` and `$p`.
+            (
+                '<subfield code="a">Saga</subfield><subfield code="h">2</subfield>'
+                '<subfield code="i">Il ritorno</subfield>',
+                ("Il ritorno", None, "Saga", 2.0),
+            ),
+            # `$d`, a parallel title, becomes `245 $b`.
+            (
+                '<subfield code="a">Stoner</subfield><subfield code="d">Stoner in English</subfield>',
+                ("Stoner", "Stoner in English", None, None),
+            ),
+        ],
+    )
+    def test_a_title_s_parts_reach_the_245_subfields_that_read_them(self, title, expected):
+        node = ElementTree.fromstring(
+            f'<record xmlns="{marc_fields.NAMESPACE}"><leader>00000nam  2200000   4500</leader>'
+            f'<datafield tag="200" ind1="1" ind2=" ">{title}</datafield></record>'
+        )
+
+        record = metadata.READERS[decoders.Reader.UNIMARC](node, _UNIMARC)
+
+        assert record is not None
+        assert (record.title, record.subtitle, record.series_name, record.series_index) == expected
+
+    def test_an_isbn_qualified_in_010_b_loses_to_one_stating_none(self):
+        """`010 $b` is written inline after the number, the legacy qualifier."""
+        isbns = (
+            '<datafield tag="010" ind1=" " ind2=" "><subfield code="a">978-3-16-148410-0</subfield>'
+            '<subfield code="b">broch.</subfield></datafield>'
+            '<datafield tag="010" ind1=" " ind2=" ">'
+            '<subfield code="a">978-0-306-40615-7</subfield></datafield>'
+        )
+
+        node = _unimarc_book("00000nam  2200000   4500", isbns)
+
+        record = metadata.READERS[decoders.Reader.UNIMARC](node, _UNIMARC)
+
+        assert record is not None
+        assert record.isbn == "9780306406157"
+
+    def test_a_lookup_finds_the_record_claiming_the_isbn_among_those_that_do_not(self):
+        root = ElementTree.parse(SBN_UNIMARC).getroot()
+
+        found = metadata._LOOKUP_READERS[decoders.Reader.UNIMARC](root, "9788845926839", _UNIMARC)
+
+        assert found.outcome is Outcome.FOUND
+        assert found.record is not None
+        assert found.record.title == "Chiamate telefoniche"
+
+    def test_a_search_answers_the_books_and_nothing_else(self):
+        root = ElementTree.parse(SBN_UNIMARC).getroot()
+
+        found = metadata._SEARCH_READERS[decoders.Reader.UNIMARC](root, _UNIMARC)
+
+        assert [record.isbn for record in found] == ["9788842080510", "9788845926839"]

@@ -7,6 +7,7 @@ cares about, because the failure is silent in exactly one direction.
 """
 
 import contextlib
+import functools
 import itertools
 import json
 from collections import Counter
@@ -120,14 +121,43 @@ def _tail_by_the_rule(
     return order + waiting
 
 
-def _concentration_of(rows: list[dict], name: str) -> float:
-    """What share of one source's answers sit in its single largest frame.
+def _added(rows: list[dict], name: str, tier: list[str]) -> list[dict]:
+    """The rows one source answers that no other member of `tier` does: what it
+    adds to the tier, or, for a member, what it adds to the rest of it."""
+    others = [other for other in tier if other != name]
+    return [row for row in rows if row[name] == "found" and not any(row[o] == "found" for o in others)]
 
-    Computed from the sample rather than read off `MEASURED`, so the guards that
-    use it cannot agree with the table by construction.
+
+def _concentration_of(rows: list[dict], name: str, tier: list[str]) -> float:
+    """What share of the books one source adds to `tier` sit in their single
+    largest frame, and 0 where it adds none. Over an empty tier that is every
+    answer it gives.
+
+    Computed from the sample, since `MEASURED` holds no figure a tier depends on.
     """
-    per_frame = Counter(row["frame"] for row in rows if row[name] == "found")
-    return max(per_frame.values()) / sum(per_frame.values())
+    per_frame = Counter(row["frame"] for row in _added(rows, name, tier))
+    return max(per_frame.values(), default=0) / max(sum(per_frame.values()), 1)
+
+
+def _shipping_tier() -> list[str]:
+    return [source.value for source in sources.DEFAULT_PLAN.lookup_together]
+
+
+def _may_hold(rows: list[dict], name: str, bound: float) -> bool:
+    """Whether `TIER_MAX_CONCENTRATION`'s rule, at `bound`, lets a tier hold
+    this source.
+
+    **Read against the tier that ships**, so the rule is checked as a fixed
+    point: the tests below build a tier from what this admits and require it to
+    be the tier it was read against. A source adding fewer books than
+    `SLOT_MUST_EARN` is admitted unread, because the share of a handful of
+    books is noise and as a third slot the slot rule refuses it anyway: the
+    BN_PL's 3 and Melinda's 3 sit at exactly two thirds.
+    """
+    tier = _shipping_tier()
+    if len(_added(rows, name, tier)) < sources.SLOT_MUST_EARN:
+        return True
+    return _concentration_of(rows, name, tier) < bound
 
 
 def _p90(values: list[float]) -> float:
@@ -156,9 +186,10 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
     re-running the probe, not running this suite.
 
     **The file is not one run any more, and its name says one date.** Every column
-    but seven is the 2026-08-31 pass; `bne` is a 2026-09-05 pass over the same
-    500 books, `bnu` a 2026-11-07 one and `bn_pl`, `libris`, `kb_dk`, `bibsys` and
-    `melinda` 2026-11-16 ones, each with its `seconds_` column. The coverage
+    but ten is the 2026-08-31 pass; `bne` is a 2026-09-05 pass over the same
+    500 books, `bnu` a 2026-11-07 one, `bn_pl`, `libris`, `kb_dk`, `bibsys` and
+    `melinda` 2026-11-16 ones and `sbn`, `porbase` and `oszk` 2026-11-17 ones,
+    each with its `seconds_` column. The coverage
     counts stay comparable, because those are a property of the books rather
     than of the day. `p90_seconds` is not comparable
     across the two dates in the way `Measured` promises within one, and
@@ -215,15 +246,6 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             measured = _p90([entry[f"seconds_{source.value}"] for entry in rows])
             assert row.p90_seconds == round(measured, 3), source
 
-    def test_each_largest_frame_matches_the_table(self):
-        """`largest_frame` with `answered` is what keeps a national catalogue out
-        of the tier, so it is recomputed rather than asserted."""
-        rows = _sample()
-        for source, row in sources.MEASURED.items():
-            per_frame = Counter(entry["frame"] for entry in rows if entry[source.value] == "found")
-            assert per_frame, source
-            assert row.largest_frame == max(per_frame.values()), source
-
     def test_the_marginal_table_matches_the_sample_and_the_frames(self):
         """`TAIL_MARGINAL` counts books the leading tier missed, which is the
         one figure the tail's order rests on and no per source count holds."""
@@ -278,7 +300,7 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             if _p90([entry[f"seconds_{name}"] for entry in rows]) <= sources.FIRST_TIER_BUDGET_SECONDS
             # The concentration rule, applied here too, or this table prices a
             # tier `_tier_for` cannot build. See `TIER_MAX_CONCENTRATION`.
-            and _concentration_of(rows, name) < sources.TIER_MAX_CONCENTRATION
+            and _may_hold(rows, name, sources.TIER_MAX_CONCENTRATION)
         ]
         for size in range(1, len(within) + 1):
             best = max(
@@ -289,9 +311,9 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             assert sources.TIER_UNION[size] == answered, size
 
     def test_the_tail_marginal_the_order_rests_on_recomputes(self):
-        """`TAIL_MARGINAL` reads 34, 30, 29, 87, 1, 42, 40, 9, 6 and 6, the
-        sample's figures plus the Polish and Danish frames', which its docstring
-        gives one source at a time.
+        """`TAIL_MARGINAL` reads 34, 30, 29, 26, 25, 17, 90, 1, 43, 40, 9, 7 and
+        7, the sample's figures plus the three frames', which its docstring gives
+        one source at a time.
 
         The pooled counts order the tail differently, and that sentence of the
         docstring is pinned at the end here.
@@ -300,11 +322,14 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
         sample = _tail_marginal(_sample())
         frames = _tail_marginal(_frames())
         assert sum(1 for row in _sample() if not any(row[name] == "found" for name in tier)) == 278
-        assert sum(1 for row in _frames() if not any(row[name] == "found" for name in tier)) == 78
+        assert sum(1 for row in _frames() if not any(row[name] == "found" for name in tier)) == 100
         assert sample == {
             CatalogueSource.NLG: 34,
             CatalogueSource.BN_PL: 0,
             CatalogueSource.KB_DK: 0,
+            CatalogueSource.SBN: 26,
+            CatalogueSource.PORBASE: 25,
+            CatalogueSource.OSZK: 0,
             CatalogueSource.OPEN_LIBRARY: 82,
             CatalogueSource.OENB: 1,
             CatalogueSource.NKP: 42,
@@ -317,18 +342,22 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             CatalogueSource.NLG: 0,
             CatalogueSource.BN_PL: 30,
             CatalogueSource.KB_DK: 29,
-            CatalogueSource.OPEN_LIBRARY: 5,
+            CatalogueSource.SBN: 0,
+            CatalogueSource.PORBASE: 0,
+            CatalogueSource.OSZK: 17,
+            CatalogueSource.OPEN_LIBRARY: 8,
             CatalogueSource.OENB: 0,
-            CatalogueSource.NKP: 0,
+            CatalogueSource.NKP: 1,
             CatalogueSource.BNE: 0,
             CatalogueSource.LIBRIS: 3,
-            CatalogueSource.MELINDA: 3,
-            CatalogueSource.BIBSYS: 4,
+            CatalogueSource.MELINDA: 4,
+            CatalogueSource.BIBSYS: 5,
         }
-        # "The pooled rule would ask LIBRIS second and the OeNB ahead of the
-        # NLG": `MEASURED.answered` ranks the same rows that way.
+        # "The pooled rule would ask the SBN second, LIBRIS third and the OeNB
+        # ahead of the NLG": `MEASURED.answered` ranks the same rows that way.
         pooled = sorted(sources.TAIL_MARGINAL, key=lambda source: -sources.MEASURED[source].answered)
-        assert pooled.index(CatalogueSource.LIBRIS) == 1
+        assert pooled.index(CatalogueSource.SBN) == 1
+        assert pooled.index(CatalogueSource.LIBRIS) == 2
         assert pooled.index(CatalogueSource.OENB) < pooled.index(CatalogueSource.NLG)
 
 
@@ -417,10 +446,12 @@ class TestTheOrderFollowsTheMeasurement:
         return row.answered / row.of
 
     @staticmethod
-    def _concentration(source: CatalogueSource) -> float:
-        """What share of a source's answers sit in its single largest frame."""
-        row = sources.MEASURED[source]
-        return row.largest_frame / row.answered
+    @functools.cache
+    def _held(bound: float) -> frozenset[CatalogueSource]:
+        """The sources `_may_hold` admits at `bound`, once per bound: the budget
+        sweep below asks for the same bound some two thousand times."""
+        rows = _sample()
+        return frozenset(source for source in sources.MEASURED if _may_hold(rows, source.value, bound))
 
     @classmethod
     def _within(cls) -> list[CatalogueSource]:
@@ -428,25 +459,24 @@ class TestTheOrderFollowsTheMeasurement:
 
         Two conditions, not one: fast enough to be asked on every lookup, and
         **general** enough to be worth asking on every lookup. See
-        `sources.TIER_MAX_CONCENTRATION` for the second, which the NLG, the NKP
-        and the BNE all fail, at 100%, 83% and 82% of their answers in one
-        frame.
+        `sources.TIER_MAX_CONCENTRATION` for the second, which the SBN, the NLG,
+        the NKP and the BNE fail on the books each adds to the pair that ships.
         """
+        held = cls._held(sources.TIER_MAX_CONCENTRATION)
         return [
             source
             for source in cls._asked_by_a_stock_install()
-            if sources.MEASURED[source].p90_seconds <= sources.FIRST_TIER_BUDGET_SECONDS
-            and cls._concentration(source) < sources.TIER_MAX_CONCENTRATION
+            if sources.MEASURED[source].p90_seconds <= sources.FIRST_TIER_BUDGET_SECONDS and source in held
         ]
 
     @classmethod
     def _tier_for(cls, budget: float, concentration: float | None = None) -> set[CatalogueSource]:
         """The tier the stated rule produces for a given budget and bound."""
-        bound = sources.TIER_MAX_CONCENTRATION if concentration is None else concentration
+        held = cls._held(sources.TIER_MAX_CONCENTRATION if concentration is None else concentration)
         within = [
             source
             for source in cls._asked_by_a_stock_install()
-            if sources.MEASURED[source].p90_seconds <= budget and cls._concentration(source) < bound
+            if sources.MEASURED[source].p90_seconds <= budget and source in held
         ]
         within.sort(key=lambda source: (-cls._rate(source), source.value))
         return set(within[: sources.ALWAYS_ASKED])
@@ -466,13 +496,26 @@ class TestTheOrderFollowsTheMeasurement:
         for source, row in sources.MEASURED.items():
             assert 0 < row.answered <= row.of, source
             assert row.p90_seconds > 0, source
-            # A largest frame bigger than the source's own answer count is a
-            # transcription error; one of zero means it answered nothing, which
-            # `answered` already refuses.
-            assert 0 < row.largest_frame <= row.answered, source
 
     def test_the_tier_holds_the_sources_that_answer_most_inside_the_budget(self):
         assert set(sources.DEFAULT_PLAN.lookup_together) == self._tier_for(sources.FIRST_TIER_BUDGET_SECONDS)
+
+    def test_concentration_is_read_on_what_a_source_adds_to_the_tier(self):
+        """The owner's ruling of 2026-11-17, on the source it decides. Over all
+        its answers the SBN reads general and outranks the DNB, so the rule read
+        that way would ship K10plus with the SBN. Over the 30 books it adds to
+        the pair that ships it does not; the DNB, read the same way, adds 12 to
+        K10plus at 50% and stays."""
+        rows = _sample()
+        bound = sources.TIER_MAX_CONCENTRATION
+        sbn, dnb = CatalogueSource.SBN, CatalogueSource.DNB
+        assert _concentration_of(rows, sbn.value, []) < bound
+        assert self._rate(sbn) > self._rate(dnb)
+        assert len(_added(rows, sbn.value, _shipping_tier())) == 30
+        assert not _may_hold(rows, sbn.value, bound)
+        assert len(_added(rows, dnb.value, _shipping_tier())) == 12
+        assert _concentration_of(rows, dnb.value, _shipping_tier()) == 0.5
+        assert sbn not in sources.DEFAULT_PLAN.lookup_together
 
     def test_nothing_in_the_tier_is_slower_than_the_budget(self):
         """The tier is gathered, so one slow member is paid on every lookup."""
@@ -526,7 +569,7 @@ class TestTheOrderFollowsTheMeasurement:
             name
             for name in SAMPLED
             if _p90([row[f"seconds_{name}"] for row in rows]) <= sources.FIRST_TIER_BUDGET_SECONDS
-            and (not general_only or _concentration_of(rows, name) < sources.TIER_MAX_CONCENTRATION)
+            and (not general_only or _may_hold(rows, name, sources.TIER_MAX_CONCENTRATION))
         ]
 
     def test_the_concentration_rule_is_what_holds_the_tier_at_two(self):
@@ -538,9 +581,9 @@ class TestTheOrderFollowsTheMeasurement:
         nothing. A critic established that against the frame count this replaced.
 
         The size is the decision. `TIER_UNION` unions rather than ranks, so with
-        both national catalogues eligible the best pair is `k10plus + nkp` at 254
-        and the third slot earns **34** against a bar of **10**. With the rule the
-        pair is `dnb + k10plus` at 222 and the third slot earns **1**.
+        the national catalogues eligible the best pair is `k10plus + nkp` at 254
+        and the third slot earns **40** against a bar of **10**. With the rule the
+        pair is `dnb + k10plus` at 222 and the third slot earns **6**.
 
         **Both numbers are computed here rather than quoted**, and an earlier
         version of this docstring quoted a third figure that neither arm produces.
@@ -573,20 +616,16 @@ class TestTheOrderFollowsTheMeasurement:
         The tier must be the same for every bound between the most concentrated
         source it keeps and the least concentrated one it excludes, or the
         constant is sitting on an edge and the next remeasurement moves it.
-        Measured: 55% kept, 82% excluded, and two thirds sits 43% into that.
-
-        **The excluded end moved when the roster grew and this sentence did
-        not**, which is the failure this file's own subject is. It read 83%, the
-        NKP's, until the BNE arrived at 82.5% and became the least concentrated
-        excluded source. The assertion below stayed green throughout, because
-        43.4% is inside its bound exactly as 42% was: a stated measurement can
-        stop being true without anything failing, and only re-deriving it says
-        so.
+        Read over what each source adds to the pair that ships, and only where
+        it adds enough to earn a slot: 50% kept, the DNB's, and 87% excluded, the
+        SBN's, and two thirds sits 45% into that.
         """
+        rows = _sample()
+        tier = _shipping_tier()
         kept = self._within()
         # **Excluded by *this* rule, not by the budget.** Open Library is out of
-        # the tier because it is slow, and its concentration is the lowest of
-        # any source, so including it here made the gap run backwards and the
+        # the tier because it is slow, and its concentration is among the lowest
+        # of any source, so including it here made the gap run backwards and the
         # first version of this test failed on the unmutated tree.
         excluded = [
             source
@@ -594,47 +633,44 @@ class TestTheOrderFollowsTheMeasurement:
             if source not in kept
             and sources.MEASURED[source].p90_seconds <= sources.FIRST_TIER_BUDGET_SECONDS
         ]
-        assert kept
+        read = [source for source in kept if len(_added(rows, source.value, tier)) >= sources.SLOT_MUST_EARN]
+        assert read
         assert excluded
-        low = max(self._concentration(s) for s in kept)
-        high = min(self._concentration(s) for s in excluded)
+        low = max(_concentration_of(rows, source.value, tier) for source in read)
+        high = min(_concentration_of(rows, source.value, tier) for source in excluded)
         assert low < sources.TIER_MAX_CONCENTRATION < high
         where = (sources.TIER_MAX_CONCENTRATION - low) / (high - low)
         assert 0.15 <= where <= 0.85, (
             f"{sources.TIER_MAX_CONCENTRATION:.3f} sits {where:.1%} into the gap "
             f"[{low:.3f}, {high:.3f}], which is near enough an edge to be a fit"
         )
-        # **Sweeping the decision the rule makes, which is the tier's size.**
-        # This loop used to sweep `_tier_for`, and could not fail: membership is
-        # `{dnb, k10plus}` at every bound from 0.49 to 1.05, because the rate
-        # rule decides membership on its own. A critic executed it and found
-        # both endpoints producing the same input set. What moves with the bound
-        # is whether a third slot earns its place, so that is what is swept.
+        # **Sweeping the decisions the rule makes, the tier's size and members.**
+        # Across the gap a third slot never earns its place and the pair is the
+        # pair that ships.
         for bound in (low + 0.001, (low + high) / 2, high - 0.001):
             pool = [
                 name
                 for name in SAMPLED
-                if _p90([row[f"seconds_{name}"] for row in _sample()]) <= sources.FIRST_TIER_BUDGET_SECONDS
-                and _concentration_of(_sample(), name) < bound
+                if _p90([row[f"seconds_{name}"] for row in rows]) <= sources.FIRST_TIER_BUDGET_SECONDS
+                and _may_hold(rows, name, bound)
             ]
             earned = self._best_union(pool, 3) - self._best_union(pool, 2)
             assert earned < sources.SLOT_MUST_EARN, (
                 f"at a bound of {bound:.3f} the third slot earns {earned}, so "
                 f"the tier's size is not the same across the gap"
             )
+            assert self._tier_for(sources.FIRST_TIER_BUDGET_SECONDS, bound) == set(
+                sources.DEFAULT_PLAN.lookup_together
+            )
 
-        # **And the margin ends at the gap, not beyond it.** Admitting the NKP
-        # takes the third slot's gain to 10, which meets the bar exactly. So the
-        # gap is the whole of the safety margin on the size decision, where the
+        # **And the margin ends at the gap, not beyond it.** Just past it the SBN
+        # is admitted and takes the DNB's place on pooled rate, so the gap is the
+        # whole of the safety margin on the tier's membership, where the
         # budget's gap leaves room on both sides. Recorded because the two read
         # as the same kind of number and are not.
-        just_over = [
-            name
-            for name in SAMPLED
-            if _p90([row[f"seconds_{name}"] for row in _sample()]) <= sources.FIRST_TIER_BUDGET_SECONDS
-            and _concentration_of(_sample(), name) < high + 0.001
-        ]
-        assert (self._best_union(just_over, 3) - self._best_union(just_over, 2)) >= sources.SLOT_MUST_EARN
+        assert self._tier_for(sources.FIRST_TIER_BUDGET_SECONDS, high + 0.001) != set(
+            sources.DEFAULT_PLAN.lookup_together
+        )
 
     def test_the_union_table_agrees_with_the_per_source_one_where_they_touch(self):
         """The one point at which the two tables can check each other.
@@ -782,7 +818,7 @@ class TestTheOrderFollowsTheMeasurement:
         assert _tail_by_the_rule([r, a, b], marginal, {r: {r: 0, a: 1, b: 1}}) == [a, b, r]
 
     def test_two_rows_on_equal_counts_go_faster_first(self):
-        """The other tie break, which today decides Melinda against BIBSYS at 6
+        """The other tie break, which today decides Melinda against BIBSYS at 7
         each. Handed the slower row first, the rule still puts the faster one
         ahead, so the order cannot rest on which was added last."""
         slow, fast = CatalogueSource.BIBSYS, CatalogueSource.MELINDA
@@ -1412,14 +1448,14 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         tier, tail = _free_plan_names()
         before = sum(_walk(row, tier, tail)[1] for row in rows)
         after = sum(_walk(row, tier, _served_tail(tail, row))[1] for row in rows)
-        assert before == after == 398
+        assert before == after == 429
 
     def test_the_uruguayan_figures_the_prose_states_recompute_from_its_column(self):
         """`metadata`'s block for the BNU, `sources`' stock install paragraph and
         `docs/api.md` state these: 26 found, all in the Uruguayan frame, 8 that
         none of the sources needing no credential holds, and that frame going
-        from 35 of 50 to 43. The 398 plus the 8 is the 406 that the Argentine
-        catalogue's 4, measured once and held by no column, takes to 410."""
+        from 35 of 50 to 43. The 429 plus the 8 is the 437 that the Argentine
+        catalogue's 4, measured once and held by no column, takes to 441."""
         rows = _sample()
         found = [row for row in rows if row[CatalogueSource.BNU.value] == "found"]
         free = [row for row in rows if any(row[name] == "found" for name in SAMPLED)]
@@ -1429,11 +1465,11 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         assert sum(row not in free for row in found) == 8
         assert sum(row in free for row in uruguayan) == 35
         assert sum(row in free or row in found for row in uruguayan) == 43
-        assert sum(row in free or row in found for row in rows) == 406
+        assert sum(row in free or row in found for row in rows) == 437
 
     def test_the_saving_the_constant_claims_recomputes(self):
-        """`SERVES_GROUPS` states 1.832s becoming 1.371s and 1,757 tail requests
-        becoming 891. A number written in prose stops being re-derived and starts
+        """`SERVES_GROUPS` states 2.366s becoming 1.268s and 2,151 tail requests
+        becoming 748. A number written in prose stops being re-derived and starts
         being copied."""
         rows = _sample()
         tier, tail = _free_plan_names()
@@ -1456,10 +1492,10 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         # refuses it, which is correct about the types and wrong about the test.
         plain_seconds, plain_requests = totals(False)
         served_seconds, served_requests = totals(True)
-        assert plain_seconds == pytest.approx(1.832, abs=0.001)
-        assert plain_requests == 1757
-        assert served_seconds == pytest.approx(1.371, abs=0.001)
-        assert served_requests == 891
+        assert plain_seconds == pytest.approx(2.366, abs=0.001)
+        assert plain_requests == 2151
+        assert served_seconds == pytest.approx(1.268, abs=0.001)
+        assert served_requests == 748
 
     def test_skipping_saves_what_demoting_cannot(self):
         """**Why the rule skips rather than demotes**, which is the design this
@@ -1467,13 +1503,12 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         because it cannot lose a book.
 
         Moving a source that cannot answer to the back of the tail models at
-        1.5812s, against 1.8317s asking everything in order and 1.3708s
+        1.6600s, against 2.3663s asking everything in order and 1.2676s
         skipping. Demotion recovers what a dead source costs ahead of the
-        answerer, which is large now that the NLG, the BN_PL and the Royal Danish
-        Library head the tail.
+        answerer, which is large now that six remitted rows head the tail.
         What it cannot recover is the failed lookups: on a row nothing answers
-        every source is asked whatever the order, and the 0.210s between the
-        last two figures is that.
+        every source is asked whatever the order, and the 0.392s between the
+        first and last figures is that.
         """
         rows = _sample()
         tier, tail = _free_plan_names()
@@ -1485,10 +1520,10 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         mean = sum(_walk(row, tier, demoted(row))[0] for row in rows) / len(rows)
         plain = sum(_walk(row, tier, tail)[0] for row in rows) / len(rows)
         skipped = sum(_walk(row, tier, _served_tail(tail, row))[0] for row in rows) / len(rows)
-        assert mean == pytest.approx(1.5812, abs=0.0001)
-        assert plain == pytest.approx(1.8317, abs=0.0001)
-        assert skipped == pytest.approx(1.3708, abs=0.0001)
-        assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 398
+        assert mean == pytest.approx(1.6600, abs=0.0001)
+        assert plain == pytest.approx(2.3663, abs=0.0001)
+        assert skipped == pytest.approx(1.2676, abs=0.0001)
+        assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 429
 
     def test_an_unrestricted_source_is_asked_about_every_isbn(self):
         for group in ("978-3", "978-960", "978-80", None):

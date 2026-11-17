@@ -4930,7 +4930,7 @@ class TestEveryTargetResolvesToADoorAndAReader:
         """Not a restatement of the derivation: it names the roster's answer.
 
         A derivation compared against itself is vacuous, so this writes out what
-        the seventeen rows actually say. A row whose capability changes has to change
+        the twenty rows actually say. A row whose capability changes has to change
         this line too, which is the argument the old test made for writing
         `SEARCH_SOURCES` out rather than deriving it, kept in the one place where
         it still costs nothing.
@@ -4951,6 +4951,9 @@ class TestEveryTargetResolvesToADoorAndAReader:
             "kb_dk",
             "bibsys",
             "melinda",
+            "sbn",
+            "porbase",
+            "oszk",
         }
         assert {source.value for source in sources.SEARCH_SOURCES} == {
             "dnb",
@@ -5092,7 +5095,7 @@ class TestNoModuleHardCodesASourceOrder:
       neither is ever two or more sources and neither is reported.
       `test_dropping_an_exemption_surfaces_only_its_own_literal` is what said
       so: with the entry kept, dropping it surfaced nothing.
-    * `targets.SEEDED`, the seventeen catalogue rows. **A mapping consulted by key**,
+    * `targets.SEEDED`, the twenty catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
       `frozenset`s, which have no order to read. The order a household gets is

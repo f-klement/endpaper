@@ -54,8 +54,10 @@ from enums import (
     OwnershipStatus,
     ReadStatus,
     ReadwiseOutcome,
+    RecordCharset,
     RecordOrigin,
     TagCategory,
+    Transport,
     member_or,
 )
 
@@ -451,13 +453,11 @@ def _enum_check(
     *,
     nullable: bool = False,
     excluding: tuple[StrEnum, ...] = (),
+    only_where: str = "",
 ) -> str:
     """One column's CHECK expression, as an `IN` list derived from its enum.
 
-    **The one home for how an enum list is spelled in this schema**, with one
-    stated exception, `ck_catalogue_targets_transport`. How many constraints
-    that is stays out of this paragraph on purpose: a count beside a rule goes
-    stale against the rule and is then read as current.
+    **The one home for how an enum list is spelled in this schema.**
     `tests/test_models.py::TestNoConstraintSpellsAnEnumListOutByHand` is what
     keeps the claim true, by refusing the shape rather than by counting the
     instances. Written out by hand a list says nothing about the enum it came
@@ -487,6 +487,11 @@ def _enum_check(
     never hold**. Both are arms of the constraint rather than of the caller, so
     that "which members may be stored" has one answer per column and the enum
     keeps naming every member the application reads.
+
+    **`only_where` couples the column to a condition on its row**: a member is
+    required where the condition holds and NULL is required everywhere else.
+    `IS NOT NULL` is written into the required arm because a CHECK passes on
+    NULL, and `NULL IN (...)` is NULL.
 
     **A value outside `[a-z0-9_-]` is refused rather than rendered.** These
     values are source literals and no request reaches them, so this is not an
@@ -523,6 +528,8 @@ def _enum_check(
     if unsafe := [value for value in values if not _ENUM_VALUE.fullmatch(value)]:
         raise ValueError(f"an enum value cannot be spelled into DDL: {unsafe}")
     listed = f"{column} IN (" + ", ".join(f"'{value}'" for value in values) + ")"
+    if only_where:
+        return f"CASE WHEN {only_where} THEN {column} IS NOT NULL AND {listed} ELSE {column} IS NULL END"
     return f"{column} IS NULL OR {listed}" if nullable else listed
 
 
@@ -3736,19 +3743,28 @@ class CatalogueTarget(Base):
             ),
             name="ck_catalogue_targets_isbn_claim",
         ),
-        # **The exception to `_enum_check`, and it is the reason rather than an
-        # oversight.** `targets.Transport` declares `Z3950` and this list leaves
-        # it out on purpose, which `targets.Transport` argues at its own site: a
-        # row may not carry a transport no door serves yet. A derivation would
-        # have to spell that exclusion here as well, against an enum this module
-        # does not import and a column typed `str` rather than as that enum, so
-        # the hand written list is the honest copy. What the derived sites buy
-        # is that a member added to an enum moves the model's text; here a
-        # member added to `Transport` is a decision about whether a row may hold
-        # it, which is a revision either way.
+        # **The ISBN-10 retry only where this module builds the query**, which
+        # is `targets.Target._check_retry` for a restored row: a bespoke
+        # adapter builds its own request, and a row answering no lookup has
+        # nothing to retry.
         CheckConstraint(
-            "transport IN ('sru', 'bespoke')",
-            name="ck_catalogue_targets_transport",
+            DialectSQL(
+                sqlite="retries_as_isbn10 = 0 OR (answers_lookup = 1 AND transport <> 'bespoke')",
+                postgresql="NOT retries_as_isbn10 OR (answers_lookup AND transport <> 'bespoke')",
+            ),
+            name="ck_catalogue_targets_isbn10_retry",
+        ),
+        # Every member, now every member has a door: `metadata._DOORS` refuses
+        # at import to hold fewer, so a transport this admits is one a request
+        # can go out of.
+        CheckConstraint(_enum_check("transport", Transport), name="ck_catalogue_targets_transport"),
+        # **The charset follows the transport**, as the address does below: a
+        # Z39.50 row names one and no other row does, which is what
+        # `targets.Target` refuses on both sides, so a restore cannot write a
+        # row the dataclass would refuse.
+        CheckConstraint(
+            _enum_check("record_charset", RecordCharset, only_where="transport = 'z3950'"),
+            name="ck_catalogue_targets_record_charset",
         ),
         # **A negative charset GLOB, and a NUL defeats one.** SQLite's `GLOB`
         # is a C string operation and stops at the first NUL, so this rule reads
@@ -3815,20 +3831,24 @@ class CatalogueTarget(Base):
         #
         # **What this refuses that nothing refused before**: a `file://` or a
         # `gopher://` address, an address of unbounded length, and a megabyte
-        # parked behind one lead byte. **What it cannot refuse is a row this
-        # application wrote**: all eleven addresses in `targets.SEEDED` are
-        # `http` or `https` and the widest is 61 characters, so the upgrade
-        # that installs this cannot fail on one.
+        # parked behind one lead byte.
+        #
+        # **The scheme follows the transport**: a Z39.50 row's address is
+        # `z3950://` and nothing else is, so a restore cannot point an SRU row
+        # at a Z39.50 port or the other way round. `targets._Z3950_ADDRESS` is
+        # the exact grammar; this is the half a Core insert cannot skip.
         CheckConstraint(
             DialectSQL(
                 sqlite=(
-                    "(base_url GLOB 'http://?*' OR base_url GLOB 'https://?*') "
+                    "(CASE WHEN transport = 'z3950' THEN base_url GLOB 'z3950://?*' "
+                    "ELSE (base_url GLOB 'http://?*' OR base_url GLOB 'https://?*') END) "
                     "AND instr(base_url, char(0)) = 0 "
                     f"AND length(base_url) <= {TARGET_BASE_URL_MAX} "
                     f"AND length(CAST(base_url AS BLOB)) <= {4 * TARGET_BASE_URL_MAX}"
                 ),
                 postgresql=(
-                    "(base_url ~ '^http://.' OR base_url ~ '^https://.') "
+                    "(CASE WHEN transport = 'z3950' THEN base_url ~ '^z3950://.' "
+                    "ELSE (base_url ~ '^http://.' OR base_url ~ '^https://.') END) "
                     f"AND length(base_url) <= {TARGET_BASE_URL_MAX} "
                     f"AND octet_length(base_url) <= {4 * TARGET_BASE_URL_MAX}"
                 ),
@@ -3866,11 +3886,14 @@ class CatalogueTarget(Base):
     query_parameter: Mapped[str] = mapped_column(String(32), nullable=False, default="")
     query_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     record_schema: Mapped[str] = mapped_column(String(32), nullable=False, default="")
+    #: A Z39.50 row's `enums.RecordCharset`, NULL on every other transport.
+    record_charset: Mapped[str | None] = mapped_column(String(16), nullable=True)
     isbn_index: Mapped[str] = mapped_column(String(TARGET_INDEX_MAX), nullable=False, default="")
     isbn_attribute: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title_index: Mapped[str] = mapped_column(String(TARGET_INDEX_MAX), nullable=False, default="")
     title_query_shape: Mapped[str | None] = mapped_column(String(32), nullable=True)
     lookup_records: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retries_as_isbn10: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     search_multiplier: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     search_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     refuses_component_parts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

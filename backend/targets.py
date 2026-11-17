@@ -54,7 +54,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Final
+from typing import Final, assert_never
 from urllib.parse import urlsplit
 
 import z3950
@@ -66,31 +66,12 @@ import z3950
 # mistake; building a decoder from anything but `Target.decoding` is.
 from decoders import IMPORT_READERS, MARC_READERS, Decoding
 from decoders import Reader as Reader
-from enums import Capability, CatalogueSource, SourceFamily
+from enums import Capability, CatalogueSource, RecordCharset, SourceFamily
 
-
-class Transport(StrEnum):
-    """Which door a target's request goes out of.
-
-    `Z3950` is declared and no seeded target uses it: `Target` refuses one, and
-    the door is #129's.
-
-    **Declaring it now does not save that ticket a migration**, which an earlier
-    version of this paragraph claimed. `ck_catalogue_targets_transport` names the
-    two transports a row may carry, SQLite cannot ALTER a constraint, and this
-    project sets `render_as_batch=True` for exactly that reason, so widening it
-    is a batch rebuild whatever this enum says. What declaring it buys is
-    smaller and still worth having: the refusal is stated in one vocabulary in
-    both places, so #129 lifts one rule rather than discovering two.
-    """
-
-    SRU = "sru"
-    Z3950 = "z3950"
-    #: Not SRU and not Z39.50: a JSON API of the target's own design, with its
-    #: own adapter. Open Library and Google Books, and nothing else. A row here
-    #: carries an address and its capabilities and no query fields at all,
-    #: because there is no query grammar to name.
-    BESPOKE = "bespoke"
+# Re-exported for the reason `Reader` is: `Target.transport` is typed on it, and
+# `enums.Transport` says why it lives there.
+from enums import Transport as Transport
+from isbn import isbn13_to_isbn10
 
 
 class Secret(StrEnum):
@@ -193,6 +174,30 @@ _MAY_WAIVE_THE_ISBN_CLAIM: Final = frozenset({CatalogueSource.DNB})
 #: to be widened together: `backup.restore` writes through Core, so the Python
 #: half of this rule runs on nothing a database returns.
 _USE_ATTRIBUTES: Final = frozenset({z3950.USE_ISBN})
+
+#: A Z39.50 row's address, `z3950://host:port/database`, and nothing else.
+#:
+#: **A closed grammar rather than `urlsplit`**, because `urlsplit` accepts a
+#: userinfo, a query, a missing port and an upper case host, and every one of
+#: them is a second spelling of an address or a field the door would drop
+#: without saying so. What it admits is what `z3950.Target` takes: a lower case
+#: host name, a port spelled without a leading zero, and one database name.
+#: Matched with `fullmatch`, for the reason `_INDEX` gives.
+_Z3950_ADDRESS = re.compile(
+    r"z3950://(?P<host>[a-z0-9.-]+):(?P<port>[1-9][0-9]{0,4})/(?P<database>[A-Za-z0-9_.-]+)"
+)
+
+#: The readers that can read what a Z39.50 record syntax arrives as, by syntax.
+#:
+#: **A syntax absent here is one no row may ask for**, which is how `OTHER` is
+#: refused: the door hands a reader MARCXML (`metadata._z3950_root`), and only a
+#: reader written for that can be named beside a syntax.
+_Z3950_READERS: Final[Mapping[z3950.Syntax, frozenset[Reader]]] = MappingProxyType(
+    {
+        z3950.Syntax.MARC21: MARC_READERS,
+        z3950.Syntax.UNIMARC: frozenset({Reader.UNIMARC}),
+    }
+)
 
 
 class BadQuery(ValueError):
@@ -383,6 +388,10 @@ class Target:
     #: enter theirs again, and nothing warns them first. Stated here rather than
     #: only at `credentials.put`, where the seal happens, because this is the
     #: line somebody edits and that one is not.
+    #:
+    #: **On a Z39.50 row it is `z3950://host:port/database`**, so the address is
+    #: still one field, `origin` still reads it, and `_Z3950_ADDRESS` is the
+    #: whole of what such a row may write here.
     base_url: str
     reader: Reader
     #: Whether this target answers an ISBN lookup, a title search, or both.
@@ -483,7 +492,14 @@ class Target:
     #: every miss, and no test can see it because it is a property of the live
     #: server. Measured 2026-09-07, all seven SRU lookup targets answer an
     #: honest empty result with no diagnostic at all.
+    #:
+    #: **On a Z39.50 row it is the record syntax asked for**, a `z3950.Syntax`
+    #: value, and required: the protocol's own name for the same question. What
+    #: a target labels its answer is read off each record rather than off this.
     record_schema: str = ""
+    #: The character set a Z39.50 target's records arrive in, required there
+    #: and None on every other transport. See `RecordCharset`.
+    record_charset: RecordCharset | None = None
     #: The CQL index that means "the ISBN" at this target.
     #:
     #: **Established by probing, one target at a time**, and `metadata`'s per
@@ -517,6 +533,24 @@ class Target:
     #: catalogue sorted first. One at the NKP, for the reason `answers_lookup`
     #: gives.
     lookup_records: int = 0
+    #: Whether a lookup that misses is asked once more, with the ISBN-10 form of
+    #: the same book.
+    #:
+    #: **Some catalogues index a record only under the ISBN it states**, and a
+    #: record catalogued before 2007 states the ten digit form, so the thirteen
+    #: digit query misses a book the catalogue holds. **Data on the row, and the
+    #: retry is `metadata._first_answer`'s**, which reads `isbn_forms` and
+    #: nothing about the source: the query for each form is still built by
+    #: `isbn_query`, and the reader still checks the record against the
+    #: thirteen digit ISBN, which `marc_fields.Fields.claims_isbn` compares in
+    #: canonical form.
+    #:
+    #: **A second search, on a miss only**, and only for a `978` ISBN, the one
+    #: prefix with a ten digit form. On a Z39.50 row it shares the first
+    #: search's association and deadline; on an SRU row it is a second request
+    #: with `fetch`'s bounds. What each row that sets it found only this way is
+    #: in `metadata`'s block for that row.
+    retries_as_isbn10: bool = False
     #: A title search asks for `limit * search_multiplier`, capped at
     #: `search_cap`. More than asked for, because the ordering is the
     #: catalogue's and the ranking is ours.
@@ -587,17 +621,13 @@ class Target:
     timeout_seconds: float | None = None
 
     def __post_init__(self) -> None:
-        if self.transport is Transport.Z3950:
-            raise ValueError(f"{self.source}: no Z39.50 door yet, the transport dispatch is #129")
         self._check_reader()
-        if self.transport is Transport.SRU:
-            self._check_sru()
-        else:
-            self._check_no_sru()
+        self._check_transport()
         if self.reader not in MARC_READERS:
             self._check_no_marc_knobs()
         self._check_waivers()
         self._check_secret()
+        self._check_retry()
 
     def _check_waivers(self) -> None:
         """Refuses a waived ISBN claim off the DNB, and a shipped login on a row needing none."""
@@ -610,6 +640,16 @@ class Target:
             # asks for nothing. Refused at construction rather than ignored,
             # which is the rule the bespoke fields above already follow.
             raise ValueError(f"{self.source}: a shipped login on a row that needs no credential")
+
+    def _check_retry(self) -> None:
+        """Refuses an ISBN-10 retry on a row whose lookup query this module does not build.
+
+        A bespoke adapter builds its own request from the ISBN, so a retry
+        there would ask the same question twice; a row answering no lookup has
+        nothing to retry.
+        """
+        if self.retries_as_isbn10 and (not self.answers_lookup or self.transport is Transport.BESPOKE):
+            raise ValueError(f"{self.source}: retries as an ISBN-10 a lookup this module builds no query for")
 
     def _check_reader(self) -> None:
         """Refuses a reader that is not a `Reader`, and one of the import family."""
@@ -683,6 +723,87 @@ class Target:
             if self.transport is Transport.SRU:
                 raise ValueError(f"{self.source}: an SRU row's login is sealed, not an adapter argument")
 
+    def _check_transport(self) -> None:
+        """Refuses a transport that is not a `Transport`, then checks what its row must carry."""
+        if not isinstance(self.transport, Transport):
+            # A bare `"sru"` would match the `case` below by equality, and is
+            # refused for the reason the reader's refusal gives.
+            raise ValueError(f"{self.source}: {self.transport!r} is not a Transport")  # noqa: TRY004
+        self._check_charset_is_z3950s()
+        match self.transport:
+            case Transport.SRU:
+                self._check_sru()
+            case Transport.Z3950:
+                self._check_z3950()
+            case Transport.BESPOKE:
+                self._check_no_sru()
+            case _:
+                assert_never(self.transport)
+
+    def _check_charset_is_z3950s(self) -> None:
+        """Refuses a record charset on any row but a Z39.50 one, which `_check_z3950` requires."""
+        if self.transport is not Transport.Z3950 and self.record_charset is not None:
+            raise ValueError(f"{self.source}: only a Z39.50 row names its records' character set")
+
+    def _check_z3950(self) -> None:
+        """Refuses a Z39.50 row missing what the door needs, or carrying what it cannot use.
+
+        **What it must carry**: an address in `_Z3950_ADDRESS`'s grammar, a
+        record syntax a reader on the row can read, the character set its
+        records arrive in, PQF, and a use attribute where it answers a lookup.
+        **What it may not**: any CQL field, and a credential, because
+        `z3950.Client.open` takes none and a login on this row would be
+        dropped at the door with the request going out unauthenticated, which
+        is the failure `metadata.carries_a_credential` exists to make visible.
+        """
+        address = _Z3950_ADDRESS.fullmatch(self.base_url)
+        if address is None or not 0 < int(address["port"]) < 65536:
+            raise ValueError(f"{self.source}: not a z3950://host:port/database address: {self.base_url!r}")
+        syntax = next((each for each in _Z3950_READERS if each.value == self.record_schema), None)
+        if syntax is None or self.reader not in _Z3950_READERS[syntax]:
+            raise ValueError(f"{self.source}: {self.reader} cannot read record syntax {self.record_schema!r}")
+        if not isinstance(self.record_charset, RecordCharset):
+            raise ValueError(f"{self.source}: a Z39.50 row names its records' character set")  # noqa: TRY004
+        self._check_z3950_fields()
+        self._check_z3950_records()
+
+    def _check_z3950_fields(self) -> None:
+        """Refuses a Z39.50 row naming CQL, a title shape or a credential."""
+        if self.query_language is not QueryLanguage.PQF:
+            raise ValueError(f"{self.source}: a Z39.50 target is asked in PQF")
+        if any((self.sru_version, self.query_parameter, self.isbn_index, self.title_index)):
+            raise ValueError(f"{self.source}: a Z39.50 target carries no SRU fields")
+        if self.title_query_shape is not None:
+            raise ValueError(f"{self.source}: a Z39.50 title query has one shape, the seam's")
+        if self.needs_key:
+            raise ValueError(f"{self.source}: the Z39.50 door carries no credential")
+
+    def _check_z3950_records(self) -> None:
+        """Refuses a Z39.50 row asking for no records, or more than `z3950.search` takes.
+
+        **Refused here because the seam raises `ValueError` past
+        `z3950.MAX_RECORDS`**, which no door handler catches, so a row asking
+        for six would be a 500 on the first scan rather than a boot failure.
+        """
+        if self.answers_lookup:
+            if not 0 < self.lookup_records <= z3950.MAX_RECORDS:
+                raise ValueError(f"{self.source}: a Z39.50 lookup asks for 1 to {z3950.MAX_RECORDS} records")
+            self._check_use_attribute()
+        asks_for_none = self.search_multiplier < 1 or not 0 < self.search_cap <= z3950.MAX_RECORDS
+        if self.answers_search and asks_for_none:
+            raise ValueError(f"{self.source}: a Z39.50 search asks for 1 to {z3950.MAX_RECORDS} records")
+
+    def _check_use_attribute(self) -> None:
+        """Refuses a PQF use attribute this module does not name."""
+        if type(self.isbn_attribute) is not int or self.isbn_attribute not in _USE_ATTRIBUTES:
+            # **`type(...) is not int` and not `isinstance`, and not
+            # membership alone.** `7.0 in {7}` is True, because a float
+            # compares equal to an integer, so membership admitted a value
+            # `z3950.query` then refuses at request time with `BadQuery`.
+            # That is the same rule enforced in two places and disagreeing:
+            # one arm built a row the other would not send.
+            raise ValueError(f"{self.source}: not a PQF use attribute: {self.isbn_attribute!r}")
+
     def _check_sru(self) -> None:
         if not self.sru_version or not self.query_parameter:
             raise ValueError(f"{self.source}: an SRU target needs a version and a parameter")
@@ -706,14 +827,8 @@ class Target:
         if self.query_language is QueryLanguage.CQL:
             if not _INDEX.fullmatch(self.isbn_index):
                 raise ValueError(f"{self.source}: not an index name: {self.isbn_index!r}")
-        elif type(self.isbn_attribute) is not int or self.isbn_attribute not in _USE_ATTRIBUTES:
-            # **`type(...) is not int` and not `isinstance`, and not
-            # membership alone.** `7.0 in {7}` is True, because a float
-            # compares equal to an integer, so membership admitted a value
-            # `z3950.query` then refuses at request time with `BadQuery`.
-            # That is the same rule enforced in two places and disagreeing:
-            # one arm built a row the other would not send.
-            raise ValueError(f"{self.source}: not a PQF use attribute: {self.isbn_attribute!r}")
+        else:
+            self._check_use_attribute()
 
     def _check_sru_search(self) -> None:
         """Refuses an SRU search a CQL title query could not be built for."""
@@ -746,7 +861,7 @@ class Target:
 
     def _check_no_marc_knobs(self) -> None:
         if self.refuses_component_parts or self.reads_author_identifiers:
-            raise ValueError(f"{self.source}: a MARC knob on a reader that reads no MARC")
+            raise ValueError(f"{self.source}: a MARC21 knob on a reader that is not a MARC21 reader")
 
     @property
     def capabilities(self) -> frozenset[Capability]:
@@ -815,8 +930,24 @@ class Target:
             return z3950.query(self.isbn_attribute, value)
         return f"{self.isbn_index}={cql_term(value)}"
 
+    def isbn_forms(self, isbn: str) -> tuple[str, ...]:
+        """The forms of one ISBN this target is asked about, in the order asked.
+
+        The thirteen digit form, then the ten digit one where the row retries
+        and the ISBN has one. See `retries_as_isbn10`.
+        """
+        ten = isbn13_to_isbn10(isbn) if self.retries_as_isbn10 else None
+        return (isbn,) if ten is None else (isbn, ten)
+
     def title_query(self, terms: list[str]) -> str:
-        """The query that asks this target about a list of title terms."""
+        """The query that asks this target about a list of title terms.
+
+        **A PQF target has one shape, the seam's**: the terms as one phrase on
+        BIB-1's title attribute, quoted by `z3950.pqf_term`. How a catalogue
+        matches that phrase is its own, as it is for a CQL `all`.
+        """
+        if self.query_language is QueryLanguage.PQF:
+            return z3950.title_query(" ".join(terms))
         shape = self.title_query_shape
         if shape is TitleQuery.ANDED_TERMS:
             return " and ".join(f"{self.title_index}={cql_term(term)}" for term in terms)
@@ -848,6 +979,24 @@ class Target:
     def search_records(self, limit: int) -> int:
         return min(limit * self.search_multiplier, self.search_cap)
 
+    @property
+    def z3950_target(self) -> z3950.Target:
+        """Where the Z39.50 door connects, the syntax it asks for, and the charset it converts from.
+
+        Read off the address `_check_z3950` already refused anything else in, so
+        only a Z39.50 row may ask; any other row is a `ValueError`.
+        """
+        address = _Z3950_ADDRESS.fullmatch(self.base_url)
+        if self.transport is not Transport.Z3950 or address is None or self.record_charset is None:
+            raise ValueError(f"{self.source}: not a Z39.50 row")
+        return z3950.Target(
+            host=address["host"],
+            port=int(address["port"]),
+            database=address["database"],
+            syntax=z3950.Syntax(self.record_schema),
+            charset=self.record_charset,
+        )
+
 
 #: Which family `SEEDED` is the registry for.
 #:
@@ -856,7 +1005,7 @@ class Target:
 #: is on `enums.SourceFamily`.
 FAMILY: Final = SourceFamily.CATALOGUE
 
-#: The seventeen catalogues this application ships knowing about.
+#: The twenty catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
 #: migrations write every one of these rows into `catalogue_targets` and
@@ -964,7 +1113,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OPEN_LIBRARY: Target(
             source=CatalogueSource.OPEN_LIBRARY,
-            rank=5,
+            rank=8,
             transport=Transport.BESPOKE,
             base_url="https://openlibrary.org",
             reader=Reader.OPEN_LIBRARY,
@@ -976,7 +1125,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.NKP: Target(
             source=CatalogueSource.NKP,
-            rank=7,
+            rank=10,
             transport=Transport.SRU,
             # The database path is load bearing: `aleph.nkp.cz:9991` alone, and
             # `/biblios`, both answer SRU diagnostic 1/235, "database does not
@@ -1008,7 +1157,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNE: Target(
             source=CatalogueSource.BNE,
-            rank=8,
+            rank=11,
             transport=Transport.SRU,
             # **The OPAC hostname, and that is the whole finding.** This library was
             # recorded as having no open interface, measured against
@@ -1079,7 +1228,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LIBRIS: Target(
             source=CatalogueSource.LIBRIS,
-            rank=9,
+            rank=12,
             transport=Transport.SRU,
             # SRU on LIBRIS's own server, so Sweden needs no Z39.50 client. The
             # same records answer Z39.50 on port 210 of this host.
@@ -1109,7 +1258,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.MELINDA: Target(
             source=CatalogueSource.MELINDA,
-            rank=10,
+            rank=13,
             transport=Transport.SRU,
             # SRU on Melinda's own server, the National Library of Finland's
             # public API host. Measured 2026-11-16.
@@ -1137,7 +1286,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BIBSYS: Target(
             source=CatalogueSource.BIBSYS,
-            rank=11,
+            rank=14,
             transport=Transport.SRU,
             # Alma's SRU path on the network zone's own host, where the
             # Norwegian libraries' shared records live. The National Library of
@@ -1162,6 +1311,79 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             lookup_records=5,
             # 1 of 182 live records on 2026-11-16 was leader/07 `a`, and none of
             # the books found was one. Refused for the BNE's reason.
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.SBN: Target(
+            source=CatalogueSource.SBN,
+            rank=5,
+            transport=Transport.Z3950,
+            # The ICCU's public Z39.50 server for the national union catalogue.
+            # It keeps UNIMARC and renders a MARC21 view of the same record when
+            # asked for `usmarc`, which is what this row asks.
+            base_url="z3950://opac.sbn.it:2100/nopac",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            serves_groups=frozenset({"978-88"}),
+            query_language=QueryLanguage.PQF,
+            record_schema=z3950.Syntax.MARC21.value,
+            # The MARC21 view is UTF-8 and says so in leader/09. `metadata`'s
+            # block for this row carries the measurement.
+            record_charset=RecordCharset.UTF8,
+            isbn_attribute=z3950.USE_ISBN,
+            lookup_records=5,
+            retries_as_isbn10=True,
+            refuses_component_parts=True,
+        ),
+        CatalogueSource.PORBASE: Target(
+            source=CatalogueSource.PORBASE,
+            rank=6,
+            transport=Transport.Z3950,
+            base_url="z3950://z3950.catalogo.bnportugal.gov.pt:210/bn",
+            reader=Reader.UNIMARC,
+            answers_lookup=True,
+            # The BNE's reason, and a second one: at about 0.7s a search here
+            # would spend most of the 4.0s fan out on one catalogue.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            serves_groups=frozenset({"978-972", "978-989"}),
+            query_language=QueryLanguage.PQF,
+            record_schema=z3950.Syntax.UNIMARC.value,
+            # Declared as `0103` in `100 $a/26-29` on every record sampled.
+            record_charset=RecordCharset.ISO5426,
+            isbn_attribute=z3950.USE_ISBN,
+            # **One, where every other lookup row asks for five**, because each
+            # further record is a Present of its own at about 0.7s and the hits
+            # past the first were copies of it. `metadata`'s block for this row
+            # carries the measurement.
+            lookup_records=1,
+            retries_as_isbn10=True,
+        ),
+        CatalogueSource.OSZK: Target(
+            source=CatalogueSource.OSZK,
+            rank=7,
+            transport=Transport.Z3950,
+            base_url="z3950://amicus.oszk.hu:1616/ANY",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            serves_groups=frozenset({"978-963", "978-615"}),
+            query_language=QueryLanguage.PQF,
+            record_schema=z3950.Syntax.MARC21.value,
+            # UTF-8 and declared in leader/09, measured with the SBN's.
+            record_charset=RecordCharset.UTF8,
+            isbn_attribute=z3950.USE_ISBN,
+            lookup_records=5,
+            retries_as_isbn10=True,
             refuses_component_parts=True,
         ),
         CatalogueSource.KB_DK: Target(
@@ -1229,7 +1451,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OENB: Target(
             source=CatalogueSource.OENB,
-            rank=6,
+            rank=9,
             transport=Transport.SRU,
             base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
             reader=Reader.MARC_GND,
@@ -1256,7 +1478,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNA: Target(
             source=CatalogueSource.BNA,
-            rank=12,
+            rank=15,
             transport=Transport.SRU,
             # **Plaintext by necessity and an IP address by necessity**, which are
             # two separate compromises: port 9991 speaks no TLS, and the library
@@ -1309,7 +1531,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNU: Target(
             source=CatalogueSource.BNU,
-            rank=13,
+            rank=16,
             transport=Transport.SRU,
             # **The BNA's two compromises again**: port 9992 speaks no TLS and the
             # library publishes a bare address. That row's comment carries what
@@ -1353,7 +1575,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.GOOGLE_BOOKS: Target(
             source=CatalogueSource.GOOGLE_BOOKS,
-            rank=14,
+            rank=17,
             transport=Transport.BESPOKE,
             base_url="https://www.googleapis.com/books/v1/volumes",
             reader=Reader.GOOGLE_BOOKS,
@@ -1370,7 +1592,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNF: Target(
             source=CatalogueSource.BNF,
-            rank=15,
+            rank=18,
             transport=Transport.SRU,
             base_url="https://catalogue.bnf.fr/api/SRU",
             reader=Reader.DUBLIN_CORE,
@@ -1390,7 +1612,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LOC: Target(
             source=CatalogueSource.LOC,
-            rank=16,
+            rank=19,
             transport=Transport.SRU,
             base_url="http://lx2.loc.gov:210/lcdb",
             reader=Reader.MODS,
@@ -1440,10 +1662,11 @@ def origin(base_url: str) -> str:
 #: Every origin this application will open a catalogue connection to.
 #:
 #: **Scheme, host and port, and not just the host**, so a row cannot downgrade a
-#: TLS target to plaintext or move it to another port on the same name. **Five**
-#: targets are plain HTTP by necessity (ports 210, 210, 9991, 9991 and 9992 speak
-#: no TLS) and an allowlist of bare hostnames would let the other seven join them.
-#: Two of the five authenticate, so a plaintext origin here is not only a
+#: TLS target to plaintext or move it to another port on the same name. **Eight**
+#: targets speak no TLS: five are plain HTTP by necessity (ports 210, 210, 9991,
+#: 9991 and 9992 offer nothing else) and three are Z39.50, which has no TLS form
+#: here, and an allowlist of bare hostnames would let the HTTPS ones join them.
+#: Two of the eight authenticate, so a plaintext origin here is not only a
 #: question of what an eavesdropper reads.
 #: `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` recomputes that
 #: count from the rows and checks this sentence against it, because it had gone

@@ -40,6 +40,7 @@ import unicodedata
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
+from types import MappingProxyType
 from typing import Any, Final, assert_never
 from xml.etree import ElementTree
 
@@ -2189,6 +2190,97 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 # rule. The record measured names the National Library of Finland in its own
 # `040`, which is that member library's code and not this catalogue's.
 
+# **The three Z39.50 catalogues, measured together.** One pass on 2026-11-17
+# through `_lookup_one` on their own rows, with libyaz 5.34.4 where the image
+# ships 5.38.1, one lookup at a time, round robin over the three hosts and each
+# host at least 1.5s apart, over 650 ISBNs: the 500 of the sample committed at
+# `tests/fixtures/catalogue_survey_2026_08_31.json` and the Polish, Danish and
+# Hungarian frames beside it. Each lookup is both forms where the first missed,
+# on one association. What each answers of the 500 is committed as its column,
+# and of the frames as theirs. The largest rendered answer of each is under 1%
+# of `z3950.MAX_RESPONSE_BYTES`, so the byte cap does not bind on these rows.
+#
+# **The SBN, Italy's union catalogue, over the ICCU's Z39.50 server**: PQF on
+# use attribute 7, the MARC21 view the server renders on request from the
+# UNIMARC it keeps, read by `_dnb_record`.
+#
+#   * **99 of the 500, in nine frames**, Italian 45 the most, because a union
+#     catalogue holds foreign editions. **15** are books none of the twelve
+#     older sources that need no credential holds, all Italian.
+#     On the sample's fifty Italian ISBNs it answers 45, where those twelve
+#     answer 34. Over the 650, 68 of its 113 answers fall outside `978-88` and
+#     every one is held by a source still asked about it, so it carries that
+#     remit.
+#   * **43 of the 113 it found over the 650 were found only by the ISBN-10**,
+#     which is why the row retries.
+#   * Lookup latency over the 650, retry included: median 0.176s, p90 0.335s,
+#     max 1.754s. No refusal in 1,230 searches.
+#   * **UTF-8, and leader/09 says so**: `a` on 146 of 146 rendered records, and
+#     ten raw ISO 2709 records were valid UTF-8 too. No decode failure in 1,950
+#     lookups across the three, so no row here needs MARC-8.
+#   * **Component parts**: 0 of 146 records are leader/07 `a`, every one `m`.
+#     `refuses_component_parts` is set for the BNE's reason, as a refusal that
+#     costs nothing where none occurs.
+#   * The largest rendered answer was 19,677 bytes, five records.
+#
+# **PORBASE, Portugal's national union catalogue, over the Biblioteca Nacional
+# de Portugal's Z39.50 server**: PQF on use attribute 7, UNIMARC, the only
+# syntax it answers, read through `_marc21_from_unimarc`.
+#
+#   * **40 of the 500, in four frames**, Portuguese 37. **16** are books none
+#     of the twelve older free sources holds, all Portuguese. On the sample's
+#     fifty Portuguese ISBNs it answers 37, where those twelve answer 30. 3 of
+#     its answers fall outside `978-972` and `978-989`, each held by a source
+#     still asked about it.
+#   * 10 of its 40 finds over the 650 came only by the ISBN-10.
+#   * **ISO 5426, declared**: `100 $a/26-29` reads `0103` on 40 of 40 records.
+#   * **One record a lookup, where every other row asks for five.** Each record
+#     past the first is a Present of its own at about 0.7s, and the extra hits
+#     measured were copies: three hits gave three identical 3,332 byte records,
+#     and one ISBN took 1.55s for one record against 2.98s to 3.32s for five.
+#     The ISBN claim still checks the one that comes back.
+#   * **The slowest catalogue in the chain**: median 1.53s, p90 1.552s, max
+#     2.28s a lookup, miss and retry included, since both forms share one
+#     association. A lookup has no fan out deadline, so one that reaches
+#     PORBASE pays that and `z3950.TIMEOUT_SECONDS` bounds the association at
+#     10s. It answers no title search, so it never meets the search fan out's.
+#     No refusal in 1,270 searches.
+#   * **A UNIMARC e book coded as text**, the carrier test's known gap, did
+#     not occur: all 40 records carry `106 $a` `r` and none a `135`. A search
+#     for electronic wording found 6 more records: 3 are leader/06 `l`, refused
+#     as computer media, and 3 are leader/06 `a` with `106 $a` `i` or no `106`,
+#     two diskettes and a CD-ROM, none with a `135`. So the shape the gap names
+#     occurred 0 times in 46 records. The second shape is a neighbouring gap,
+#     not measured through the reader.
+#   * The server returns duplicate copies of one record per hit, which is what
+#     makes one record enough.
+#
+# **The OSZK, the National Széchényi Library, Hungary's national library, over
+# its Z39.50 server**: PQF on use attribute 7, MARC21, read by `_dnb_record`.
+#
+#   * **2 of the 500**, both Austrian, because the sample has no Hungarian
+#     frame. **On fifty Hungarian ISBNs**, drawn from Wikidata by publisher
+#     country, Hungary, seed 20261116, from a pool of only 60, it answers 40,
+#     where the twelve older free sources answer 33 between them; **12 are books
+#     none of the twelve holds**. Two of the fifty are in `978-5`, a Russian
+#     group, with a Hungarian publisher; it answers neither, and both of its
+#     answers outside `978-963` and `978-615` are held by a source still asked.
+#   * **13 of its 42 finds over the 650 came only by the ISBN-10**, a share
+#     second to the SBN's 43 of 113.
+#   * Lookup latency over the 650: median 0.071s, p90 0.079s, max 5.082s, the
+#     fastest door in the chain.
+#   * **It refused about one lookup in eight**: 78 of the 650 drew Bib-1
+#     diagnostic 2, a temporary system error, at random, on either form and on
+#     a fresh association as on a shared one. So a search refused that way is
+#     put again on the same association, at most twice
+#     (`_TEMPORARY_REFUSAL_RETRIES`, which says what the retry rests on); a third
+#     refusal is `UNAVAILABLE` for this source, the walk goes on, and where
+#     nothing else finds the book that answer is cached for
+#     `_MISS_TTL_SECONDS`, as a miss is. No other refusal is asked again.
+#   * UTF-8, `a` in leader/09 on 49 of 49 records. Leader/07 is `m` on 42 and
+#     `d`, a subunit, on 7; `refuses_component_parts` refuses `a` and `b`, so
+#     the 7 are read. The largest rendered answer was 9,993 bytes.
+
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -2239,17 +2331,19 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 # **What this chain covers without a Google Books key, which is what a default
 # install runs.** Three sources need a credential (`sources.NEEDS_A_KEY`), two
 # of them ship the login their library publishes and Google Books does not, so
-# the chain most deployments actually run is the fourteen sources a stock install
-# asks. Measured over 500 domestic ISBNs across ten frames, it answers 410 and
-# misses 90, and outside German language publishing it misses 86 of 400.
+# the chain most deployments actually run is the seventeen sources a stock install
+# asks. Measured over 500 domestic ISBNs across ten frames, it answers 441 and
+# misses 59, and outside German language publishing it misses 55 of 400.
 #
-# The twelve books between that and the twelve sources that need nothing, which
-# answer 398 and miss 102, are the two credentialled rows above: the Argentine
-# one uniquely adds 4 and the Uruguayan one 8. Of the twelve, the Polish,
+# The twelve books between that and the fifteen sources that need nothing, which
+# answer 429 and miss 71, are the two credentialled rows above: the Argentine
+# one uniquely adds 4 and the Uruguayan one 8. Of the fifteen, the Polish,
 # Swedish and Nordic rows add three books to the 395 the first seven answered,
 # an Italian edition only LIBRIS holds, a Brazilian book only the Royal Danish
 # Library and BIBSYS hold and a Greek one only Melinda holds; the sample has no
-# Polish or Nordic frame, and each row's block says what it adds there.
+# Polish or Nordic frame, and each row's block says what it adds there. The
+# three Z39.50 rows add 31 more, the SBN 15 Italian books and PORBASE 16
+# Portuguese ones.
 #
 # The same 500 books
 # under the roster of three releases
@@ -3151,7 +3245,7 @@ def _marc_nodes(root: ElementTree.Element, decoding: decoders.Decoding) -> list[
 
     **On the search path that is the whole answer and on the lookup path it is
     not**, which is the asymmetry to read before moving this rule.
-    `_sru_lookup` turns a diagnostic into `Outcome.UNAVAILABLE` before a reader
+    `_sru_ask` turns a diagnostic into `Outcome.UNAVAILABLE` before a reader
     is reached, because a lookup can say "nobody could be asked" and a search
     cannot: this returns `list[Record]`, and an empty list is the only thing it
     has to say with. `_sru_refusal` carries the argument.
@@ -3179,6 +3273,9 @@ def _marc_build(
     `_k10plus_record` joins `650 $a` and `$x` into one subject and does neither.
     Folding them would change answers rather than restructure code, which is the
     class of thing `add_xslt` was refused over.
+
+    **A UNIMARC record arrives here converted and takes the second arm**, with
+    author identifiers off because `decoders.Decoding` refuses that knob on it.
     """
     if decoding.reader is decoders.Reader.MARC_PLAIN:
         return _k10plus_record(fields, isbn, source=decoding.source)
@@ -3298,6 +3395,289 @@ def _mods_record(record: ElementTree.Element, decoding: decoders.Decoding) -> Re
     return _loc_record(record, source=decoding.source)
 
 
+# ── UNIMARC ───────────────────────────────────────────────────────────────────
+#
+# The Library of Congress's UNIMARC to MARC 21 conversion specification
+# (loc.gov/marc/unimarctomarc21.html, August 2001), applied to the fields the
+# MARC21 reader reads and to no others. A converted record goes through
+# `_dnb_record` with author identifiers off, the profile the ÖNB and the NLG
+# use, so `Fields.claims_isbn`, `Fields.describes_a_book` and every refusal in
+# them hold for UNIMARC because they are the same code.
+#
+# **A crosswalk rather than a second reader**, because a second reader is a
+# second copy of every rule `marc_fields.py` carries, and the copies drift.
+#
+# **The reader takes MARCXML, its text already decoded.** That is what
+# libyaz renders from ISO 2709, in the MARC21 slim namespace whatever the
+# format, and the character set is the renderer's business. Measured
+# 2026-11-16: Portugal's PORBASE declares ISO 5426 in `100 $a/26-29` (`0103`,
+# 38 of 38 records) and Italy's SBN declares ISO 10646 (`50`, 64 of 64).
+#
+# Left unread, because the MARC21 reader reads nothing they would become or the
+# crosswalk does not cover them: `214`, the newer publication statement, which
+# the 2001 specification predates and which 0 of those 102 records carry; `225`
+# and the `4xx` links, since the series is read from `245 $n $p` alone; the
+# corporate names `710` to `712`; `675` and `686`; `073`; `856`; and the `007`,
+# which the specification builds from coded fields this reader does not read.
+# The leader and `106` carry the carrier test instead.
+
+
+#: UNIMARC leader/06 codes that MARC21 spells differently; the rest are kept.
+#:
+#: **Copying the leader unconverted would be a wrong answer, not a cosmetic
+#: one**: UNIMARC `m` is multimedia and MARC21 `m` a computer file, so a kit
+#: would be refused as software, and UNIMARC `l`, computer media, would pass.
+_UNIMARC_RECORD_TYPES: Final[dict[str, str]] = {"h": "a", "l": "m", "m": "o", "n": "r"}
+
+#: UNIMARC leader/07 for an analytic, which the specification refuses to
+#: convert at all (its error 01). Refused here whatever the row says, which is
+#: why `decoders.Reader.UNIMARC` carries no component part knob.
+_UNIMARC_ANALYTIC: Final = "a"
+
+#: Relator codes, from the specification's Table 2, for the one role this
+#: application reads: `marc_fields` counts `aut` and `cre` as authorship, and
+#: UNIMARC has no `cre`. Every other `$4` is dropped, which is the
+#: specification's own rule for a code without an equivalent and reads exactly
+#: as its MARC21 code would: as somebody who did not write the book.
+_UNIMARC_RELATORS: Final[dict[str, str]] = {"070": "aut"}
+
+#: UNIMARC's non sorting markers, as MARC21 spells them, so `marc_fields`
+#: strips them. libyaz maps them itself when it decodes ISO 5426 and leaves them
+#: alone in a UTF-8 record: the SBN's titles carry U+0088 and U+0089, 22 pairs
+#: in 64 records, which would otherwise reach a title as invisible characters.
+_UNIMARC_NON_SORTING: Final = str.maketrans({"\x88": "\x98", "\x89": "\x9c"})
+
+#: Subject subdivisions MARC21 spells the other way round: UNIMARC's `$y` is
+#: geographic and `$z` chronological.
+_UNIMARC_SWAPPED: Final[dict[str, str]] = {"y": "z", "z": "y"}
+
+#: UNIMARC's authority record number, which the specification does not convert.
+_UNIMARC_AUTHORITY_NUMBER: Final = "3"
+
+#: A personal name's subfields besides `$a`, `$b` and `$4`, by Procedure 1.
+_UNIMARC_NAME_PARTS: Final[dict[str, str]] = {"c": "c", "d": "b", "f": "d", "g": "q"}
+
+#: Each `200` subfield the specification converts: the MARC21 code it becomes
+#: when it follows one of the codes beside it, and otherwise the separator that
+#: joins it to the subfield before. `""` is "nothing yet", so only the first
+#: `$a` opens the field. `$b`, `$v` and `$z` are not converted.
+_UNIMARC_TITLE: Final[dict[str, tuple[str | None, frozenset[str], str]]] = {
+    "a": ("a", frozenset({""}), " ; "),
+    "c": (None, frozenset(), ". "),
+    "d": ("b", frozenset({"a", "n", "p"}), " "),
+    "e": ("b", frozenset({"a", "n", "p"}), " : "),
+    "f": ("c", frozenset({"a", "b", "n", "p"}), " / "),
+    "g": (None, frozenset(), " ; "),
+    "h": ("n", frozenset({"a", "n", "p"}), ". "),
+    "i": ("p", frozenset({"a", "n", "p"}), ". "),
+}
+
+type _Subfields = list[tuple[str, str]]
+
+
+def _unimarc_renamed(codes: Mapping[str, str], subfields: _Subfields) -> _Subfields:
+    """The subfields `codes` names, recoded, in record order."""
+    return [(codes[code], text) for code, text in subfields if code in codes]
+
+
+def _unimarc_isbn(subfields: _Subfields) -> _Subfields:
+    """`010` as `020`: hyphens out, and `$b` written inline after the number.
+
+    The inline parenthesis is the specification's, and it is the legacy
+    qualifier `marc_fields.Subfields.isbn_is_qualified` already reads, so a
+    number qualified `broch.` loses to a sibling stating none.
+    """
+    qualifier = next((text for code, text in subfields if code == "b" and text), None)
+    if qualifier is not None and not qualifier.startswith("("):
+        qualifier = f"({qualifier})"
+    converted: _Subfields = []
+    for code, text in subfields:
+        if code == "a":
+            number = text.replace("-", "")
+            converted.append(("a", f"{number} {qualifier}" if qualifier else number))
+        elif code == "z":
+            converted.append(("z", text.replace("-", "")))
+    return converted
+
+
+def _unimarc_title(subfields: _Subfields) -> _Subfields:
+    """`200` as `245`, by the specification's processing note.
+
+    A subfield joining the one before goes where the specification puts it,
+    which is how a second `$a` or a `$g` reaches the field without becoming a
+    title. Subfields before the first `$a` are dropped, and a `200` with no `$a`
+    converts to nothing, which is the specification's error 05 arriving as the
+    reader's own refusal of a record with no title.
+    """
+    converted: list[list[str]] = []
+    for code, text in subfields:
+        if code not in _UNIMARC_TITLE:
+            continue
+        becomes, after, joiner = _UNIMARC_TITLE[code]
+        previous = converted[-1][0] if converted else ""
+        if becomes is not None and previous in after:
+            converted.append([becomes, text])
+        elif converted:
+            converted[-1][1] += joiner + text
+    return [(code, text) for code, text in converted]
+
+
+def _unimarc_subject(subfields: _Subfields) -> _Subfields:
+    """A subject heading: every subfield kept but the authority number, with
+    `$y` and `$z` swapped.
+
+    **Kept rather than listed**, which is the specification's "keep" for `$a`,
+    `$x` and the vocabulary in `$2`, so the vocabulary reaches
+    `marc_fields.Subfields.subject_vocabulary`, its one reader, and this
+    module names the subfield nowhere. Anything else is carried unread.
+    """
+    return [
+        (_UNIMARC_SWAPPED.get(code, code), text)
+        for code, text in subfields
+        if code != _UNIMARC_AUTHORITY_NUMBER
+    ]
+
+
+def _unimarc_subject_name(subfields: _Subfields) -> _Subfields:
+    """`600`: a personal name by Procedure 1, then its subdivisions."""
+    name_codes = {"a", "b", "4", *_UNIMARC_NAME_PARTS}
+    return _unimarc_name(subfields) + _unimarc_subject(
+        [(code, text) for code, text in subfields if code not in name_codes]
+    )
+
+
+def _unimarc_name(subfields: _Subfields) -> _Subfields:
+    """A personal name, by Procedure 1: `$b` joins `$a` after a comma.
+
+    The catalogues put that comma on either side, `Backman, $b Fredrik,` at
+    PORBASE and `Redi $b , Riccardo` at the SBN, so each part is trimmed of it
+    first.
+    """
+    heading = _unimarc_name_heading(subfields)
+    if heading is None:
+        return []
+    return [("a", heading), *_unimarc_name_qualifiers(subfields)]
+
+
+def _unimarc_name_heading(subfields: _Subfields) -> str | None:
+    """The first `$a` with every `$b` after it, or None where that `$a` is
+    missing or blank, so the name converts to nothing."""
+    entry = [text.strip(" ,") for code, text in subfields if code == "a"][:1]
+    if not entry or not entry[0]:
+        return None
+    parts = [text.strip(" ,") for code, text in subfields if code == "b"]
+    return ", ".join(part for part in (*entry, *parts) if part)
+
+
+def _unimarc_name_qualifiers(subfields: _Subfields) -> _Subfields:
+    """Every subfield after the heading: a relator code the table knows, and
+    each name part under its MARC21 code."""
+    converted: _Subfields = []
+    for code, text in subfields:
+        if code == "4" and (relator := _UNIMARC_RELATORS.get(text.strip())):
+            converted.append(("4", relator))
+        elif code in _UNIMARC_NAME_PARTS:
+            converted.append((_UNIMARC_NAME_PARTS[code], text))
+    return converted
+
+
+#: Every UNIMARC field converted, as its MARC21 tag and the conversion.
+_UNIMARC_FIELDS: Final[dict[str, tuple[str, Callable[[_Subfields], _Subfields]]]] = {
+    "010": ("020", _unimarc_isbn),
+    # The specification writes a lone language to `008/35-37` and only a
+    # second one to `041`. This writes every `$a` to `041`, because that is
+    # the one the MARC21 reader reads: a monolingual record would otherwise
+    # lose its language.
+    "101": ("041", functools.partial(_unimarc_renamed, {"a": "a"})),
+    "200": ("245", _unimarc_title),
+    "210": ("260", functools.partial(_unimarc_renamed, {"a": "a", "c": "b", "d": "c"})),
+    "215": ("300", functools.partial(_unimarc_renamed, {"a": "a", "c": "b", "d": "c", "e": "e"})),
+    "330": ("520", functools.partial(_unimarc_renamed, {"a": "a"})),
+    "600": ("600", _unimarc_subject_name),
+    "606": ("650", _unimarc_subject),
+    "607": ("651", _unimarc_subject),
+    # `$v`, the edition, becomes a `$2` nothing reads, so it is not converted.
+    "676": ("082", functools.partial(_unimarc_renamed, {"a": "a"})),
+    "700": ("100", _unimarc_name),
+    "701": ("700", _unimarc_name),
+    "702": ("700", _unimarc_name),
+}
+
+_MARC21: Final = f"{{{marc_fields.NAMESPACE}}}"
+
+
+def _unimarc_leader(leader: str) -> str | None:
+    """The MARC21 leader, or None for an analytic, which is not converted.
+
+    A leader too short to hold a position keeps what it has, the rule
+    `marc_fields.is_component_part` states for a truncated one.
+    """
+    if len(leader) > 7 and leader[7] == _UNIMARC_ANALYTIC:
+        return None
+    if len(leader) > 6:
+        return leader[:6] + _UNIMARC_RECORD_TYPES.get(leader[6], leader[6]) + leader[7:]
+    return leader
+
+
+def _unimarc_subfields(datafield: ElementTree.Element) -> _Subfields:
+    """One field's subfields, with UNIMARC's non sorting markers respelled."""
+    return [
+        (subfield.get("code") or "", (subfield.text or "").translate(_UNIMARC_NON_SORTING))
+        for subfield in datafield.findall(f"{_MARC21}subfield")
+    ]
+
+
+def _append_field(record: ElementTree.Element, tag: str, subfields: _Subfields) -> None:
+    """A MARC21 datafield on `record`, unless the conversion left it empty."""
+    if not subfields:
+        return
+    field = ElementTree.SubElement(record, f"{_MARC21}datafield", {"tag": tag, "ind1": " ", "ind2": " "})
+    for code, text in subfields:
+        ElementTree.SubElement(field, f"{_MARC21}subfield", {"code": code}).text = text
+
+
+def _marc21_from_unimarc(record: ElementTree.Element) -> ElementTree.Element | None:
+    """One UNIMARC record as the MARC21 record the crosswalk makes of it.
+
+    None for an analytic. `106 $a/0`, the form of item, becomes `008/23`, which
+    is the specification's transfer and the position `marc_fields` reads for an
+    electronic one. Indicators are not converted: nothing downstream reads
+    them on these fields.
+    """
+    leader = _unimarc_leader(record.findtext(f"{_MARC21}leader") or "")
+    if leader is None:
+        return None
+    converted = ElementTree.Element(marc_fields.RECORD_TAG)
+    ElementTree.SubElement(converted, f"{_MARC21}leader").text = leader
+    for datafield in record.findall(f"{_MARC21}datafield"):
+        tag = datafield.get("tag") or ""
+        if tag == "106":
+            form = next((text[:1] for code, text in _unimarc_subfields(datafield) if code == "a"), "")
+            control = ElementTree.SubElement(converted, f"{_MARC21}controlfield", {"tag": "008"})
+            control.text = f"{form:>24}".ljust(40)
+        elif tag in _UNIMARC_FIELDS:
+            marc21_tag, conversion = _UNIMARC_FIELDS[tag]
+            _append_field(converted, marc21_tag, conversion(_unimarc_subfields(datafield)))
+    return converted
+
+
+def _unimarc_record(record: ElementTree.Element, decoding: decoders.Decoding) -> Record | None:
+    """One UNIMARC record, through the crosswalk and then `_marc_record`."""
+    converted = _marc21_from_unimarc(record)
+    return None if converted is None else _marc_record(converted, decoding)
+
+
+def _unimarc_lookup(root: ElementTree.Element, isbn: str, decoding: decoders.Decoding) -> Lookup:
+    """`_marc_lookup` over every record in the response, converted."""
+    collection = ElementTree.Element(f"{_MARC21}collection")
+    collection.extend(
+        converted
+        for node in root.iter(marc_fields.RECORD_TAG)
+        if (converted := _marc21_from_unimarc(node)) is not None
+    )
+    return _marc_lookup(collection, isbn, decoding)
+
+
 #: Which decoder reads ONE catalogue record, by `decoders.Reader`. The catalogue
 #: family's half of the contract `decoders.py` states, and `opds.READERS` is the
 #: import family's.
@@ -3308,7 +3688,7 @@ def _mods_record(record: ElementTree.Element, decoding: decoders.Decoding) -> Re
 #: arrived. No URL, no status, no handle, no `targets.Target`.
 #:
 #: **Three catalogue readers are deliberately absent, and each exclusion is a
-#: measurement rather than an oversight.** The rule is that these four plus the
+#: measurement rather than an oversight.** The rule is that these five plus the
 #: three below partition `decoders.CATALOGUE_READERS`, asserted by
 #: `tests/test_decoders.py::TestEveryCatalogueReaderIsPlacedOrExcluded`, so a
 #: new reader fails that test until somebody places it. An inclusion list is
@@ -3335,6 +3715,7 @@ READERS: Final[
     decoders.Reader.MARC_PLAIN: _marc_record,
     decoders.Reader.DUBLIN_CORE: _dublin_core_record,
     decoders.Reader.MODS: _mods_record,
+    decoders.Reader.UNIMARC: _unimarc_record,
 }
 
 #: The catalogue readers `READERS` cannot hold, and why, in one place a test can
@@ -3394,6 +3775,15 @@ def _parents_of(root: ElementTree.Element, tag: str) -> list[ElementTree.Element
     return list(found)
 
 
+def _unimarc_search(root: ElementTree.Element, decoding: decoders.Decoding) -> list[Record]:
+    """Every book in a UNIMARC response. `_unimarc_record` converts and refuses.
+
+    An entry of its own rather than `_marc_search`, whose component part knob
+    a UNIMARC decoding cannot carry, and so that no MARC21 reader shares it.
+    """
+    return _records(root.iter(marc_fields.RECORD_TAG), decoding)
+
+
 def _mods_search(root: ElementTree.Element, decoding: decoders.Decoding) -> list[Record]:
     """Every book in a MODS response. The Library of Congress's shape."""
     return _records(root.iter(f"{_MODS}mods"), decoding)
@@ -3422,6 +3812,7 @@ _LOOKUP_READERS: Final[
     decoders.Reader.MARC_GND: _marc_lookup,
     decoders.Reader.MARC_PLAIN: _marc_lookup,
     decoders.Reader.DUBLIN_CORE_BARE: _dublin_core_bare_lookup,
+    decoders.Reader.UNIMARC: _unimarc_lookup,
 }
 
 #: Which decoder reads a title search response, by `decoders.Reader`.
@@ -3435,6 +3826,7 @@ _SEARCH_READERS: Final[
     decoders.Reader.MARC_PLAIN: _marc_search,
     decoders.Reader.DUBLIN_CORE: _dublin_core_search,
     decoders.Reader.MODS: _mods_search,
+    decoders.Reader.UNIMARC: _unimarc_search,
 }
 
 
@@ -3480,7 +3872,7 @@ def _sru_refusal(root: ElementTree.Element) -> str | None:
     would read 1/2 and 1/235 as books this library does not hold.
 
     **A diagnostic beside records is not a refusal, and this function cannot
-    tell**, which is why `_sru_lookup` asks it only after the reader has found
+    tell**, which is why `_sru_ask` asks it only after the reader has found
     nothing. The National Library of Greece answers the true `numberOfRecords`
     **and** `Unknown schema for retrieval` when no `recordSchema` is named, and
     `docs/decisions.md` records a probe that read every such response as
@@ -3524,8 +3916,34 @@ def _sru_refusal(root: ElementTree.Element) -> str | None:
     return None
 
 
+async def _first_answer(forms: tuple[str, ...], ask: Callable[[str], Awaitable[Lookup]]) -> Lookup:
+    """Ask for each form of one ISBN in turn until an answer is not a miss.
+
+    **The ISBN-10 retry, and the one place it is written**, for both doors
+    that build a query: `targets.Target.isbn_forms` says which forms a row is
+    asked about, so the retry is a field on the row rather than a branch on a
+    source or a transport. Only `NOT_FOUND` moves on; a refusal or an
+    unreachable target would answer the next form the same way.
+    """
+    answer = await ask(forms[0])
+    for asked in forms[1:]:
+        if answer.outcome is not Outcome.NOT_FOUND:
+            break
+        answer = await ask(asked)
+    return answer
+
+
 async def _sru_lookup(target: targets.Target, isbn: str, credential: fetch.Credential | None) -> Lookup:
-    """One ISBN lookup against an SRU target.
+    """One ISBN lookup against an SRU target, one request per form `_first_answer` asks for."""
+    return await _first_answer(
+        target.isbn_forms(isbn), lambda asked: _sru_ask(target, isbn, asked, credential)
+    )
+
+
+async def _sru_ask(
+    target: targets.Target, isbn: str, asked: str, credential: fetch.Credential | None
+) -> Lookup:
+    """One SRU request for `asked`, a form of `isbn`, read against `isbn` itself.
 
     **`credential` is offered to the request and attached by nothing else.**
     `fetch` hands it to each hop and `credentials.Credential.header_for` decides,
@@ -3540,7 +3958,7 @@ async def _sru_lookup(target: targets.Target, isbn: str, credential: fetch.Crede
     """
     name = target.source.value
     try:
-        params = target.sru_params(target.isbn_query(isbn), target.lookup_records)
+        params = target.sru_params(target.isbn_query(asked), target.lookup_records)
         response = await fetch.get_once(target.base_url, params=params, credential=credential)
         if response.status_code == 429:
             return Lookup(Outcome.RATE_LIMITED, source=name)
@@ -3597,6 +4015,145 @@ async def _sru_search(
     return _SEARCH_READERS[target.reader](root, target.decoding)
 
 
+#: What a Z39.50 exchange can fail with on this side of the readers: anything
+#: the seam raises, a record that is not XML or not UTF-8, and a query a row
+#: could not build. Each is "this source is unavailable", never a 500.
+_Z3950_FAILURES: Final = (z3950.Z3950Error, ElementTree.ParseError, UnicodeDecodeError, targets.BadQuery)
+
+#: How many times one search is put again after a temporary refusal
+#: (a `z3950.Refused` marked `temporary`), on the same association and inside its deadline.
+#: **Two, so three asks at most.** Measured 2026-11-17 at the OSZK: 78 of 650
+#: lookups drew the refusal, and asked again **on a fresh association about two
+#: seconds later**, every one answered within three asks. An immediate ask on the
+#: same association, which is what this does, is not measured: a second live pass
+#: met no refusal in 1,271 searches, so the tests hold it, not an observation. No
+#: other refusal is asked again, since a target that said no for a reason about
+#: the question says it again; and this bound is what stops a target that only
+#: ever answers "temporary" from costing a search per tick of the deadline.
+_TEMPORARY_REFUSAL_RETRIES: Final = 2
+
+
+def _z3950_root(target: targets.Target, answer: z3950.Answer) -> ElementTree.Element:
+    """The records of one Z39.50 answer as the MARCXML collection a reader takes.
+
+    **The client renders each record as MARCXML in UTF-8**, converting from the
+    row's `targets.Target.record_charset`, so the readers here are the SRU
+    door's own and nothing reads ISO 2709. Each record goes through `_parsed`,
+    which refuses the doctype that unbounds a parse; `z3950.MAX_RESPONSE_BYTES`
+    is the other half, for the reason `_parsed` gives about `fetch`'s.
+
+    **A record in another syntax than the row's is dropped, never read.** A
+    target may answer a request for one format in another, as `z3950.Record`
+    measures, and the row's reader and charset are both the requested
+    format's: read anyway, a substituted record converts from the wrong set
+    and has its tags read under the wrong format, with nothing raised. Logged
+    at warning, one line per record, so a target doing it shows as that
+    rather than as a catalogue holding nothing. The log names the target's own
+    label beside the seam's word, since an unmapped label is `OTHER` and the
+    label is what `z3950_yaz` would need to learn.
+
+    **Hits with no record left is `z3950.Unrenderable`, not an empty
+    collection.** Empty reads as a miss, and a miss tells a member to type the
+    book in by hand; a target that always substitutes, or whose every record
+    the client dropped, counted hits and handed over none it can read, so
+    whether it holds the book is unknown, which is `Outcome.UNAVAILABLE` and
+    not a miss. A partial drop still reads what survived.
+    """
+    wanted = target.z3950_target.syntax
+    collection = ElementTree.Element(f"{{{marc_fields.NAMESPACE}}}collection")
+    for record in answer.records:
+        if record.syntax is not wanted:
+            logger.warning(
+                "%s answered a %s request with a %s record (%s); dropped",
+                target.source.value,
+                wanted.value,
+                record.reported,
+                record.syntax.value,
+            )
+            continue
+        collection.append(_parsed(record.raw.decode()))
+    if answer.hits > 0 and not len(collection):
+        raise z3950.Unrenderable(f"{answer.hits} hits and no record this door can read")
+    return collection
+
+
+async def _z3950_lookup(target: targets.Target, isbn: str) -> Lookup:
+    """One ISBN lookup through the Z39.50 seam, every form on one association.
+
+    **Every bound arrives from the seam by construction**: the bytes across the
+    records (`z3950.MAX_RESPONSE_BYTES`), their count (`targets.Target`
+    refuses a row past `z3950.MAX_RECORDS`) and one deadline over the whole
+    association (`z3950.TIMEOUT_SECONDS`, under the fan out's own). The two
+    `fetch` bounds with no counterpart, a redirect off the host and a content
+    encoding, name things the protocol does not have.
+
+    **A refusal needs no reading of the envelope here**, unlike `_sru_ask`:
+    the seam raises `Refused` for a target that said no and answers zero hits
+    as a value, so the two arrive apart and only the first is `UNAVAILABLE`.
+
+    **The ISBN-10 retry shares the association and its clock**, so a lookup
+    is one open and one deadline however many forms it asks, which is the use
+    `z3950.association` names. A failure on any form is the whole lookup's.
+    """
+    try:
+        async with z3950.association(target.z3950_target) as open_:
+            return await _first_answer(
+                target.isbn_forms(isbn), lambda asked: _z3950_ask(open_, target, isbn, asked)
+            )
+    except _Z3950_FAILURES:
+        logger.warning("%s lookup failed for %s", target.source.value, isbn, exc_info=True)
+        return Lookup(Outcome.UNAVAILABLE, source=target.source.value)
+
+
+async def _z3950_ask(open_: z3950.Association, target: targets.Target, isbn: str, asked: str) -> Lookup:
+    """One search on an open association for `asked`, a form of `isbn`, read against `isbn` itself.
+
+    Raises what the seam and `_z3950_root` raise; `_z3950_lookup` turns each
+    into `UNAVAILABLE`.
+    """
+    answer = await _z3950_asked_through_temporary_refusals(
+        open_, target.isbn_query(asked), target.lookup_records
+    )
+    return _LOOKUP_READERS[target.reader](_z3950_root(target, answer), isbn, target.decoding)
+
+
+async def _z3950_asked_through_temporary_refusals(
+    open_: z3950.Association, pqf: str, records: int
+) -> z3950.Answer:
+    """One search, put again up to `_TEMPORARY_REFUSAL_RETRIES` times on a temporary refusal.
+
+    The last refusal is raised as any other is, so a target still refusing is
+    `UNAVAILABLE` and cached as today.
+    """
+    for _ in range(_TEMPORARY_REFUSAL_RETRIES):
+        try:
+            return await z3950.search(open_, pqf, records=records)
+        except z3950.Refused as refused:
+            if not refused.temporary:
+                raise
+            logger.info("%s refused a search as temporary; asking again", open_.target.host)
+    return await z3950.search(open_, pqf, records=records)
+
+
+async def _z3950_search(target: targets.Target, query: str, limit: int) -> list[Record]:
+    """One title search through the Z39.50 seam, bounded as `_z3950_lookup` is.
+
+    The query is `targets.Target.title_query`'s PQF phrase, and the record
+    count is the row's, which `targets.Target` keeps inside `z3950.MAX_RECORDS`.
+    """
+    terms = _search_terms(query)
+    records = target.search_records(limit)
+    if not terms or records < 1:
+        return []
+    try:
+        answer = await z3950.search_once(target.z3950_target, target.title_query(terms), records=records)
+        root = _z3950_root(target, answer)
+    except _Z3950_FAILURES:
+        logger.warning("%s search failed for %r", target.source.value, query, exc_info=True)
+        return []
+    return _SEARCH_READERS[target.reader](root, target.decoding)
+
+
 def resolve(target: targets.Target) -> None:
     """Refuse a row that names a capability nothing here can serve.
 
@@ -3624,61 +4181,53 @@ def resolve(target: targets.Target) -> None:
     the invariants it can see on one row on its own. This is the half that needs
     to know what code exists.
     """
-    if _bespoke_without_a_credential(target):
+    door = _DOORS[target.transport]
+    if target.needs_key and target.secret is targets.Secret.NONE and not door.carries_a_credential:
         # **The refusal the bespoke path did not have, and it is about the row
-        # rather than about either door**, which is why it is hoisted above both
-        # arms instead of written into one. A bespoke row needing a credential
-        # and naming no secret has nothing that can supply one: a sealed login
-        # goes out of the SRU door and no other, which `carries_a_credential`
-        # states and `tests/test_metadata.py::TestWhichDoorCarriesALogin`
-        # measures at the wire. Before this, such a row resolved, reached
+        # rather than about either capability**, which is why it is hoisted above
+        # both arms instead of written into one. A row needing a credential, naming
+        # no secret, and going out of a door that carries no login has nothing
+        # that can supply one: a sealed login goes out of the SRU door and no
+        # other, which `carries_a_credential` states and
+        # `tests/test_metadata.py::TestWhichDoorCarriesALogin` measures at the
+        # wire. Before this, a bespoke row like that resolved, reached
         # `_lookup_one` and was handed `""`, and the request went out
         # unauthenticated and came back as an ordinary miss. Written into the
         # lookup arm alone it would have missed a row whose only door is the
         # search door.
-        raise ValueError(f"{target.source}: needs a credential and no bespoke door carries one")
-    if target.can(Capability.ANSWERS_ISBN):
-        lookup_readers = _door_readers(target, sru=_LOOKUP_READERS, keyed=_KEYED_LOOKUPS, free=_FREE_LOOKUPS)
-        if target.reader not in lookup_readers:
-            raise ValueError(f"{target.source}: answers a lookup and {target.reader} reads none")
-    if target.can(Capability.ANSWERS_TITLE_SEARCH):
-        readers = _door_readers(target, sru=_SEARCH_READERS, keyed=_METERED_SEARCHES, free=_FREE_SEARCHES)
-        if target.reader not in readers:
-            raise ValueError(f"{target.source}: answers a search and {target.reader} reads none")
+        raise ValueError(f"{target.source}: needs a credential and its door carries none")
+    _refuse_a_reader_the_door_lacks(target, door)
 
 
-def _bespoke_without_a_credential(target: targets.Target) -> bool:
-    """Whether a row goes out of a bespoke door, needs a credential, and names no secret."""
-    return (
-        target.transport is not targets.Transport.SRU
-        and target.needs_key
-        and target.secret is targets.Secret.NONE
-    )
+def _refuse_a_reader_the_door_lacks(target: targets.Target, door: _Door) -> None:
+    """`resolve`'s two capability arms: each capability the row claims, its door reads."""
+    if target.can(Capability.ANSWERS_ISBN) and target.reader not in door.lookup_readers(target):
+        raise ValueError(f"{target.source}: answers a lookup and {target.reader} reads none")
+    if target.can(Capability.ANSWERS_TITLE_SEARCH) and target.reader not in door.search_readers(target):
+        raise ValueError(f"{target.source}: answers a search and {target.reader} reads none")
 
 
-def _door_readers(
+def _bespoke_readers(
     target: targets.Target,
     *,
-    sru: Mapping[decoders.Reader, object],
     keyed: Mapping[decoders.Reader, object],
     free: Mapping[decoders.Reader, object],
 ) -> Collection[decoders.Reader]:
-    """The readers the door this row would go through can serve, for one capability.
-
-    One rule for both of `resolve`'s arms, given that capability's three tables:
-    the SRU door's, the one bespoke table entitled to the Google Books key, and
-    the free bespoke one.
+    """The readers the bespoke door can serve this row, given one capability's two tables.
 
     **Keyed by the secret, not by `Capability.METERED`.** The two agree on the
     seeded roster and are different questions: being billed per request is not
     being entitled to one named source's key, and a second metered bespoke source
-    added to the keyed table would have been handed Google's by arriving.
+    added to the keyed table would have been handed Google's by arriving. A
+    `match` with an `assert_never` tail, as `_bespoke_lookup` has, so a third
+    secret is a mypy error here rather than a row read against the free table.
     """
-    if target.transport is targets.Transport.SRU:
-        return sru.keys()
-    if target.secret is targets.Secret.GOOGLE_BOOKS_KEY:
-        return keyed.keys()
-    return free.keys()
+    match target.secret:
+        case targets.Secret.GOOGLE_BOOKS_KEY:
+            return keyed.keys()
+        case targets.Secret.NONE:
+            return free.keys()
+    assert_never(target.secret)
 
 
 def carries_a_credential(target: targets.Target) -> bool:
@@ -3712,10 +4261,12 @@ def carries_a_credential(target: targets.Target) -> bool:
     deliberately not written here: it is a live cardinality, and one written into
     this module would be a number nothing recomputes.
 
-    `Z3950` answers False and must, because `fetch.py` never opens that socket.
-    #129 is where that door and what it carries are decided together.
+    **A column of `_DOORS` rather than a test of the transport**, so the door and
+    what it carries are one row there. The Z39.50 door answers False because
+    `z3950.Client.open` takes no login, and `targets.Target` refuses a Z39.50
+    row that needs one rather than let it be dropped here.
     """
-    return target.transport is targets.Transport.SRU
+    return _DOORS[target.transport].carries_a_credential
 
 
 async def _lookup_one(
@@ -3778,9 +4329,18 @@ async def _lookup_one(
     table's accident standing in for a rule about the row.
     `tests/test_metadata.py::TestOnlyTheKeysOwnerIsHandedIt::test_the_row_is_read_and_not_the_tables_key_set`
     is what separates them.
+
+    **The door is `_DOORS[target.transport]`**, so the transport is a field
+    read once rather than a branch at each call site, and the secret's `match`
+    is `_bespoke_lookup`'s, the one door it concerns.
     """
-    if target.transport is targets.Transport.SRU:
-        return await _sru_lookup(target, isbn, credential)
+    return await _DOORS[target.transport].lookup(target, isbn, api_key, credential)
+
+
+async def _bespoke_lookup(
+    target: targets.Target, isbn: str, api_key: str, _credential: fetch.Credential | None
+) -> Lookup:
+    """The bespoke door's lookup, handed the key only where the row names it. See `_lookup_one`."""
     match target.secret:
         case targets.Secret.GOOGLE_BOOKS_KEY:
             return await _KEYED_LOOKUPS[target.reader](isbn, api_key)
@@ -3810,14 +4370,87 @@ async def _search_one(
     would have been handed Google's key by arriving, exactly as at the lookup
     door.
     """
-    if target.transport is targets.Transport.SRU:
-        return await _sru_search(target, query, limit, credential)
+    return await _DOORS[target.transport].search(target, query, limit, api_key, credential)
+
+
+async def _bespoke_search(
+    target: targets.Target, query: str, limit: int, api_key: str, _credential: fetch.Credential | None
+) -> list[Record]:
+    """The bespoke door's search, handed the key on the lookup door's terms. See `_search_one`."""
     match target.secret:
         case targets.Secret.GOOGLE_BOOKS_KEY:
             return await _METERED_SEARCHES[target.reader](query, limit, api_key)
         case targets.Secret.NONE:
             return await _FREE_SEARCHES[target.reader](query, limit)
     assert_never(target.secret)
+
+
+@dataclass(frozen=True)
+class _Door:
+    """One outbound door: how it looks an ISBN up, how it searches, and whether a login rides it.
+
+    **One signature for every door**, so the dispatch is a lookup in `_DOORS`
+    and nothing above it knows which protocol answered. A door ignores the
+    arguments it has no use for: the SRU door the key, the Z39.50 door both.
+    """
+
+    lookup: Callable[[targets.Target, str, str, fetch.Credential | None], Awaitable[Lookup]]
+    search: Callable[[targets.Target, str, int, str, fetch.Credential | None], Awaitable[list[Record]]]
+    #: Whether a sealed login handed to this door leaves the process. See
+    #: `carries_a_credential`, which reads it.
+    carries_a_credential: bool
+    #: The readers this door can serve a row for each capability, which `resolve`
+    #: asks, so the boot check reads the same row of this table the dispatch does
+    #: and a transport added with a door states its readers rather than inheriting
+    #: another door's.
+    lookup_readers: Callable[[targets.Target], Collection[decoders.Reader]]
+    search_readers: Callable[[targets.Target], Collection[decoders.Reader]]
+
+
+#: The door for each transport, and the only place a row's transport is read on
+#: the request path.
+#:
+#: **Two doors for two protocols, deliberately not one client for both.** One
+#: client speaking both would drop the four bounds `fetch.py` holds and that
+#: client does not: the raw byte count, the per request deadline, the refusal of
+#: a redirect off the host and of an unasked content encoding. The comparison
+#: is in `docs/decisions.md`.
+#:
+#: **Refused at import to hold fewer members than `targets.Transport`**, below,
+#: so a transport added without a door fails the boot rather than a scan.
+_DOORS: Final[Mapping[targets.Transport, _Door]] = MappingProxyType(
+    {
+        targets.Transport.SRU: _Door(
+            lookup=lambda target, isbn, _key, credential: _sru_lookup(target, isbn, credential),
+            search=lambda target, query, limit, _key, credential: _sru_search(
+                target, query, limit, credential
+            ),
+            carries_a_credential=True,
+            lookup_readers=lambda _target: _LOOKUP_READERS.keys(),
+            search_readers=lambda _target: _SEARCH_READERS.keys(),
+        ),
+        # Which of the XML readers a Z39.50 row may name for its record syntax is
+        # narrower still, and `targets.Target` refuses the rest.
+        targets.Transport.Z3950: _Door(
+            lookup=lambda target, isbn, _key, _credential: _z3950_lookup(target, isbn),
+            search=lambda target, query, limit, _key, _credential: _z3950_search(target, query, limit),
+            carries_a_credential=False,
+            lookup_readers=lambda _target: _LOOKUP_READERS.keys(),
+            search_readers=lambda _target: _SEARCH_READERS.keys(),
+        ),
+        targets.Transport.BESPOKE: _Door(
+            lookup=_bespoke_lookup,
+            search=_bespoke_search,
+            carries_a_credential=False,
+            lookup_readers=lambda target: _bespoke_readers(target, keyed=_KEYED_LOOKUPS, free=_FREE_LOOKUPS),
+            search_readers=lambda target: _bespoke_readers(
+                target, keyed=_METERED_SEARCHES, free=_FREE_SEARCHES
+            ),
+        ),
+    }
+)
+if _doorless := set(targets.Transport) - set(_DOORS):
+    raise RuntimeError(f"a transport with no door: {sorted(_doorless)}")
 
 
 # ── Ranking ───────────────────────────────────────────────────────────────────
@@ -3913,7 +4546,24 @@ _LANGUAGE_WEIGHT: Final = 3
 #: meeting this line should not conclude that any of them appears in search
 #: results.
 _SECONDARY_SOURCES: Final = frozenset(
-    {"bnf", "loc", "oenb", "nlg", "nkp", "bne", "bna", "bnu", "bn_pl", "libris", "kb_dk", "bibsys", "melinda"}
+    {
+        "bnf",
+        "loc",
+        "oenb",
+        "nlg",
+        "nkp",
+        "bne",
+        "bna",
+        "bnu",
+        "bn_pl",
+        "libris",
+        "kb_dk",
+        "bibsys",
+        "melinda",
+        "sbn",
+        "porbase",
+        "oszk",
+    }
 )
 _SECONDARY_PENALTY: Final = 1
 
@@ -4526,6 +5176,9 @@ _MATCH_PRECEDENCE: Final = (
     "kb_dk",
     "bibsys",
     "melinda",
+    "sbn",
+    "porbase",
+    "oszk",
 )
 
 

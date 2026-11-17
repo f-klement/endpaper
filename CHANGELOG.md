@@ -24,6 +24,15 @@
   other free catalogues miss.
 - Book lookups also ask Melinda, the Finnish union catalogue, which holds Finnish books the
   other free catalogues miss.
+- A catalogue record whose extent ends in a bracketed run of unnumbered pages, such as
+  `308, [3] p.`, now gives its page count.
+- A lookup now also asks the Italian union catalogue (SBN), the Portuguese national union
+  catalogue (PORBASE) and the Hungarian national library (OSZK), each only about books from its
+  own country, after the Greek, Polish and Danish libraries and before Open Library.
+- A catalogue that misses a book can be asked once more with the ten digit ISBN; the three new
+  catalogues are, and find a third of their books that way.
+- A lookup a Z39.50 catalogue such as the Hungarian national library briefly refuses with a
+  temporary error is asked again, up to twice, before the catalogue is reported unavailable.
 
 ## v0.21.3
 

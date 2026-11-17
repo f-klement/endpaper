@@ -979,7 +979,7 @@ def _emitting_calls(tree: ast.Module) -> list[tuple[str, ast.Call]]:
     **That refusal catches objects that are not loggers, and it is affordable
     only because this rule reads one module.** Every emitter-named attribute
     call in `auth_backends.py` is on `logger`, measured. Elsewhere in the tree
-    they are not: `z3950_provisional.py` makes two calls to
+    they are not: `z3950_yaz.py` makes two calls to
     `bindings.error(...)`, declared to return a four element diagnostic tuple,
     and a `warnings.warn(...)` would read the same way anywhere it appeared.
     **Two calls rather than two line numbers: a position is anchored by

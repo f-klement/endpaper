@@ -63,33 +63,12 @@ class Measured:
     #: flight. **p90 and not the mean**, because a tier is gathered and so costs
     #: its slowest member, and a mean hides the case that decides the budget.
     p90_seconds: float
-    #: How many of this source's answers fall in its single largest frame.
-    #:
-    #: **With `answered`, this is what separates a general catalogue from a
-    #: national one**, and the ratio rather than either number is the thing:
-    #: `largest_frame / answered` is how concentrated the source is. Stored as
-    #: the raw count so this table stays measurements and the conclusion is
-    #: computed. See `TIER_MAX_CONCENTRATION`.
-    #:
-    #: **This replaced a count of frames answered, and the replacement is the
-    #: whole point.** The first version asked how many of the ten frames a source
-    #: answers **anything** in, which a design critic measured as too weak in the
-    #: round that introduced it: it flatters the DNB, which scores 5 frames while
-    #: 83 of its 91 answers are in two, and it admits the OeNB at 4 frames and
-    #: **1** marginal answer while barring the NLG at 1 frame and **34**. It is a
-    #: rule about presence standing in for a rule about generality.
-    #:
-    #: The Czech National Library is what made that undeniable: it answers in
-    #: **6** frames, so the frame count admits it to the tier, and **49 of its 59
-    #: answers are Czech**. Concentration puts it where it belongs without
-    #: anybody re-deciding.
-    largest_frame: int
 
 
 #: What each lookup source that needs no credential does, measured 2026-08-30,
 #: except the rows from the BNE's down, each of which says its own date.
 #:
-#: **The set is the twelve that need nothing, which is two short of what a stock
+#: **The set is the fifteen that need nothing, which is two short of what a stock
 #: install asks**, and the gap is the whole of what this heading has to be
 #: careful about. The Argentine and Uruguayan national libraries each need a
 #: login and ship one, so a household that has typed nothing does ask them; they
@@ -112,12 +91,12 @@ class Measured:
 #: These figures drive `ALWAYS_ASKED` through the tier rules below. Re-measure
 #: with the committed sample rather than adjusting a row.
 MEASURED: Final[dict[CatalogueSource, Measured]] = {
-    CatalogueSource.DNB: Measured(answered=91, of=500, p90_seconds=0.258, largest_frame=44),
-    CatalogueSource.K10PLUS: Measured(answered=210, of=500, p90_seconds=0.512, largest_frame=45),
-    CatalogueSource.OENB: Measured(answered=55, of=500, p90_seconds=0.538, largest_frame=30),
-    CatalogueSource.OPEN_LIBRARY: Measured(answered=237, of=500, p90_seconds=2.562, largest_frame=36),
-    CatalogueSource.NLG: Measured(answered=37, of=500, p90_seconds=0.238, largest_frame=37),
-    CatalogueSource.NKP: Measured(answered=59, of=500, p90_seconds=0.239, largest_frame=49),
+    CatalogueSource.DNB: Measured(answered=91, of=500, p90_seconds=0.258),
+    CatalogueSource.K10PLUS: Measured(answered=210, of=500, p90_seconds=0.512),
+    CatalogueSource.OENB: Measured(answered=55, of=500, p90_seconds=0.538),
+    CatalogueSource.OPEN_LIBRARY: Measured(answered=237, of=500, p90_seconds=2.562),
+    CatalogueSource.NLG: Measured(answered=37, of=500, p90_seconds=0.238),
+    CatalogueSource.NKP: Measured(answered=59, of=500, p90_seconds=0.239),
     # **This column is a later pass on the same 500 books**, measured
     # 2026-09-05, where every other column comes from the pass this table's own
     # heading dates, and that is said here rather than left for a reader to
@@ -128,35 +107,44 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
     # two books behind the NKP, and the tail is ordered on `TAIL_MARGINAL` and
     # `TAIL_INSIDE_REMIT` rather than on latency, so a latency figure could not
     # move its position at all.
-    CatalogueSource.BNE: Measured(answered=57, of=500, p90_seconds=0.276, largest_frame=47),
+    CatalogueSource.BNE: Measured(answered=57, of=500, p90_seconds=0.276),
     # **A third date on the same 500 books**, 2026-11-16, for the BNE's reason:
     # the counts compare exactly and the latency approximately. 9 answers, none
-    # in a Polish frame because the sample has none, so its concentration here
-    # reads 44% and says nothing about a national catalogue. It does not reach
-    # the tier anyway, ranking last of the eight a tier may hold. What
-    # it answers on Polish books is in `metadata`'s block for it.
-    CatalogueSource.BN_PL: Measured(answered=9, of=500, p90_seconds=0.446, largest_frame=4),
+    # in a Polish frame because the sample has none. What it answers on Polish
+    # books is in `metadata`'s block for it.
+    CatalogueSource.BN_PL: Measured(answered=9, of=500, p90_seconds=0.446),
     # The same pass and the same caveat. A union catalogue, so 70 answers in
-    # every frame and genuinely general by the concentration rule, at 23%. It
-    # ranks third of the eight a tier may hold, behind the DNB's 91. **Its p90
-    # here is a property of this sample**: 0.367s is mostly empty answers, and
-    # on fifty Swedish books, where every answer carries a union's holdings,
-    # it is 2.134s. `metadata`'s block for it carries both.
-    CatalogueSource.LIBRIS: Measured(answered=70, of=500, p90_seconds=0.367, largest_frame=16),
+    # every frame. It ranks third of the nine a tier may hold, behind the DNB's
+    # 91. **Its p90 here is a property of this sample**: 0.367s is mostly empty
+    # answers, and on fifty Swedish books, where every answer carries a union's
+    # holdings, it is 2.134s. `metadata`'s block for it carries both.
+    CatalogueSource.LIBRIS: Measured(answered=70, of=500, p90_seconds=0.367),
     # The same date and the same caveat. A national library holding foreign
-    # editions, so 35 answers over eight frames, German 12 the most, general by
-    # the concentration rule at 34%: none of the 35 is Danish, since the sample
-    # holds no Danish frame. It ranks sixth of the eight a tier may hold.
-    # What it answers on Danish books is in `metadata`'s block for it.
-    CatalogueSource.KB_DK: Measured(answered=35, of=500, p90_seconds=0.64, largest_frame=12),
+    # editions, so 35 answers over eight frames and none Danish, since the
+    # sample holds no Danish frame. What it answers on Danish books is in
+    # `metadata`'s block for it.
+    CatalogueSource.KB_DK: Measured(answered=35, of=500, p90_seconds=0.64),
     # The same date and the same caveat. A union catalogue: 48 answers over
-    # seven frames, German 17 the most, general at 35%, and fifth of the eight
-    # a tier may hold.
-    CatalogueSource.BIBSYS: Measured(answered=48, of=500, p90_seconds=0.362, largest_frame=17),
+    # seven frames.
+    CatalogueSource.BIBSYS: Measured(answered=48, of=500, p90_seconds=0.362),
     # The same date and the same caveat. A union catalogue: 32 answers over six
-    # frames, the German and Austrian ten each the most, general at 31%, and
-    # seventh of the eight a tier may hold.
-    CatalogueSource.MELINDA: Measured(answered=32, of=500, p90_seconds=0.251, largest_frame=10),
+    # frames.
+    CatalogueSource.MELINDA: Measured(answered=32, of=500, p90_seconds=0.251),
+    # **A fourth date**, 2026-11-17, for the BNE's reason, and each of these
+    # three is one lookup through the Z39.50 door with its ISBN-10 retry, so
+    # the p90 is the whole lookup. A union catalogue: 99 answers over nine
+    # frames, Italian 45 the most. It is the one source the tier rule refuses
+    # on what it adds rather than on what it answers: `TIER_MAX_CONCENTRATION`.
+    CatalogueSource.SBN: Measured(answered=99, of=500, p90_seconds=0.337),
+    # The same date and the same caveat. 37 of its 40 answers are Portuguese,
+    # and at 1.552s it is the one source outside `FIRST_TIER_BUDGET_SECONDS`
+    # but Open Library. What a lookup that reaches it pays is in `metadata`'s
+    # block for it.
+    CatalogueSource.PORBASE: Measured(answered=40, of=500, p90_seconds=1.552),
+    # The same date and the same caveat. 2 answers, both Austrian, because the
+    # sample has no Hungarian frame; what it answers on Hungarian books is in
+    # `metadata`'s block for it.
+    CatalogueSource.OSZK: Measured(answered=2, of=500, p90_seconds=0.076),
 }
 
 #: What the best tier of each size answers, of the same 500 ISBNs as `MEASURED`.
@@ -166,11 +154,10 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
 #: ones, and a per source table has no way of saying so. Each entry is the best
 #: tier of that size that `FIRST_TIER_BUDGET_SECONDS` allows: K10plus alone,
 #: then K10plus with the DNB, then both with LIBRIS, then those three with the
-#: BN_PL, then those four with the OENB, then those five with the Royal Danish
-#: Library or BIBSYS, which add the same one book, then those six with Melinda,
-#: then all eight. That is every source the tier **rule** allows, which is
-#: narrower than every source inside the budget: eleven are inside the budget
-#: and eight are inside it and under `TIER_MAX_CONCENTRATION` as well.
+#: BN_PL, and from five on several tiers tie, each adding one book or none, up
+#: to all nine. That is every source the tier **rule** allows, which is
+#: narrower than every source inside the budget: thirteen are inside the budget
+#: and nine are inside it and are not refused by `TIER_MAX_CONCENTRATION`.
 #:
 #: **It exists to pin the tier's size against something other than the tier.**
 #: Without it, a guard that derives the tier from `MEASURED` slices with
@@ -182,48 +169,63 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
 #: same limit: it is evidence about that run and not about a re-run.
 #:
 #: **Over the sources a tier may hold, which is narrower than "inside the
-#: budget".** `TIER_MAX_CONCENTRATION` keeps two national catalogues out, and it
-#: has to be applied here as well or this table would price a tier that cannot
-#: be built: the best pair of everything inside the budget is K10plus with the
-#: NKP at **254**, against **222** for the pair that ships. That pair reaches 42
-#: books the shipping pair does not, and **40 of the 42 are Czech**. The NLG pair
-#: is the same shape one step milder, 244, with all 37 of its answers in the
-#: Greek frame.
-TIER_UNION: Final[dict[int, int]] = {1: 210, 2: 222, 3: 228, 4: 231, 5: 232, 6: 233, 7: 234, 8: 234}
+#: budget".** `TIER_MAX_CONCENTRATION` keeps four catalogues out, and it has to
+#: be applied here as well or this table would price a tier that cannot be
+#: built: the best pair of everything inside the budget is K10plus with the NKP
+#: at **254**, against **222** for the pair that ships. That pair reaches 42
+#: books the shipping pair does not, and **40 of the 42 are Czech**. The BNE,
+#: the NLG and the SBN pairs are the same shape, at 250, 244 and 243.
+TIER_UNION: Final[dict[int, int]] = {1: 210, 2: 222, 3: 228, 4: 231, 5: 232, 6: 233, 7: 234, 8: 234, 9: 234}
 
-#: How much of a source's coverage may sit in one frame and still be asked on
-#: **every** lookup.
+#: How much of what a source adds to the tier may sit in one frame and still be
+#: asked on **every** lookup.
 #:
-#: **It decides the tier's size, not its membership.** Membership ranks by pooled
-#: rate; the size rule unions rather than ranks, so without a concentration bound
-#: the arithmetic demands a third concurrent request from every install
-#: everywhere to serve one frame.
+#: **It decides the tier's size, and its membership wherever a concentrated
+#: source answers more than a member.** Membership ranks by pooled rate, which
+#: the SBN's 99 would win against the DNB's 91; the size rule unions rather than
+#: ranks, so without a concentration bound the arithmetic demands a third
+#: concurrent request from every install everywhere to serve one frame.
 #:
 #: **Concentration rather than a count of frames answered**, because a source
 #: answering a little in many frames and one answering everything in one frame
 #: are different propositions for a household that is in none of them.
+#:
+#: **Read over the books a source adds to the rest of the tier, not over
+#: everything it answers**, the owner's ruling of 2026-11-17. A union catalogue
+#: holds foreign editions the tier already has, so over all its answers it reads
+#: general while what it adds is one country's. The SBN is that shape: 45% of
+#: its 99 answers are Italian, which passes, and 26 of the 30 books it adds to
+#: the DNB and K10plus are, 87%, which does not. The DNB adds 12 to K10plus at
+#: 50%, so the pair that ships is unchanged; its margin is a few books, and a
+#: crossing fails `test_the_tier_holds_the_sources_that_answer_most_inside_the_budget`
+#: rather than passing quietly. A source that adds fewer books than
+#: `SLOT_MUST_EARN` is not read at all: a share of a handful of books is noise
+#: rather than a remit, and as a third slot the slot rule refuses it anyway.
 TIER_MAX_CONCENTRATION: Final = 2 / 3
 
 #: For each source asked one at a time, how many of the books the leading tier
 #: missed it answers, over the same 500 and the frames committed beside them.
 #:
 #: **The tail's rule is marginal and no per source count can express it.** In
-#: the order below, the pooled counts read 37, 9, 35, 237, 55, 59, 57, 70, 32
-#: and 48, and the answers to books the leading pair missed 34, 30, 29, 87, 1,
-#: 42, 40, 9, 6 and 6. So the pooled rule would ask LIBRIS second and the OeNB
-#: ahead of the NLG; the books the tier missed put LIBRIS and the two Nordic
-#: union catalogues last.
+#: the order below, the pooled counts read 37, 9, 35, 99, 40, 2, 237, 55, 59,
+#: 57, 70, 32 and 48, and the answers to books the leading pair missed 34, 30,
+#: 29, 26, 25, 17, 90, 1, 43, 40, 9, 7 and 7. So the pooled rule would ask the
+#: SBN second, LIBRIS third and the OeNB ahead of the NLG; the books the tier
+#: missed put LIBRIS and the two Nordic union catalogues last.
 #:
 #: **A source with a remit is counted only on the ISBNs inside it**: they are
 #: all it is ever asked about. Where the sample holds them that is the sample,
 #: as for the NLG's Greek frame and the OeNB's `978-3` books. Where it holds
 #: none, a frame of 50 drawn the way the sample's frames were is committed
-#: beside it, and every row is counted over that too. There are two: Polish and
-#: Danish, 50 ISBNs each from Wikidata by publisher country, measured
-#: 2026-11-16. Of the 278 books in the 500 the leading pair missed, the rows
-#: below answer 34, 0, 0, 82, 1, 42, 40, 6, 3 and 2; of the 39 in the Polish
-#: frame, 0, 30, 0, 4, 0, 0, 0, 0, 2 and 0; of the 39 in the Danish one, 0, 0,
-#: 29, 1, 0, 0, 0, 3, 1 and 4. Each figure here is the sum. **A frame is
+#: beside it, and every row is counted over that too. There are three: Polish,
+#: Danish and Hungarian, 50 ISBNs each from Wikidata by publisher country,
+#: measured 2026-11-16, with the SBN, PORBASE and OSZK columns 2026-11-17. Of
+#: the 278 books in the 500 the leading pair missed, the rows below answer 34,
+#: 0, 0, 26, 25, 0, 82, 1, 42, 40, 6, 3 and 2; of the 39 in the Polish frame,
+#: 0, 30, 0, 0, 0, 0, 4, 0, 0, 0, 0, 2 and 0; of the 39 in the Danish one, 0,
+#: 0, 29, 0, 0, 0, 1, 0, 0, 0, 3, 1 and 4; of the 22 in the Hungarian one, 0,
+#: 0, 0, 0, 0, 17, 3, 0, 1, 0, 0, 1 and 1. Each figure here is the sum. The
+#: Italian and Portuguese books are the sample's own frames. **A frame is
 #: committed for a remit and for nothing else**: a country frame for a source
 #: with no remit would count its own catalogue's books over every other row's,
 #: and that row is ranked on the whole sample like the rest.
@@ -234,9 +236,9 @@ TIER_MAX_CONCENTRATION: Final = 2 / 3
 #: ISBN in a named group, a swap of the two changes the walk for no other book,
 #: since the remitted row is never asked about one. **A `979` ISBN, or one whose
 #: group `isbn.registration_group` cannot name, is the exception**: `_serves`
-#: asks every remitted row about it, so such a lookup asks the NLG, the BN_PL
-#: and the Royal Danish Library before Open Library, where none is likely to
-#: answer. The owner accepted that cost. Two rows that **both have a remit, or
+#: asks every remitted row about it, so such a lookup asks the six remitted rows
+#: ahead of Open Library before it, where none is likely to answer, at the cost
+#: `SERVES_GROUPS` states. The owner accepted that cost. Two rows that **both have a remit, or
 #: neither**, are compared on this table.
 #:
 #: Read pairwise, that admits more than one order wherever a remitted row beats
@@ -253,11 +255,14 @@ TIER_MAX_CONCENTRATION: Final = 2 / 3
 #: **What it gives today.** On its Greek books the NLG answers 34 and Open
 #: Library 4, on its Polish ones the BN_PL 30 and Open Library 4, on its Danish
 #: ones the Royal Danish Library 29 and Open Library 1, and on its `978-3` ones
-#: the OeNB 1 and Open Library 3, against 0 for the NKP. So the NLG, the BN_PL
-#: and the Royal Danish Library go ahead of Open Library, in that order by this
-#: table, and the OeNB behind Open Library and ahead of the NKP.
+#: the OeNB 1 and Open Library 3, against 0 for the NKP. On its Italian books
+#: the SBN answers 26 and Open Library 13, on its Portuguese ones PORBASE 25
+#: and Open Library 11, and on its Hungarian ones the OSZK 17 and Open Library
+#: 3. So the NLG, the BN_PL, the Royal Danish Library, the SBN, PORBASE and the
+#: OSZK go ahead of Open Library, in that order by this table, and the OeNB
+#: behind Open Library and ahead of the NKP.
 #:
-#: **Two unremitted rows tie, Melinda and BIBSYS at 6**, and the rule says
+#: **Two unremitted rows tie, Melinda and BIBSYS at 7**, and the rule says
 #: nothing about a tie between two rows it compares on this table. Melinda goes
 #: first because it is the faster, p90 0.251s against 0.362s, which is the
 #: cheaper of the two to ask on a walk the other would answer.
@@ -275,18 +280,22 @@ TAIL_MARGINAL: Final[dict[CatalogueSource, int]] = {
     CatalogueSource.NLG: 34,
     CatalogueSource.BN_PL: 30,
     CatalogueSource.KB_DK: 29,
-    CatalogueSource.OPEN_LIBRARY: 87,
+    CatalogueSource.SBN: 26,
+    CatalogueSource.PORBASE: 25,
+    CatalogueSource.OSZK: 17,
+    CatalogueSource.OPEN_LIBRARY: 90,
     CatalogueSource.OENB: 1,
-    CatalogueSource.NKP: 42,
+    CatalogueSource.NKP: 43,
     CatalogueSource.BNE: 40,
     CatalogueSource.LIBRIS: 9,
-    CatalogueSource.MELINDA: 6,
-    CatalogueSource.BIBSYS: 6,
+    CatalogueSource.MELINDA: 7,
+    CatalogueSource.BIBSYS: 7,
 }
 
 #: For each tail source with a remit, what it and each tail source with none
 #: answer of the books the leading pair missed **inside that remit**: 46 Greek,
-#: 38 Polish, 37 Danish and 5 in `978-3`, over the sample and the frames as
+#: 38 Polish, 37 Danish, 5 in `978-3`, 30 Italian, 33 Portuguese and 20
+#: Hungarian, over the sample and the frames as
 #: `TAIL_MARGINAL` counts them.
 #:
 #: Only the pairs `TAIL_MARGINAL`'s rule compares this way are here, a remitted
@@ -329,6 +338,33 @@ TAIL_INSIDE_REMIT: Final[dict[CatalogueSource, dict[CatalogueSource, int]]] = {
         CatalogueSource.LIBRIS: 0,
         CatalogueSource.MELINDA: 0,
         CatalogueSource.BIBSYS: 0,
+    },
+    CatalogueSource.SBN: {
+        CatalogueSource.SBN: 26,
+        CatalogueSource.OPEN_LIBRARY: 13,
+        CatalogueSource.NKP: 0,
+        CatalogueSource.BNE: 0,
+        CatalogueSource.LIBRIS: 2,
+        CatalogueSource.MELINDA: 1,
+        CatalogueSource.BIBSYS: 0,
+    },
+    CatalogueSource.PORBASE: {
+        CatalogueSource.PORBASE: 25,
+        CatalogueSource.OPEN_LIBRARY: 11,
+        CatalogueSource.NKP: 1,
+        CatalogueSource.BNE: 1,
+        CatalogueSource.LIBRIS: 1,
+        CatalogueSource.MELINDA: 0,
+        CatalogueSource.BIBSYS: 0,
+    },
+    CatalogueSource.OSZK: {
+        CatalogueSource.OSZK: 17,
+        CatalogueSource.OPEN_LIBRARY: 3,
+        CatalogueSource.NKP: 1,
+        CatalogueSource.BNE: 0,
+        CatalogueSource.LIBRIS: 0,
+        CatalogueSource.MELINDA: 1,
+        CatalogueSource.BIBSYS: 1,
     },
 }
 
@@ -378,14 +414,16 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: one of them**. A reorder is never the fix for a book the chain misses.
 #:
 #: **That modelling ran over the seven sources that needed no credential then**,
-#: which is seven short of what a stock install asks now: the Argentine and
+#: which is ten short of what a stock install asks now: the Argentine and
 #: Uruguayan rows ship the logins their libraries publish, and the BN_PL,
-#: LIBRIS and the three Nordic catalogues arrived after it. It is left as measured
-#: rather than bumped: the conclusion is that permutation does not move
-#: coverage, and adding a source the modelling never permuted would not support
-#: it. The BN_PL answers no book of the 500 that the seven do not, LIBRIS one,
-#: BIBSYS and the Royal Danish Library one more between them and Melinda one,
-#: so the twelve that need nothing answer 398.
+#: LIBRIS, the three Nordic catalogues and the three Z39.50 ones arrived after
+#: it. It is left as measured rather than bumped: the conclusion is that
+#: permutation does not move coverage, and adding a source the modelling never
+#: permuted would not support it. The BN_PL answers no book of the 500 that the
+#: seven do not, LIBRIS one, BIBSYS and the Royal Danish Library one more
+#: between them and Melinda one, so the twelve answer 398; the SBN adds 15,
+#: PORBASE 16 more and the OSZK none, so the fifteen that need nothing answer
+#: 429.
 #:
 #: **The first tier is a latency budget.** `ALWAYS_ASKED` sources are gathered,
 #: so the tier costs its slowest member rather than their sum, and membership is
@@ -403,6 +441,9 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
     CatalogueSource.NLG,
     CatalogueSource.BN_PL,
     CatalogueSource.KB_DK,
+    CatalogueSource.SBN,
+    CatalogueSource.PORBASE,
+    CatalogueSource.OSZK,
     CatalogueSource.OPEN_LIBRARY,
     CatalogueSource.OENB,
     CatalogueSource.NKP,
@@ -516,14 +557,14 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: had to be checked rather than assumed when they came apart.
 #:
 #: **This is much of the chain's coverage, and most installs do not have it.**
-#: The fourteen sources a stock install asks answer 410 of the 500 ISBNs behind `MEASURED` and miss
-#: 90, and outside German language publishing they miss 86 of 400. #91
+#: The seventeen sources a stock install asks answer 441 of the 500 ISBNs behind `MEASURED` and miss
+#: 59, and outside German language publishing they miss 55 of 400. #91
 #: measured the same books with a key: Italy 36% missed keyless against 0% with
 #: one, Greece 86% against 54%. So "the chain covers this country" is a claim
 #: about a keyed install, and it is worth saying wherever the chain's coverage
 #: is described rather than being left for a household to discover.
 #:
-#: **410 and not 398, and which twelve books moved is measured rather than
+#: **441 and not 429, and which twelve books moved is measured rather than
 #: assumed.** The two credentialled sources ship the logins their own libraries
 #: publish, and `metadata`'s block for each measures what it answers that the rest
 #: miss, over the same committed sample: **4** for the Argentine catalogue and
@@ -535,18 +576,20 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #:
 #: The 395 stays stated because it is what was measured and because it is the
 #: figure for an install that pins both `CATALOGUE_CREDENTIAL_BNA` and
-#: `CATALOGUE_CREDENTIAL_BNU` to something it cannot use: the twelve sources
-#: that need no credential at all answer 398 of the 500 and miss 102. The first
+#: `CATALOGUE_CREDENTIAL_BNU` to something it cannot use: the fifteen sources
+#: that need no credential at all answer 429 of the 500 and miss 71. The first
 #: seven answered 395; the BN_PL adds no book to them, LIBRIS one, an Italian
 #: edition, BIBSYS and the Royal Danish Library one between them, a Brazilian
 #: book both hold, and Melinda one, a Greek book. Nothing else in the chain
-#: holds any of the three.
+#: holds any of those three. The SBN then adds 15, all Italian, PORBASE 16, all
+#: Portuguese, and the OSZK none.
 #:
 #: **"Most of the chain's coverage" was true when it was written and is not
-#: now**, which is why this paragraph says "much". Four things moved the free
-#: figure from 300 to 410 on the same 500 books: three national catalogues, the
+#: now**, which is why this paragraph says "much". Five things moved the free
+#: figure from 300 to 441 on the same 500 books: three national catalogues, the
 #: `020 $q` rule in `marc_fields.Fields.isbn`, which was refusing 51 records
-#: the sources already held, and two more catalogues arriving with their logins. The
+#: the sources already held, two more catalogues arriving with their logins, and
+#: the two Z39.50 union and national catalogues for Italy and Portugal. The
 #: Greek figure above is the sharpest case, and it moved in
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
@@ -588,8 +631,8 @@ STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (NEEDS_
 #:
 #: A cost bound rather than a taste: an ordinary lookup makes this many outbound
 #: requests whatever the household puts in the list, so reordering cannot turn
-#: every lookup into a fifteen way fan out. **Fifteen, not seventeen**, and the number is
-#: `LOOKUP_SOURCES` rather than the roster: two of the seventeen answer a title
+#: every lookup into an eighteen way fan out. **Eighteen, not twenty**, and the number is
+#: `LOOKUP_SOURCES` rather than the roster: two of the twenty answer a title
 #: search only and are never asked about an ISBN at all. What a household changes is
 #: **which** sources fill the slots, which is the whole point of the control.
 #:
@@ -636,8 +679,8 @@ STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (NEEDS_
 #: buys **0 books**. Nobody modelled its latency as a third slot.
 #:
 #: **LIBRIS is the best third slot of all, and the slot rule refuses it on the
-#: same reading.** A union catalogue, general at 23% concentration and p90
-#: 0.367s on this sample, it makes the best union of three, 228, and earns
+#: same reading.** A union catalogue with a p90 of 0.367s on this sample, it
+#: makes the best union of three, 228, and earns
 #: **6**. Of the 6, 5 are books the tail reaches anyway; the sixth, an Italian
 #: edition, only LIBRIS holds, and the tail reaches LIBRIS. So it buys **0
 #: books** too, and its p90 on Swedish books, 2.134s, would put it outside the
@@ -647,8 +690,17 @@ STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (NEEDS_
 #: answers spread over eight frames, 34% in the largest, and its p90 is 0.640s,
 #: inside the budget. As a third slot it earns **1**, a Brazilian book the tail
 #: reaches anyway, so it buys **0 books**. BIBSYS and Melinda, union
-#: catalogues, general at 35% and 31% with p90s of 0.362s and 0.251s, earn **2**
-#: and **3** and buy **0** on the same reading.
+#: catalogues with p90s of 0.362s and 0.251s, earn **2** and **3** and buy
+#: **0** on the same reading.
+#:
+#: **The SBN would earn a slot and is refused on what it adds.** Fast, p90
+#: 0.337s with its ISBN-10 retry, and 99 answers, more than the DNB's 91, so the
+#: pooled rate puts it in the pair: K10plus with the SBN answers 243 against
+#: 222, and as a third slot it earns **30**. But 26 of the 30 books it adds to
+#: the shipping pair are Italian, and `TIER_MAX_CONCENTRATION` reads those
+#: rather than its 99. On an ISBN in `978-88` it is the first source the tail
+#: asks, since the three remitted rows ahead of it are asked only inside their
+#: own groups.
 #:
 #: Recorded with the numbers so the next reader can reverse it against them
 #: rather than guess.
@@ -658,15 +710,21 @@ ALWAYS_ASKED: Final = 2
 #: sources whose remit is one, and nothing at all for the sources whose is not.
 #:
 #: **What it buys**, modelled over the 500 ISBN sample across `lookup`'s two
-#: phases: **1.832s mean without this table, 1.371s with it**, for the same
-#: **398** books, with **891** tail requests instead of **1,757**. Per frame it
-#: runs from 0.052s, in the German frame where the leading pair answers most
-#: books before the tail is reached, to 0.817s. Against the 1.435s and 872 this
-#: read before the Polish and Swedish rows joined, the saving is wider: the
-#: NLG, the BN_PL and the Royal Danish Library now head the tail, so without the
-#: table all three are asked on every tail walk and with it only inside their
-#: groups, and the sample holds no `978-83` or `978-87` ISBN at all. LIBRIS,
-#: Melinda and BIBSYS add to both arms alike, having no remit.
+#: phases: **2.366s mean without this table, 1.268s with it**, for the same
+#: **429** books, with **748** tail requests instead of **2,151**. Per frame it
+#: runs from 0.163s, in the German frame where the leading pair answers most
+#: books before the tail is reached, to 2.239s in the Czech one. Six remitted
+#: rows head the tail, so without the table all six are asked on every tail
+#: walk and with it only inside their groups; the sample holds no `978-83`,
+#: `978-87`, `978-963` or `978-615` ISBN at all. LIBRIS, Melinda and BIBSYS add
+#: to both arms alike, having no remit.
+#:
+#: **What a lookup this table cannot narrow pays**, a `979` ISBN or one whose
+#: group `isbn.registration_group` cannot name: all six remitted rows before
+#: Open Library. Their `MEASURED` p90s sum to about 3.3s, against about 1.3s for
+#: the three remitted rows that preceded the Z39.50 ones. A lookup has no
+#: overall deadline, so each of the three Z39.50 rows that cannot be reached
+#: costs up to `z3950.TIMEOUT_SECONDS` on top.
 #:
 #: **Those figures are the chain of sources that need no credential**, and the
 #: model is two rows short of the chain a stock install now runs: the Argentine

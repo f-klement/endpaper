@@ -20,8 +20,8 @@ seven are the roster's own size. Nothing
 in a sentence's shape says which one is meant. So "seventeen sources" in this tree
 is a correct count of the roster, a correct count of what a lookup or a search
 may ask, or a stale count of some other subject entirely. Measured over the census below,
-**15** of its occurrences count something that is not the roster, so a scan
-with no classification fails 15 times on its first run and is switched off.
+**24** of its occurrences count something that is not the roster, so a scan
+with no classification fails 24 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -1311,7 +1311,6 @@ OUT_OF_BOUND: frozenset[str] = frozenset(
         "backend/fetch.py '{n} concurrent sources' entry[0]",
         "backend/metadata.py '{n} sources' entry[3]",
         "backend/metadata.py '{n} sources' entry[4]",
-        "backend/sources.py '{n} frames a source' entry[0]",
         "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
         "backend/tests/test_authority.py '{n} `670` source' entry[0]",
         "backend/tests/test_authority.py '{n} viaf source' entry[0]",
@@ -1352,21 +1351,27 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ("backend/tests/test_classifications.py", "{n} catalogues"): [
         NotTheRoster("a fixture sentence for the extraction under test")
     ],
-    ("backend/fetch.py", "{n} catalogue"): [Counts("the whole roster")],
+    ("backend/fetch.py", "{n} catalogue"): [
+        NotTheRoster("the catalogues reached over HTTP, which `fetch.py` serves and the Z39.50 rows do not")
+    ],
     ("backend/targets.py", "{n} catalogues"): [Counts("the whole roster")],
     ("backend/tests/test_house_rules.py", "{n} catalogue"): [Counts("the whole roster")],
     ("backend/fetch.py", "{n} third party catalogues"): [Counts("the whole roster")],
     # Both sides of one sentence about which doors the address policy is wired
     # to. "Seeded" is the distinction being drawn, not a smaller set: every
     # source in the roster is seeded, and a typed host is not a source at all.
-    ("backend/fetch.py", "{n} seeded catalogues"): [Counts("the whole roster")],
+    ("backend/fetch.py", "{n} seeded catalogues"): [
+        NotTheRoster("the catalogues reached over HTTP, which `fetch.py` serves and the Z39.50 rows do not")
+    ],
     # The memory ceiling `MAX_RESPONSE_BYTES` derives: how many sources a pod
     # could ask at once, a bound rather than a count of any roster set. It
     # equals the roster only by coincidence, which is when the census raises it.
     ("backend/fetch.py", "{n} concurrent sources"): [
         NotTheRoster("the concurrent sources a pod's memory admits, a ceiling and not a count")
     ],
-    ("docs/security.md", "{n} seeded catalogues"): [Counts("the whole roster")],
+    ("docs/security.md", "{n} seeded catalogues"): [
+        NotTheRoster("the catalogues reached over HTTP, which `fetch.py` serves and the Z39.50 rows do not")
+    ],
     # The OPDS route's three, and all three count the **search** fan out rather
     # than the roster. `holdings` prices its own sequential walk against what
     # `metadata.search` does concurrently, and the other two say how much of
@@ -1377,7 +1382,10 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ("backend/tests/routers/test_opds.py", "{n} catalogues"): [Counts("SEARCH_SOURCES")],
     ("backend/fetch.py", "{n} sources"): [
         Counts("SEARCH_SOURCES", near="`metadata.search` asks"),
-        Counts("the whole roster", near="compression is not requested"),
+        NotTheRoster(
+            "the catalogues reached over HTTP, which `fetch.py` serves and the Z39.50 rows do not",
+            near="compression is not requested",
+        ),
     ],
     # The **singular** phrase, and the three entries around it are all plural, so
     # this collides with none of them and needs no anchor. The sentence prices the
@@ -1414,11 +1422,11 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         # them is arithmetic rather than a re-run.
         Counts(
             "STOCK_INSTALL_ASKS",
-            near="answer 410 of the 500 ISBNs",
+            near="answer 441 of the 500 ISBNs",
         ),
         Counts(
             "the lookup sources that need no credential",
-            near="that need no credential at all answer 398",
+            near="that need no credential at all answer 429",
         ),
     ],
     ("backend/bibliographic.py", "{n} sources"): [
@@ -1443,7 +1451,7 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         ),
         Counts(
             "the lookup sources that need no credential",
-            near="answer 398 and miss 102, are the two",
+            near="answer 429 and miss 71, are the two",
         ),
         NotTheRoster(
             "the sources needing no credential on the day the Argentine pass ran",
@@ -1465,7 +1473,9 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     ("backend/tests/test_authority.py", "{n} viaf source"): [
         NotTheRoster("VIAF's own source codes, which are not catalogues this app asks")
     ],
-    ("backend/tests/test_fetch.py", "{n} catalogues"): [Counts("the whole roster")],
+    ("backend/tests/test_fetch.py", "{n} catalogues"): [
+        NotTheRoster("the catalogues reached over HTTP, which `fetch.py` serves and the Z39.50 rows do not")
+    ],
     ("backend/tests/test_fetch.py", "{n} sources"): [
         NotTheRoster(
             "the fan out the bound was written for before the OENB joined, in the "
@@ -1508,6 +1518,9 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         Counts("the whole roster", near="grows by one per source"),
     ],
     ("backend/tests/test_metadata.py", "{n} lookup sources"): [Counts("LOOKUP_SOURCES")],
+    ("backend/tests/test_metadata.py", "{n} check this source"): [
+        NotTheRoster("the MARC tag 020, which the census reads as a number")
+    ],
     ("backend/tests/test_ratelimit.py", "{n} public catalogues"): [Counts("LOOKUP_SOURCES")],
     ("backend/tests/test_roster_counts.py", "{n} sources"): [
         NotTheRoster(
@@ -1551,9 +1564,6 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
     # of fifty domestic ISBNs, and ten is a roster size today, so the census
     # raises this sentence the moment the roster reaches ten. The two counts are
     # unrelated and their being equal is a coincidence of this roster.
-    ("backend/sources.py", "{n} frames a source"): [
-        NotTheRoster("frames of the ISBN sample `MEASURED` is taken over")
-    ],
     # Characters in a mutation's input, not sources: a MARC entity expansion
     # turning a very short input into a 1,000,000 character title. `source`
     # there is the adjective for the input text.
@@ -1669,9 +1679,20 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         )
     ],
     ("docs/legend.md", "{n} metadata sources"): [Counts("the whole roster")],
-    ("docs/security.md", "{n} catalogue"): [Counts("the whole roster")],
+    ("docs/legend.md", "{n} sources"): [
+        NotTheRoster("the catalogues reached without TLS, which `TestThePlaintextSourcesAreCounted` counts")
+    ],
+    ("docs/security.md", "{n} catalogue"): [
+        NotTheRoster("the catalogues reached over HTTP, which `fetch.py` serves and the Z39.50 rows do not")
+    ],
     ("docs/security.md", "{n} public catalogues"): [Counts("SEARCH_SOURCES")],
-    ("docs/security.md", "{n} catalogues"): [Counts("LOOKUP_SOURCES")],
+    ("docs/security.md", "{n} catalogues"): [
+        Counts("LOOKUP_SOURCES", near="a lookup can reach any of"),
+        NotTheRoster(
+            "the catalogues reached without TLS, which `TestThePlaintextSourcesAreCounted` counts",
+            near="with no TLS endpoint",
+        ),
+    ],
     ("docs/security.md", "{n} third party catalogues"): [Counts("the whole roster")],
     ("docs/security.md", "{n} sources"): [
         NotTheRoster(
@@ -2822,6 +2843,9 @@ class TestTheFeatureListNamesTheRosterAsSourcesHoldsIt:
         CatalogueSource.KB_DK: "Royal Danish Library",
         CatalogueSource.BIBSYS: "BIBSYS",
         CatalogueSource.MELINDA: "Melinda",
+        CatalogueSource.SBN: "Italian National Library Service",
+        CatalogueSource.PORBASE: "PORBASE",
+        CatalogueSource.OSZK: "National Széchényi Library",
         CatalogueSource.BN_PL: "Polish National Library",
         CatalogueSource.BNA: "Argentine National Library",
         CatalogueSource.BNU: "Uruguayan National Library",
@@ -2840,6 +2864,9 @@ class TestTheFeatureListNamesTheRosterAsSourcesHoldsIt:
         CatalogueSource.OENB: "Austrian",
         CatalogueSource.BN_PL: "Polish",
         CatalogueSource.KB_DK: "Danish",
+        CatalogueSource.SBN: "Italian",
+        CatalogueSource.PORBASE: "Portuguese",
+        CatalogueSource.OSZK: "Hungarian",
         CatalogueSource.BNA: "Argentine",
         CatalogueSource.BNU: "Uruguayan",
         CatalogueSource.BNF: "French",

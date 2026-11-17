@@ -11,7 +11,8 @@ import decoders
 import sources
 import targets
 import z3950
-from enums import Capability, CatalogueSource
+from enums import Capability, CatalogueSource, RecordCharset
+from tests.helpers import z3950_row
 
 
 def _seeded(**overrides: object) -> targets.Target:
@@ -40,6 +41,94 @@ def _seeded(**overrides: object) -> targets.Target:
     }
     fields.update(overrides)
     return targets.Target(**fields)  # type: ignore[arg-type]
+
+
+class TestAZ3950RowCarriesWhatTheDoorNeeds:
+    """What a Z39.50 row must carry, and what it may not."""
+
+    def test_a_complete_row_names_where_the_door_connects(self):
+        assert z3950_row().z3950_target == z3950.Target(
+            host="catalogue.example",
+            port=2100,
+            database="nopac",
+            syntax=z3950.Syntax.MARC21,
+            charset=RecordCharset.UTF8,
+        )
+
+    def test_both_queries_are_the_seams_pqf(self):
+        row = z3950_row()
+        assert row.isbn_query("9788804668237") == z3950.isbn_query("9788804668237")
+        assert row.title_query(["il", "nome", "della", "rosa"]) == z3950.title_query("il nome della rosa")
+
+    def test_an_sru_row_has_no_z3950_address(self):
+        with pytest.raises(ValueError, match=r"not a Z39\.50 row"):
+            _ = _seeded().z3950_target
+
+    @pytest.mark.parametrize(
+        "base_url",
+        [
+            "https://catalogue.example:2100/nopac",
+            "z3950://catalogue.example/nopac",
+            "z3950://user@catalogue.example:2100/nopac",
+            "z3950://Catalogue.example:2100/nopac",
+            "z3950://catalogue.example:0/nopac",
+            "z3950://catalogue.example:65536/nopac",
+            "z3950://catalogue.example:0210/nopac",
+            "z3950://catalogue.example:2100/nopac?x=1",
+            "z3950://catalogue.example:2100/",
+        ],
+    )
+    def test_an_address_outside_the_grammar_is_refused(self, base_url):
+        with pytest.raises(ValueError, match="z3950://host:port/database"):
+            z3950_row(base_url=base_url)
+
+    @pytest.mark.parametrize(
+        ("overrides", "message"),
+        [
+            ({"record_schema": z3950.Syntax.OTHER.value}, "cannot read record syntax"),
+            ({"record_schema": "marcxml"}, "cannot read record syntax"),
+            ({"reader": targets.Reader.MODS}, "cannot read record syntax"),
+            ({"record_charset": None}, "character set"),
+            ({"record_charset": "utf8"}, "character set"),
+            ({"query_language": targets.QueryLanguage.CQL}, "asked in PQF"),
+            ({"isbn_index": "dc.isbn"}, "no SRU fields"),
+            ({"sru_version": "1.1"}, "no SRU fields"),
+            ({"title_query_shape": targets.TitleQuery.QUOTED_ALL}, "one shape"),
+            ({"needs_key": True}, "carries no credential"),
+            ({"isbn_attribute": None}, "not a PQF use attribute"),
+            ({"lookup_records": z3950.MAX_RECORDS + 1}, "1 to"),
+            ({"lookup_records": 0}, "1 to"),
+            ({"search_cap": z3950.MAX_RECORDS + 1}, "1 to"),
+            ({"search_multiplier": 0}, "1 to"),
+        ],
+    )
+    def test_a_row_the_door_could_not_serve_is_refused(self, overrides, message):
+        with pytest.raises(ValueError, match=message):
+            z3950_row(**overrides)
+
+    def test_a_unimarc_row_is_read_by_the_unimarc_reader(self):
+        row = z3950_row(
+            record_schema=z3950.Syntax.UNIMARC.value,
+            record_charset=RecordCharset.ISO5426,
+            reader=targets.Reader.UNIMARC,
+        )
+        assert row.z3950_target.syntax is z3950.Syntax.UNIMARC
+
+    def test_a_unimarc_row_is_refused_a_marc21_reader(self):
+        with pytest.raises(ValueError, match="cannot read record syntax"):
+            z3950_row(record_schema=z3950.Syntax.UNIMARC.value, reader=targets.Reader.MARC_PLAIN)
+
+    def test_a_row_answering_no_search_needs_no_search_counts(self):
+        assert not z3950_row(answers_search=False, search_multiplier=0, search_cap=0).answers_search
+
+    def test_only_a_z3950_row_names_a_character_set(self):
+        with pytest.raises(ValueError, match=r"only a Z39\.50 row"):
+            _seeded(record_charset=RecordCharset.UTF8)
+
+    def test_a_transport_that_is_not_a_member_is_refused(self):
+        """A bare string would match the dispatch by equality and skip the type."""
+        with pytest.raises(ValueError, match="is not a Transport"):
+            z3950_row(transport="z3950")
 
 
 class TestTheSeededRosterSaysWhatTheRulesSay:
@@ -88,20 +177,23 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
         """The column is #132's. Pinned so it cannot be read as working."""
         assert all(target.timeout_seconds is None for target in targets.SEEDED.values())
 
-    def test_every_row_is_seeded_reachable_over_http(self):
+    def test_every_row_is_seeded_with_an_origin_its_transport_speaks(self):
         """Every address parses to an origin, and none carries a credential."""
         for target in targets.SEEDED.values():
             origin = targets.origin(target.base_url)
             assert origin in targets.SEEDED_ORIGINS
             assert "@" not in origin
-            assert origin.startswith(("http://", "https://"))
+            schemes = (
+                ("z3950://",) if target.transport is targets.Transport.Z3950 else ("http://", "https://")
+            )
+            assert origin.startswith(schemes), target.source
 
     def test_the_origins_are_one_per_host_and_carry_the_scheme(self):
-        """Scheme and port, not a bare host: five targets are plaintext by
-        necessity and a hostname allowlist would let the other seven join them.
+        """Scheme and port, not a bare host: eight targets speak no TLS and a
+        hostname allowlist would let the HTTPS ones join them.
 
         **Counted rather than listed**, and the count is the thing: two of the
-        five authenticate, so a plaintext origin is no longer only a question
+        eight authenticate, so a plaintext origin is no longer only a question
         of what an eavesdropper reads.
         `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` names them
         and checks the two documents that state the number.
@@ -109,8 +201,8 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
         assert {
             targets.origin(target.base_url) for target in targets.SEEDED.values()
         } == targets.SEEDED_ORIGINS
-        plaintext = {o for o in targets.SEEDED_ORIGINS if o.startswith("http://")}
-        assert len(plaintext) == 5
+        plaintext = {o for o in targets.SEEDED_ORIGINS if not o.startswith("https://")}
+        assert len(plaintext) == 8
 
 
 class TestARowCannotCarryQueryStructure:
@@ -208,10 +300,6 @@ class TestARowCannotCarryQueryStructure:
         with pytest.raises(ValueError, match="only a CQL target can answer a search"):
             _seeded(query_language=targets.QueryLanguage.PQF, isbn_attribute=7)
 
-    def test_there_is_no_z3950_door_yet(self):
-        with pytest.raises(ValueError, match=r"no Z39\.50 door yet"):
-            _seeded(transport=targets.Transport.Z3950)
-
     def test_a_catalogue_row_may_not_name_the_other_familys_reader(self):
         """The one rule `enums.SourceFamily` exists for, at the one place a row
         could break it.
@@ -250,7 +338,7 @@ class TestARowCannotCarryQueryStructure:
             )
 
     def test_a_marc_knob_on_a_reader_that_reads_no_marc_is_refused(self):
-        with pytest.raises(ValueError, match="a MARC knob on a reader that reads no MARC"):
+        with pytest.raises(ValueError, match="a MARC21 knob on a reader that is not a MARC21 reader"):
             _seeded(
                 reader=targets.Reader.MODS,
                 answers_lookup=False,
@@ -308,6 +396,23 @@ class TestABespokeRowCarriesNoQueryShape:
                 serves_groups=frozenset(),
                 isbn_attribute=7,
             )
+
+
+class TestTheIsbn10RetryIsARowsAndOnlyWhereTheQueryIsOurs:
+    def test_a_retrying_row_asks_the_ten_digit_form_second(self):
+        assert z3950_row(retries_as_isbn10=True).isbn_forms("9780743273565") == (
+            "9780743273565",
+            "0743273567",
+        )
+
+    def test_a_979_isbn_has_no_ten_digit_form_to_ask(self):
+        assert z3950_row(retries_as_isbn10=True).isbn_forms("9791259690760") == ("9791259690760",)
+
+    def test_a_bespoke_row_may_not_retry(self):
+        """Its adapter builds its own request, so a retry asks the same thing twice."""
+        row = targets.SEEDED[CatalogueSource.OPEN_LIBRARY]
+        with pytest.raises(ValueError, match="retries as an ISBN-10"):
+            dataclasses.replace(row, retries_as_isbn10=True)
 
 
 class TestTheQueryIsBuiltHereAndNowhereElse:

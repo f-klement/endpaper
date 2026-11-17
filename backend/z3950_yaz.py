@@ -1,26 +1,20 @@
-"""**PROVISIONAL.** The one Z39.50 client that exists today, and not the chosen one.
+"""The Z39.50 client: a `ctypes` binding to the ZOOM C API in the `libyaz` the image ships.
 
-**The route is an open decision and this file is not it.** #92 asks for a transport; which
-client fills it is being settled separately, and the candidate list is not complete. This
-exists so that `z3950.py`'s bounds can be exercised and the Library of Congress control can
-be checked against a real target, which is the only thing that tells a database name from a
-guess. Do not harden it, do not build on its shape, and do not cite it as a decision.
+**Chosen over four other routes**: two subprocess shells, a pure Python protocol stack and
+an SRU gateway in the image. Why each lost is in `docs/decisions.md`. It returns records
+rendered as MARCXML in UTF-8 by the library, spawns nothing per query, and leaves every
+bound to the seam.
 
-**Nothing outside `z3950.py` may import it.** Everything a caller needs is on the seam:
-`Target`, `Record`, `Answer` and the four failure classes. That is what makes swapping this
-out a change to one function, `z3950._default_client`.
-
-What it is, so the next reader does not have to guess: a `ctypes` binding to the ZOOM C API
-in `libyaz.so.5`, which the image already ships (`docker/build-yaz.sh`,
-`docs/architecture.md`). ZOOM is blocking, so `z3950.py` runs every call off the event loop.
+**No module outside `z3950.py` may import it.** Everything a caller needs is on the seam:
+`Target`, `Record`, `Answer` and the four failure classes. That keeps the library behind
+one function, `z3950._default_client`, and a test holds it there. ZOOM is blocking, so
+`z3950.py` runs every call off the event loop.
 
 **The ctypes wiring and the error taxonomy are deliberately separate.** `Bindings` is the
-nine calls this needs; `_YazSession` is the rules on top of them. The rules are what earn a
-test, and they are testable with no library present because `Bindings` can be faked. The
-wiring is what a different route replaces.
+calls this needs; `_YazSession` is the rules on top of them. The rules are what earn a
+test, and they are testable with no library present because `Bindings` can be faked.
 
-**Two limitations, recorded because they are inputs to choosing a route rather than
-defects to fix here.**
+**Two limitations of the library, and the reason the seam carries its own bounds.**
 
 * ZOOM's own `timeout` option is whole seconds, so a sub second budget rounds to a floor of
   one second. The deadline a caller actually sees is `Association._call`'s
@@ -34,6 +28,7 @@ import ctypes
 import logging
 from typing import Any, Final, Protocol
 
+from enums import RecordCharset
 from z3950 import (
     MAX_RESPONSE_BYTES,
     BadQuery,
@@ -44,13 +39,33 @@ from z3950 import (
     Syntax,
     Target,
     Unreachable,
+    Unrenderable,
     Z3950Error,
 )
 
 logger = logging.getLogger("endpaper.z3950")
 
-#: Where the image puts YAZ. `docker/build-yaz.sh` bakes this prefix into the binary as its
-#: RUNPATH, so the tree is not relocatable and neither is this path.
+#: The library this loads, at the path the image puts it and nowhere else.
+#:
+#: **No setting, no environment variable and no search path can move it, deliberately.**
+#: `ctypes.CDLL` runs a library's initialisers as it loads, so a path read from outside is
+#: a switch that runs code in this process. A runtime setting would hand that switch to an
+#: admin; an environment variable hands it to whoever sets the environment, who could
+#: already `LD_PRELOAD`, so it would buy them nothing and cost a knob that has to be bounded,
+#: documented and tested. A bare `libyaz.so.5` would ask the loader's search path, which is
+#: the same switch spelled differently. **What is refused is a switch at run time, not a
+#: second build**: a build that ships the library elsewhere, as a desktop bundle must,
+#: changes this constant when it is built.
+#:
+#: **The prefix is fixed by the build rather than chosen here.** `docker/build-yaz.sh`
+#: configures YAZ into `/opt/yaz` and libtool bakes that prefix into the binaries as their
+#: RUNPATH, so the tree is not relocatable; the Dockerfile copies it to the same path.
+#: `test_z3950_yaz.py` reads both files and fails if either moves without this, and the
+#: image smoke test loads the library from this path in the finished image.
+#:
+#: Without the file, as in a run from source, an open is `Unreachable` rather than an
+#: error, so a source on this transport degrades the way an unanswering target does, and
+#: the failure is logged where `YazClient` raises it so it is not read as an outage.
 LIBRARY: Final = "/opt/yaz/lib/libyaz.so.5"
 
 #: The client's own diagnostic set. Anything else came from the target.
@@ -61,6 +76,11 @@ LIBRARY: Final = "/opt/yaz/lib/libyaz.so.5"
 #: set is the client's needs none. An unknown set is read as the target's, which is the
 #: conservative direction: a refusal is not worth retrying and an unreachable host is.
 _CLIENT_DIAGSET: Final = "ZOOM"
+
+#: Bib-1 diagnostic 2, "Temporary system error": the target's word about its own state, and
+#: the one refusal `Refused` marks `temporary`. What was measured of it, and under what
+#: condition, is at `metadata._TEMPORARY_REFUSAL_RETRIES`.
+_TEMPORARY_SYSTEM_ERROR: Final = ("Bib-1", 2)
 
 #: The client could not parse the query, which is a bug here rather than a target's answer.
 #: Measured 2026-08-28 by injecting `@attr 1=4 "moby" @attr 1=4 "dick"`, which never
@@ -78,6 +98,28 @@ _INVALID_QUERY: Final = 10010
 _REQUESTED: Final[dict[Syntax, str]] = {
     Syntax.MARC21: "usmarc",
     Syntax.UNIMARC: "unimarc",
+}
+
+#: How a record is asked of the library, by the set its target sends: as MARCXML, converted
+#: to UTF-8 from that set.
+#:
+#: **The library's own MARC code renders it**, so the readers downstream read MARCXML and
+#: nothing here parses ISO 2709. A UTF-8 record needs no conversion and gets none. Measured
+#: 2026-11-16 with `yaz-marcdump`: PORBASE's UNIMARC is ISO 5426 (`0103` in `100 $a/26-29`,
+#: 38 of 38 records) and SBN's is UTF-8 (`50`, 64 of 64).
+#:
+#: **Each string measured through `CtypesBindings.record` against YAZ 5.38.1 the same day**:
+#: SBN under `xml`, PORBASE under the ISO 5426 one and the Library of Congress under the
+#: MARC-8 one each render parseable MARCXML with their accents right, and PORBASE under bare
+#: `xml` does not parse. **A misspelled charset is not refused**: `charset=nonsense,utf8`
+#: rendered the record unconverted, so a wrong entry here shows only as wrong letters.
+#: The image smoke test holds every entry to that in the finished image, the one place
+#: the library is; it runs on every image built from `main`, where it gates `:latest`, and
+#: on a tag.
+_RENDER: Final[dict[RecordCharset, str]] = {
+    RecordCharset.UTF8: "xml",
+    RecordCharset.MARC8: "xml; charset=marc8,utf8",
+    RecordCharset.ISO5426: "xml; charset=iso5426,utf8",
 }
 
 #: Lower cased, because the two labels measured differ only in case.
@@ -122,8 +164,12 @@ class Bindings(Protocol):
         ...
 
     def size(self, resultset: int) -> int: ...
-    def record(self, resultset: int, index: int) -> tuple[str, bytes] | None:
-        """`(syntax, raw)` for one record, or None where the target sent none."""
+    def record(self, resultset: int, index: int, render: str) -> tuple[str, bytes | None] | None:
+        """`(syntax, rendered)` for one record, or None where the target sent none.
+
+        `render` is the ZOOM record type asked for, one of `_RENDER`'s values. `rendered`
+        is None where the record is there and the library could not render it.
+        """
         ...
 
     def free_resultset(self, resultset: int) -> None: ...
@@ -205,15 +251,13 @@ class CtypesBindings:
     def size(self, resultset: int) -> int:
         return int(self._lib.ZOOM_resultset_size(resultset))
 
-    def record(self, resultset: int, index: int) -> tuple[str, bytes] | None:
+    def record(self, resultset: int, index: int, render: str) -> tuple[str, bytes | None] | None:
         handle = self._lib.ZOOM_resultset_record(resultset, index)
         if not handle:
             return None
-        raw = self._member(handle, "raw")
+        rendered = self._member(handle, render)
         syntax = self._member(handle, "syntax")
-        if raw is None:
-            return None
-        return (syntax or b"").decode(errors="replace"), raw
+        return (syntax or b"").decode(errors="replace"), rendered
 
     def _member(self, record: int, name: str) -> bytes | None:
         """One field of a ZOOM record, as bytes. See `SIGNATURES` for why `string_at`."""
@@ -237,7 +281,7 @@ def classify(code: int, message: str, detail: str, diagset: str) -> Z3950Error:
     bad query" cannot drift apart between the open, the search and the record.
     """
     if diagset != _CLIENT_DIAGSET:
-        return Refused(code, message, detail)
+        return Refused(code, message, detail, temporary=(diagset, code) == _TEMPORARY_SYSTEM_ERROR)
     if code == _INVALID_QUERY:
         return BadQuery(f"{message}: {detail}" if detail else message)
     return Unreachable(f"[{code}] {message}{f': {detail}' if detail else ''}")
@@ -246,7 +290,8 @@ def classify(code: int, message: str, detail: str, diagset: str) -> Z3950Error:
 class _YazSession:
     """One open association, and the rules that keep its three failures apart.
 
-    **The first failure is latched and every later call re-raises it.** Measured
+    **The first failure is latched and every later call re-raises it**, except a
+    `Refused` marked `temporary`, which ends nothing (`_latch` says why). Measured
     2026-08-28 against a closed port on a host that exists: the connect reports
     `[10007] Timeout` and the search that follows reports no error and zero hits. Without
     a latch, "unreachable" arrives at a caller as "this catalogue does not hold the book",
@@ -265,6 +310,11 @@ class _YazSession:
         self._failed: Z3950Error | None = None
 
     def _latch(self, error: Z3950Error) -> Z3950Error:
+        # **A temporary refusal is not latched**: the target answered, so the association
+        # is sound, and latching it would answer every later search on it with the same
+        # refusal without asking, which is the retry `metadata` makes turned into a no op.
+        if isinstance(error, Refused) and error.temporary:
+            return error
         if self._failed is None:
             self._failed = error
         return self._failed
@@ -280,7 +330,14 @@ class _YazSession:
             raise self._failed
         self._release_resultset()
         resultset = self._bindings.search(self._connection, pqf)
-        self._check()
+        try:
+            self._check()
+        except Z3950Error:
+            # Freed here because nothing else holds it: `_resultset` is set only on
+            # success, so without this every refused search left its set unfreed.
+            if resultset:
+                self._bindings.free_resultset(resultset)
+            raise
         if not resultset:
             raise self._latch(Unreachable(f"{self._target.host} returned no result set"))
         self._resultset = resultset
@@ -291,15 +348,19 @@ class _YazSession:
             raise self._failed
         if not self._resultset:
             raise Z3950Error("fetch was called before search")
-        got = self._bindings.record(self._resultset, index)
+        got = self._bindings.record(self._resultset, index, _RENDER[self._target.charset])
         # The diagnostic first: measured at `z3950.nlg.gr`, a refused record syntax comes
         # back as a null record AND a `[239]` diagnostic, and reporting the null alone
         # would lose the reason.
         self._check()
         if got is None:
             raise self._latch(Refused(0, "The target sent no record", f"position {index}"))
-        label, raw = got
-        return Record(syntax=reported_syntax(label), reported=label, raw=raw)
+        label, rendered = got
+        if rendered is None:
+            # Not latched: the record arrived, so the association is sound and the next
+            # position may render. See `Unrenderable`.
+            raise Unrenderable(f"{self._target.host} position {index} would not render as MARCXML")
+        return Record(syntax=reported_syntax(label), reported=label, raw=rendered)
 
     def close(self) -> None:
         self._release_resultset()
@@ -321,15 +382,48 @@ class _YazSession:
             self._resultset = 0
 
 
-class ProvisionalYazClient:
-    """`z3950.Client` over ZOOM. See this module's docstring for its status."""
+#: What to do about a library that will not load: the path is fixed, and a run from source
+#: needs YAZ installed under it.
+_NOT_LOADED: Final = "Path fixed in backend/z3950_yaz.py; outside the image build YAZ with --prefix=/opt/yaz."
+
+#: What to do about a library that loads without an entry point: it is a YAZ whose ZOOM API
+#: differs from the one `SIGNATURES` declares, so the prefix is not the remedy.
+_NO_ENTRY_POINT: Final = "Another YAZ version: it lacks an entry point SIGNATURES names."
+
+
+def _could_not_start(error: Exception, remedy: str) -> Unreachable:
+    """The client failing to start, logged as itself and raised as an unreachable source.
+
+    Every caller reads `Unreachable` as the catalogue being down, so this logs at error, at
+    the one site that can tell a broken install from an outage. Not cached by the caller: a
+    library that appears later, or a transient failure, is read at the next open.
+
+    **The loader's cause comes before the remedy**, because `Unreachable` cuts its text at
+    `MAX_DIAGNOSTIC_CHARS` and the cause is what names what is wrong; musl's names the path
+    as well. The log line is whole, since the loader's words are this host's and not a
+    target's.
+    """
+    message = f"Z39.50 library {LIBRARY} not loaded: {error}. {remedy}"
+    logger.error("The Z39.50 client could not start: %s", message)
+    return Unreachable(message)
+
+
+class YazClient:
+    """`z3950.Client` over ZOOM, loading `LIBRARY` at its first open."""
 
     def __init__(self, bindings: Bindings | None = None) -> None:
         self._bindings = bindings
 
     def _load(self) -> Bindings:
         if self._bindings is None:
-            self._bindings = CtypesBindings()
+            try:
+                self._bindings = CtypesBindings()
+            except OSError as error:
+                raise _could_not_start(error, _NOT_LOADED) from error
+            except AttributeError as error:
+                # One that loads without an entry point `SIGNATURES` names, which would
+                # otherwise reach a lookup as a 500.
+                raise _could_not_start(error, _NO_ENTRY_POINT) from error
         return self._bindings
 
     def open(self, target: Target, *, timeout: float) -> Session:

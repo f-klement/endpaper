@@ -56,10 +56,10 @@ on a file unchanged, and it is run rather than asserted:
 disk, builds a `Decoding` by hand with no `Target` anywhere, and gets the record
 the live path gets.
 
-## Why there are eight readers and six serialisations
+## Why there are nine readers and seven serialisations
 
-The serialisations are MARC21, Dublin Core, MODS, Open Library's JSON, Google
-Books' and OPDS's Atom. Two of them are read two ways.
+The serialisations are MARC21, UNIMARC, Dublin Core, MODS, Open Library's JSON,
+Google Books' and OPDS's Atom. Two of them are read two ways.
 
 MARC21 is two profiles here rather than one. `metadata._dnb_record` harvests GND
 identified headings across five tags and refuses a title that names a volume
@@ -68,6 +68,11 @@ no author identifiers and refuses no volume slot. Folding them would be a
 behaviour change dressed as a refactor. Dublin Core is likewise two, namespaced
 and bare, because the Czech National Library writes `<record-list><dc-record>`
 with no namespace at all and the BnF's selector returns zero against it.
+
+UNIMARC is one reader and no profile of its own: `metadata._marc21_from_unimarc`
+rewrites a record into MARC21 by the Library of Congress crosswalk, and the
+MARC21 reader reads what comes out, so every refusal above holds for it by
+construction rather than by a second copy.
 
 ## Why a decoder is a function and not a stylesheet
 
@@ -125,6 +130,12 @@ class Reader(StrEnum):
     #: serve OPDS and all seven serve the 1.x Atom line. See
     #: `docs/decisions.md`, "OPDS is a discovery route".
     OPDS_ATOM = "opds_atom"
+    #: UNIMARC, through `metadata._marc21_from_unimarc` and then the MARC21
+    #: reader. Not in `MARC_READERS`, and that is the crosswalk's rule rather
+    #: than an omission: it refuses a component part itself, whatever the row
+    #: says, and a UNIMARC record carries no GND number for the other knob to
+    #: read.
+    UNIMARC = "unimarc"
 
 
 #: The readers that read MARC21, so the two knobs that only a MARC reader can
@@ -174,6 +185,7 @@ CATALOGUE_READERS: Final = frozenset(
         Reader.MODS,
         Reader.OPEN_LIBRARY,
         Reader.GOOGLE_BOOKS,
+        Reader.UNIMARC,
     }
 )
 
@@ -213,7 +225,7 @@ class Decoding:
     reads_author_identifiers: bool = False
 
     def __post_init__(self) -> None:
-        """A MARC knob on a reader that reads no MARC is refused here too.
+        """A MARC21 knob on a reader that is not a MARC21 reader is refused here too.
 
         **`targets.Target` refuses the same pairing and that was not enough**,
         which a critic measured: `Decoding(source="opf",
@@ -249,4 +261,4 @@ class Decoding:
         if self.reader not in MARC_READERS and (
             self.refuses_component_parts or self.reads_author_identifiers
         ):
-            raise ValueError(f"{self.source}: a MARC knob on a reader that reads no MARC")
+            raise ValueError(f"{self.source}: a MARC21 knob on a reader that is not a MARC21 reader")

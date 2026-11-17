@@ -120,6 +120,18 @@ class TestPageCount:
     def test_returns_nothing_for_an_absent_field(self):
         assert pages_from_extent(None) is None
 
+    @pytest.mark.parametrize(
+        ("extent", "expected"),
+        [
+            # ISBD's unnumbered sequence after the count, as PORBASE writes it.
+            ("308, [3] p.", 308),
+            # An offprint's range ends in the same shape and is not a count.
+            ("p. 129-137, [1] p.", None),
+        ],
+    )
+    def test_reads_past_an_unnumbered_sequence_but_not_a_page_range(self, extent, expected):
+        assert pages_from_extent(extent) == expected
+
 
 class TestAPageCountIsBoundedAtBothEnds:
     """What the reader refuses, which is a separate behaviour from what it reads.

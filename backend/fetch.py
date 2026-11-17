@@ -1,8 +1,9 @@
 """One door for the catalogue requests this app makes, and every bound on them.
 
-`metadata.py` and `google_books.py` ask seventeen third party catalogues for records.
-Every one of those requests used to be built by hand: nine `httpx.AsyncClient(...)`
-constructions in `metadata.py` and one in `google_books.py`, each repeating the
+`metadata.py` and `google_books.py` ask twenty third party catalogues for records,
+seventeen of them over HTTP. Every one of those HTTP requests used to be built by
+hand: nine `httpx.AsyncClient(...)` constructions in `metadata.py` and one in
+`google_books.py`, each repeating the
 timeout, each following redirects anywhere, and none of them bounding the bytes
 read or the seconds spent. This module is the single definition of all four.
 

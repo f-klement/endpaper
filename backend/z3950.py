@@ -24,8 +24,9 @@ rebinding window still in it. `fetch.classify` and `fetch.AddressPolicy` are
 reusable as they stand; the pin is not. Nothing needs either today: every
 `Target` comes from `targets.SEEDED`, which is a module constant.
 
-The client is behind a `Session` and `Client` protocol and is not chosen yet. The
-bound by bound comparison with `fetch.py` is in `docs/decisions.md`.
+The client is behind a `Session` and `Client` protocol: `z3950_yaz.py`, a binding to
+YAZ's ZOOM API, reached only through `_default_client`. The bound by bound comparison
+with `fetch.py` is in `docs/decisions.md`.
 """
 
 import asyncio
@@ -40,6 +41,7 @@ from enum import Enum
 from typing import Final, Protocol
 
 from deadline import in_, left
+from enums import RecordCharset
 
 logger = logging.getLogger("endpaper.z3950")
 
@@ -68,7 +70,7 @@ logger = logging.getLogger("endpaper.z3950")
 #: `libris.kb.se/sru/libris`.
 TIMEOUT_SECONDS: Final = 10.0
 
-#: The most a target may answer with, counted on the records it hands over.
+#: The most a target may answer with, counted on the records as the client renders them.
 #:
 #: The same 2 MiB `fetch.MAX_RESPONSE_BYTES` allows, so one hostile source costs the same
 #: whichever transport it is reached over, and so the worst case `fetch.py` works out for
@@ -246,7 +248,11 @@ class Z3950Error(Exception):
 
 
 class Unreachable(Z3950Error):
-    """Nothing answered: the connection failed, or it timed out before a reply.
+    """Nothing answered: the connection failed, it timed out before a reply, or the client
+    could not start because its library would not load.
+
+    The last is not the catalogue's fault, so the client logs it where it raises it; the
+    caller sees the same disposition, since either way this source has nothing to give.
 
     Distinct from `Refused` because the dispositions differ: a host that is down may be
     up tomorrow, while a host that demands credentials will refuse for ever.
@@ -258,14 +264,20 @@ class Refused(Z3950Error):
 
     Carries the diagnostic so a caller can tell `[101] Access-control failure` from
     `[235] Database does not exist`, which are a dead target and a typo respectively.
+
+    **`temporary` marks the one refusal worth asking again**: Bib-1 diagnostic 2,
+    "Temporary system error", which the target sends about its own state rather than about
+    the question. The client sets it, since only the client sees the diagnostic set, and
+    leaves the association open after it, so the same question can go out again on it.
     """
 
-    def __init__(self, code: int, message: str, detail: str = "") -> None:
+    def __init__(self, code: int, message: str, detail: str = "", *, temporary: bool = False) -> None:
         readable_detail = readable(detail)
         super().__init__(f"[{code}] {readable(message)}{f': {readable_detail}' if readable_detail else ''}")
         self.code = code
         self.message = readable(message)
         self.detail = readable_detail
+        self.temporary = temporary
 
 
 class ResponseTooLarge(Z3950Error):
@@ -274,6 +286,20 @@ class ResponseTooLarge(Z3950Error):
 
 class DeadlineExceeded(Z3950Error):
     """More than the time budget the association was opened with."""
+
+
+class Unrenderable(Z3950Error):
+    """Records the client holds and cannot hand over, such as malformed ISO 2709.
+
+    **About one record and not the association**, so a session raises it from `fetch`
+    without latching it, and the walk in `_exchange` drops that record, logs it, and
+    keeps the rest. Reported as `Refused` instead, one bad record among five would lose
+    the other four and name the target as refusing.
+
+    **`metadata._z3950_root` raises it for a whole answer** too: one that counted hits
+    and kept no record a reader can use, so a lookup reads it as unavailable rather
+    than as a miss.
+    """
 
 
 class BadQuery(Z3950Error):
@@ -306,11 +332,15 @@ class Target:
     database: str
     #: The format to **ask** for. Never the one to believe: see `Record.syntax`.
     syntax: Syntax = Syntax.MARC21
+    #: The character set the target's records arrive in, which the client converts from.
+    #: Defaulted for a caller of the seam alone; a catalogue row must name it, and
+    #: `targets.Target` refuses one that does not.
+    charset: RecordCharset = RecordCharset.UTF8
 
 
 @dataclass(frozen=True)
 class Record:
-    """One record, as the target labelled it and as its bytes arrived."""
+    """One record, as the target labelled it and as the client rendered it."""
 
     #: What the target said this is, normalised to the seam's vocabulary.
     #:
@@ -323,12 +353,13 @@ class Record:
     syntax: Syntax
     #: The label verbatim, for a caller that wants to know what the target actually said.
     reported: str
-    #: The record exactly as it arrived.
+    #: The record as MARCXML in UTF-8, rendered by the client from what the target sent.
     #:
-    #: Bytes rather than text because MARC21 is binary and self describing: the leader's
-    #: first five characters are the record's own length, and position 9 names its
-    #: character set. Decoding here would destroy both, and the mapping downstream needs
-    #: them.
+    #: **Rendered rather than raw ISO 2709**, because every catalogue reader takes MARCXML
+    #: and the character set conversion is the client's library's, which knows ISO 5426
+    #: and MARC-8 where this application does not. The set it converts from is
+    #: `Target.charset`. Bytes, and counted as bytes by `MAX_RESPONSE_BYTES`, which so
+    #: bounds the rendered size: larger than the wire's, so the cap binds sooner.
     raw: bytes
 
 
@@ -346,13 +377,16 @@ class Session(Protocol):
     Three methods and no bounds: the bounds are `search()`'s job, on the other side of
     this seam, so that choosing a different client cannot quietly change them.
 
-    An implementation raises `Unreachable`, `Refused` or `BadQuery` and nothing else.
-    Two obligations that are not visible from the call site:
+    An implementation raises `Unreachable`, `Refused` or `BadQuery` and nothing else,
+    except that `fetch` raises `Unrenderable` for one record it cannot hand over, which
+    ends nothing. Two obligations that are not visible from the call site:
 
     * **`search()` must not report success after a failed open.** Measured 2026-08-28
       against a closed port, the reference library reports a connect timeout and then
       answers the next search with `no error` and zero hits, which is `Unreachable`
-      wearing `Answer(hits=0)` as a costume. An implementation latches its first failure.
+      wearing `Answer(hits=0)` as a costume. An implementation latches its first failure,
+      except a `Refused` marked `temporary`, which ends nothing, so the same search can be
+      put again; latched, it turns the caller's retry into a silent no op.
     * **`search()` and `fetch()` after `close()` must raise rather than crash.** The
       association latches its own end too, so this is the second lock on one door; it is
       here because the failure is a signal rather than an exception and one lock is not
@@ -497,15 +531,15 @@ def title_query(title: str) -> str:
 
 
 def _default_client() -> Client:
-    """The client in use today.
+    """The client: `z3950_yaz.YazClient`.
 
     Imported here rather than at module scope so that this module can be imported, and
     every bound in it tested, on a machine with no Z39.50 client installed at all.
     Building the client loads nothing either: the library is read at its first open.
     """
-    from z3950_provisional import ProvisionalYazClient
+    from z3950_yaz import YazClient
 
-    return ProvisionalYazClient()
+    return YazClient()
 
 
 class Association:
@@ -760,7 +794,8 @@ async def _exchange(open_association: Association, pqf: str, records: int, cap: 
 
     **All or nothing.** A walk that runs out of time discards the records it already
     fetched, which is `fetch.py`'s behaviour too: a body that stops arriving yields
-    nothing rather than a prefix. It is why `MAX_RECORDS` is bounded by time.
+    nothing rather than a prefix. It is why `MAX_RECORDS` is bounded by time. The one
+    record a walk passes over is an `Unrenderable` one: see `_fetched`.
     """
 
     def run_search(session: Session) -> int:
@@ -776,17 +811,35 @@ async def _exchange(open_association: Association, pqf: str, records: int, cap: 
     got: list[Record] = []
     total = 0
     for index in range(min(hits, records)):
-
-        def run_fetch(session: Session, position: int = index) -> Record:
-            return session.fetch(position)
-
-        record = await open_association._call(run_fetch, deadline=ends)
+        record = await _fetched(open_association, index, ends)
+        if record is None:
+            continue
         total += len(record.raw)
         if total > cap:
             logger.warning("Refused a Z39.50 answer over %d bytes at record %d", cap, index)
             raise ResponseTooLarge(f"The target answered with more than {cap} bytes")
         got.append(record)
     return Answer(hits=hits, records=tuple(got))
+
+
+async def _fetched(open_association: Association, index: int, ends: float) -> Record | None:
+    """One record of the walk, or None where the client could not render it.
+
+    Logged at warning, one line per record dropped, so a target whose records the
+    library cannot read shows in the log as that rather than as a catalogue holding
+    nothing. At most `MAX_RECORDS` lines per search.
+    """
+
+    def run_fetch(session: Session) -> Record:
+        return session.fetch(index)
+
+    try:
+        return await open_association._call(run_fetch, deadline=ends)
+    except Unrenderable as error:
+        logger.warning(
+            "Dropped a Z39.50 record from %s at position %d: %s", open_association._where, index, error
+        )
+        return None
 
 
 async def search_once(

@@ -2236,11 +2236,6 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
     so it is the rule's boundary rather than an oversight in one version of it.
     """
 
-    #: The one constraint that spells its values out, and the reason is at its
-    #: own site: the enum is not in `enums.py`, the column is not typed as it,
-    #: and the list is two of its three members on purpose.
-    _EXEMPT = frozenset({"ck_catalogue_targets_transport"})
-
     #: The two helpers that derive a list from an enum. A closed set this rule
     #: may hold, unlike a set of spellings: both are defined in the file it
     #: walks, so a third arrives in the same edit as its callers.
@@ -2306,19 +2301,12 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
     @classmethod
     def _lists_an_enum(cls) -> dict[str, str]:
         """The population this rule reads: every named CHECK whose rendered text
-        carries a quoted `IN` list, the exemption included."""
+        carries a quoted `IN` list."""
         return {name: text for name, text in cls._rendered().items() if cls._A_QUOTED_IN_LIST.search(text)}
 
     @classmethod
     def _derived(cls, name: str, sites: dict[str, ast.expr]) -> bool:
         """Whether this constraint was handed a call to one of the helpers.
-
-        **One predicate with two callers, and that is deliberate rather than
-        tidy.** The rule below asserts it of every constraint that is not
-        exempt, and the exemption arm asserts the negative of it, so the two
-        cannot drift into asking different questions: the version before this
-        one had them inline and apart, and the exemption arm stopped catching a
-        stale exemption without anything failing.
 
         **`func.id` alone, so a call written `models._enum_check` is reported
         as hand written.** That is a false positive rather than a miss, which
@@ -2334,7 +2322,7 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
         sites = self._call_sites()
         wrong = [
             f"{name}: spells its values out"
-            for name in sorted(set(self._lists_an_enum()) - self._EXEMPT)
+            for name in sorted(self._lists_an_enum())
             if not self._derived(name, sites)
         ]
 
@@ -2367,30 +2355,3 @@ class TestNoConstraintSpellsAnEnumListOutByHand:
             f"have: {sorted(declared ^ walked)}"
         )
         assert self._lists_an_enum(), "no CHECK in this schema renders a quoted IN list"
-
-    def test_the_exemption_still_names_a_constraint_that_needs_it(self) -> None:
-        """An exemption nobody notices has gone stale would hide the next hand
-        written list filed under that name.
-
-        **Both directions, because the interesting one is invisible from the
-        population alone.** Deriving a constraint does not change its rendered
-        text, so an exempt name that started calling `_enum_check` is still in
-        the population and a rule asking only that would stay green with the
-        entry earning nothing. This asks the same predicate the rule above
-        asks, negated: an exempt constraint has to still be hand written, and
-        it has to still render a list at all, which is the other direction and
-        covers a constraint deleted or renamed.
-        """
-        sites = self._call_sites()
-        listing = set(self._lists_an_enum())
-        stale = [
-            f"{name}: {'derived now' if self._derived(name, sites) else 'renders no list'}"
-            for name in sorted(self._EXEMPT)
-            if name not in listing or self._derived(name, sites)
-        ]
-
-        assert stale == [], (
-            "these are exempt from the rule above and no longer need to be, so "
-            "the exemption is hiding whatever is next filed under that name. "
-            "Delete the entry:\n" + "\n".join(stale)
-        )

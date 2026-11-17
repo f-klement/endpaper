@@ -329,6 +329,7 @@ import covers  # noqa: E402
 import main  # noqa: E402
 import metadata  # noqa: E402
 import ratelimit  # noqa: E402
+import z3950  # noqa: E402
 from database import Base, SessionLocal, engine  # noqa: E402
 from models import User  # noqa: E402
 from tests import sqlite_only  # noqa: E402
@@ -1339,6 +1340,46 @@ def cover_hosts_resolve_to_fixtures() -> Iterator[None]:
         yield
     finally:
         covers.resolver = shipped
+
+
+class _NoZ3950Client:
+    """A `z3950.Client` that refuses every open, so a test supplying none reaches no catalogue."""
+
+    def open(self, target: z3950.Target, *, timeout: float) -> z3950.Session:
+        raise z3950.Unreachable(f"the suite opens no Z39.50 association to {target.host}; supply a client")
+
+
+#: The client the seam ships, kept so the fixture below restores it whatever a
+#: test's own patch left behind.
+_SHIPPED_Z3950_CLIENT = z3950._default_client
+
+
+@pytest.fixture(autouse=True)
+def refuse_unsupplied_z3950(request: pytest.FixtureRequest) -> Iterator[None]:
+    """No test opens a Z39.50 association or loads libyaz unless it supplies the client.
+
+    `refuse_unmocked_network` is the same rule for httpx and cannot see this
+    door: the seam's default client is a ctypes binding, which opens its own
+    socket. So `z3950._default_client` answers with a client refusing every
+    open, as `Unreachable`, which every caller already degrades on: like the
+    respx router, this keeps the suite hermetic and does not turn a forgotten
+    client into a red test. A test that supplies its own client, by argument or
+    by `monkeypatch.setattr` on this attribute, is unaffected.
+
+    `@pytest.mark.shipped_z3950_client` keeps the real one, for the tests about
+    it. **Set and restored by hand, from a constant taken at import**, for the
+    reason `cover_hosts_resolve_to_fixtures` gives: a `monkeypatch` undo that
+    runs after this teardown cannot leave the next test with a stale client,
+    because the next setup sets it again.
+    """
+    if request.node.get_closest_marker("shipped_z3950_client") is None:
+        z3950._default_client = _NoZ3950Client
+    else:
+        z3950._default_client = _SHIPPED_Z3950_CLIENT
+    try:
+        yield
+    finally:
+        z3950._default_client = _SHIPPED_Z3950_CLIENT
 
 
 @pytest.fixture(autouse=True)

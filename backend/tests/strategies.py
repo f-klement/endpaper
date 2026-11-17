@@ -29,7 +29,7 @@ import logging
 import pkgutil
 import string
 import tracemalloc
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 from xml.sax.saxutils import escape, quoteattr
@@ -304,12 +304,14 @@ MARC_TAGS: Final = _marc_tags()
 _SUBFIELD_CODES: Final = string.ascii_lowercase + string.digits
 
 
-def marc_records() -> SearchStrategy[Node]:
-    """One MARC21 `record` element, namespaced by the collection around it.
+def marc_records(tags: Sequence[str] = MARC_TAGS, title_tag: str = "245") -> SearchStrategy[Node]:
+    """One MARC `record` element, namespaced by the collection around it.
 
     A leader at its real length or truncated, control fields, and datafields
     over the tags the readers name. A title is drawn often rather than always,
-    because a record with no `245 $a` is the reader's one refusal.
+    because a record with no `245 $a` is the reader's one refusal. `tags` and
+    `title_tag` draw a UNIMARC record instead, which MARCXML carries in the
+    same namespace.
     """
     subfield = st.builds(
         lambda code, value: Node("subfield", (("code", code),), value),
@@ -322,7 +324,7 @@ def marc_records() -> SearchStrategy[Node]:
             (("tag", tag), ("ind1", ind1), ("ind2", ind2)),
             children=tuple(subfields),
         ),
-        st.sampled_from(MARC_TAGS),
+        st.sampled_from(tags),
         st.sampled_from(" 0123456789"),
         st.sampled_from(" 0123456789"),
         st.lists(subfield, max_size=4),
@@ -330,7 +332,7 @@ def marc_records() -> SearchStrategy[Node]:
     title = st.builds(
         lambda value: Node(
             "datafield",
-            (("tag", "245"), ("ind1", "1"), ("ind2", "0")),
+            (("tag", title_tag), ("ind1", "1"), ("ind2", "0")),
             children=(Node("subfield", (("code", "a"),), value),),
         ),
         field_values(),

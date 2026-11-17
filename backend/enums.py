@@ -1006,8 +1006,9 @@ class CatalogueSource(StrEnum):
 
     **Not every source answers every question**, and the split is real rather
     than incidental. BNF and LOC are title search only, because neither was
-    worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL, LIBRIS, KB_DK, BIBSYS and
-    MELINDA are the other way round, **lookup only**, and for two different reasons. The NKP's,
+    worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL, LIBRIS, KB_DK, BIBSYS,
+    MELINDA, SBN, PORBASE and OSZK are the other way round, **lookup only**, and
+    for two different reasons. The NKP's,
     the BNA's and the BNU's is the server's: each renders one populated record
     per response whatever page size is asked for, so a search for ten
     candidates would be ten requests. The rest is ours: nobody has measured
@@ -1059,6 +1060,16 @@ class CatalogueSource(StrEnum):
     #: runs. SRU and MARC21 on its own server rather than on Alma, LIBRIS's
     #: shape.
     MELINDA = "melinda"
+    #: The Servizio Bibliotecario Nazionale, Italy's union catalogue, which the
+    #: ICCU runs. Z39.50, asked for its MARC21 view of records it keeps in
+    #: UNIMARC.
+    SBN = "sbn"
+    #: PORBASE, the Portuguese union catalogue the Biblioteca Nacional de
+    #: Portugal runs. Z39.50 and UNIMARC, the only syntax it answers in.
+    PORBASE = "porbase"
+    #: The Országos Széchényi Könyvtár, Hungary's national library. Z39.50 and
+    #: MARC21.
+    OSZK = "oszk"
 
 
 # A member per `CatalogueSource` is checked below the class rather than
@@ -1095,6 +1106,9 @@ class RecordOrigin(StrEnum):
     KB_DK = "kb_dk"
     BIBSYS = "bibsys"
     MELINDA = "melinda"
+    SBN = "sbn"
+    PORBASE = "porbase"
+    OSZK = "oszk"
     #: Typed by a member, or sent by a client that named no other origin.
     MANUAL = "manual"
     #: Read off the book's own file, or its name, on the scan page.
@@ -1190,6 +1204,53 @@ class Capability(StrEnum):
     #: Needs a credential the household supplies, so an install without one has
     #: a source in the list that can never answer.
     NEEDS_A_CREDENTIAL = "needs_a_credential"
+
+
+class Transport(StrEnum):
+    """Which door a catalogue target's request goes out of.
+
+    **A field of the row, read by one dispatcher**: `metadata._DOORS` holds one
+    door per member and refuses at import to hold fewer, so nothing above it
+    asks which protocol answered. What a row on each transport must carry is
+    `targets.Target`'s to refuse.
+
+    **Here rather than in `targets.py`** because `models.py` derives
+    `ck_catalogue_targets_transport` from it, and a foundation importing the
+    catalogue layer would point up the stack. `targets.Transport` is this
+    class, re-exported.
+    """
+
+    SRU = "sru"
+    #: Z39.50 through `z3950.py`'s seam: no HTTP, no redirect, no content
+    #: encoding, and its own byte and time bounds.
+    Z3950 = "z3950"
+    #: Not SRU and not Z39.50: a JSON API of the target's own design, with its
+    #: own adapter. Open Library and Google Books, and nothing else. A row here
+    #: carries an address and its capabilities and no query fields at all,
+    #: because there is no query grammar to name.
+    BESPOKE = "bespoke"
+
+
+class RecordCharset(StrEnum):
+    """The character set a Z39.50 target's records arrive in, which the client converts from.
+
+    **Data on the row, because the record cannot be trusted to say.** A MARC21
+    record declares its set in leader/09 and a UNIMARC one in `100 $a/26-29`,
+    but the client renders text before any reader sees a leader, and a set read
+    wrongly is every accented letter wrong with nothing raised. So each row
+    names what its target was measured sending, and the client converts from
+    that to UTF-8.
+
+    **The seam's spelling, not the client's**, for the reason `z3950.Syntax`
+    gives: the client maps these to whatever its library calls them.
+    """
+
+    #: ISO 10646 as UTF-8, which needs no conversion.
+    UTF8 = "utf8"
+    #: MARC-8, the MARC21 default where leader/09 is blank.
+    MARC8 = "marc8"
+    #: ISO 5426, which a UNIMARC record declares as `0103` in `100 $a/26-29`.
+    ISO5426 = "iso5426"
 
 
 class VerificationProvenance(StrEnum):

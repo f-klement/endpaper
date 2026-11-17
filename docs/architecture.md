@@ -267,7 +267,7 @@ listed.
 | Catalogue | [`targets.py`](../backend/targets.py) | One catalogue target as data: where it is, how it is asked, what reads it back. |
 | Catalogue | [`xml_parse.py`](../backend/xml_parse.py) | What turning a stranger's XML into a tree may cost, and the one builder that holds it. |
 | Catalogue | [`z3950.py`](../backend/z3950.py) | One door for the Z39.50 requests this app makes, and every bound on them. |
-| Catalogue | [`z3950_provisional.py`](../backend/z3950_provisional.py) | **PROVISIONAL.** The one Z39.50 client that exists today, and not the chosen one. |
+| Catalogue | [`z3950_yaz.py`](../backend/z3950_yaz.py) | The Z39.50 client: a `ctypes` binding to the ZOOM C API in the `libyaz` the image ships. |
 | Contracts | [`schemas/`](../backend/schemas/) | Request and response contracts. |
 | Foundations | [`authors.py`](../backend/authors.py) | Who wrote what, read out of one free text column. |
 | Foundations | [`categories.py`](../backend/categories.py) | A Book's Categories: the stored form of `books.categories`, its bounds, and the four producer policies. |
@@ -424,6 +424,9 @@ flowchart TB
     nlg["NLG, SRU, MARC_GND, only 978-618 and 978-960"]
     bn_pl["BN_PL, SRU, MARC_GND, only 978-83"]
     kb_dk["KB_DK, SRU, MARC_GND, only 978-87"]
+    sbn["SBN, Z3950, MARC_GND, only 978-88"]
+    porbase["PORBASE, Z3950, UNIMARC, only 978-972 and 978-989"]
+    oszk["OSZK, Z3950, MARC_GND, only 978-615 and 978-963"]
     open_library["OPEN_LIBRARY, BESPOKE, OPEN_LIBRARY"]
     oenb["OENB, SRU, MARC_GND, only 978-3"]
     nkp["NKP, SRU, DUBLIN_CORE_BARE"]
@@ -443,7 +446,10 @@ flowchart TB
   together -->|"no record"| in_turn
   nlg --> bn_pl
   bn_pl --> kb_dk
-  kb_dk --> open_library
+  kb_dk --> sbn
+  sbn --> porbase
+  porbase --> oszk
+  oszk --> open_library
   open_library --> oenb
   oenb --> nkp
   nkp --> bne
@@ -463,10 +469,17 @@ flowchart TB
    lookup spends no quota unless a library moves it up and switches the pair off. Who is
    believed about a field is `_preferred_source` and `_MATCH_PRECEDENCE`, not the order.
 3. **The rest are asked one at a time** until one finds the book. A source with a remit is
-   skipped for an ISBN outside it.
-4. **Each request goes through `fetch.py`**, which bounds it by deadline, body size and
-   redirects, and a decoder in `decoders.py` turns the answer into a `catalogue.Record`. The
-   decoder is never told how the bytes arrived.
+   skipped for an ISBN outside it. Which source may join the pair is decided on the books it
+   would add to it, so a union catalogue whose additions are one country's stays out of the
+   pair.
+4. **Each request goes out of the door its row's transport names**, read once from
+   `metadata._DOORS`: SRU and the bespoke APIs through `fetch.py`, which bounds a request by
+   deadline, body size and redirects, and Z39.50 through `z3950.py`, which bounds an
+   association by deadline, record bytes and record count. A row whose `retries_as_isbn10` is
+   set asks once more with the ten digit ISBN on a miss, through `metadata._first_answer`,
+   which both query doors call; on Z39.50 both forms share one association and its deadline.
+   A decoder in `decoders.py` turns the answer into a `catalogue.Record` and is never told
+   how the bytes arrived.
 5. **A found record gets a cover** from `covers.resolve`, which checks that the image exists
    before offering it.
 
@@ -474,9 +487,13 @@ A title search is a different path, `metadata.title_search`: it asks every searc
 plan allows within a deadline, ranks the matches by `_relevance`, and offers a slower "search
 harder" with a longer one.
 
-`z3950.py` is the bounded door for Z39.50 and `z3950_provisional.py` the client behind it.
-No seeded target uses that transport yet, and `targets.Target` refuses one until the dispatch
-exists, so no lookup reaches the library the image carries.
+`z3950.py` is the bounded door for Z39.50 and `z3950_yaz.py` the client behind it, which
+renders each record as MARCXML so the SRU door's readers read it. A Z39.50 row is a
+`z3950://host:port/database` address, a record syntax, the character set its records arrive
+in and a use attribute, and `targets.Target` refuses one missing any of them or naming a
+credential, which that door cannot carry. Three seeded targets use it, the SBN, PORBASE and
+the OSZK, each for ISBN lookups only. PORBASE answers in UNIMARC alone, which
+`metadata._marc21_from_unimarc` maps onto MARC21 before the MARC21 reader sees it.
 
 ## Imports and files
 
@@ -822,11 +839,11 @@ The first stage compiles **YAZ**, IndexData's Z39.50 implementation, because nat
 catalogues speak Z39.50 and nothing else reaches several of them. Six of the eight targets
 surveyed run YAZ as their server.
 
-**What uses it.** `backend/z3950.py` is the transport and `backend/z3950_provisional.py`
-is the client behind its seam, binding `libyaz.so.5` through `ctypes`. The client is
-explicitly provisional: the route was not settled when the transport was written, and the
-seam exists so that changing it is a change to one function. No seeded target uses the
-transport yet ([The catalogue lookup](#the-catalogue-lookup)).
+**What uses it.** `backend/z3950.py` is the transport and `backend/z3950_yaz.py` is the
+client behind its seam, binding `libyaz.so.5` through `ctypes` by the absolute path the
+image puts it at, and no other: a library loaded by `ctypes` runs code, so the path is not
+configurable. The image smoke test loads it that way in the finished image. Three seeded
+targets use the transport ([The catalogue lookup](#the-catalogue-lookup)).
 
 **Alpine packages no YAZ.** Checked across edge, v3.22, v3.21 and the pinned base's own
 3.24.1, in main, community and testing: no `yaz`, no `yaz-dev`. So it is either compiled or
@@ -930,7 +947,7 @@ the whole `DT_NEEDED` closure rather than one library: everything must load and 
 which is strictly more than the musl version string ever compared. **What it cannot cover is
 what is loaded later by `dlopen`**, and gnutls does exactly that with p11-kit at TLS setup
 time rather than at load. Moot while nothing here speaks TLS, and worth knowing before
-anything does. The release smoke test
+anything does. The image smoke test
 runs the same command again on the finished image, which is not duplication: the first
 fails the build, in any build including somebody's own `docker build`, and the second
 proves it in the artefact about to be published.
@@ -1009,7 +1026,7 @@ One line each; the reasoning is in [decisions.md](decisions.md).
 - [The provider order is the order sources are asked, and nothing else](decisions.md#the-provider-order-is-the-order-sources-are-asked-and-nothing-else), and [the first tier is a latency budget](decisions.md#the-first-tier-is-a-latency-budget-and-no-order-of-the-roster-covers-more).
 - [The SRU server borrows the public catalogue's gate](decisions.md#the-sru-server-borrows-the-public-catalogues-gate-rather-than-growing-one).
 - [OPDS is a discovery route](decisions.md#opds-is-a-discovery-route-and-the-atom-line-is-not-a-metadata-import-route), not a metadata import route.
-- [The Z39.50 transport is a seam](decisions.md#the-z3950-transport-is-a-seam-and-the-client-behind-it-is-not-chosen-yet), and [YAZ is compiled, not packaged](decisions.md#yaz-is-compiled-not-packaged-and-the-image-stays-alpine).
+- [The Z39.50 transport is a seam](decisions.md#the-z3950-transport-is-a-seam-and-the-client-behind-it-is-the-ctypes-binding-to-yaz), and [YAZ is compiled, not packaged](decisions.md#yaz-is-compiled-not-packaged-and-the-image-stays-alpine).
 - [A test account is a column](decisions.md#a-test-account-is-a-column-not-auth_source-is-local), and [under proxy auth only a switch token beats the header](decisions.md#under-proxy-auth-a-token-beats-the-header-but-only-a-switch-token).
 - [Types are generated, not hand written](decisions.md#types-are-generated-not-hand-written).
 

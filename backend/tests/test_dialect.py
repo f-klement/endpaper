@@ -20,9 +20,9 @@ gets believed:
   **The revisions it covers are found by type rather than listed**, for both
   rule shapes, so one that carries a rule table is covered the moment it exists.
   For a swapped rule the comparison is a **chain**: each revision's arm is the
-  next one's starting point and the last is the model. For an added rule there
-  is no chain, and the arm saying so is
-  `::test_every_addition_is_still_the_last_text_of_its_chain`.
+  next one's starting point and the last is the model. An added rule is the
+  first link of its chain where a later revision swaps it (`first_swap`), and
+  is compared with the model where none does.
 * `TestEveryCheckRendersWithoutASqliteOnlyIdiom` is parametrised over
   `Base.metadata`, so a constraint added to a model is covered the moment it
   exists. **It is a token scan, and a token scan is an enumeration of an open
@@ -158,6 +158,7 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("catalogue_targets", "ck_catalogue_targets_base_url"),
             ("catalogue_targets", "ck_catalogue_targets_indexes"),
             ("catalogue_targets", "ck_catalogue_targets_isbn_claim"),
+            ("catalogue_targets", "ck_catalogue_targets_isbn10_retry"),
             ("catalogue_targets", "ck_catalogue_targets_use_attribute"),
             ("custom_field_values", "ck_custom_field_values_bounds"),
             ("custom_fields", "ck_custom_fields_name_bounds"),
@@ -433,14 +434,28 @@ THE_SWAPS: Final = [
     ("f4a1c62d0b97", "author_identifiers", "ck_author_identifiers_bounds"),
     ("b8f4c1a7e309", "book_identifiers", "ck_book_identifiers_bounds"),
     ("b8f4c1a7e309", "catalogue_credentials", "ck_catalogue_credentials_envelope"),
+    ("6ecb05b436b5", "catalogue_targets", "ck_catalogue_targets_base_url"),
     ("a6d3f92c7b14", "catalogue_targets", "ck_catalogue_targets_indexes"),
     ("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_indexes"),
+    ("6ecb05b436b5", "catalogue_targets", "ck_catalogue_targets_transport"),
     ("f4a1c62d0b97", "custom_field_values", "ck_custom_field_values_bounds"),
     ("f4a1c62d0b97", "custom_fields", "ck_custom_fields_name_bounds"),
     ("a6d3f92c7b14", "opds_servers", "ck_opds_servers_base_url"),
     ("f4a1c62d0b97", "opds_servers", "ck_opds_servers_name"),
     ("f4a1c62d0b97", "quotes", "ck_quotes_text_bounds"),
 ]
+
+
+def first_swap(constraint: str) -> SwappedRule | None:
+    """The first swap of a constraint, which is where an addition of it stops being the last text.
+
+    **An addition is the first link of its constraint's chain**: the swap after
+    it drops the text it installed, so that swap's `before` must be the
+    addition's text, and only an addition nothing swaps is compared with the
+    model. Read from both files that compare an addition.
+    """
+    swaps = SWAP_CHAIN.get(constraint)
+    return swaps[0][1] if swaps else None
 
 
 class TestTheScanOverAModulesNamespace:
@@ -678,7 +693,13 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         compared against nothing: the rule nobody adds a line for is always the
         new one.
         """
-        assert " ".join(added.postgresql.split()) == _declared(added.table, added.constraint, POSTGRESQL)
+        swapped = first_swap(added.constraint)
+        expected = (
+            " ".join(swapped.before_pg.split())
+            if swapped is not None
+            else _declared(added.table, added.constraint, POSTGRESQL)
+        )
+        assert " ".join(added.postgresql.split()) == expected
 
     def test_these_are_the_rules_the_revisions_add(self):
         """Anti vacuity for that walk, and **non emptiness would not be it.**
@@ -703,78 +724,16 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
         `TestTheseAreTheConstraintsWithTwoSpellings` already has in this file.
         """
         assert [(revision, rule.table, rule.constraint) for revision, rule in ADDED_RULES] == [
-            ("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_base_url")
+            ("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_base_url"),
+            ("6ecb05b436b5", "catalogue_targets", "ck_catalogue_targets_record_charset"),
+            ("2d87a872d78e", "catalogue_targets", "ck_catalogue_targets_isbn10_retry"),
         ]
 
-    def test_every_addition_is_still_the_last_text_of_its_chain(self):
-        """The condition under which comparing an addition with the model is
-        the right comparison, asserted rather than assumed.
-
-        An addition is the **first** text of a constraint's chain and
-        `test_every_rule_a_revision_added_agrees` compares it against the
-        **last**, which is what the model declares. **Two things would have to
-        stay true for those to be one text**, and this asserts one of them:
-        that nothing swaps a constraint some revision added. The other is that
-        no constraint is added twice, which needs no arm of its own, because a
-        second addition of one constraint reds the exact list beside this and
-        reds whichever of the two texts is not the model's.
-
-        **This is where the widened walk refuses something legitimate.** It
-        reds **as well as** the comparisons, not instead of them: a legitimate
-        swap moves the model, so driven, the two text comparisons red naming
-        the addition and this reds naming the constraint. That is one extra
-        named failure, and it is the one that says which of the two is the
-        fault. When it fires, the fix is to fold the additions into the chain
-        `_swap_chain` builds, so an addition is a link rather than an endpoint,
-        and not to delete any of the three.
-
-        **Why that fold is not already here.** It would make the comparison
-        right in general, and it is a design change rather than a widening: an
-        addition has no `before`, so a chain that holds one needs a convention
-        for where an addition starts, and **nothing in this tree could
-        exercise that convention**, because no addition has ever been swapped.
-        A rule invented over an empty population is a rule nobody has run.
-
-        **The choice between the two is failure direction, not effort.** This
-        arm is wrong **loudly**: it refuses a correct revision at the line
-        somebody is writing it on, and they find out the same day. A
-        convention nothing exercises is wrong **quietly**, because being wrong
-        about it means a chain that agrees with itself. That is the reason
-        that survives the day somebody decides the fold is cheap after all,
-        where an argument about effort is overturned by exactly that reader.
-        """
-        added = {(rule.table, rule.constraint): rule for _, rule in ADDED_RULES}
-        last_swap = {
-            (swaps[-1][1].table, constraint): swaps[-1][1] for constraint, swaps in SWAP_CHAIN.items()
-        }
-        # **Both engines, and the engine is in the message.** A first version
-        # compared the Postgres sides alone, so an addition overtaken on the
-        # SQLite arm only left this green while the addition's own comparison
-        # reddened: the refusal still happened and the arm that exists to
-        # explain it said nothing. SQLite is the engine every deployment runs,
-        # so that is the half this cannot be blind to.
-        overtaken = sorted(
-            (table, constraint, engine)
-            for (table, constraint), addition in added.items()
-            if (table, constraint) in last_swap
-            for engine, ended_on, added_as in (
-                ("sqlite", last_swap[table, constraint].after, addition.sqlite),
-                (
-                    "postgresql",
-                    last_swap[table, constraint].after_pg,
-                    addition.postgresql,
-                ),
-            )
-            if " ".join(ended_on.split()) != " ".join(added_as.split())
-        )
-
-        assert added, "no revision adds a constraint, so this asserted nothing"
-        assert not overtaken, (
-            f"{overtaken} was added with one text and its chain now ends on "
-            "another, on the engine named beside it, so the addition is no "
-            "longer the last text of its constraint and comparing it against "
-            "the model refuses a correct revision"
-        )
+    def test_an_addition_is_compared_with_the_swap_that_followed_it(self):
+        """Anti vacuity for the fold `first_swap` makes: at least one addition
+        is a link rather than an endpoint, so the comparison above reads a
+        swap's `before_pg` on some case and not only the model."""
+        assert any(first_swap(rule.constraint) is not None for _, rule in ADDED_RULES)
 
 
 @pytest.mark.parametrize("table_name", sorted(Base.metadata.tables), ids=lambda name: name)

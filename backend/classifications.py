@@ -147,7 +147,7 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
     field is the first thing a full book should lose, and before this it was
     kept ahead of a Library of Congress subject heading because its number
     happened to be a GND one. A parser can only order the record in front of it,
-    and by the time a list reaches here a merge has concatenated up to twelve
+    and by the time a list reaches here a merge has concatenated up to fifteen
     catalogues, which is every catalogue whose reader builds a `Heading`: the
     leading source's subject headings sit in front of the second catalogue's
     Dewey number and the Library of Congress's call number, which are then the

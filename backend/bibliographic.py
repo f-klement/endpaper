@@ -164,6 +164,10 @@ def strip_isbd_punctuation(raw: str) -> str:
     return raw.strip().rstrip("/:;,=").strip()
 
 
+#: The units `pages_from_extent` counts pages in.
+_PAGE_UNITS: Final = r"(?:Seiten|Bl\.|S\.|pages|p\.|pp\.|stran)"
+
+
 def pages_from_extent(raw: str | None) -> int | None:
     r"""`390 Seiten`, `348 S.` and `528 p.` all become a number.
 
@@ -189,10 +193,18 @@ def pages_from_extent(raw: str | None) -> int | None:
     This **extracts**, where `is_physical_book` **refuses**, which is why a per
     source phrasing belongs there and not here. Only spellings actually measured
     are listed.
+
+    **ISBD's unnumbered sequence is read past**, and only where the first
+    pattern found nothing, so no answer it gave moves: `308, [3] p.` is 308
+    numbered pages and 3 unnumbered ones. Measured 2026-11-16 over 38 PORBASE
+    extents, this answers 20 that were None. A count after a hyphen is refused
+    there, because `p. 129-137, [1] p.` is an offprint's page range.
     """
     if not raw:
         return None
-    match = re.search(r"(?<!\d)(\d{1,6})\s*(?:Seiten|Bl\.|S\.|pages|p\.|pp\.|stran)", raw)
+    match = re.search(rf"(?<!\d)(\d{{1,6}})\s*{_PAGE_UNITS}", raw) or re.search(
+        rf"(?<![\d-])(\d{{1,6}}),\s*\[\d{{1,6}}\]\s*{_PAGE_UNITS}", raw
+    )
     if not match:
         return None
     pages = int(match.group(1))
@@ -234,12 +246,13 @@ def is_placeholder_title(title: str) -> bool:
 #: `is_physical_book` being what the search paths and K10plus ask.
 #:
 #: **This is the fallback now, and a code test stands in front of it.**
-#: `is_physical_book` is reached from fifteen sources, the whole roster less the
+#: `is_physical_book` is reached from eighteen sources, the whole roster less the
 #: two that never ask it: the DNB, K10plus, the OENB, the NLG, the BNE, the
-#: BN_PL, LIBRIS, Melinda, BIBSYS, the Royal Danish Library, the NKP, the BNA,
-#: the BNU, the BnF and the Library of Congress. Eleven of them state the
-#: carrier in codes and are asked those first, the ten MARC ones through
-#: `marc_fields.Fields.describes_a_book` and the Library of Congress through
+#: BN_PL, LIBRIS, Melinda, BIBSYS, the Royal Danish Library, the SBN, PORBASE,
+#: the OSZK, the NKP, the BNA, the BNU, the BnF and the Library of Congress.
+#: Fourteen of them state the carrier in codes and are asked those first, the
+#: thirteen MARC ones through `marc_fields.Fields.describes_a_book`, PORBASE's
+#: after the UNIMARC crosswalk, and the Library of Congress through
 #: `metadata._loc_carrier_is_book`. The four Dublin Core sources decide it from
 #: prose alone, and two of them state their own,
 #: `metadata._NKP_ONLINE` and `metadata._BNF_ONLINE`. **The BNA states none,
@@ -249,9 +262,9 @@ def is_placeholder_title(title: str) -> bool:
 #: read by the same reader, states none either.
 #:
 #: **So a reader who has met a new wording should not lengthen this.** Widening
-#: it still changes what all fifteen refuse, and #124 is the record of what that
+#: it still changes what all eighteen refuse, and #124 is the record of what that
 #: buys: the wording is a property of the language, the language list is open,
-#: and eleven of the fifteen never needed the wording at all.
+#: and fourteen of the eighteen never needed the wording at all.
 _ONLINE_FORMS: Final = r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
 _DISC_FORMS: Final = r"audio disc|sound (?:disc|recording)|videodisc|dvd|blu-?ray"
 
