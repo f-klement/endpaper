@@ -249,6 +249,21 @@ describe("a table field", () => {
     expect(readLuaTable("return { 1 2 }").ok).toBe(false);
   });
 
+  it("refuses a long run of digits ending in a letter without stalling", () => {
+    // Timed, because nothing else observes a regular expression backtracking.
+    // The number pattern used to split the run every way before its lookahead
+    // refused the letter. Measured once on `builder`: 1 ms, and 23,842 ms with
+    // that pattern put back, so the ceiling is far from both.
+    const source = `return { ${"1".repeat(100_000)}a }`;
+
+    const started = performance.now();
+    const reading = readLuaTable(source);
+    const elapsed = performance.now() - started;
+
+    expect(reading.ok).toBe(false);
+    expect(elapsed).toBeLessThan(1_000);
+  });
+
   it("refuses a minus sign before anything but a number", () => {
     expect(readLuaTable("return { -x }").ok).toBe(false);
   });

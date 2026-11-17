@@ -1549,7 +1549,9 @@ export function useKoreaderHighlightImport(): UseKoreaderHighlightImportResult {
   const [isRunning, setRunning] = useState(false);
 
   async function run(files: readonly File[]): Promise<void> {
-    const read = await Promise.all(files.map(readPickedSidecar));
+    const read = await Promise.all(
+      files.map((file, picked) => readPickedSidecar(file, picked)),
+    );
     const digests = [
       ...new Set(
         read.flatMap(({ reading }) =>

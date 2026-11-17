@@ -46,8 +46,11 @@ const ESCAPES: Readonly<Record<string, string>> = {
 };
 
 const NAME = /[A-Za-z_][A-Za-z0-9_]*/y;
+// The dot opens the fraction rather than standing alone between two digit
+// runs: `\d+\.?\d*` splits a long digit run every way before the lookahead
+// refuses a trailing letter, quadratic in a run the file chose.
 const NUMBER =
-  /(?:0[xX][0-9a-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)(?![A-Za-z0-9_.])/y;
+  /(?:0[xX][0-9a-fA-F]+|(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)(?![A-Za-z0-9_.])/y;
 
 class Reader {
   private at = 0;

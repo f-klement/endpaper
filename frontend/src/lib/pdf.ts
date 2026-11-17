@@ -534,7 +534,10 @@ class Lexer {
       const reference = this.reference(Number(token));
       if (reference !== null) return reference;
     }
-    return /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(token) ? Number(token) : null;
+    // The dot opens the fraction rather than standing alone between two digit
+    // runs: `\d+\.?\d*` splits a long digit run every way before refusing a
+    // trailing letter, quadratic in a token the file chose.
+    return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(token) ? Number(token) : null;
   }
 
   /**

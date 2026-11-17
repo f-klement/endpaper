@@ -101,6 +101,18 @@ const SWEEP_CEILING_MS = 30_000;
  */
 const OUROBOROS_READ_CEILING = 64;
 
+/**
+ * How long reading one token of a hundred thousand digits and a letter may take.
+ *
+ * **Timed, because nothing else observes a regular expression backtracking.**
+ * The pattern that reads a number used to split the digit run every way before
+ * refusing the letter, quadratic in the run. Measured once on `builder`: the
+ * read took 4 ms, and 8,976 ms with that pattern put back, so the ceiling sits
+ * nine times under the defect and 250 times over the healthy read, and a node
+ * three times faster or slower leaves the verdict where it was.
+ */
+const LONG_TOKEN_CEILING_MS = 1_000;
+
 async function read(bytes: Uint8Array<ArrayBuffer>) {
   return readPdf(new Blob([bytes]));
 }
@@ -573,16 +585,19 @@ describe("an array longer than anything real", () => {
  * member that throws costs only itself, so a refused title reads as null.
  */
 async function titledBy(body: string) {
-  return read(
-    await streamPdf(
-      [
-        object(1, "<< /Title 3 0 R >>"),
-        object(2, "<< /Type /Catalog >>"),
-        object(3, body),
-      ],
-      "/Info 1 0 R /Root 2 0 R",
-      { packed: [[3]] },
-    ),
+  return read(await titledFile(body));
+}
+
+/** The file `titledBy` reads, for a test that times the read alone. */
+async function titledFile(body: string) {
+  return streamPdf(
+    [
+      object(1, "<< /Title 3 0 R >>"),
+      object(2, "<< /Type /Catalog >>"),
+      object(3, body),
+    ],
+    "/Info 1 0 R /Root 2 0 R",
+    { packed: [[3]] },
   );
 }
 
@@ -638,6 +653,17 @@ describe("a value the lexer has to read whole", () => {
 
   it("reads a title held by reference, so the refusals below are the lexer's", async () => {
     expect(verdict(await titledBy("<456D6D61>"))).toBe("read: Emma");
+  });
+
+  it("refuses a long run of digits ending in a letter without stalling", async () => {
+    const file = await titledFile(`${"1".repeat(100_000)}x`);
+
+    const started = performance.now();
+    const reading = await read(file);
+    const elapsed = performance.now() - started;
+
+    expect(verdict(reading)).toBe("read: null");
+    expect(elapsed).toBeLessThan(LONG_TOKEN_CEILING_MS);
   });
 
   it.each([

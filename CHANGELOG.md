@@ -130,6 +130,8 @@ configuration, everyday use and the architecture.
 
 - A book lookup no longer stalls when a catalogue's classification carries a long run of spaces.
 
+- A PDF or KOReader sidecar holding a long run of digits no longer stalls its import.
+
 - The error page uses the app's green accent, and its status line and button meet WCAG AA
   contrast in both light and dark mode.
 
