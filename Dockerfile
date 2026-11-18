@@ -121,7 +121,7 @@ WORKDIR /app
 # variant ships it at /usr/local/bin/uv. Copying /uv from the alpine image fails with
 # "failed to get fileinfo for /kaniko/deps/.../uv: no such file or directory", which
 # reads like a kaniko cross-stage bug and is really just a missing file.
-COPY --from=ghcr.io/astral-sh/uv:0.13.7-alpine@sha256:a788290ce829958f18bcea1dfd9fb5dcf4bfb22f6380b52c9322f9d91e86b117 /usr/local/bin/uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.9-alpine@sha256:788c243c482a0b16ef0e05c6e5bf7e4c2ba7f2e7ec04f05eb758a28607cfb652 /usr/local/bin/uv /bin/uv
 
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
