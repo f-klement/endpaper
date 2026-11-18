@@ -9909,7 +9909,9 @@ def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
 _BYTE_DOORS: Final[dict[str, str]] = {
     "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
     "metadata.py::_parsed": ("tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"),
-    "authority.py::_naf_read": "tests/test_authority.py::TestANafAnswerIsReadOrRefusedByName",
+    # The NAF's and the BNP's one parse; the BNP's path has its own property,
+    # `tests/test_authority.py::TestABnpAnswerIsReadOrRefusedByName`.
+    "authority.py::_tree": "tests/test_authority.py::TestANafAnswerIsReadOrRefusedByName",
     "opds.py::read_page": "tests/test_opds.py::TestAPageIsReadOrRefusedByName",
     "backup.py::read_manifest": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
     "backup.py::_manifest_bytes": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",

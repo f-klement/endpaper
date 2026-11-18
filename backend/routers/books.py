@@ -1479,6 +1479,15 @@ def _html_chunks(db: Session, viewer_id: int) -> Iterator[str]:
     spreadsheet wants.
     The rows are the other formats' rows, from the same `_export_pages` walk.
 
+    **No covers, by either route.** One by URL is either this server's
+    `/covers/` route, behind sign in and out of reach of the person handed
+    the file, or a third party's, which would learn who opened the page;
+    the page's own policy refuses both. One embedded as data is up to
+    `covers.MAX_COVER_BYTES` a book, a third more as base64, so a thousand
+    books could reach gigabytes. `TestTheHtmlExport` refuses `src` and the
+    other fetching attributes it lists, so an `<img>` cover fails it; a CSS
+    `url()` is left to the policy.
+
     The head is yielded before the first page, so an empty shelf still
     downloads a page that opens, with its headings and no rows.
     """
@@ -2703,9 +2712,9 @@ async def author_authority(
     number, or failing both a confirmed ORCID iD, that number is a key: it
     resolves to exactly one record, and the spelling on it is the suggestion
     this feature exists to offer. Where it holds none, the author's name is put
-    to a name search of the GND and the LCNAF, the GND's people first, and of
-    ORCID only where both find nobody. A name is not a key. Two people are
-    spelled `Stevenson, Robert Louis` in the GND.
+    to a name search of the GND and the LCNAF, the GND's people first, and in
+    library mode of ORCID where both find nobody. A name is not a key. Two
+    people are spelled `Stevenson, Robert Louis` in the GND.
 
     **`q` steers that search and forces it.** Without it the query is the
     author's own display name, which is exactly wrong when the shelf spells
@@ -2748,11 +2757,15 @@ async def author_authority(
     # into them, and `fetch.get_once` gives every call its own budget when it is
     # passed none. `authority.DEADLINE_SECONDS` carries the measurement.
     deadline = authority.deadline_from_now()
+    # ORCID by name in library mode only: outside it nearly every hit is a
+    # researcher sharing a novelist's name. A stored ORCID iD below is a key
+    # and is resolved in either mode. `authority.search` has the measurement.
+    ask_orcid = settings_store.library_mode(db)
     try:
         if q is not None:
             # A retyped name is a search whatever is stored: the member is
             # saying the shelf spelling is not the one to look up.
-            found = await authority.search(q, deadline=deadline)
+            found = await authority.search(q, deadline=deadline, ask_orcid=ask_orcid)
         elif stored:
             # Which stored numbers are asked, and of which file, is
             # `resolve_stored`'s: a number the file no longer holds answers
@@ -2761,7 +2774,9 @@ async def author_authority(
                 [(row.scheme, row.identifier) for row in stored], deadline=deadline
             )
         else:
-            found = await authority.search(authorship.display_name(author), deadline=deadline)
+            found = await authority.search(
+                authorship.display_name(author), deadline=deadline, ask_orcid=ask_orcid
+            )
     except authority.AuthorityUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -2838,8 +2853,9 @@ async def confirm_author_identifier(
     request is well formed and the state refuses it.
 
     **Confirming a GND number stores the cross references that came with it**,
-    and the six national numbers, which cost the extra requests. A confirmation
-    is up to eight outbound calls, which is why it is a deliberate action rather
+    and the six national numbers, which cost the extra requests; a Portuguese
+    one is kept only where the BNP's record names the person. A confirmation
+    is up to nine outbound calls, which is why it is a deliberate action rather
     than something a lookup does on the way past.
 
     **The cross references only for `gnd`.** An LCNAF or ORCID record is

@@ -129,6 +129,12 @@ const ROW_LINE: Record<
       {t("rapid.lookingUp")}
     </span>
   ),
+  // Asked at the pace, so it can wait a while: it says what it is waiting on.
+  listed: (entry, t) => (
+    <span className="text-paper-600 dark:text-paper-400">
+      {t("rapid.listed", { isbn: entry.isbn })}
+    </span>
+  ),
   reading: (entry, t) => (
     <span className="text-paper-600 dark:text-paper-400">
       {t("rapid.reading", { name: entry.label })}
@@ -271,6 +277,8 @@ interface RapidQueueProps {
    */
   figures: QueueFigures;
   isLookingUp: boolean;
+  /** How far the paced run has got, `null` when none is running. */
+  lookUpProgress: BulkProgress | null;
   onLookUp: () => void;
   onStopLookUp: () => void;
   onChoose: (key: string, match: BookMatch) => void;
@@ -337,6 +345,7 @@ export default function RapidQueue({
   onStopAdding,
   figures,
   isLookingUp,
+  lookUpProgress,
   onLookUp,
   onStopLookUp,
   onChoose,
@@ -393,6 +402,7 @@ export default function RapidQueue({
         waiting={figures.waiting}
         paceMinutes={figures.paceMinutes}
         isLookingUp={isLookingUp}
+        progress={lookUpProgress}
         isAdding={isAdding}
         onLookUp={onLookUp}
         onStopLookUp={onStopLookUp}
@@ -588,6 +598,7 @@ function LookUpControls({
   waiting,
   paceMinutes,
   isLookingUp,
+  progress,
   isAdding,
   onLookUp,
   onStopLookUp,
@@ -595,21 +606,14 @@ function LookUpControls({
   waiting: number;
   paceMinutes: number;
   isLookingUp: boolean;
+  progress: BulkProgress | null;
   isAdding: boolean;
   onLookUp: () => void;
   onStopLookUp: () => void;
 }) {
   const { t } = useTranslation();
   if (isLookingUp) {
-    return (
-      <button
-        type="button"
-        onClick={onStopLookUp}
-        className="w-full py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
-      >
-        {t("fallback.stop")}
-      </button>
-    );
+    return <StopLookingUp progress={progress} onStop={onStopLookUp} />;
   }
   // Offered, never automatic. A folder of several hundred files is several
   // hundred catalogue calls, a name's fan out or a stated ISBN's lookup,
@@ -629,6 +633,41 @@ function LookUpControls({
       <p className="text-xs text-paper-600 mt-1.5 leading-relaxed dark:text-paper-400">
         {t("fallback.pace", { minutes: paceMinutes })}
       </p>
+    </div>
+  );
+}
+
+/**
+ * The paced run's stop, and how far it has got.
+ *
+ * **Not a live region**, for the reason the add's progress is not: it moves
+ * once per row, and announcing it would read a list of five hundred aloud.
+ */
+function StopLookingUp({
+  progress,
+  onStop,
+}: {
+  progress: BulkProgress | null;
+  onStop: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onStop}
+        className="w-full py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
+      >
+        {t("fallback.stop")}
+      </button>
+      {progress && (
+        <p className="text-xs text-paper-600 mt-1.5 dark:text-paper-400">
+          {t("fallback.progress", {
+            done: progress.done,
+            total: progress.total,
+          })}
+        </p>
+      )}
     </div>
   );
 }

@@ -1181,6 +1181,7 @@ export const de: Messages = {
   "rapid.explain":
     "Einfach weiterscannen. Jedes Buch wird nachgeschlagen und gesammelt, bestätigt wird am Ende alles zusammen.",
   "rapid.queued": "{count} in der Liste",
+  "rapid.listed": "Wartet auf das Nachschlagen: {isbn}",
   "rapid.lookingUp": "Wird nachgeschlagen...",
   "rapid.reading": "{name} wird gelesen...",
   "rapid.notFound": "Nicht gefunden: {isbn}",
@@ -1212,6 +1213,26 @@ export const de: Messages = {
   "rapid.nothingScanned": "Noch nichts gescannt",
 
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
+  "isbnList.title": "Aus einer ISBN-Liste hinzufügen",
+  "isbnList.explain":
+    "ISBNs einfügen oder eine Textdatei mit ISBNs wählen, getrennt durch Zeilen, Leerzeichen oder Kommas; eine ISBN-Liste darf die Einträge, die in der Liste auf das Nachschlagen warten, auf bis zu {limit} bringen, gewählte und noch nicht nachgeschlagene Dateien eingeschlossen. Jede wird im selben Tempo wie gewählte Dateien in den Katalogen nachgeschlagen, und die Bücher warten in der Liste auf eine Prüfung, bevor etwas hinzugefügt wird.",
+  "isbnList.pasteLabel": "ISBNs",
+  "isbnList.submit": "Nachschlagen",
+  "isbnList.fileLabel": "Oder eine Text- oder CSV-Datei wählen",
+  "isbnList.queued": "Zum Nachschlagen eingereihte ISBNs: {count}",
+  "isbnList.invalid":
+    "Keine ISBNs, weil die Prüfziffer nicht stimmt, daher nicht nachgeschlagen: {count}",
+  "isbnList.repeated": "Mehrfach geschrieben, einmal eingereiht: {count}",
+  "isbnList.ignored":
+    "Wörter und Zahlen, die nicht wie eine ISBN aussehen, übergangen: {count}",
+  "isbnList.tooMany":
+    "Diese Liste enthält {count} ISBNs, eine Liste darf {limit} enthalten. Teile sie und gib sie in Teilen ein.",
+  "isbnList.invalidMore": "Und {count} weitere, nicht angezeigt.",
+  "isbnList.noRoom":
+    "Diese Liste enthält {count} ISBNs, und jetzt können noch {room} hinzukommen: was in der Liste auf das Nachschlagen wartet, gewählte Dateien eingeschlossen, darf bis zu {limit} erreichen. Gib weniger ein, oder den Rest, sobald die Liste nachgeschlagen ist.",
+  "isbnList.fileTooLarge": "Diese Datei ist zu groß für eine ISBN-Liste.",
+  "isbnList.fileUnreadable": "Diese Datei konnte nicht gelesen werden.",
+
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
     "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht, und eine Datei, die eine ISBN nennt, lässt sich darüber nachschlagen wie ein gescannter Barcode. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird. Ein Ordner, in dem oben die metadata.db einer Calibre-Bibliothek liegt, wird stattdessen über diesen Index gelesen: ein Buch für jedes Buch der Bibliothek, mit jeder seiner Dateien. Lässt sich der Index nicht lesen, wird der Ordner Datei für Datei gelesen, und diese Seite sagt das. Wird ein Ordner erneut gewählt, werden die aus jedem Ordner dieses Namens gespeicherten Dateien geprüft, gleich wer sie gespeichert hat: eine noch vorhandene gilt als gefunden, die nicht gefundenen werden aufgeführt, jeweils mit dem Buch verknüpft, und erst auf Knopfdruck als fehlend markiert. Ein Ordner, der keine davon enthält, gilt als anderer Ordner mit demselben Namen.",
@@ -1242,10 +1263,11 @@ export const de: Messages = {
     "{count} übersprungen, weil Endpaper kein Format davon liest.",
   "fallback.lookUp": "{count} in den Katalogen nachschlagen",
   "fallback.pace":
-    "Die Dateinamen, jede ISBN, die eine Datei nennt, Titel und Autor aus den Tags eines Hörbuchs (ohne Tags der Name seines Ordners) und die ISBN jedes gescannten Barcodes, der keinen Katalog erreicht hat, gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
+    "Die Dateinamen, jede ISBN, die eine Datei nennt, Titel und Autor aus den Tags eines Hörbuchs (ohne Tags der Name seines Ordners), die ISBN jedes gescannten Barcodes, der keinen Katalog erreicht hat, und jede ISBN aus einer Liste gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
   "fallback.paceAgain":
     "Dieselben Dateinamen, Hörbuchtags und Hörbuchordnernamen gehen ein zweites Mal an dieselben Kataloge, die Dateien selbst weiterhin nicht. Genauso zeitlich gestreckt. Ungefähr {minutes} min.",
   "fallback.stop": "Suche beenden",
+  "fallback.progress": "{done} von {total} gefragt",
   "fallback.searching": "Die Kataloge werden gefragt...",
   "fallback.fromTheName": "Aus dem Dateinamen",
   "fallback.notInCatalogues":

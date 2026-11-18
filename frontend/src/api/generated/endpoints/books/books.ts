@@ -1128,9 +1128,9 @@ export const getAuthorAuthorityUrl = (params: AuthorAuthorityParams) => {
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and of
- * ORCID only where both find nobody. A name is not a key. Two people are
- * spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and in
+ * library mode of ORCID where both find nobody. A name is not a key. Two
+ * people are spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1217,9 +1217,9 @@ export type AuthorAuthorityQueryError = Refusal | HTTPValidationError;
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and of
- * ORCID only where both find nobody. A name is not a key. Two people are
- * spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and in
+ * library mode of ORCID where both find nobody. A name is not a key. Two
+ * people are spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1283,9 +1283,9 @@ export function useAuthorAuthority<
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and of
- * ORCID only where both find nobody. A name is not a key. Two people are
- * spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and in
+ * library mode of ORCID where both find nobody. A name is not a key. Two
+ * people are spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1349,9 +1349,9 @@ export function useAuthorAuthority<
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and of
- * ORCID only where both find nobody. A name is not a key. Two people are
- * spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and in
+ * library mode of ORCID where both find nobody. A name is not a key. Two
+ * people are spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1407,9 +1407,9 @@ export function useAuthorAuthority<
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and of
- * ORCID only where both find nobody. A name is not a key. Two people are
- * spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and in
+ * library mode of ORCID where both find nobody. A name is not a key. Two
+ * people are spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1480,8 +1480,9 @@ export const getConfirmAuthorIdentifierUrl = () => {
  * request is well formed and the state refuses it.
  *
  * **Confirming a GND number stores the cross references that came with it**,
- * and the six national numbers, which cost the extra requests. A confirmation
- * is up to eight outbound calls, which is why it is a deliberate action rather
+ * and the six national numbers, which cost the extra requests; a Portuguese
+ * one is kept only where the BNP's record names the person. A confirmation
+ * is up to nine outbound calls, which is why it is a deliberate action rather
  * than something a lookup does on the way past.
  *
  * **The cross references only for `gnd`.** An LCNAF or ORCID record is
@@ -1569,8 +1570,9 @@ export type ConfirmAuthorIdentifierMutationVariables = {
  * request is well formed and the state refuses it.
  *
  * **Confirming a GND number stores the cross references that came with it**,
- * and the six national numbers, which cost the extra requests. A confirmation
- * is up to eight outbound calls, which is why it is a deliberate action rather
+ * and the six national numbers, which cost the extra requests; a Portuguese
+ * one is kept only where the BNP's record names the person. A confirmation
+ * is up to nine outbound calls, which is why it is a deliberate action rather
  * than something a lookup does on the way past.
  *
  * **The cross references only for `gnd`.** An LCNAF or ORCID record is

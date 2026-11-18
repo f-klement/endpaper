@@ -5845,10 +5845,12 @@ writer here can produce**, and these pass it: the identifier arrives free from a
 this app already has a reason to read.
 
 Being able to resolve one is a later question, and it runs the other way. `acervo.bn.gov.br`
-answers 403 to every agent tried and has no open Z39.50 port, and the rest wait on a Z39.50
-transport this app does not have. So an adapter is blocked on a transport rather than on
-this list, and the identifier stored today is what makes that adapter cheap on the day the
-transport lands.
+answers 403 to every agent tried and has no open Z39.50 port, and the rest were measured on
+2026-11-18 once the Z39.50 client existed: Portugal's authority file answers by number over
+plain HTTPS and is resolved; Spain's, Italy's and Argentina's do not take a stored number over
+any protocol this app speaks, and Chile's accepts no connection. So an adapter is blocked on
+the libraries rather than on this list, and the identifier stored today is what makes one
+cheap on the day a library serves it.
 
 `SUDOC` is deliberately still absent though every cluster carries it: it is a French union
 catalogue rather than one of the six national files that were asked for.
@@ -11468,10 +11470,14 @@ now.** A scheme has to be a value some writer can produce, which was the rule
 the old sentence was reaching for and which these pass: the identifier
 arrives free from a VIAF cluster this app already has a reason to read.
 Being able to *resolve* one is a separate and later question, and it is what
-makes the argument run the other way: Brazil and Argentina answer 403 to
-every agent tried and have no open Z39.50 port, so an adapter for them is
-blocked on a transport rather than on this list, and the identifier stored
-today is what makes that adapter cheap on the day the transport lands.
+makes the argument run the other way: Brazil answers 403 to every agent
+tried and has no open Z39.50 port. Argentina does have one:
+`200.123.191.9:9991/BNA10` serves its MARC21 authority file with the login
+the app already ships for the catalogue row, but no index there takes the
+stored number, only a name (measured 2026-11-18). So an adapter for either
+is blocked on something other than this list, and the identifier stored
+today is what makes that adapter cheap on the day the library serves the
+number.
 
 So the closed set is still closed for the same reason: a member has to be
 something a writer here produces. What changed is that six more things are.
@@ -24807,6 +24813,38 @@ so the privacy scope cannot differ. The columns are named in `routers/books._htm
 leaves it out; the page carries it because finding the book is the page's purpose, and the
 CSV already carries it to the same member.
 
+### The HTML export carries no covers
+
+Neither linked nor embedded. A cover by URL is one of two things. Where the fetch was
+stored, it is this server's `/covers/` route, behind sign in and out of reach of the person
+the file is handed to. Where it failed, it stays a third party's `https://` URL (*A stored
+cover must be https, or one of ours*), which would learn who opened the page. The page's
+own `default-src 'none'` policy refuses both. A cover embedded as a data URL is up to
+`covers.MAX_COVER_BYTES` (5 MiB) a book, a third more as base64, so a thousand books could
+reach gigabytes at the bound; a real cover is tens of kilobytes, so tens of megabytes is
+the usual file, against roughly a hundred kilobytes of rows. The policy would also need an
+`img-src data:` hole. `TestTheHtmlExport::test_the_page_names_nothing_a_browser_would_fetch`
+refuses `src` and the other fetching attributes it lists, so an `<img>` cover fails it; a
+cover in a CSS `url()` passes that test and is left to the policy. The reason sits in the
+docstring of `routers/books._html_chunks`.
+
+**The case against, kept.** A person browsing a shelf recognises a cover faster than a
+title. Embedding a thumbnail rather than the stored image would bound the size, but needs
+a resize step that does not exist; the page stays text until somebody asks for that.
+
+### The HTML export has no size cap of its own
+
+The precedent is *The MARCXML export is paged rather than capped*. The page is streamed
+from the same `_export_pages` walk, one page of `marc.EXPORT_PAGE_RECORDS` rows at a time,
+so the server's peak is one page whatever the shelf's size (measured flat at about 1 MiB
+from 10,000 to 40,000 books for the MARCXML arm), and the file grows linearly with six
+short escaped columns a book. A cap could only truncate or refuse. One that truncates is a
+short export nobody can notice, which `_export_pages` and *An oversized MARC file is
+refused, where an oversized CSV is truncated* both rule out. One that refuses would protect
+no resource, because the peak does not grow with the shelf. `ratelimit.EXPORT_LIMIT` allows
+five starts a minute a member, which, as `ratelimit.py` says, bounds neither concurrency nor
+members together; it is not offered as a size bound.
+
 ## Five exports a minute is held to the formats the menu offers
 
 `ratelimit.EXPORT_LIMIT` is five because a member comparing every format spends one start on
@@ -25730,7 +25768,8 @@ Public APIs Terms of Service (updated 23 October 2024, read 2026-11-16 at
 the public to access our Anonymous API and Public API (together the "Public APIs")", and say
 "you may not make use of the public APIs in connection with any revenue-generating product or
 service". The anonymous tier is inside that definition. `docs/configuration.md` says so to
-deployers; whether ORCID is asked by default is the owner's question.
+deployers. Whether ORCID is asked by default was the owner's question, answered on 2026-11-18:
+see *ORCID is asked by name only in library mode; a stored iD resolves in either*.
 
 **A lookup on demand, not a suggest source.** It is asked by `search` under
 `ratelimit.AUTHORITY_LIMIT`, once per name search that missed, never per keystroke: 25,000
@@ -25738,9 +25777,10 @@ reads a day per address would not carry a typeahead.
 
 **Ranked last, as the owner ruled on 2026-09-05**: asked only where lobid and the Library of
 Congress name authority file both answered and found nobody, so its request is paid on a miss
-alone. A national file that did not answer raises "try again" before ORCID is asked, as it did
-before ORCID was a file: its researchers sharing the name are no answer to an outage. Its people arrive under `AuthorityScheme.ORCID` and are cross checked against Wikidata
-by `P496`. A stored iD resolves only where no GND or LCNAF number is stored.
+alone, and only in library mode. A national file that did not answer raises "try again" before
+ORCID is asked, as it did before ORCID was a file: its researchers sharing the name are no
+answer to an outage. Its people arrive under `AuthorityScheme.ORCID` and are cross checked
+against Wikidata by `P496`. A stored iD resolves only where no GND or LCNAF number is stored.
 
 **ORCID and ISNI are never compared, and that is the dedupe rule.** ISNI reserved a block of its
 numbering space for ORCID to mint from (`0000-0001-5000-0007` to `0000-0003-5000-0001`, and
@@ -26533,3 +26573,185 @@ over HTTP is Metaproxy's 400 for every path, so it has no SRU front end. IRSpy, 
 list and Koha's directory name no Belgian national target, and KBR's own page names the host, the
 port and MARC21-XML and no database. The route left is to ask `metadata@kbr.be`. Twenty of the
 Belgian frame's fifty are Dutch language group ISBNs, where KB GGC would overlap it.
+
+## A list of ISBNs joins the rapid queue and its paced run, and adds no route (2026-11-18)
+
+A pasted or uploaded list of ISBNs is a fifth way into the queue rapid mode, the file picker and
+a Calibre library fill (`IsbnListPanel` on the Scan page). Each valid ISBN becomes a `listed`
+row keyed as a barcode is, so a book listed and then scanned is one row, and the paced lookup
+(`runTheLookups`, one start per `FALLBACK_INTERVAL_MS`, half of `METADATA_LIMIT`) asks each one
+through the same `GET /api/books/lookup` a barcode takes. Nothing is written until Add all. The
+merge of several sources into one record is the lookup's own, so the server gains nothing: no
+route, no schema, no new limiter. A second queue or a server side job would be a second pace
+beside the one the page already shares with the scanner and the search box, which is what
+`runTheLookups` exists to refuse.
+
+**It starts the run without a second press**, unlike a picked folder, whose lookup is offered and
+never automatic. Pointing at a folder is not a request to send its names anywhere; handing over a
+list of identifiers is the request to look them up, the button that does it says so, and the only
+thing that leaves the browser is the ISBNs the member wrote. A run already going finishes first; a stop
+pressed meanwhile leaves the list's rows waiting for the Look up press instead, because a stop is
+a request to stop asking. Leaving the Scan page stops the run, so a list cannot go on spending
+lookups into a page nobody is on, nor run beside a second list pasted on coming back.
+
+**The list size bound is 500 rows waiting for the lookup, the list's and those already waiting
+together, and a list that does not fit is refused whole.** The queue's bound rather than each
+list's, because two lists of 500 are the thousand rows one list may not queue. Priced against
+the pace and the queue rather than the server: every row goes through the one paced run, so a list spends no
+more of the metadata limit a minute than a folder does, only more of the clock, about 17 minutes
+for 500. The queue draws every row with no windowing, and 500 is the folder size the paced lookup
+was priced for. Refused whole rather than cut at 500, because a cut leaves the member to find the
+line it fell on. An uploaded file over 1 MB is refused before it is read: 500 ISBNs one a line is
+under 9 KB. **Every row waiting for a lookup counts**, a picked folder's names not
+yet looked up among them, because that is what the next Look up press walks; so a folder of
+more than 500 refuses any list until it has been looked up, and the panel's copy says what is
+counted rather than promising room for 500.
+
+**The pace meets the Slovak National Library's door sooner on a list than on a folder.** The SNK
+closes a connection past about eight lookups a minute per address (`ratelimit.py`), and the paced
+run starts 30 a minute. A list of a Slovak shelf is uniformly `978-80`, so it holds that rate
+against the SNK where a folder of mixed names rarely does; past it the SNK reports itself
+unavailable and those rows go `not-reached`, which the lookup offers again. Accepted rather than
+slowed: a slower pace for every list to suit one catalogue would cost every other member the
+clock.
+
+**Progress on a long list is a figure beside the stop**, "Asked n of m", counted over the rows the
+run set out to ask, so a row picked meanwhile does not move it; each row also changes from
+"Waiting for the lookup" to "Asking the catalogues..." to its answer. Not a live region, for the
+reason the add's progress is not: it moves once per row.
+
+**An ISBN no source answers becomes what a scanned barcode no source answers becomes**: a
+`not-found` row with a titleless draft, which the batch does not take and which says
+"Not found: ISBN"; the member removes it or adds that book by hand. An unreachable catalogue makes
+it `not-reached`, offered to the lookup again. One rule for both entries, in
+`queue.ts`'s `ASKED_AS_A_BARCODE`.
+
+**An invalid ISBN is reported and never queued.** A token shaped like one, ten or thirteen
+characters once normalised, whose check digit fails or whose prefix is not Bookland's, is named
+back as written, so the typo can be found (the first fifty, and a count of the rest); any other token (a header, a title word, a year) is
+only counted, because listing each word of a title as a bad ISBN would bury the real typo.
+A leading `ISBN:` or `ISBN-13:` label, as copied bibliographic text writes it, is read past
+rather than costing the ISBN. `lib/isbnList.ts` holds the reading.
+
+## ORCID is asked by name only in library mode; a stored iD resolves in either (2026-11-18)
+
+**A name search asks ORCID only in library mode.** Measured on the catalogue sample's
+authors (385 distinct authors over ten frames, 2026-11-18): ORCID's top hit was the book's own
+author for 30 (8%, 0 to 17% by frame, every one an academic), and 192 (50%) got some hit, mostly
+namesakes. On a household shelf a hit is therefore usually a researcher sharing a novelist's
+name, offered as a candidate a member can confirm by mistake. A library with an academic
+collection is where the 8% sits, so library mode keeps the fallback. `authority.search` takes
+`ask_orcid`, off by default, and the route passes `settings_store.library_mode`. Off by default
+so a new caller that forgets it offers nobody's namesakes.
+
+**Resolving a stored ORCID iD stays on with library mode off.** The ruling is about the name
+search's namesakes, and a stored iD has none: it is a key that names one person, and it got
+there because a member confirmed it or a confirmed GND record carried it. Turning library mode
+off must not make an author with only an ORCID iD answer nothing on the next lookup, which is
+the defect an LCNAF number alone once caused. Its cost is one ORCID request per stored iD,
+already bounded by `MAX_CANDIDATES` and the authority limiter.
+
+**The GND record's `orcid.org` cross reference is still stored on a confirmation, in either
+mode.** It is read from lobid's `sameAs` and costs no request to ORCID, and the GND asserts it
+rather than a name matching it, so the namesake argument does not reach it.
+
+This answers the question *ORCID is the last file a name search asks, and never compared with
+ISNI* left to the owner, and narrows its ranking to library mode.
+
+## A Portuguese author number is checked against the BNP's authority file and looked up there, and the other five are not (2026-11-18)
+
+**Measured 2026-11-18** over the 300 ISBNs of the Italian, Spanish, Portuguese, Brazilian,
+Argentine and Uruguayan survey frames: 163 author names, 153 VIAF clusters, and each stored scheme
+put back to its own library by the number the cluster carries.
+
+| Scheme | Route | Found by number | Why not, where not |
+|---|---|---|---|
+| PTBNP, Portugal | HTTPS GET `urn.bnportugal.gov.pt/nca/unimarc-authorities/marcxchange?id=<n>` | **20 of 20**, each named as its cluster names the person; median 0.20 s, max 0.46 s | |
+| BNE, Spain | Alma SRU `alma.authority_id=<n>`; Z39.50 `z3950.bne.es:210` | 0 of 20 | The open SRU serves bibliographic records only; 40 of 42 stored numbers are Alma record ids, and neither `alma.authority_id` (19 asked) nor `alma.mms_id` (1 asked) takes one; the one legacy `XX` number asked, of 2, found linked book records. Z39.50 answers `[101] Access-control failure` without a login. |
+| ICCU, Italy | Z39.50 `opac.sbn.it:2100/nopac`, `1=1016` | 0 of 20 | SBN serves no authority database over Z39.50 (`[235] Database does not exist` on every name tried) and no SRU; `nopac` does not index the `$0` that carries the number. |
+| ARBABN, Argentina | Z39.50 `200.123.191.9:9991/BNA10`, published login | 0 of 12 | The authority file answers, MARC21, `001` the stored number; **no use attribute takes the number** (`1=12`, `1=1032` and 29 others `[123]`, `1=1016` finds nothing). A name search confirmed by `001` found 6 of 12, which is a name lookup and not a number lookup. |
+| BLBNB, Brazil | none | not measurable | `acervo.bn.gov.br` answers 403 behind Cloudflare; no Z39.50 port accepts a connection; no directory lists a target. |
+| BNCHL, Chile | none | not measurable | `www.bncatalogo.cl` accepts no connection on ports 80, 443, 210, 2100, 9909, 9991 or 9992; VIAF's numbers are 23 digits where Wikidata's `P1890` records 9. |
+
+**Choices in the build:**
+
+- **The URN service, not Z39.50.** The BNP's Z39.50 server ignores the database name: `aut`,
+  `autoridades` and `zzzznonsense` all answered the same 981 bibliographic hits. The URN service is
+  plain HTTPS with a valid certificate and needs no new client. The record's own `003` host,
+  `id.bnportugal.gov.pt`, redirects to `urn.bn.pt`, whose certificate does not match; the
+  `urn.bnportugal.gov.pt` host is asked directly.
+- **Asked at confirmation time, on the owner's ruling (2026-11-18).** A PTBNP number arrives as a
+  cross reference of a confirmed GND record, so a lookup resolves that person by the GND number
+  and would never reach the BNP. So `national_identifiers` puts the number the VIAF cluster (or,
+  where VIAF produced none, Wikidata) names back to the BNP, through the same request the lookup
+  makes and with no Wikidata call, and compares names:
+  - **the record names the person, or links the VIAF cluster that named the confirmed GND record
+    back**: the number is stored;
+  - **the record names somebody else and links no such cluster, the BNP answers its miss, or the
+    number is not one it would be asked by**: the number is not stored, and nothing else changes:
+    the other national numbers are stored as before and no name is written anywhere;
+  - **the BNP cannot answer** (no connection, a 5xx, a body it cannot read, a collection holding
+    no record, the deadline spent): the number is stored unchecked, as it was before the BNP was
+    asked. The supplier already tied it to the confirmed person (VIAF in both directions, Wikidata
+    by the GND number), and a confirmation must not fail or lose a number because one library is
+    down. An empty collection counts as no answer because the miss is a different, measured body;
+    read as a miss, a format drift would drop every Portuguese number confirmed while it lasted.
+- **What "names the person" means**: any name the GND record gives (heading or variant) is any
+  name the BNP record gives, as the same words in any order under `authors.author_key`. Measured
+  2026-11-18 over the 19 of the 20 sampled people whose VIAF cluster carried a GND number,
+  lobid's record against the BNP's: **18 of 19 match**, 16 on the two headings alone and 17
+  with variants but word order kept (`Taibo, Paco Ignacio II.` meets the BNP's `Taibo II, Paco
+  I.` only through word order). The one refused is a true person the BNP misspells,
+  `Fogazarro, Antonio`, in its heading and both variants.
+  **0 of 361** pairings of one person's GND record with another's BNP record match.
+  **What that does not measure**: the name check catches a number for somebody else entirely,
+  and no more. A namesake shares a form and passes, and a namesake is the error a VIAF mis-merge
+  most plausibly makes; a single word form (`Nietzsche` in a `400`, `Plutarco` as a heading) is
+  enough on its own. The 361 pairings are of differently named people, so they do not measure
+  that risk, and no wrong number was seen in the 19 (nor in the 20 asked).
+- **The rescue: the record's own VIAF link.** Where the names do not meet, the number is still
+  kept when the BNP record links the very cluster that named the confirmed GND record back: the
+  bidirectional check `national_identifiers` makes for the GND number, from the BNP's side.
+  Measured over the 20 sampled records: **4 of 20 carry a VIAF link**, every one the cluster the
+  number was read from: three in `856 $u` (`https://viaf.org/viaf/<n>/`: Nietzsche, Marías,
+  Sánchez Dragó) and Fogazzaro's in `810 $a` (`VIAF http://viaf.org/viaf/39408145/`). Eco's
+  record, outside the 20, writes `https://viaf.org/en/viaf/<n>`; all three shapes are read. So
+  Fogazzaro is kept on the VIAF route, and the trade over the 19 is now 0 of 19 correct numbers
+  lost and 0 of 19 wrong caught. On the Wikidata route no cluster spoke, so the link rescues
+  nothing there and the misspelling still drops.
+- **The cost**: one request on a confirmation whose cluster names a PTBNP number, 0.17 to 0.46 s
+  measured, so the confirmation's worst path is about 4.9 s against the 8.0 s deadline; a
+  confirmation is up to 9 requests over four hosts, 15 on the Wikidata fallback.
+- **A lookup still reaches the BNP through `resolve_stored`, last in `_STORED_ORDER`**, only for a
+  PTBNP number with no GND, LCNAF or ORCID number beside it: the same one file per lookup rule as
+  the LCNAF and ORCID resolvers.
+- **A miss is read from the body.** The service answers HTTP 200 with `<urn-response><error>Registo
+  inexistente</error></urn-response>` for a number it does not hold (measured on `99999999`); that
+  is None. Any other `urn-response`, a non 200, or a body that is not MarcXchange is
+  `AuthorityUnavailable`, so an outage is never shown as nobody.
+- **The record must be the one asked for**: `001` equal to the stored number, leader/06 `x` (an
+  established entry, 20 of 20 sampled), and a `200` personal name heading. Name and `400` variants go
+  through `metadata.unimarc_name_heading`, the rule the catalogue door's UNIMARC crosswalk already
+  applies to a `700`, now a named export so both read a name alike. Dates are `200 $f` split at the
+  hyphen and kept as written. `830`, a biographical note, is not read.
+- **Wikidata is asked by `P1005`** for the item and its description, as the LCNAF and ORCID
+  resolvers ask by `P244` and `P496`, **and nothing is compared**: a BNP candidate carries no
+  `same_as`, and the record's own `856` Wikidata link is not read, since 1 of 21 records fetched
+  carried one (Eco's; none of the 20 sampled). As with the NAF, a wrong `P1005` claim would show
+  another person's description beside the BNP's name; it writes nothing.
+- **An undifferentiated heading is not refused**: UNIMARC `120` is not read, where the NAF's
+  `008/32 b` is. None of the 20 sampled records carried a `120`.
+- **Bounds.** A PTBNP number is `[1-9][0-9]{0,9}` (sampled 4 to 7 digits) before it reaches a query.
+  `_BNP_LIMIT` is 65,536 bytes against a largest measured record of 2,901 over 20 (22x). The XML is
+  built through the module's one parse site, `_tree`, now shared by the NAF and the BNP, so the
+  doctype refusal and `xml_parse` bounds hold; **the allocation factor was not measured for this
+  record shape**: the NAF's `ALLOCATION_FACTOR` of 33 is measured on MARC21 slim, and MarcXchange is
+  the same element shape, so at the 64 KiB cap the bound is about 2.4 MB. The 20 real records
+  (870 to 2,901 bytes) sit inside `ALLOCATION_FLOOR`, so they cannot measure it; a local read
+  (CPython 3.15, not the suite pod) on records built to the cap peaked at 11.7 to 14.7 a byte.
+  The deadline is the
+  lookup's `DEADLINE_SECONDS`; one BNP request measured 0.17 to 0.46 s. The rate row in
+  `docs/security.md` carries the fifth host: a lookup at most 15 requests and about 20 KB per call,
+  and a confirmation 9 requests over four hosts, 15 on the fallback, 150 a minute at the ceiling.
+- **Terms**: the BNP's open data page offers the URN service for retrieval by identifier, mainly for
+  library systems, and states nothing beyond a contact.

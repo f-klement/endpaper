@@ -1728,10 +1728,10 @@ def origin(base_url: str) -> str:
 #: * it raises a `fetch.FetchRefused` subclass, which is an `httpx.HTTPError`, so
 #:   it lands in every existing handler and costs no new arm;
 #: * and **this set is not the whole allowlist**. `fetch.py` is every outbound
-#:   door but covers, and `authority.py` is a caller with four origins of its
-#:   own, `lobid.org`, `viaf.org`, `wikidata.org` and `pub.orcid.org`, none of
-#:   them here. A check derived from this set alone refuses every author identity
-#:   lookup in the application.
+#:   door but covers, and `authority.py` is a caller with five origins of its
+#:   own, `lobid.org`, `viaf.org`, `wikidata.org`, `pub.orcid.org` and
+#:   `urn.bnportugal.gov.pt`, none of them here. A check derived from this set
+#:   alone refuses every author identity lookup in the application.
 #:
 #: Not merged with `covers.COVER_HOSTS`, which is a different question with a
 #: different answer: that tuple generates the CSP's `img-src`, so merging would

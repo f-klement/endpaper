@@ -844,7 +844,7 @@ surveyed run YAZ as their server.
 **What uses it.** `backend/z3950.py` is the transport and `backend/z3950_yaz.py` is the
 client behind its seam, binding `libyaz.so.5` through `ctypes` by the absolute path the
 image puts it at, and no other: a library loaded by `ctypes` runs code, so the path is not
-configurable. The image smoke test loads it that way in the finished image. Three seeded
+configurable. The image smoke test loads it that way in the finished image. Four seeded
 targets use the transport ([The catalogue lookup](#the-catalogue-lookup)).
 
 **Alpine packages no YAZ.** Checked across edge, v3.22, v3.21 and the pinned base's own

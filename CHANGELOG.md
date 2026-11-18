@@ -3,6 +3,10 @@
 ## Unreleased
 
 - A lookup now also asks the Slovak National Library about books from Czech and Slovak publishers, after the Hungarian library and before Open Library; on fifty Slovak books it finds sixteen that no other free catalogue holds.
+- A list of ISBNs, pasted or picked as a text or CSV file, can be catalogued from the Scan page: each is looked up at the same pace as a folder of files and waits in the queue for review before anything is added, and ISBNs with a wrong check digit are listed back rather than looked up.
+- An author with a Portuguese national library number and no GND, Library of Congress or ORCID number is now looked up in the Biblioteca Nacional de Portugal's authority file by that number.
+- Confirming an author's GND number now checks the Portuguese national library number it brings against the Biblioteca Nacional de Portugal's own record, and keeps it only where that record names the same person or links the same VIAF cluster; where the library cannot answer, or answers with an empty record set, the number is kept unchecked.
+- Outside library mode an author lookup no longer offers ORCID's researchers for a name the GND and the Library of Congress do not hold; an ORCID iD already stored still resolves.
 
 ## v0.22.0
 

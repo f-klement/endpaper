@@ -714,6 +714,64 @@ describe("useRapidIntake", () => {
     expect(result.current.figures.waiting).toBe(1);
   });
 
+  it("looks a listed ISBN up without a second press, and writes nothing", async () => {
+    api.on("/api/books/lookup", { body: LOOKUP });
+    const { result } = renderRapid();
+
+    act(() => result.current.listIsbns(["9780441013593"]));
+
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+    expect(result.current.entries[0]?.draft?.title).toBe("Dune");
+    await waitFor(() => expect(result.current.isLookingUp).toBe(false));
+    expect(result.current.lookUpProgress).toBeNull();
+    expect(api.lastCall("/api/books/scan")).toBeUndefined();
+  });
+
+  it(
+    "asks a list one ISBN at a time at the pace, saying how far it has got",
+    async () => {
+      // The second ISBN is asked only after the floor between starts, so the
+      // figure is caught between the two and the 404 lands as not found.
+      api.on("/api/books/lookup", (url) =>
+        url.includes("9780441013593")
+          ? { body: LOOKUP }
+          : { status: 404, body: { detail: "Not found" } },
+      );
+      const { result } = renderRapid();
+
+      act(() => result.current.listIsbns(["9780441013593", "9780306406157"]));
+
+      await waitFor(() =>
+        expect(result.current.entries[0]?.state).toBe("found"),
+      );
+      expect(result.current.entries[1]?.state).toBe("listed");
+      expect(result.current.lookUpProgress).toEqual({ done: 0, total: 2 });
+      await waitFor(
+        () => expect(result.current.entries[1]?.state).toBe("not-found"),
+        { timeout: FALLBACK_INTERVAL_MS * 2 },
+      );
+      expect(
+        api.calls.filter((call) => call.url.includes("/api/books/lookup")),
+      ).toHaveLength(2);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("does not ask again about a listed ISBN the queue already holds", async () => {
+    api.on("/api/books/lookup", { body: LOOKUP });
+    const { result } = renderRapid();
+    act(() => result.current.capture("9780441013593"));
+    await waitFor(() => expect(result.current.entries[0]?.state).toBe("found"));
+
+    act(() => result.current.listIsbns(["9780441013593"]));
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.isLookingUp).toBe(false);
+    expect(
+      api.calls.filter((call) => call.url.includes("/api/books/lookup")),
+    ).toHaveLength(1);
+  });
+
   it("writes nothing until the batch is confirmed", async () => {
     api.on("/api/books/lookup", { body: LOOKUP });
     const { result } = renderRapid();
@@ -3330,6 +3388,121 @@ describe("useRapidIntake and a file with no usable metadata", () => {
       });
       expect(searchCalls()).toBe(1);
       // The two it never reached are still there to be asked about.
+      expect(result.current.figures.waiting).toBe(2);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it(
+    "stops a list's run when the page that started it goes",
+    async () => {
+      // Without the stop on unmount the loop walks on over `liveEntries`, which
+      // keeps its last value, and a second call lands an interval later.
+      api.on("/api/books/lookup", { status: 404, body: { detail: "No" } });
+      const { result, unmount } = renderRapid();
+      act(() => result.current.listIsbns(["9780441013593", "9780306406157"]));
+      await waitFor(() => expect(lookupCalls()).toBe(1));
+
+      unmount();
+      await new Promise((resolve) =>
+        setTimeout(resolve, FALLBACK_INTERVAL_MS * 1.5),
+      );
+
+      expect(lookupCalls()).toBe(1);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it("starts one run for two presses in one tick", async () => {
+    // The guard is a ref because the rendered flag is down for both calls
+    // until the first one's render commits: two runs over disjoint sets would
+    // each ask a row at once.
+    api.on("/api/books/search", {
+      body: { matches: [MATCH], asked: ["open_library"], unasked: [] },
+    });
+    const { result } = renderRapid();
+    act(() =>
+      result.current.pickFiles([new File(["%PDF"], "dispossessed.pdf")]),
+    );
+    await settled(result);
+    act(() => result.current.lookUpTheNames());
+    await waitFor(() =>
+      expect(result.current.entries[0]?.state).toBe("choosing"),
+    );
+    act(() => result.current.keepEveryNameForNow());
+    act(() => result.current.pickFiles([new File(["%PDF"], "Dune.pdf")]));
+    await settled(result);
+
+    act(() => {
+      result.current.lookUpTheNames();
+      result.current.lookUpTheKeptNames();
+    });
+
+    await waitFor(() => expect(result.current.isLookingUp).toBe(false));
+    expect(searchCalls()).toBe(2);
+    expect(result.current.figures.keptForNow).toBe(1);
+  });
+
+  it(
+    "holds a list behind a run already going, then looks it up",
+    async () => {
+      api.on("/api/books/search", {
+        body: { matches: [], asked: ["open_library"], unasked: [] },
+      });
+      api.on("/api/books/lookup", { status: 404, body: { detail: "No" } });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([
+          new File(["a"], "Dune.pdf"),
+          new File(["b"], "Solaris.pdf"),
+        ]),
+      );
+      await settled(result);
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() => expect(searchCalls()).toBe(1));
+
+      act(() => result.current.listIsbns(["9780441013593"]));
+
+      expect(lookupCalls()).toBe(0);
+      expect(result.current.entries[2]?.state).toBe("listed");
+      await waitFor(
+        () => expect(result.current.entries[2]?.state).toBe("not-found"),
+        { timeout: FALLBACK_INTERVAL_MS * 2 },
+      );
+      expect(searchCalls()).toBe(2);
+      expect(lookupCalls()).toBe(1);
+    },
+    FALLBACK_INTERVAL_MS * 4,
+  );
+
+  it(
+    "leaves a list held behind a run for a press once that run is stopped",
+    async () => {
+      // A stop is a request to stop asking. Without clearing the held list it
+      // would start the moment the run the member stopped had ended.
+      api.on("/api/books/search", {
+        body: { matches: [], asked: ["open_library"], unasked: [] },
+      });
+      api.on("/api/books/lookup", { status: 404, body: { detail: "No" } });
+      const { result } = renderRapid();
+      act(() =>
+        result.current.pickFiles([
+          new File(["a"], "Dune.pdf"),
+          new File(["b"], "Solaris.pdf"),
+        ]),
+      );
+      await settled(result);
+      act(() => result.current.lookUpTheNames());
+      await waitFor(() => expect(searchCalls()).toBe(1));
+      act(() => result.current.listIsbns(["9780441013593"]));
+
+      act(() => result.current.stopLookingUp());
+      await waitFor(() => expect(result.current.isLookingUp).toBe(false));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(result.current.isLookingUp).toBe(false);
+      expect(lookupCalls()).toBe(0);
+      expect(result.current.entries[2]?.state).toBe("listed");
       expect(result.current.figures.waiting).toBe(2);
     },
     FALLBACK_INTERVAL_MS * 4,

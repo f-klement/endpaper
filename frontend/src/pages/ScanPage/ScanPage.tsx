@@ -8,6 +8,7 @@ import { parseIsbn } from "../../lib/isbn";
 import BarcodeScanner from "./components/BarcodeScanner";
 import CarriedFields from "./components/CarriedFields";
 import FilePickPanel from "./components/FilePickPanel";
+import IsbnListPanel from "./components/IsbnListPanel";
 import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import { useFolderSweep } from "../hooks";
@@ -102,6 +103,7 @@ function RapidPanel({
             onStopAdding={rapid.stopAdding}
             figures={rapid.figures}
             isLookingUp={rapid.isLookingUp}
+            lookUpProgress={rapid.lookUpProgress}
             onLookUp={rapid.lookUpTheNames}
             onStopLookUp={rapid.stopLookingUp}
             onChoose={rapid.chooseFor}
@@ -464,6 +466,14 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             failed={folderSweep.failed}
             isMarking={folderSweep.isMarking}
             onMarkMissing={folderSweep.markMissing}
+          />
+          {/* The fifth way in, for a list kept somewhere else: a spreadsheet,
+              another app's export, or ISBNs typed off a shelf. It fills the
+              same queue and the same paced run as the file picker, and sits
+              after the sweep notice, which reports on that picker. */}
+          <IsbnListPanel
+            onList={rapid.listIsbns}
+            waiting={rapid.figures.waiting}
           />
         </>
       )}

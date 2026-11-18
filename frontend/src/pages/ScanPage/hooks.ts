@@ -1175,6 +1175,17 @@ export interface UseRapidIntakeResult {
   /** Feed a scanned barcode in. Repeats are ignored rather than queued twice. */
   capture: (isbn: string) => void;
   /**
+   * Queue a list of canonical ISBNs and ask the catalogues about them.
+   *
+   * **The one entry into the paced run that starts it without a second press**,
+   * because handing over a list of identifiers is the request to look them up:
+   * the press that queued them names the count, and nothing leaves the browser
+   * but the ISBNs the member wrote. It is still the one paced run, so a run
+   * already going finishes first and this starts when it ends. An ISBN the
+   * queue already holds is not asked again.
+   */
+  listIsbns: (isbns: readonly string[]) => void;
+  /**
    * Read picked files and queue what they say.
    *
    * The same queue as the scanner fills, deliberately: a folder is a third way
@@ -1221,6 +1232,15 @@ export interface UseRapidIntakeResult {
   /** Stop the paced run after the call in flight. */
   stopLookingUp: () => void;
   isLookingUp: boolean;
+  /**
+   * How far the paced run has got, or `null` when none is running.
+   *
+   * `addProgress`'s figure for the other loop, and for the same reason: a list
+   * of five hundred is a quarter of an hour, and a stop with no figure beside
+   * it is pressed blind. Counted over the rows the run set out to ask, so a
+   * row picked meanwhile, which joins the next run, does not move it.
+   */
+  lookUpProgress: BulkProgress | null;
   /**
    * File one audiobook candidate's parts as a book each.
    *
@@ -1370,6 +1390,18 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const [entries, setEntries] = useState<ScannedEntry[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lookUpProgress, setLookUpProgress] = useState<BulkProgress | null>(
+    null,
+  );
+  // Set by a list and read once the queue holding it has rendered: the run
+  // walks the rendered queue and checks each row against `liveEntries`, so
+  // starting it in the press that queued the rows would skip every one.
+  const runWhenListed = useRef(false);
+  // **Whether a paced run is going, read where `isLookingUp` cannot be.** The
+  // rendered flag lags the call that starts a run by one commit, and a list's
+  // run starts from an effect rather than a press: `runTheLookups` says why
+  // that window is real.
+  const lookUpRunning = useRef(false);
   // **What the last pick passed over, rather than a running total.** A total
   // has no way down: the notice sits beside the picker rather than the queue,
   // precisely so it can be shown when nothing was queued at all, and a member
@@ -1399,6 +1431,19 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // How to end the wait between two calls early. Null whenever the run is not
   // waiting, which is every moment a stop has nothing to interrupt.
   const endTheWait = useRef<(() => void) | null>(null);
+  // **Leaving the page stops the paced run.** Nothing else would: the loop
+  // reads `liveEntries`, which keeps its last value once nothing renders, so a
+  // list of five hundred went on spending a quarter of an hour of lookups
+  // into dead state, and a list pasted on coming back started a second run on
+  // the fresh hook beside it, the two together the whole of `METADATA_LIMIT`.
+  useEffect(
+    () => () => {
+      runWhenListed.current = false;
+      stopRequested.current = true;
+      endTheWait.current?.();
+    },
+    [],
+  );
   const [location, setLocation] = useState(readLastLocation);
   const [result, setResult] = useState<IntakeResult | null>(null);
   // **The whole of `addAsCopy`, not the copy request's own pending flag.** That
@@ -1410,11 +1455,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const intake: Intake = {
     entries,
     location,
-    isLookingUp,
+    lookUpRunning,
     setEntries,
     setSkipped,
     setLibraryNotice,
     setIsLookingUp,
+    setLookUpProgress,
     setIsAdding,
     setIsAddingCopy,
     setAddProgress,
@@ -1436,6 +1482,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
   };
   const apply = (event: QueueEvent) => applyTo(intake, event);
 
+  // **After `liveEntries` is written, which is why it is declared after it.**
+  // A run going when the list arrived keeps the flag until it ends, and this
+  // fires again then because `isLookingUp` moved. A stop pressed meanwhile
+  // clears the flag, so the list waits for a press rather than starting the
+  // moment the run the member stopped has ended.
+  useEffect(() => {
+    if (!runWhenListed.current || lookUpRunning.current) return;
+    runWhenListed.current = false;
+    void runTheLookups(intake, isListed);
+  });
+
   return {
     isActive,
     start: () => {
@@ -1448,6 +1505,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setLocation,
     locations,
     capture: (isbn) => capture(intake, isbn),
+    listIsbns: (isbns) => {
+      runWhenListed.current = true;
+      apply({ kind: "listed", isbns });
+    },
     pickFiles: (files) => pickFiles(intake, files),
     isReading: isReading(entries),
     skipped,
@@ -1457,12 +1518,14 @@ export function useRapidIntake(): UseRapidIntakeResult {
     lookUpTheKeptNames: () => void runTheLookups(intake, canBeAskedAgain),
     stopLookingUp: () => {
       stopRequested.current = true;
+      runWhenListed.current = false;
       // The run may be between two calls rather than inside one, and the loop
       // reads the flag only at its top. Without this the button is inert for up
       // to a whole interval.
       endTheWait.current?.();
     },
     isLookingUp,
+    lookUpProgress,
     chooseFor: (key, match) => apply({ kind: "chosen", key, match }),
     takeTheRecord: (key) => apply({ kind: "record-taken", key }),
     keepTheFile: (key) => apply({ kind: "kept-the-file", key }),
@@ -1508,12 +1571,13 @@ type IntakeResult = NonNullable<UseRapidIntakeResult["result"]>;
 interface Intake {
   readonly entries: ScannedEntry[];
   readonly location: string;
-  readonly isLookingUp: boolean;
+  readonly lookUpRunning: RefObject<boolean>;
   readonly locale: Locale;
   readonly setEntries: Dispatch<SetStateAction<ScannedEntry[]>>;
   readonly setSkipped: (count: number) => void;
   readonly setLibraryNotice: (notice: LibraryNotice | null) => void;
   readonly setIsLookingUp: (running: boolean) => void;
+  readonly setLookUpProgress: (progress: BulkProgress | null) => void;
   readonly setIsAdding: (running: boolean) => void;
   readonly setIsAddingCopy: (running: boolean) => void;
   readonly setAddProgress: (progress: BulkProgress | null) => void;
@@ -1557,6 +1621,11 @@ function fetchTheIsbn(queryClient: QueryClient, isbn: string) {
     queryFn: () => lookupIsbn({ isbn }),
     staleTime: 60_000,
   });
+}
+
+/** A row a list queued that the paced run has not asked about yet. */
+function isListed(entry: ScannedEntry): boolean {
+  return entry.state === "listed";
 }
 
 async function lookUpTheBarcode(intake: Intake, isbn: string) {
@@ -2085,7 +2154,7 @@ async function lookUpTheName(intake: Intake, entry: ScannedEntry) {
  * **One loop for both presses, taking the predicate rather than the list.**
  * The pace is priced against a limiter the whole page shares, so a second
  * mechanism beside this one would be a second run able to start while this is
- * going: `isLookingUp` is what refuses that, and it refuses it once here
+ * going: `lookUpRunning` is what refuses that, and it refuses it once here
  * rather than once per caller. The predicate is passed rather than the
  * filtered array so the run reads the entries it starts from, which is what
  * makes the count on the button and the list the loop walks the same set.
@@ -2094,32 +2163,28 @@ async function runTheLookups(
   intake: Intake,
   over: (entry: ScannedEntry) => boolean,
 ) {
-  // **The rendered state, and a ref was tried here and taken back out.** A
-  // press is a discrete event, which React flushes before it delivers the
-  // next, so a second press cannot see this as it was, and there are two
-  // presses: one per set. Two calls inside one tick would both pass, and a
-  // ref refused the second.
-  //
-  // **What that would now cost is no longer nothing.** While there was one
-  // entry point the two loops walked the same list and asked the same query
-  // keys, so React Query answered the second out of the first's flight. The
-  // two sets here are disjoint by construction, so two runs would ask
-  // different rows: 30 starts a minute each is the whole of `METADATA_LIMIT`,
-  // which is the one outcome `FALLBACK_STARTS_PER_MINUTE` is priced to
-  // refuse. What holds is that nothing calls both in one tick. **Anything
-  // that ever does needs the ref back**, and it is this paragraph rather than
-  // a test that says so, because a guard nothing can watch go wrong is a
-  // guard nothing can watch go missing.
-  if (intake.isLookingUp) return;
+  // **A ref, set in the same call, and not the rendered `isLookingUp`.** The
+  // rendered flag held while every caller was a press, because React flushes
+  // a discrete event before it delivers the next. A list's run starts from an
+  // effect, which React defers after a render that a continuation caused,
+  // such as a file read: a press in that window and the effect would both see
+  // the flag down, and two runs, 30 starts a minute each, are the whole of
+  // `METADATA_LIMIT`, the one outcome `FALLBACK_STARTS_PER_MINUTE` is priced
+  // to refuse. The sets the callers pass also overlap now (a listed row
+  // needs a lookup), so the second run would ask the same rows again.
+  if (intake.lookUpRunning.current) return;
   const walking = intake.entries.filter(over);
   if (walking.length === 0) return;
 
+  intake.lookUpRunning.current = true;
   intake.stopRequested.current = false;
   intake.setIsLookingUp(true);
   try {
     await walkTheLookups(intake, walking);
   } finally {
+    intake.lookUpRunning.current = false;
     intake.setIsLookingUp(false);
+    intake.setLookUpProgress(null);
   }
 }
 
@@ -2133,6 +2198,7 @@ async function walkTheLookups(intake: Intake, walking: ScannedEntry[]) {
     if (!intake.liveEntries.current.some((one) => one.key === entry.key))
       continue;
     applyTo(intake, { kind: "asked", key: entry.key });
+    intake.setLookUpProgress({ done: index, total: walking.length });
     const startedAt = Date.now();
     await lookUpTheName(intake, entry);
     if (index === walking.length - 1) break;

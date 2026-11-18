@@ -274,10 +274,10 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,492 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,524 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
-| An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
+| An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 205 |
 | An identifier two files disagree about is shown and never stored | [The national identifiers have one route, and Wikidata is the fallback for it](decisions.md#the-national-identifiers-have-one-route-and-wikidata-is-the-fallback-for-it) | 142 |
 | An identifier two files disagree about is shown and never stored | [A refusal test whose subject is a plausible future member is a countdown](decisions.md#a-refusal-test-whose-subject-is-a-plausible-future-member-is-a-countdown) | 178 |
 | An identifier two files disagree about is shown and never stored | [The in app reminder is a sender, and it is the one that does not stamp `notified_at`](decisions.md#the-in-app-reminder-is-a-sender-and-it-is-the-one-that-does-not-stamp-notified_at) | 165 |
@@ -499,7 +499,7 @@ repeat the argument.
 |  | [A request body bounds the cover URL it stores, not the one it receives](decisions.md#a-request-body-bounds-the-cover-url-it-stores-not-the-one-it-receives) | 289 |
 |  | [Which columns an import may fill, column by column](decisions.md#which-columns-an-import-may-fill-column-by-column) | 667 |
 |  | [Which authority schemes exist, and why the list is code rather than rows](decisions.md#which-authority-schemes-exist-and-why-the-list-is-code-rather-than-rows) | 401 |
-|  | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts-1) | 246 |
+|  | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts-1) | 278 |
 |  | [The Z39.50 door's bounds, and which of fetch.py's four have no counterpart](decisions.md#the-z3950-doors-bounds-and-which-of-fetchpys-four-have-no-counterpart) | 617 |
 |  | [UNIMARC is read from the Library of Congress crosswalk, and not until a source sends one](decisions.md#unimarc-is-read-from-the-library-of-congress-crosswalk-and-not-until-a-source-sends-one) | 1,441 |
 |  | [ISNI is the identity spine, and VIAF is a discovery route](decisions.md#isni-is-the-identity-spine-and-viaf-is-a-discovery-route) | 455 |
@@ -998,7 +998,9 @@ repeat the argument.
 |  | [What the collection cost counts, and for whom](decisions.md#what-the-collection-cost-counts-and-for-whom) | 519 |
 |  | [The Uruguayan catalogue ships its published login, and carries a remit the Argentine one could not](decisions.md#the-uruguayan-catalogue-ships-its-published-login-and-carries-a-remit-the-argentine-one-could-not) | 175 |
 |  | [The HTML export is not asked for by the download's Accept header](decisions.md#the-html-export-is-not-asked-for-by-the-downloads-accept-header) | 89 |
-|  | [The HTML export carries six columns, not the CSV's](decisions.md#the-html-export-carries-six-columns-not-the-csvs) | 114 |
+|  | [The HTML export carries six columns, not the CSV's](decisions.md#the-html-export-carries-six-columns-not-the-csvs) | 495 |
+| The HTML export carries six columns, not the CSV's | [The HTML export carries no covers](decisions.md#the-html-export-carries-no-covers) | 220 |
+| The HTML export carries six columns, not the CSV's | [The HTML export has no size cap of its own](decisions.md#the-html-export-has-no-size-cap-of-its-own) | 143 |
 |  | [Five exports a minute is held to the formats the menu offers](decisions.md#five-exports-a-minute-is-held-to-the-formats-the-menu-offers) | 76 |
 |  | [CRAP under 10 on every pipeline, as a ratchet, with a scorer of our own in Go](decisions.md#crap-under-10-on-every-pipeline-as-a-ratchet-with-a-scorer-of-our-own-in-go) | 3,689 |
 |  | [SonarQube is read by hand before a release tag, and never gated on](decisions.md#sonarqube-is-read-by-hand-before-a-release-tag-and-never-gated-on) | 1,083 |
@@ -1027,7 +1029,7 @@ repeat the argument.
 |  | [MARC `040` names only an agency that can be cited](decisions.md#marc-040-names-only-an-agency-that-can-be-cited) | 336 |
 |  | [A test module's caches live as long as its tests, not as long as the worker](decisions.md#a-test-modules-caches-live-as-long-as-its-tests-not-as-long-as-the-worker) | 416 |
 |  | [The Library of Congress name authority file is the second file a name search asks (2026-11-16)](decisions.md#the-library-of-congress-name-authority-file-is-the-second-file-a-name-search-asks-2026-11-16) | 873 |
-|  | [ORCID is the last file a name search asks, and never compared with ISNI (2026-11-16)](decisions.md#orcid-is-the-last-file-a-name-search-asks-and-never-compared-with-isni-2026-11-16) | 1,234 |
+|  | [ORCID is the last file a name search asks, and never compared with ISNI (2026-11-16)](decisions.md#orcid-is-the-last-file-a-name-search-asks-and-never-compared-with-isni-2026-11-16) | 1,258 |
 |  | [Poland's National Library and LIBRIS join the roster, placed by the marginal rule (2026-11-16)](decisions.md#polands-national-library-and-libris-join-the-roster-placed-by-the-marginal-rule-2026-11-16) | 1,346 |
 |  | [The Royal Danish Library, BIBSYS and Melinda join the roster, and where the remit placement put them (2026-11-16)](decisions.md#the-royal-danish-library-bibsys-and-melinda-join-the-roster-and-where-the-remit-placement-put-them-2026-11-16) | 1,436 |
 |  | [Refused: the National Library of Norway's view (47BIBSYS_NB)](decisions.md#refused-the-national-library-of-norways-view-47bibsys_nb) | 83 |
@@ -1058,4 +1060,7 @@ repeat the argument.
 | The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [No ISBN-10 retry: the index matches the ten digit form](decisions.md#no-isbn-10-retry-the-index-matches-the-ten-digit-form) | 118 |
 | The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Leader/07 `b` records arrive among the hits](decisions.md#leader07-b-records-arrive-among-the-hits) | 36 |
 | The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Three survey candidates refused, each on its own frame (2026-11-17)](decisions.md#three-survey-candidates-refused-each-on-its-own-frame-2026-11-17) | 565 |
+|  | [A list of ISBNs joins the rapid queue and its paced run, and adds no route (2026-11-18)](decisions.md#a-list-of-isbns-joins-the-rapid-queue-and-its-paced-run-and-adds-no-route-2026-11-18) | 809 |
+|  | [ORCID is asked by name only in library mode; a stored iD resolves in either (2026-11-18)](decisions.md#orcid-is-asked-by-name-only-in-library-mode-a-stored-id-resolves-in-either-2026-11-18) | 287 |
+|  | [A Portuguese author number is checked against the BNP's authority file and looked up there, and the other five are not (2026-11-18)](decisions.md#a-portuguese-author-number-is-checked-against-the-bnps-authority-file-and-looked-up-there-and-the-other-five-are-not-2026-11-18) | 1,489 |
 <!-- index: end -->

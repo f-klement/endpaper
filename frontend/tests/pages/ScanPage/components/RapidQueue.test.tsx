@@ -90,6 +90,7 @@ function renderQueue(
     onStopAdding: vi.fn<RapidQueueProps["onStopAdding"]>(),
     figures,
     isLookingUp: false,
+    lookUpProgress: null,
     onLookUp: vi.fn<RapidQueueProps["onLookUp"]>(),
     onStopLookUp: vi.fn<RapidQueueProps["onStopLookUp"]>(),
     onChoose: vi.fn<RapidQueueProps["onChoose"]>(),
@@ -1361,6 +1362,35 @@ describe("RapidQueue and a book taken from its file name", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Stop looking up" }),
+    ).toBeInTheDocument();
+  });
+
+  it("says how far a run has got beside its stop", () => {
+    renderQueue({
+      entries: [derived],
+      isLookingUp: true,
+      lookUpProgress: { done: 3, total: 40 },
+    });
+
+    expect(screen.getByText("Asked 3 of 40")).toBeInTheDocument();
+  });
+
+  it("says a listed ISBN is waiting for the paced lookup", () => {
+    renderQueue({
+      entries: [
+        {
+          key: "isbn:9780441013593",
+          label: "9780441013593",
+          isbn: "9780441013593",
+          format: "",
+          state: "listed",
+          draft: null,
+        },
+      ],
+    });
+
+    expect(
+      screen.getByText("Waiting for the lookup: 9780441013593"),
     ).toBeInTheDocument();
   });
 

@@ -3526,7 +3526,11 @@ def _unimarc_renamed(codes: Mapping[str, str], subfields: _Subfields) -> _Subfie
 
 
 def _unimarc_isbn_qualifier(subfields: _Subfields) -> str | None:
-    """The first non empty `$b`, in parentheses, or None where there is none."""
+    """The first non empty `$b`, or None where there is none.
+
+    Wrapped in parentheses unless it already opens with one; one that does
+    is returned as it stands, closed or not.
+    """
     qualifier = next((text for code, text in subfields if code == "b" and text), None)
     if qualifier is not None and not qualifier.startswith("("):
         return f"({qualifier})"
@@ -3604,15 +3608,19 @@ def _unimarc_name(subfields: _Subfields) -> _Subfields:
     PORBASE and `Redi $b , Riccardo` at the SBN, so each part is trimmed of it
     first.
     """
-    heading = _unimarc_name_heading(subfields)
+    heading = unimarc_name_heading(subfields)
     if heading is None:
         return []
     return [("a", heading), *_unimarc_name_qualifiers(subfields)]
 
 
-def _unimarc_name_heading(subfields: _Subfields) -> str | None:
+def unimarc_name_heading(subfields: list[tuple[str, str]]) -> str | None:
     """The first `$a` with every `$b` after it, or None where that `$a` is
-    missing or blank, so the name converts to nothing."""
+    missing or blank, so the name converts to nothing.
+
+    **A seam because a UNIMARC authority record spells a person the same way**:
+    `authority._bnp_person` reads the BNP's `200` through it, so a name reads
+    alike whether a book or the authority file carried it."""
     entry = [text.strip(" ,") for code, text in subfields if code == "a"][:1]
     if not entry or not entry[0]:
         return None

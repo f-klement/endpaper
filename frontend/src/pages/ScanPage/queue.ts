@@ -69,6 +69,22 @@ export const FALLBACK_STARTS_PER_MINUTE = 30;
 export const FALLBACK_INTERVAL_MS = 60_000 / FALLBACK_STARTS_PER_MINUTE;
 
 /**
+ * The most rows a pasted or uploaded list may leave waiting for the lookup,
+ * counting those already waiting.
+ *
+ * **Priced against the pace above and the queue that draws them**, not against
+ * the server: every row goes through the one paced run, so a list costs no more
+ * of the metadata limit than a folder does, only more of the clock. 500 is
+ * about 17 minutes at `FALLBACK_INTERVAL_MS`, the length of the largest folder
+ * the paced lookup was priced for, and the queue draws every row it holds with
+ * no windowing. **The queue's bound, not each list's**: `IsbnListPanel` adds
+ * the rows already waiting, so a second list cannot double it. A list that
+ * does not fit is refused whole rather than cut, because a cut leaves the
+ * member to find which line it fell on.
+ */
+export const ISBN_LIST_LIMIT = 500;
+
+/**
  * How a row came to be standing under its own file name.
  *
  * A closed set, and it is a named type rather than an inline union so that
@@ -403,6 +419,11 @@ type ReasonWithNoRecordHeld =
  * asks what a scanned barcode is asked and keeps the file's own fields only
  * where the record has none (`types.enrichedDraft`).
  *
+ * **`listed` is an ISBN from a pasted or uploaded list**, waiting for the
+ * paced run. It is a barcode in every way but one: nothing has been asked
+ * about it yet, so it is asked at the pace rather than at once, and what the
+ * run makes of it is what the scan makes of a barcode.
+ *
  * **`not-reached` is a barcode whose lookup reached no catalogue**, which
  * answers nothing about the book. It carries no draft, so the batch leaves
  * it, and the paced lookup offers it again, as it does a name whose lookup
@@ -414,6 +435,7 @@ type ReasonWithNoRecordHeld =
  */
 export type ScannedEntry =
   | InState<"looking-up">
+  | InState<"listed">
   | InState<"reading", "claims">
   | InState<"derived", "reason" | "answered">
   | (InState<"stated", "reason" | "answered"> & {
@@ -561,6 +583,7 @@ const QUEUE_STATES: {
     askable: false,
     deciding: false,
   },
+  listed: { stillReading: false, askable: true, deciding: false },
   reading: { stillReading: true, askable: false, deciding: false },
   derived: { stillReading: false, askable: true, deciding: false },
   stated: { stillReading: false, askable: true, deciding: false },
@@ -770,7 +793,8 @@ export function canBeAskedAgain(entry: ScannedEntry): boolean {
 export interface QueueFigures {
   /**
    * Rows a catalogue has not answered yet: a name with nothing else behind
-   * it, an ISBN a file stated, or a barcode whose catalogues were not reached.
+   * it, an ISBN a file stated, an ISBN from a list, or a barcode whose
+   * catalogues were not reached.
    */
   readonly waiting: number;
   /**
@@ -906,6 +930,11 @@ export type QueueEvent =
   /** A barcode arrived. A repeat changes nothing. */
   | { readonly kind: "captured"; readonly isbn: string }
   /**
+   * A list of canonical ISBNs arrived. One the queue already holds, scanned or
+   * listed before, is left where it is.
+   */
+  | { readonly kind: "listed"; readonly isbns: readonly string[] }
+  /**
    * Rows for picked files. A row whose key the queue already claims is
    * dropped (`notYetQueued`), and a pick that leaves none changes nothing.
    */
@@ -1039,6 +1068,7 @@ const AFTER_EVENT: {
   ) => ScannedEntry[];
 } = {
   captured: (entries, event) => withBarcode(entries, event.isbn),
+  listed: (entries, event) => withListed(entries, event.isbns),
   picked: (entries, event) => withPicked(entries, event.rows),
   "file-read": (entries, event) =>
     patch(entries, event.key, (row) => ({
@@ -1150,6 +1180,29 @@ function withBarcode(entries: ScannedEntry[], isbn: string): ScannedEntry[] {
       state: "looking-up",
       draft: null,
     },
+  ];
+}
+
+/**
+ * A row for each listed ISBN the queue does not hold yet, keyed as a barcode
+ * is, so a book listed and then scanned is one row.
+ */
+function withListed(
+  entries: ScannedEntry[],
+  isbns: readonly string[],
+): ScannedEntry[] {
+  const fresh = notYetQueued(entries, isbns, scannedKey);
+  if (fresh.length === 0) return entries;
+  return [
+    ...entries,
+    ...fresh.map((isbn): ScannedEntry => ({
+      key: scannedKey(isbn),
+      label: isbn,
+      isbn,
+      format: "",
+      state: "listed",
+      draft: null,
+    })),
   ];
 }
 
@@ -1343,11 +1396,18 @@ function whatTheFileSaid(
   return fromTheName(naming, said === undefined ? note : { kind: "no-title" });
 }
 
+/** The states whose row is an ISBN and nothing else, which a miss reads alike. */
+const ASKED_AS_A_BARCODE: ReadonlySet<ScannedEntry["state"]> = new Set([
+  "looking-up",
+  "listed",
+  "not-reached",
+]);
+
 /**
  * Where a row goes back to when asking about it threw.
  *
- * A barcode, asked at the scan or again, goes where the scan's own reading
- * sends it, because the name path's reading files it under a file name it does
+ * A barcode, asked at the scan or again, and a listed ISBN go where the scan's
+ * own reading sends a barcode, because the name path's reading files it under a file name it does
  * not have. A `stated` row goes back to its file's draft and says so; only a
  * row standing under its name is said to be kept under it.
  */
@@ -1356,7 +1416,7 @@ function notAnswered(
   asked: ScannedEntry["state"],
   unknown: boolean,
 ): ScannedEntry {
-  if (asked === "looking-up" || asked === "not-reached") {
+  if (ASKED_AS_A_BARCODE.has(asked)) {
     return { ...leaving(row), ...barcodeMiss(row.isbn, unknown) };
   }
   const back = asked === "stated" ? "stated" : "derived";

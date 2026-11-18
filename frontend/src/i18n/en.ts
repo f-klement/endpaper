@@ -1346,6 +1346,7 @@ export const en = {
   "rapid.lookingUp": "Looking up...",
   "rapid.reading": "{name} is being read...",
   "rapid.notFound": "Not found: {isbn}",
+  "rapid.listed": "Waiting for the lookup: {isbn}",
   "rapid.notReached": "Catalogues not reached: {isbn}",
   "rapid.duplicate": "Already scanned",
   "rapid.alreadyInLibrary": "Already in the library",
@@ -1402,6 +1403,27 @@ export const en = {
   "rapid.nothingScanned": "Nothing scanned yet",
 
   // ── Adding books from their files ───────────────────────────────────────
+  // ── A pasted or uploaded list of ISBNs ──────────────────────────────────
+  "isbnList.title": "Add from a list of ISBNs",
+  "isbnList.explain":
+    "Paste ISBNs or pick a text file of them, separated by lines, spaces or commas; a list may bring the queue's entries that wait for a lookup up to {limit}, picked files not yet looked up included. Each one is looked up in the catalogues at the same pace as picked files, and the books wait in the queue for you to review before anything is added.",
+  "isbnList.pasteLabel": "ISBNs",
+  "isbnList.submit": "Look these up",
+  "isbnList.fileLabel": "Or pick a text or CSV file",
+  "isbnList.queued": "ISBNs queued for the lookup: {count}",
+  "isbnList.invalid":
+    "Not ISBNs, because the check digit does not match, so not looked up: {count}",
+  "isbnList.repeated": "Written more than once, queued once: {count}",
+  "isbnList.ignored":
+    "Words and numbers that are not shaped like an ISBN, passed over: {count}",
+  "isbnList.tooMany":
+    "This list holds {count} ISBNs, and one list may hold {limit}. Split it and hand it over in parts.",
+  "isbnList.invalidMore": "And {count} more, not shown.",
+  "isbnList.noRoom":
+    "This list holds {count} ISBNs, and {room} more can join the queue now: what waits there for a lookup, picked files included, may reach {limit}. Hand over fewer, or the rest once the queue has been looked up.",
+  "isbnList.fileTooLarge": "This file is too large to be a list of ISBNs.",
+  "isbnList.fileUnreadable": "This file could not be read.",
+
   "file.title": "Add from a file",
   // **The last sentence says what the press does and not only what it refuses.**
   // "Never uploaded" was the whole of it, and it stayed true when a folder pick
@@ -1457,7 +1479,7 @@ export const en = {
   // to the same public catalogues a title search and a scanned barcode reach.
   // The tags are file content rather than a name, which is why they are named.
   "fallback.pace":
-    "The file names, any ISBN a file states, the title and author an audiobook's tags name (or its folder name, where it has none), and the ISBN of any scanned barcode that reached no catalogue are sent to the catalogues Endpaper searches; the files are not. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
+    "The file names, any ISBN a file states, the title and author an audiobook's tags name (or its folder name, where it has none), the ISBN of any scanned barcode that reached no catalogue, and any ISBN from a list are sent to the catalogues Endpaper searches; the files are not. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
   // **Written to stand alone, because that is how it usually renders.** The bulk
   // keep clears the queue, so nothing is waiting and the paragraph above is off
   // the screen: every fact this press discloses is in this string on its own,
@@ -1468,6 +1490,7 @@ export const en = {
   "fallback.paceAgain":
     "The same file names, audiobook tags and audiobook folder names go to the same catalogues a second time, and the files themselves still do not. Paced the same way. Roughly {minutes} min.",
   "fallback.stop": "Stop looking up",
+  "fallback.progress": "Asked {done} of {total}",
   "fallback.searching": "Asking the catalogues...",
   "fallback.fromTheName": "From the file name",
   "fallback.notInCatalogues":

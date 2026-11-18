@@ -30,6 +30,12 @@ answer 10 and the Czech national catalogue answers 49.
 reviewed before anything is written, so a misread barcode is caught before it
 becomes a row.
 
+**A list of ISBNs**, pasted or picked as a text or CSV file, joins the same
+queue: each is looked up at the pace a folder of files is and waits for the same
+review. One list holds at most 500, and none is taken that would leave more than
+500 entries waiting for a lookup. An ISBN whose check digit is wrong is listed
+back rather than looked up.
+
 **Enrichment** fills a sparse record from an external catalogue on request. It is
 always a choice: nothing is fetched in the background, and a field is only
 overwritten when you say so.
@@ -165,7 +171,8 @@ that a feed is a catalogue rather than a file: there is nothing to avoid
 storing, and a browser cannot fetch a self hosted server that sends no
 permissive CORS headers. **No route accepts a book file.**
 
-**Import and export** as CSV, and a full backup and restore.
+**Import and export** as CSV, export as plain text or as one web page that opens
+offline, and a full backup and restore.
 
 ## Finding things
 
@@ -401,8 +408,9 @@ screen here.
 **No library circulation.** No queue positions, no pickup notifications, no
 fines. Koha exists and is better at all of it. MARC21 itself is read and
 written, which is the exchange format rather than the circulation system: see
-*MARC21 import and export* under The interface. No catalogue is asked over
-Z39.50 yet: see *The Z39.50 client library* in `docs/architecture.md`.
+*MARC21 import and export* under The interface. Z39.50 is used as a client
+only, to ask the Italian, Portuguese, Hungarian and Slovak catalogues about a
+book: see *The Z39.50 client library* in `docs/architecture.md`.
 
 **No Z39.50 server.** SRU is served and this is not: Z39.50 is a binary
 protocol over raw TCP, normally served through YAZ, and is not a shape this
@@ -418,10 +426,25 @@ national library numbers for Brazil, Argentina, Spain, Portugal, Italy and
 Chile**, which the GND record does not carry and the VIAF cluster it names does.
 That is what lets an author be looked up outside German. Dates and a one line
 description are shown while you tell two same named writers apart, and are not
-kept. An author stays a derived fact rather than a second thing to maintain.
+kept. In library mode, a name neither the GND nor the Library of Congress holds
+is also put to ORCID, which registers researchers; a household is not offered
+its answers to a name, because for the authors of a household shelf they are
+mostly other people with the same name. An author stays a derived fact rather
+than a second thing to maintain.
 
-Those six are **stored and not resolved**, and the difference is honest rather
-than a limitation being dressed up: Brazil's and Argentina's catalogues refuse
-every request, and the rest speak a protocol this app has no client for. The
-identifier arrives free with a confirmation, which is what would make an adapter
-for one of them cheap on the day it becomes possible.
+**Portugal's is checked and resolved.** Confirming a GND number asks the
+Biblioteca Nacional de Portugal's authority file for the Portuguese number the
+VIAF cluster names, and keeps it only where that record gives the person one
+of the names the GND record does, or links that same cluster; where the
+library cannot be reached, the number is kept as the cluster names it. An author whose only number is a
+Portuguese one is looked up in that file by the number, over plain HTTPS.
+**The other five are stored and not resolved**,
+because none of them serves its authority file to a number lookup this app
+could make: Spain's open SRU serves book records only and its Z39.50 refuses
+without a login; Italy's union catalogue serves no authority database
+over Z39.50 and no SRU; Argentina's authority file answers Z39.50 with the
+published login but no index takes the number, only a name; Brazil's
+catalogue refuses every request; and Chile's accepts no connection, and VIAF
+writes its numbers in a longer form than Wikidata records for it. The
+identifier arrives free with a confirmation, which is what would make an
+adapter for one of them cheap on the day it becomes possible.
