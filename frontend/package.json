@@ -44,7 +44,7 @@
     "fast-check": "4.10.2",
     "happy-dom": "21.0.4",
     "jsdom": "31.0.1",
-    "orval": "8.47.0",
+    "orval": "8.48.0",
     "oxfmt": "0.78.0",
     "oxlint": "1.93.0",
     "tailwindcss": "4.3.5",

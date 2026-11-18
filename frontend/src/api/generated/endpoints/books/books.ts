@@ -114,6 +114,36 @@ import { customFetch } from "../../../mutator.ts";
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
+const getHeaders = (
+  ...sources: (RequestInit["headers"] | Record<string, string | undefined>)[]
+) => {
+  const seen = new Set<string>();
+  const layers: [string, string | readonly string[]][][] = [];
+  for (const source of sources.reverse()) {
+    if (!source) continue;
+    const entries =
+      source instanceof Headers
+        ? source.entries()
+        : Symbol.iterator in source
+          ? Array.from(
+              source as Iterable<Iterable<string>>,
+              (entry) => Array.from(entry) as [string, string],
+            )
+          : Object.entries<string | readonly string[] | undefined>(source);
+    const layer: [string, string | readonly string[]][] = [];
+    for (const [name, value] of entries) {
+      if (value !== undefined && !seen.has(name.toLowerCase()))
+        layer.push([name, value]);
+    }
+    for (const [name] of layer) seen.add(name.toLowerCase());
+    layers.push(layer);
+  }
+  return Object.fromEntries(layers.reverse().flat()) as Extract<
+    RequestInit["headers"],
+    Record<string, unknown>
+  >;
+};
+
 const withQueryKey = <T extends object, K>(
   query: T,
   queryKey: K,
@@ -491,34 +521,13 @@ export const addBook = async (
   bookCreate: BookCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getAddBookUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bookCreate),
   });
 };
@@ -1487,34 +1496,13 @@ export const confirmAuthorIdentifier = async (
   authorIdentifierRequest: AuthorIdentifierRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<ConfirmedIdentifierOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<ConfirmedIdentifierOut>(getConfirmAuthorIdentifierUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(authorIdentifierRequest),
   });
 };
@@ -1767,34 +1755,13 @@ export const mergeAuthors = async (
   authorMergeRequest: AuthorMergeRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AuthorOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<AuthorOut>(getMergeAuthorsUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(authorMergeRequest),
   });
 };
@@ -1921,34 +1888,13 @@ export const mergeAuthorsBatch = async (
   authorMergeBatchRequest: AuthorMergeBatchRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AuthorBatchMergeOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<AuthorBatchMergeOut>(getMergeAuthorsBatchUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(authorMergeBatchRequest),
   });
 };
@@ -2593,34 +2539,13 @@ export const bulkAction = async (
   bulkRequest: BulkRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BulkResult> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BulkResult>(getBulkActionUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bulkRequest),
   });
 };
@@ -3543,34 +3468,13 @@ export const defineCustomField = async (
   customFieldCreate: CustomFieldCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<CustomFieldOut>(getDefineCustomFieldUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(customFieldCreate),
   });
 };
@@ -3881,34 +3785,13 @@ export const renameCustomField = async (
   customFieldRename: CustomFieldRename,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<CustomFieldOut>(getRenameCustomFieldUrl(fieldId), {
     ...options,
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(customFieldRename),
   });
 };
@@ -4767,34 +4650,13 @@ export const sweepDigitalReferences = async (
   sweepIn: SweepIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<SweepOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<SweepOut>(getSweepDigitalReferencesUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(sweepIn),
   });
 };
@@ -5534,34 +5396,13 @@ export const findFileHolders = async (
   holdersIn: HoldersIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<HoldersOut[]> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<HoldersOut[]>(getFindFileHoldersUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(holdersIn),
   });
 };
@@ -6205,34 +6046,13 @@ export const mergeBooks = async (
   mergeRequest: MergeRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getMergeBooksUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(mergeRequest),
   });
 };
@@ -6630,34 +6450,13 @@ export const scanAdd = async (
   bookCreate: BookCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getScanAddUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bookCreate),
   });
 };
@@ -7458,34 +7257,13 @@ export const createTag = async (
   tagCreate: TagCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<TagOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<TagOut>(getCreateTagUrl(), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(tagCreate),
   });
 };
@@ -8280,34 +8058,13 @@ export const updateBookDetails = async (
   bookDetailsUpdate: BookDetailsUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getUpdateBookDetailsUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bookDetailsUpdate),
   });
 };
@@ -8718,34 +8475,13 @@ export const decideAccess = async (
   accessDecision: AccessDecision,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AccessRequestOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<AccessRequestOut>(getDecideAccessUrl(bookId, requestId), {
     ...options,
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(accessDecision),
   });
 };
@@ -8852,34 +8588,13 @@ export const setCollection = async (
   collectionAssign: CollectionAssign,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getSetCollectionUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(collectionAssign),
   });
 };
@@ -9199,34 +8914,13 @@ export const addCopy = async (
   copyCreate: CopyCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getAddCopyUrl(bookId), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(copyCreate),
   });
 };
@@ -9651,36 +9345,15 @@ export const setCustomField = async (
   customFieldValueUpdate: CustomFieldValueUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldValueOut[]> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<CustomFieldValueOut[]>(
     getSetCustomFieldUrl(bookId, fieldId),
     {
       ...options,
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        ...getHeaders(options?.headers),
-      },
+      headers: getHeaders(
+        { "Content-Type": "application/json" },
+        options?.headers,
+      ),
       body: JSON.stringify(customFieldValueUpdate),
     },
   );
@@ -10056,36 +9729,15 @@ export const reportDigitalReference = async (
   digitalReferenceIn: DigitalReferenceIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<DigitalReferenceOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<DigitalReferenceOut>(
     getReportDigitalReferenceUrl(bookId),
     {
       ...options,
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getHeaders(options?.headers),
-      },
+      headers: getHeaders(
+        { "Content-Type": "application/json" },
+        options?.headers,
+      ),
       body: JSON.stringify(digitalReferenceIn),
     },
   );
@@ -10476,34 +10128,13 @@ export const setDiscuss = async (
   bookDiscussUpdate: BookDiscussUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getSetDiscussUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bookDiscussUpdate),
   });
 };
@@ -10806,34 +10437,13 @@ export const applyEnrichment = async (
   params?: ApplyEnrichmentParams,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookEnrichmentOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookEnrichmentOut>(getApplyEnrichmentUrl(bookId, params), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bookMatch),
   });
 };
@@ -11348,36 +10958,15 @@ export const importKoreaderHighlights = async (
   koreaderImportIn: KoreaderImportIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<HighlightImportOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<HighlightImportOut>(
     getImportKoreaderHighlightsUrl(bookId),
     {
       ...options,
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getHeaders(options?.headers),
-      },
+      headers: getHeaders(
+        { "Content-Type": "application/json" },
+        options?.headers,
+      ),
       body: JSON.stringify(koreaderImportIn),
     },
   );
@@ -11604,36 +11193,15 @@ export const setHighlightSharing = async (
   highlightSharingIn: HighlightSharingIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<HighlightOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<HighlightOut>(
     getSetHighlightSharingUrl(bookId, highlightId),
     {
       ...options,
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        ...getHeaders(options?.headers),
-      },
+      headers: getHeaders(
+        { "Content-Type": "application/json" },
+        options?.headers,
+      ),
       body: JSON.stringify(highlightSharingIn),
     },
   );
@@ -12084,34 +11652,13 @@ export const addNote = async (
   noteCreate: NoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<NoteOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<NoteOut>(getAddNoteUrl(bookId), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(noteCreate),
   });
 };
@@ -12287,34 +11834,13 @@ export const editNote = async (
   noteCreate: NoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<NoteOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<NoteOut>(getEditNoteUrl(bookId, noteId), {
     ...options,
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(noteCreate),
   });
 };
@@ -12521,34 +12047,13 @@ export const setOwnership = async (
   ownershipUpdate: OwnershipUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getSetOwnershipUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(ownershipUpdate),
   });
 };
@@ -12739,34 +12244,13 @@ export const setPrivacy = async (
   privacyUpdate: PrivacyUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getSetPrivacyUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(privacyUpdate),
   });
 };
@@ -13049,34 +12533,13 @@ export const addProgress = async (
   progressCreate: ProgressCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<ProgressOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<ProgressOut>(getAddProgressUrl(bookId), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(progressCreate),
   });
 };
@@ -13477,34 +12940,13 @@ export const addQuote = async (
   quoteCreate: QuoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<QuoteOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<QuoteOut>(getAddQuoteUrl(bookId), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(quoteCreate),
   });
 };
@@ -13680,34 +13122,13 @@ export const editQuote = async (
   quoteCreate: QuoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<QuoteOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<QuoteOut>(getEditQuoteUrl(bookId, quoteId), {
     ...options,
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(quoteCreate),
   });
 };
@@ -13804,34 +13225,13 @@ export const setRating = async (
   bookRatingUpdate: BookRatingUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getSetRatingUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bookRatingUpdate),
   });
 };
@@ -14119,34 +13519,13 @@ export const updateStatus = async (
   bookStatusUpdate: BookStatusUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getUpdateStatusUrl(bookId), {
     ...options,
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(bookStatusUpdate),
   });
 };
@@ -14260,34 +13639,13 @@ export const addBookTagByName = async (
   tagCreate: TagCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<BookOut>(getAddBookTagByNameUrl(bookId), {
     ...options,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(tagCreate),
   });
 };
