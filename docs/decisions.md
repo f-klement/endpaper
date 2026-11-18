@@ -9894,10 +9894,9 @@ fifth MARC source, and the sentence was rewritten to name which two sources appl
 rather than to count anything. Its verdict went with it, and this guard is how that was
 noticed rather than left.
 
-The census raises 3 candidates in it. **0** are live claims the guard now checks against
-`sources.py`; **3** are not the roster, being one of this entry's own worked examples, a
-sentence about what a shared pattern would have changed, and a survey of national libraries
-in the Z39.50 transport entry.
+The census raises 2 candidates in it. **0** are live claims the guard now checks against
+`sources.py`; **2** are not the roster, being one of this entry's own worked examples and a
+survey of national libraries in the Z39.50 transport entry.
 All three figures are recomputed from the verdict table rather than reread.
 
 **Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
@@ -26396,3 +26395,141 @@ committed sample.
 Refused alternatives, with figures: follow the rule as written (tier DNB, K10plus, SBN; tail
 NLG, BN_PL, KB_DK, PORBASE, OSZK, Open Library, OENB, NKP, BNE, LIBRIS, BIBSYS, Melinda), or
 K10plus with the SBN at two (the DNB to the tail with 14 marginal).
+
+## The Slovak National Library joins the roster over Z39.50 (2026-11-17)
+
+One row in `targets.SEEDED`, ISBN lookup only, migration `5c3e9a1d7b20`:
+
+| row | address | syntax, charset | records | ISBN-10 retry | remit |
+|---|---|---|---|---|---|
+| SNK | `z3950://z3950.snk.sk:1111/Default` | MARC21, UTF-8 | 5 | no | `978-80` |
+
+Chosen on its own country's frame: of fifty Slovak ISBNs drawn from Wikidata by publisher
+country (pool 120, seed 20261116) the fifteen keyless sources find 16 and the SNK 27, **NEW 16**
+(17 with remits applied), every one `978-80`; on the 29 `978-80` ISBNs of that frame the fifteen
+find 13 and the SNK 27. The lowest NEW built before it is Melinda's 9.
+
+Measured through `metadata._lookup_one` on the row as first built, with the ISBN-10 retry on, system libyaz 5.34.4, one lookup at
+a time, over 700 ISBNs: the committed 500, the Polish, Danish and Hungarian frames, and the Slovak
+fifty. Figures are in `metadata`'s block for the row; the 500's and the frames' answers are
+committed as the `snk` column, with `seconds_snk` on the 500.
+
+### Where the placement rules put it
+
+**Remit `978-80`.** The bar (`sources.SERVES_GROUPS`): no book of the 500 that it alone answers
+outside the remit. It answers 16 of the 500: 10 Czech, all `978-80`, and 6 outside (4 Austrian,
+2 German), each held by a source still asked about it. Bar met. `978-80` is shared with Czech
+publishers and is the NKP's group too; the NKP carries no remit (it fails the bar on its own
+two books), so a `978-80` ISBN is asked of both.
+
+**Not in the leading tier.** p90 0.066s, inside `FIRST_TIER_BUDGET_SECONDS`. It adds 4 books to
+the DNB and K10plus, all Czech; that is under `SLOT_MUST_EARN`, so its concentration is not read
+and it enters the pool a tier may hold, which moves `TIER_UNION` from size 4 on (228, then 232,
+235, 236, 237, 238, 238, 238 over ten sources, against 231 ... 234 over nine). As a third slot it
+earns 4, against LIBRIS's 6 and the bar of 10, so the pair is unchanged and `ALWAYS_ASKED` stays 2.
+Every tier guard holds with it in the pool (budget and concentration sweeps unchanged).
+
+**Tail: just ahead of Open Library, after the OSZK.** Inside `978-80` the leading pair misses 41
+books, all in the sample's Czech frame; the SNK answers 4 of them, Open Library 1, the NKP 40,
+the BNE, LIBRIS, Melinda and BIBSYS 0. By the rule, a remitted row goes ahead of the first
+unremitted row it beats on its own ISBNs: 4 against Open Library's 1, so ahead of Open Library.
+Among the remitted rows meeting there it goes by `TAIL_MARGINAL`, where it reads 4, the least,
+so last of them: NLG 34, BN_PL 30, KB_DK 29, SBN 26, PORBASE 25, OSZK 17, SNK 4, then Open
+Library. For any `978` ISBN in a named group that position is the whole walk: no other remitted
+row serves `978-80`, so a Czech or Slovak book asks the SNK first after the pair, then Open
+Library, then the NKP. The order among the remitted rows matters only to a `979` ISBN or one
+with no named group, which now asks seven remitted rows before Open Library, p90s summing to
+about 3.4s.
+
+**No Slovak frame committed, by the rule's own wording.** `TAIL_MARGINAL` counts a remitted row on
+the ISBNs inside its remit, from the sample where the sample holds them and from a committed
+frame only where it holds none. The sample's Czech frame is fifty `978-80` ISBNs, so the SNK is
+counted on those. With the Slovak fifty added it would read 20 against Open Library's 5 inside
+`978-80` and sit between PORBASE and the OSZK, which changes no walk for a named group; the
+same frame would also count over every unremitted row and break the Melinda and BIBSYS tie the
+other way (BIBSYS 9, Melinda 8), a reorder of two rows unrelated to Slovakia. Measured both
+ways; the frame stays in the seat's scratch, not the tree.
+
+**The remit model** (`SERVES_GROUPS`) re-run with the row: 2.376s per lookup without the table,
+1.263s with it, 2,325 tail requests becoming 781, for the same 429 books; per frame 0.166s
+(German) to 2.209s (Czech). Demotion instead of skipping models at 1.6635s.
+
+**Coverage of the 500 unchanged**: the SNK adds no book of the 500 to the other fifteen keyless
+sources, so the sixteen answer 429 and the eighteen a stock install asks 441.
+
+### Its door closes after about eight connections a minute
+
+The SNK's Metaproxy closes a new connection at open once about eight have arrived from one
+address within a minute: at one every 1.5s, eight were accepted and every one after refused for
+half a minute; at one every 7.5s, one in eight was refused; at one every 8.2s, none in about 500.
+22 of the 700 lookups were refused this way and each answered when asked again 20 to 30s later.
+The client reads it as a lost connection, `Unreachable`, so the lookup marks the SNK
+`UNAVAILABLE` and walks on, as for the OSZK's refusals; where nothing else holds the book the
+lookup reports the catalogue unavailable and that is cached for `_MISS_TTL_SECONDS`.
+The door counts by address, so every member's lookups, refreshes and enrichments count
+together, and it is met by `978-80` books and by `979` ones or any whose group cannot be named,
+which `_serves` puts to every remitted row, once the leading pair misses them.
+`METADATA_LIMIT` (60 a minute per member) does not prevent it. Recorded in the security rate row
+and the limiter's comment. Not built: a per host pace in the Z39.50 door, which would be a design
+change to the door rather than to this row.
+
+### No ISBN-10 retry: the index matches the ten digit form
+
+6 books were found by the thirteen digit search alone though every record fetched for them
+states only the ten digit form in `020`, so the SNK's index normalises the two, as the BN_PL's
+does, and the row does not retry, as the BN_PL's does not. Measured with the retry on, the second
+search ran on 652 lookups and found nothing. The latency in `metadata`'s block and the committed
+`seconds_snk` (p90 0.066s in `sources.MEASURED`) were taken with it on and stand as an upper
+bound: subtracting the retry's search from each logged lookup gives median 0.042s and p90 0.053s
+against 0.060s and 0.069s. The order is unchanged, the SNK's place resting on its counts and not
+its p90.
+
+### Leader/07 `b` records arrive among the hits
+
+5 of 93 rendered records were leader/07 `b`, articles about the book with no ISBN of their own;
+`refuses_component_parts` refuses them, and each of the 3 lookups that returned one found the
+book in another record.
+
+### Three survey candidates refused, each on its own frame (2026-11-17)
+
+The last four candidates of the national catalogue survey were each measured on fifty ISBNs of
+their own country, drawn from Wikidata by publisher country (P212 of an item whose publisher's
+P17 is that country, at most 3,000 rows, valid ISBN-13s deduplicated, sorted and shuffled with
+seed 20261116), against the fifteen lookup sources that need no credential, each asked as its row
+asks. The Slovak National Library joined; the other three are refused, and the figure is the one
+the bar reads: the books a candidate finds that none of the fifteen does (NEW). The lowest NEW
+built so far is Melinda's 9 of 50.
+
+| candidate | endpoint | NEW | why refused |
+|---|---|---|---|
+| Netherlands, KB GGC | SRU 1.2 `jsru.kb.nl/sru/sru`, `x-collection=GGC`, `dc.identifier` | **3 of 50**, remits applied or not | under the bar, and only one of the three is a printed book |
+| Lithuania, LIBIS | Z39.50 `z3950.libis.lt:210/KNYGOS`, UNIMARC | **2 of 6** | no measurement: Wikidata holds six ISBNs with a Lithuanian publisher |
+| Belgium, KBR | Z39.50 `catalog.kbr.be:9001`, MARC21 | not measured | the database name is not discoverable from outside |
+
+**The Netherlands, KB GGC.** The Dutch frame's pool hit the 3,000 row limit (2,948 valid), so
+it is whatever the endpoint returned first; 22 of its 50 are in a Dutch group (`978-90`,
+`978-94`). The fifteen find 46 of the 50. KB finds 18, every one Dutch, 6 of them only through
+the ISBN-10 retry, and NEW 3: `9789070066727` a printed book, `9789025866655` a sound recording
+(DAISY streaming audio) and `9789024443451` an ePub, read off KB's own records. On the Dutch
+subframe the fifteen find 18 and KB 18. **It would also need a reader nothing here has**: KB
+answers namespaced Dublin Core. `DUBLIN_CORE_BARE`, the one Dublin Core lookup reader, reads the
+NKP's un-namespaced shape and sees nothing in it, and the BnF's `DUBLIN_CORE` is wired for title
+search only; its record builder would find the elements but refuses an online record by
+`dc:format` or "electronic resource" in `dc:type`, and KB writes neither (the extent is in
+`dcterms:extent`, "online resource" in `dc:type`), so the ePub above would pass as a book. Median
+0.099s.
+
+**Lithuania, LIBIS.** Wikidata's whole pool for the rule is six ISBNs, and only two of them are in
+the Lithuanian group `978-609`; the other four are Portuguese groups. LIBIS finds the two
+Lithuanian ones and nobody else does, so NEW 2 of 6, which ranks nothing. A frame of Lithuanian
+books from another source is what would let it be measured. Median 0.95s over 6 queries,
+against 2.56s on an earlier day, so about a second per query is what holds.
+
+**Belgium, KBR.** The Z39.50 door at `catalog.kbr.be:9001` (Metaproxy/YAZ) accepts a connection
+and names no database: `IR-Explain-1` is diagnostic 235, "database does not exist", and so are
+146 guessed names (case variants of Default, KBR, catalogue, biblios, the OPAC's Syracuse and
+CATALOGUE, Alma's `32KBR_INST`, the Voyager, Aleph, Virtua and Koha defaults, `*`). The same port
+over HTTP is Metaproxy's 400 for every path, so it has no SRU front end. IRSpy, Tellico's server
+list and Koha's directory name no Belgian national target, and KBR's own page names the host, the
+port and MARC21-XML and no database. The route left is to ask `metadata@kbr.be`. Twenty of the
+Belgian frame's fifty are Dutch language group ISBNs, where KB GGC would overlap it.

@@ -439,13 +439,13 @@ repeat the argument.
 |  | [A subject label keeps the place of its first occurrence](decisions.md#a-subject-label-keeps-the-place-of-its-first-occurrence) | 105 |
 |  | [The first `$0` is the authority file's number, and `Subfields.gnd_identifier` asks a different question](decisions.md#the-first-0-is-the-authority-files-number-and-subfieldsgnd_identifier-asks-a-different-question) | 316 |
 |  | [A label under two vocabularies is two subjects; a label restated undeclared is one](decisions.md#a-label-under-two-vocabularies-is-two-subjects-a-label-restated-undeclared-is-one) | 154 |
-|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,120 |
+|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,110 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every Python file is compiled, and the warning is recorded rather than raised](decisions.md#every-python-file-is-compiled-and-the-warning-is-recorded-rather-than-raised) | 448 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every field a request body carries is bounded, and the value comes from one place each](decisions.md#every-field-a-request-body-carries-is-bounded-and-the-value-comes-from-one-place-each) | 816 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The guard is three questions asked of every request body, not a table of fields](decisions.md#the-guard-is-three-questions-asked-of-every-request-body-not-a-table-of-fields) | 50 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [`BodySizeLimitMiddleware` promises a bound it does not apply, and the gap is stated](decisions.md#bodysizelimitmiddleware-promises-a-bound-it-does-not-apply-and-the-gap-is-stated) | 89 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Two bounds this entry does not close](decisions.md#two-bounds-this-entry-does-not-close) | 155 |
-| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The roster count is guarded by a census with a verdict, not by a scan and not by a list](decisions.md#the-roster-count-is-guarded-by-a-census-with-a-verdict-not-by-a-scan-and-not-by-a-list) | 711 |
+| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The roster count is guarded by a census with a verdict, not by a scan and not by a list](decisions.md#the-roster-count-is-guarded-by-a-census-with-a-verdict-not-by-a-scan-and-not-by-a-list) | 701 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The hole a reviewer should know about](decisions.md#the-hole-a-reviewer-should-know-about) | 52 |
 |  | [A stale count outside the census grammar is fixed by rewriting the sentence, not by widening the census](decisions.md#a-stale-count-outside-the-census-grammar-is-fixed-by-rewriting-the-sentence-not-by-widening-the-census) | 278 |
 |  | [Four figures in the roster census are snapshots rather than recomputed, deliberately](decisions.md#four-figures-in-the-roster-census-are-snapshots-rather-than-recomputed-deliberately) | 172 |
@@ -1052,4 +1052,10 @@ repeat the argument.
 | Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [The UNIMARC e book coded as text is recorded, not fixed](decisions.md#the-unimarc-e-book-coded-as-text-is-recorded-not-fixed) | 47 |
 | Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [The UNIMARC reader is under the catalogue property, through PORBASE](decisions.md#the-unimarc-reader-is-under-the-catalogue-property-through-porbase) | 94 |
 |  | [The leading tier reads concentration on what a source adds, not on everything it answers (2026-11-17)](decisions.md#the-leading-tier-reads-concentration-on-what-a-source-adds-not-on-everything-it-answers-2026-11-17) | 427 |
+|  | [The Slovak National Library joins the roster over Z39.50 (2026-11-17)](decisions.md#the-slovak-national-library-joins-the-roster-over-z3950-2026-11-17) | 1,696 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Where the placement rules put it](decisions.md#where-the-placement-rules-put-it) | 561 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Its door closes after about eight connections a minute](decisions.md#its-door-closes-after-about-eight-connections-a-minute) | 203 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [No ISBN-10 retry: the index matches the ten digit form](decisions.md#no-isbn-10-retry-the-index-matches-the-ten-digit-form) | 118 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Leader/07 `b` records arrive among the hits](decisions.md#leader07-b-records-arrive-among-the-hits) | 36 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Three survey candidates refused, each on its own frame (2026-11-17)](decisions.md#three-survey-candidates-refused-each-on-its-own-frame-2026-11-17) | 565 |
 <!-- index: end -->

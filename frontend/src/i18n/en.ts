@@ -2148,6 +2148,7 @@ export const en = {
   "providers.name.sbn": "Italian National Library Service",
   "providers.name.porbase": "PORBASE",
   "providers.name.oszk": "National Széchényi Library",
+  "providers.name.snk": "Slovak National Library",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

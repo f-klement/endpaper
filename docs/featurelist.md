@@ -21,7 +21,7 @@ condition, and where it is shelved.
 search, by pointing at the book's own file, or by hand. ISBN lookup chains
 several sources so a European or pre-ISBN book still resolves rather than
 failing at one provider, and English, German, French, Spanish, Portuguese,
-Italian, Greek, Czech and Hungarian titles all resolve. Greek and Czech are the clearest case for
+Italian, Greek, Czech, Hungarian and Slovak titles all resolve. Greek and Czech are the clearest case for
 chaining them: of 50 Greek ISBNs the other free sources answer 8 between
 them and the Greek national catalogue answers 37, and of 50 Czech ISBNs they
 answer 10 and the Czech national catalogue answers 49.
@@ -61,9 +61,9 @@ National Library and K10plus are asked together and their records merged. When n
 answers, the rest are asked in turn until one does: the National Library of Greece, the
 Polish National Library, the Royal Danish Library, the Italian National Library Service
 (SBN, Italy's union catalogue), PORBASE (Portugal's), the National Széchényi Library
-(Hungary's), Open Library, the Austrian National Library, the Czech National
+(Hungary's), the Slovak National Library, Open Library, the Austrian National Library, the Czech National
 Library, the Spanish National Library, LIBRIS (the Swedish union catalogue), Melinda
-(the Finnish union catalogue), BIBSYS (the Norwegian union catalogue), the Argentine National Library, the Uruguayan National Library and Google Books. The Greek, Polish, Danish, Italian, Portuguese, Hungarian, Austrian and Uruguayan libraries are
+(the Finnish union catalogue), BIBSYS (the Norwegian union catalogue), the Argentine National Library, the Uruguayan National Library and Google Books. The Greek, Polish, Danish, Italian, Portuguese, Hungarian, Slovak, Austrian and Uruguayan libraries are
 asked only about ISBNs in the registration
 groups they collect, so a German book does not wait on Athens, and Settings names the groups
 beside each. A title search asks the German National Library, K10plus, Open Library, the

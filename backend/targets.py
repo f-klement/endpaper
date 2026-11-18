@@ -1005,7 +1005,7 @@ class Target:
 #: is on `enums.SourceFamily`.
 FAMILY: Final = SourceFamily.CATALOGUE
 
-#: The twenty catalogues this application ships knowing about.
+#: The twenty one catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
 #: migrations write every one of these rows into `catalogue_targets` and
@@ -1113,7 +1113,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OPEN_LIBRARY: Target(
             source=CatalogueSource.OPEN_LIBRARY,
-            rank=8,
+            rank=9,
             transport=Transport.BESPOKE,
             base_url="https://openlibrary.org",
             reader=Reader.OPEN_LIBRARY,
@@ -1125,7 +1125,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.NKP: Target(
             source=CatalogueSource.NKP,
-            rank=10,
+            rank=11,
             transport=Transport.SRU,
             # The database path is load bearing: `aleph.nkp.cz:9991` alone, and
             # `/biblios`, both answer SRU diagnostic 1/235, "database does not
@@ -1157,7 +1157,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNE: Target(
             source=CatalogueSource.BNE,
-            rank=11,
+            rank=12,
             transport=Transport.SRU,
             # **The OPAC hostname, and that is the whole finding.** This library was
             # recorded as having no open interface, measured against
@@ -1228,7 +1228,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LIBRIS: Target(
             source=CatalogueSource.LIBRIS,
-            rank=12,
+            rank=13,
             transport=Transport.SRU,
             # SRU on LIBRIS's own server, so Sweden needs no Z39.50 client. The
             # same records answer Z39.50 on port 210 of this host.
@@ -1258,7 +1258,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.MELINDA: Target(
             source=CatalogueSource.MELINDA,
-            rank=13,
+            rank=14,
             transport=Transport.SRU,
             # SRU on Melinda's own server, the National Library of Finland's
             # public API host. Measured 2026-11-16.
@@ -1286,7 +1286,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BIBSYS: Target(
             source=CatalogueSource.BIBSYS,
-            rank=14,
+            rank=15,
             transport=Transport.SRU,
             # Alma's SRU path on the network zone's own host, where the
             # Norwegian libraries' shared records live. The National Library of
@@ -1386,6 +1386,37 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             retries_as_isbn10=True,
             refuses_component_parts=True,
         ),
+        CatalogueSource.SNK: Target(
+            source=CatalogueSource.SNK,
+            rank=8,
+            transport=Transport.Z3950,
+            # The national library's Metaproxy in front of its Virtua catalogue.
+            # The database is `Default`; the national bibliography's records
+            # carry its local fields 919, 949 and 972, which no reader here reads.
+            base_url="z3950://z3950.snk.sk:1111/Default",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            # **`978-80`, which Czech and Slovak publishers share**, and which
+            # the NKP, carrying no remit, is asked about too. `metadata`'s block
+            # for this row carries the bar.
+            serves_groups=frozenset({"978-80"}),
+            query_language=QueryLanguage.PQF,
+            record_schema=z3950.Syntax.MARC21.value,
+            # UTF-8 and declared in leader/09. `metadata`'s block for this row
+            # carries the measurement.
+            record_charset=RecordCharset.UTF8,
+            isbn_attribute=z3950.USE_ISBN,
+            lookup_records=5,
+            # No ISBN-10 retry: the index matches the ten digit form too, so
+            # a second search would ask the same thing. `metadata`'s block for
+            # this row measures it.
+            refuses_component_parts=True,
+        ),
         CatalogueSource.KB_DK: Target(
             source=CatalogueSource.KB_DK,
             rank=4,
@@ -1451,7 +1482,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OENB: Target(
             source=CatalogueSource.OENB,
-            rank=9,
+            rank=10,
             transport=Transport.SRU,
             base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
             reader=Reader.MARC_GND,
@@ -1478,7 +1509,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNA: Target(
             source=CatalogueSource.BNA,
-            rank=15,
+            rank=16,
             transport=Transport.SRU,
             # **Plaintext by necessity and an IP address by necessity**, which are
             # two separate compromises: port 9991 speaks no TLS, and the library
@@ -1531,7 +1562,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNU: Target(
             source=CatalogueSource.BNU,
-            rank=16,
+            rank=17,
             transport=Transport.SRU,
             # **The BNA's two compromises again**: port 9992 speaks no TLS and the
             # library publishes a bare address. That row's comment carries what
@@ -1575,7 +1606,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.GOOGLE_BOOKS: Target(
             source=CatalogueSource.GOOGLE_BOOKS,
-            rank=17,
+            rank=18,
             transport=Transport.BESPOKE,
             base_url="https://www.googleapis.com/books/v1/volumes",
             reader=Reader.GOOGLE_BOOKS,
@@ -1592,7 +1623,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNF: Target(
             source=CatalogueSource.BNF,
-            rank=18,
+            rank=19,
             transport=Transport.SRU,
             base_url="https://catalogue.bnf.fr/api/SRU",
             reader=Reader.DUBLIN_CORE,
@@ -1612,7 +1643,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LOC: Target(
             source=CatalogueSource.LOC,
-            rank=19,
+            rank=20,
             transport=Transport.SRU,
             base_url="http://lx2.loc.gov:210/lcdb",
             reader=Reader.MODS,
@@ -1662,11 +1693,11 @@ def origin(base_url: str) -> str:
 #: Every origin this application will open a catalogue connection to.
 #:
 #: **Scheme, host and port, and not just the host**, so a row cannot downgrade a
-#: TLS target to plaintext or move it to another port on the same name. **Eight**
+#: TLS target to plaintext or move it to another port on the same name. **Nine**
 #: targets speak no TLS: five are plain HTTP by necessity (ports 210, 210, 9991,
-#: 9991 and 9992 offer nothing else) and three are Z39.50, which has no TLS form
+#: 9991 and 9992 offer nothing else) and four are Z39.50, which has no TLS form
 #: here, and an allowlist of bare hostnames would let the HTTPS ones join them.
-#: Two of the eight authenticate, so a plaintext origin here is not only a
+#: Two of the nine authenticate, so a plaintext origin here is not only a
 #: question of what an eavesdropper reads.
 #: `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` recomputes that
 #: count from the rows and checks this sentence against it, because it had gone

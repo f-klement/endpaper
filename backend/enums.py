@@ -1007,7 +1007,7 @@ class CatalogueSource(StrEnum):
     **Not every source answers every question**, and the split is real rather
     than incidental. BNF and LOC are title search only, because neither was
     worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL, LIBRIS, KB_DK, BIBSYS,
-    MELINDA, SBN, PORBASE and OSZK are the other way round, **lookup only**, and
+    MELINDA, SBN, PORBASE, OSZK and SNK are the other way round, **lookup only**, and
     for two different reasons. The NKP's,
     the BNA's and the BNU's is the server's: each renders one populated record
     per response whatever page size is asked for, so a search for ten
@@ -1070,6 +1070,9 @@ class CatalogueSource(StrEnum):
     #: The Országos Széchényi Könyvtár, Hungary's national library. Z39.50 and
     #: MARC21.
     OSZK = "oszk"
+    #: The Slovenská národná knižnica, Slovakia's national library. Z39.50 and
+    #: MARC21.
+    SNK = "snk"
 
 
 # A member per `CatalogueSource` is checked below the class rather than
@@ -1109,6 +1112,7 @@ class RecordOrigin(StrEnum):
     SBN = "sbn"
     PORBASE = "porbase"
     OSZK = "oszk"
+    SNK = "snk"
     #: Typed by a member, or sent by a client that named no other origin.
     MANUAL = "manual"
     #: Read off the book's own file, or its name, on the scan page.

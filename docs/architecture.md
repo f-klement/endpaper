@@ -427,6 +427,7 @@ flowchart TB
     sbn["SBN, Z3950, MARC_GND, only 978-88"]
     porbase["PORBASE, Z3950, UNIMARC, only 978-972 and 978-989"]
     oszk["OSZK, Z3950, MARC_GND, only 978-615 and 978-963"]
+    snk["SNK, Z3950, MARC_GND, only 978-80"]
     open_library["OPEN_LIBRARY, BESPOKE, OPEN_LIBRARY"]
     oenb["OENB, SRU, MARC_GND, only 978-3"]
     nkp["NKP, SRU, DUBLIN_CORE_BARE"]
@@ -449,7 +450,8 @@ flowchart TB
   kb_dk --> sbn
   sbn --> porbase
   porbase --> oszk
-  oszk --> open_library
+  oszk --> snk
+  snk --> open_library
   open_library --> oenb
   oenb --> nkp
   nkp --> bne
@@ -491,8 +493,8 @@ harder" with a longer one.
 renders each record as MARCXML so the SRU door's readers read it. A Z39.50 row is a
 `z3950://host:port/database` address, a record syntax, the character set its records arrive
 in and a use attribute, and `targets.Target` refuses one missing any of them or naming a
-credential, which that door cannot carry. Three seeded targets use it, the SBN, PORBASE and
-the OSZK, each for ISBN lookups only. PORBASE answers in UNIMARC alone, which
+credential, which that door cannot carry. Four seeded targets use it, the SBN, PORBASE, the
+OSZK and the SNK, each for ISBN lookups only. PORBASE answers in UNIMARC alone, which
 `metadata._marc21_from_unimarc` maps onto MARC21 before the MARC21 reader sees it.
 
 ## Imports and files

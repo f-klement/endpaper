@@ -2281,6 +2281,50 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 #     `d`, a subunit, on 7; `refuses_component_parts` refuses `a` and `b`, so
 #     the 7 are read. The largest rendered answer was 9,993 bytes.
 
+# **The SNK, the Slovak National Library, over its Z39.50 server**: PQF on use
+# attribute 7, MARC21, read by `_dnb_record`. Measured on 2026-11-17, later
+# than the three above and by the same method, through `_lookup_one` on its own
+# row, one lookup at a time, over 700 ISBNs: the 500, the Polish, Danish and
+# Hungarian frames, and fifty Slovak ISBNs drawn from Wikidata by publisher
+# country, Slovakia, seed 20261116, from a pool of 120. The Slovak fifty are
+# not committed: the sample's Czech frame already holds `978-80`, and a frame
+# is committed only for a remit the sample holds nothing of
+# (`sources.TAIL_MARGINAL`).
+#
+#   * **16 of the 500**: 10 of the fifty Czech ISBNs, where the NKP answers 49,
+#     and 6 Austrian and German editions, each held by a source still asked
+#     about it, so it carries the `978-80` remit. It adds no book of the 500
+#     to the fifteen other sources that need no credential.
+#   * **On the fifty Slovak ISBNs it answers 27**, where those fifteen answer
+#     16 between them; **16 are books none of them holds**, all in `978-80`.
+#     Twenty of the fifty are in one `978-1` block that nothing asked holds.
+#   * **The index matches the ISBN-10 form too**, the BN_PL's way, so the row
+#     does not retry: 6 books were found by the thirteen digit search alone
+#     though every record fetched for them states only the ten digit form in
+#     `020`. Measured with the row retrying, the second search ran on 652
+#     lookups and found nothing.
+#   * Lookup latency over the 700, measured with that retry on: median
+#     0.060s, p90 0.069s, max 0.511s. The retry cost about 0.02s a miss, so
+#     these and the committed `seconds_snk` stand as an upper bound.
+#   * **It closes a connection at the door once about eight have arrived from
+#     one address within a minute.** One new connection every 1.5s was
+#     accepted eight times and then refused for half a minute; every 7.5s, one
+#     in eight was refused; every 8.2s, none. 22 of the 700 lookups were
+#     refused that way at open and answered when asked again 20 to 30s later.
+#     The refusal is a lost connection, `Unreachable`, so here it is
+#     `UNAVAILABLE` for this source and the walk goes on, as the OSZK's is:
+#     a household looking up, refreshing or enriching books the leading pair
+#     misses, `978-80` ones or `979` ones or any whose group cannot be named,
+#     faster than one each seven seconds or so between all its members will
+#     see some lookups report the SNK unavailable rather than the book
+#     missing, cached for `_MISS_TTL_SECONDS`. `METADATA_LIMIT` is per member
+#     and far above it.
+#   * UTF-8, `a` in leader/09 on 93 of 93 rendered records. Leader/07 is `m`
+#     on 88 and `b` on 5, articles about the book carrying no ISBN that
+#     `refuses_component_parts` refuses; every lookup that returned one found
+#     the book in another record. The largest rendered answer was 43,312
+#     bytes, five records, about 2% of `z3950.MAX_RESPONSE_BYTES`.
+
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -2331,19 +2375,20 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 # **What this chain covers without a Google Books key, which is what a default
 # install runs.** Three sources need a credential (`sources.NEEDS_A_KEY`), two
 # of them ship the login their library publishes and Google Books does not, so
-# the chain most deployments actually run is the seventeen sources a stock install
+# the chain most deployments actually run is the eighteen sources a stock install
 # asks. Measured over 500 domestic ISBNs across ten frames, it answers 441 and
 # misses 59, and outside German language publishing it misses 55 of 400.
 #
-# The twelve books between that and the fifteen sources that need nothing, which
+# The twelve books between that and the sixteen sources that need nothing, which
 # answer 429 and miss 71, are the two credentialled rows above: the Argentine
-# one uniquely adds 4 and the Uruguayan one 8. Of the fifteen, the Polish,
+# one uniquely adds 4 and the Uruguayan one 8. Of the sixteen, the Polish,
 # Swedish and Nordic rows add three books to the 395 the first seven answered,
 # an Italian edition only LIBRIS holds, a Brazilian book only the Royal Danish
 # Library and BIBSYS hold and a Greek one only Melinda holds; the sample has no
 # Polish or Nordic frame, and each row's block says what it adds there. The
-# three Z39.50 rows add 31 more, the SBN 15 Italian books and PORBASE 16
-# Portuguese ones.
+# Z39.50 rows add 31 more, the SBN 15 Italian books and PORBASE 16 Portuguese
+# ones; the OSZK and the SNK add none, the sample having no Hungarian or Slovak
+# frame.
 #
 # The same 500 books
 # under the roster of three releases
@@ -3480,6 +3525,14 @@ def _unimarc_renamed(codes: Mapping[str, str], subfields: _Subfields) -> _Subfie
     return [(codes[code], text) for code, text in subfields if code in codes]
 
 
+def _unimarc_isbn_qualifier(subfields: _Subfields) -> str | None:
+    """The first non empty `$b`, in parentheses, or None where there is none."""
+    qualifier = next((text for code, text in subfields if code == "b" and text), None)
+    if qualifier is not None and not qualifier.startswith("("):
+        return f"({qualifier})"
+    return qualifier
+
+
 def _unimarc_isbn(subfields: _Subfields) -> _Subfields:
     """`010` as `020`: hyphens out, and `$b` written inline after the number.
 
@@ -3487,9 +3540,7 @@ def _unimarc_isbn(subfields: _Subfields) -> _Subfields:
     qualifier `marc_fields.Subfields.isbn_is_qualified` already reads, so a
     number qualified `broch.` loses to a sibling stating none.
     """
-    qualifier = next((text for code, text in subfields if code == "b" and text), None)
-    if qualifier is not None and not qualifier.startswith("("):
-        qualifier = f"({qualifier})"
+    qualifier = _unimarc_isbn_qualifier(subfields)
     converted: _Subfields = []
     for code, text in subfields:
         if code == "a":
@@ -3636,6 +3687,13 @@ def _append_field(record: ElementTree.Element, tag: str, subfields: _Subfields) 
         ElementTree.SubElement(field, f"{_MARC21}subfield", {"code": code}).text = text
 
 
+def _append_form_of_item(converted: ElementTree.Element, datafield: ElementTree.Element) -> None:
+    """`106 $a` as `008`, the form of item at position 23."""
+    form = next((text[:1] for code, text in _unimarc_subfields(datafield) if code == "a"), "")
+    control = ElementTree.SubElement(converted, f"{_MARC21}controlfield", {"tag": "008"})
+    control.text = f"{form:>24}".ljust(40)
+
+
 def _marc21_from_unimarc(record: ElementTree.Element) -> ElementTree.Element | None:
     """One UNIMARC record as the MARC21 record the crosswalk makes of it.
 
@@ -3652,9 +3710,7 @@ def _marc21_from_unimarc(record: ElementTree.Element) -> ElementTree.Element | N
     for datafield in record.findall(f"{_MARC21}datafield"):
         tag = datafield.get("tag") or ""
         if tag == "106":
-            form = next((text[:1] for code, text in _unimarc_subfields(datafield) if code == "a"), "")
-            control = ElementTree.SubElement(converted, f"{_MARC21}controlfield", {"tag": "008"})
-            control.text = f"{form:>24}".ljust(40)
+            _append_form_of_item(converted, datafield)
         elif tag in _UNIMARC_FIELDS:
             marc21_tag, conversion = _UNIMARC_FIELDS[tag]
             _append_field(converted, marc21_tag, conversion(_unimarc_subfields(datafield)))
@@ -4563,6 +4619,7 @@ _SECONDARY_SOURCES: Final = frozenset(
         "sbn",
         "porbase",
         "oszk",
+        "snk",
     }
 )
 _SECONDARY_PENALTY: Final = 1
@@ -5179,6 +5236,7 @@ _MATCH_PRECEDENCE: Final = (
     "sbn",
     "porbase",
     "oszk",
+    "snk",
 )
 
 

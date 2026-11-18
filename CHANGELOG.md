@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- A lookup now also asks the Slovak National Library about books from Czech and Slovak publishers, after the Hungarian library and before Open Library; on fifty Slovak books it finds sixteen that no other free catalogue holds.
+
 ## v0.22.0
 
 _2026-11-17_

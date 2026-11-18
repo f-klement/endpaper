@@ -678,7 +678,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks eighteen catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks nineteen catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
@@ -691,7 +691,8 @@ the same book.
 **Phase two, asked in turn, only if neither knew the book:** the **National Library of
 Greece**, then the **Polish National Library**, then the **Royal Danish Library**, then
 the **SBN**, Italy's union catalogue, then **PORBASE**, Portugal's, then the **National
-Széchényi Library**, Hungary's, then **Open Library**, then the **Austrian
+Széchényi Library**, Hungary's, then the **Slovak National Library**, then **Open
+Library**, then the **Austrian
 National Library**, then the **Czech National Library**, then the **Spanish National
 Library**, then **LIBRIS**, the Swedish union catalogue, then **Melinda**, the
 Finnish one, then **BIBSYS**, the Norwegian one, then the **Biblioteca Nacional
@@ -705,15 +706,17 @@ no other `978` book in a named group: on its Greek books the NLG answers 34 to O
 ones the Polish library 30 to Open Library's 4, on its Danish ones the Royal Danish Library
 29 to Open Library's 1, on its Italian ones the SBN 26 to Open Library's 13, on its
 Portuguese ones PORBASE 25 to Open Library's 11, on its Hungarian ones the National
-Széchényi Library 17 to Open Library's 3, and on its `978-3` ones the ÖNB 1 to Open
-Library's 3 and the NKP's 0. The Polish, Danish and Hungarian frames are there because the
+Széchényi Library 17 to Open Library's 3, on its `978-80` ones the Slovak National Library
+4 to Open Library's 1, and on its `978-3` ones the ÖNB 1 to Open Library's 3 and the NKP's
+0. The Czech National Library answers 40 of those `978-80` books and carries no remit, so it
+is asked about them too, after Open Library. The Polish, Danish and Hungarian frames are there because the
 500 hold no Polish, Danish or Hungarian ISBN. A `979` ISBN, or one whose group cannot be
-named, reaches every such catalogue, so that lookup asks all six before Open Library: their
-measured p90s sum to about 3.3 seconds, and each Z39.50 catalogue that cannot be reached adds
+named, reaches every such catalogue, so that lookup asks all seven before Open Library: their
+measured p90s sum to about 3.4 seconds, and each Z39.50 catalogue that cannot be reached adds
 up to its ten second timeout, since a lookup has no overall deadline. Open Library is the broadest source and much the slowest, which is why it is here
 rather than in phase one.
 
-**Three of the eighteen need a credential and only one of them costs money**, which is why the
+**Three of the nineteen need a credential and only one of them costs money**, which is why the
 last three are where they are. Google Books has a key, a quota and a bill attached, so it is
 last and an ordinary lookup spends no quota at all. The Argentine and Uruguayan national
 libraries each need a login and charge nothing: each library publishes a username and
@@ -741,11 +744,12 @@ phase one judges a candidate by the books it would add rather than by everything
 **And in phase two it is asked only about the ISBNs it could hold.** An ISBN names its own
 registration group, `978-3` for German language publishing, `978-960` and `978-618` for
 Greek, `978-83` for Polish, `978-87` for Danish, `978-9974` for Uruguayan, `978-88` for
-Italian, `978-972` and `978-989` for Portuguese, `978-963` and `978-615` for Hungarian, and a
+Italian, `978-972` and `978-989` for Portuguese, `978-963` and `978-615` for Hungarian,
+`978-80` for Czech and Slovak, and a
 catalogue whose collecting remit is one of those is skipped for a book from another. So a
 German library stops paying a round trip to Athens on every scan the German pair misses.
-Measured over the same 500 ISBNs, for the chain that needs no credential: **2.366s per
-lookup becoming 1.268s**, and **2,151 phase two requests becoming 748**, for the same 429
+Measured over the same 500 ISBNs, for the chain that needs no credential: **2.376s per
+lookup becoming 1.263s**, and **2,325 phase two requests becoming 781**, for the same 429
 books.
 
 **The Spanish National Library declares no remit**, unlike the two above it, and that is a
@@ -768,10 +772,11 @@ The Danish catalogue is the same case again, with a twist: one Brazilian book of
 held by it and by BIBSYS, the Norwegian union catalogue, and nothing else, so one of the two
 may carry a remit and not both. The Danish national library carries `978-87` and BIBSYS,
 a union catalogue, carries none. Nor does Melinda, the
-Finnish union catalogue: it alone holds one Greek book of the 500. The SBN, PORBASE and the
-National Széchényi Library were put to all 500 and to the Polish, Danish and Hungarian
-frames, and every book each answers outside its own groups another catalogue still asked
-holds, so each is asked only about its own country's books.
+Finnish union catalogue: it alone holds one Greek book of the 500. The SBN, PORBASE, the
+National Széchényi Library and the Slovak National Library were put to all 500 and to the
+Polish, Danish and Hungarian frames, and every book each answers outside its own groups
+another catalogue still asked holds, so each is asked only about its own country's books;
+for the Slovak library that is `978-80`, which Czech publishers share.
 
 **No book is lost to it, and that is a measured bound rather than an intention.** A
 catalogue may carry a remit only if there is no book it alone answers outside that remit,
@@ -796,7 +801,7 @@ asymmetry in this table and is the server's rather than a preference: it returns
 filled in record per reply whatever page size is asked for, so ten search results would be
 ten requests. A lookup wants one record and gets one.
 
-**No order of the eighteen finds more books than another.** Every enabled source is asked
+**No order of the nineteen finds more books than another.** Every enabled source is asked
 until one answers, so the order decides latency and which records are merged, never
 coverage. Reordering is not the fix for a book the chain misses.
 
@@ -806,13 +811,13 @@ the registration groups it collects and no others. The bound on that is zero boo
 sentence above holds in practice as well as in principle.
 
 **What the chain covers on a stock install, which is one that has typed nothing.**
-Fifteen of the eighteen need no credential at all, two ship the one their library publishes,
+Sixteen of the nineteen need no credential at all, two ship the one their library publishes,
 and only Google Books takes a key you supply. Measured over 500
-domestic ISBNs across ten countries, the seventeen sources a stock install asks answer **441 and
+domestic ISBNs across ten countries, the eighteen sources a stock install asks answer **441 and
 miss 59**,
 and outside German language publishing they miss **55 of 400**.
 
-Twelve of those books are the two credentialled catalogues': the fifteen sources that need
+Twelve of those books are the two credentialled catalogues': the sixteen sources that need
 nothing answer **429 and miss 71**, the Argentine catalogue uniquely adds four and the
 Uruguayan one eight, each in its own country's frame. Of the 429, the SBN adds 15 to the
 twelve older free sources, all Italian, and PORBASE 16, all Portuguese: on the sample's fifty
@@ -825,8 +830,10 @@ sources holds; on fifty Swedish ones LIBRIS answers 45, 22 of them books none of
 holds; on fifty Danish ones the Royal Danish Library answers 38, 27 of them books none of
 the nine older free sources holds; on fifty Norwegian ones BIBSYS answers 48, 16 of them
 books none of those nine holds; on fifty Finnish ones Melinda answers all 50, 9 of them
-books none of those nine holds; and on fifty Hungarian ones the National Széchényi Library
-answers 40, 12 of them books none of the twelve older free sources holds.
+books none of those nine holds; on fifty Hungarian ones the National Széchényi Library
+answers 40, 12 of them books none of the twelve older free sources holds; and on fifty Slovak
+ones the Slovak National Library answers 27, 16 of them books none of the fifteen older free
+sources holds. Neither adds a book of the 500.
 
 The same books under an
 earlier release answered 300: the three national catalogues added since, the NLG, the NKP
@@ -863,7 +870,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the eighteen sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the nineteen sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the

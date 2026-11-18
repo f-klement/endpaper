@@ -189,11 +189,11 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
             assert origin.startswith(schemes), target.source
 
     def test_the_origins_are_one_per_host_and_carry_the_scheme(self):
-        """Scheme and port, not a bare host: eight targets speak no TLS and a
+        """Scheme and port, not a bare host: nine targets speak no TLS and a
         hostname allowlist would let the HTTPS ones join them.
 
         **Counted rather than listed**, and the count is the thing: two of the
-        eight authenticate, so a plaintext origin is no longer only a question
+        nine authenticate, so a plaintext origin is no longer only a question
         of what an eavesdropper reads.
         `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` names them
         and checks the two documents that state the number.
@@ -202,7 +202,7 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
             targets.origin(target.base_url) for target in targets.SEEDED.values()
         } == targets.SEEDED_ORIGINS
         plaintext = {o for o in targets.SEEDED_ORIGINS if not o.startswith("https://")}
-        assert len(plaintext) == 8
+        assert len(plaintext) == 9
 
 
 class TestARowCannotCarryQueryStructure:

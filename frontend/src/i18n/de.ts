@@ -1879,6 +1879,7 @@ export const de: Messages = {
   "providers.name.sbn": "Italienischer Nationaler Bibliotheksdienst",
   "providers.name.porbase": "PORBASE",
   "providers.name.oszk": "Ungarische Nationalbibliothek",
+  "providers.name.snk": "Slowakische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

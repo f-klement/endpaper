@@ -246,13 +246,14 @@ def is_placeholder_title(title: str) -> bool:
 #: `is_physical_book` being what the search paths and K10plus ask.
 #:
 #: **This is the fallback now, and a code test stands in front of it.**
-#: `is_physical_book` is reached from eighteen sources, the whole roster less the
+#: `is_physical_book` is reached from nineteen sources, the whole roster less the
 #: two that never ask it: the DNB, K10plus, the OENB, the NLG, the BNE, the
 #: BN_PL, LIBRIS, Melinda, BIBSYS, the Royal Danish Library, the SBN, PORBASE,
-#: the OSZK, the NKP, the BNA, the BNU, the BnF and the Library of Congress.
-#: Fourteen of them state the carrier in codes and are asked those first, the
-#: thirteen MARC ones through `marc_fields.Fields.describes_a_book`, PORBASE's
-#: after the UNIMARC crosswalk, and the Library of Congress through
+#: the OSZK, the SNK, the NKP, the BNA, the BNU, the BnF and the Library of
+#: Congress. Fifteen of them state the carrier in codes and are asked those
+#: first, the fourteen MARC ones through
+#: `marc_fields.Fields.describes_a_book`, PORBASE's after the UNIMARC
+#: crosswalk, and the Library of Congress through
 #: `metadata._loc_carrier_is_book`. The four Dublin Core sources decide it from
 #: prose alone, and two of them state their own,
 #: `metadata._NKP_ONLINE` and `metadata._BNF_ONLINE`. **The BNA states none,
@@ -262,9 +263,9 @@ def is_placeholder_title(title: str) -> bool:
 #: read by the same reader, states none either.
 #:
 #: **So a reader who has met a new wording should not lengthen this.** Widening
-#: it still changes what all eighteen refuse, and #124 is the record of what that
+#: it still changes what all nineteen refuse, and #124 is the record of what that
 #: buys: the wording is a property of the language, the language list is open,
-#: and fourteen of the eighteen never needed the wording at all.
+#: and fifteen of the nineteen never needed the wording at all.
 _ONLINE_FORMS: Final = r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
 _DISC_FORMS: Final = r"audio disc|sound (?:disc|recording)|videodisc|dvd|blu-?ray"
 
