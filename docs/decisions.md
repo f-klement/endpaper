@@ -2324,9 +2324,10 @@ says so rather than implying a round trip.
 `Z` under a plain comparison; collation for display order is a separate change.
 ### A route docstring is API documentation, not an internal comment
 
-FastAPI serves a handler's docstring as the operation description at `/docs`, `/redoc` and
-`/openapi.json`, and `orval` ships it as a doc comment in `frontend/src/api/generated/`. So
-a route docstring has an audience that cannot open the repository.
+FastAPI serves a handler's docstring as the operation description in `/openapi.json`, which
+any signed in member can read, and `orval` ships it as a doc comment in
+`frontend/src/api/generated/`. So a route docstring has an audience that cannot open the
+repository.
 
 Recorded because moving logic out of two handlers took their documentation with it.
 Measured on `openapi.json`: `POST /api/books/authors/merge` went from **1277 characters to
@@ -3083,9 +3084,9 @@ books the viewer may not see. That is the `list_tags` disclosure again by a
 different door.
 
 **The fourth pass reports every read of those tables and decides nothing.** Which
-statements are safe is a hand written allowlist of ten, each a source fragment and
+statements are safe is a hand written allowlist, each entry a source fragment and
 a reason, with a test asserting the fragment appears in the statement at the line
-it is matched to. Two of the ten are correct queries reported anyway, and a test
+it is matched to. Some entries are correct queries reported anyway, and a test
 keeps them reported so the cost is not quietly removed.
 
 **Deciding correctness was tried first and abandoned on evidence.** Five versions
@@ -11002,6 +11003,9 @@ The same reasoning gives it the catalogue's rate limit counter rather than one o
 size: there is one published catalogue, and a harvester and a browser reading the same
 records should not have two budgets between them.
 
+The SRU server also has a switch of its own, read after this gate: see *The SRU server has a
+switch of its own*.
+
 ## The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned
 
 `Shelf.seen_by_the_public` filters rows and `schemas/public.py` is the column boundary for
@@ -11064,6 +11068,8 @@ obvious derivation fails: "the column has no length limit" gets `dc.description`
 `dc.subject` wrong, since its column is `String(100)` and its cost is a correlated `EXISTS`
 over a join. The two classes are declared per row with no default, so a thirteenth index
 cannot be added without somebody deciding what it costs.
+`dc.subject` adds a charge per tag per book on top of its class: see *`dc.subject` is
+charged by the public shelf's tags per book*.
 
 **The parse bounds stay.** They bound structure, which is memory and stack; the budget
 bounds work, which is CPU. Neither is the other, and the budget is applied on top, so it is
@@ -16512,10 +16518,10 @@ suite does not run on the second engine and nothing skips on one. SQLite is the 
 target and what the whole suite runs on. The published prose says so in those words.
 
 **`postgresql+pg8000://` is the spelling, and the bare scheme is the trap.** SQLAlchemy
-resolves `postgresql://` to its default driver, psycopg. Nothing in `database.py` rewrites it, so the obvious
-URL still fails, with an error naming a package the image deliberately does not carry.
-Every published table and every comment now spells the full scheme; normalising it in code
-is a separate decision and is in the tracker.
+resolves `postgresql://` to its default driver, psycopg, which the image deliberately does
+not carry. `database.py` does not rewrite the URL; it refuses it at startup with a message
+naming the full scheme (see *A Postgres URL naming any driver but pg8000 is refused at
+startup, never rewritten*). Every published table and every comment spells the full scheme.
 
 **The connection is not certificate checked and can be cleartext, and shipping the driver
 is what made that an operator's problem rather than a developer's.** It is authenticated,
@@ -22344,7 +22350,7 @@ Settled by the owner. `_checked_collection` already answered 400 for a collectio
 
 `subtitle`, `author`, `publisher`, `description` and `series_name` hold no empty or whitespace only string. `models.BLANK_IS_NULL` names them and `models.blank_as_none` is the rule, with four callers: `Book`'s `@validates` hook for every ORM write (the request bodies, evidence, and the MARC, OPDS and CSV creates, which build a `Book` from a record with no request body), the two request bodies' `mode="before"` validators, `backup._parse_row` for a restore, and `evidence.is_empty`. Revision d3f8a1c6b250 nulled the stored ones.
 
-* **Only all whitespace changes.** Text keeps its spaces, because trimming is a second rule nobody asked for. Whitespace is `str.isspace`'s 29 characters on both engines; a character that looks blank and is not whitespace (zero width space, Hangul filler, byte order mark, Mongolian vowel separator U+180E, which left the whitespace set in Unicode 6.3) is a value and is kept. A test runs every one of the 29 and the four lookalikes through the revision on SQLite in CI, and on PostgreSQL 18 in the nightly whole suite run, since the `test:postgres` selection on the release paths does not include that file.
+* **Only all whitespace changes.** Text keeps its spaces, because trimming is a second rule nobody asked for. Whitespace is `str.isspace`'s 29 characters on both engines; a character that looks blank and is not whitespace (zero width space, Hangul filler, byte order mark, Mongolian vowel separator U+180E, which left the whitespace set in Unicode 6.3) is a value and is kept. A test runs every one of the 29 and the four lookalikes through the revision on SQLite in CI, and on PostgreSQL 18 in the nightly whole suite run, since the `test:postgres` selection on the release paths does not include that class.
 * **Why the model is the home.** It is the one hook every ORM write passes, so a new writer is covered without knowing the rule. It does not fire on a Core insert or `Query.update`, so the restore calls the function itself, as it does `covers.storable` for `cover_url`; no `Query.update` or bulk write touches the five columns today.
 * **Why the request bodies keep their validators.** They run before `max_length`, so a blank wider than the column is null rather than a 422. They call the same function over the same tuple, so it is one rule at two sites, not two rules.
 
@@ -27041,3 +27047,184 @@ point there, so the generated file holds each text once.
   Node dependencies; it is included whole rather than trimmed by a special case.
 - The link to `/licences/third-party.txt` is a 404 under `bun run dev`: the file exists
   only in a built image.
+
+## `dc.subject` is charged by the public shelf's tags per book (2026-11-19)
+
+**Decision.** A `dc.subject` comparison charges `Cost.EXPENSIVE` (8) plus
+`SUBJECT_CHARGE_PER_TAG` (1) for each tag per book above one, rounded up. Tags
+per book is tag links over books on `Shelf.seen_by_the_public`, measured once per
+request and only when the query names the index. The two value enum stays.
+
+**Why this shape and not a separate bound.** Measured on builder, 3,000 public
+books, 2,000 character descriptions, 400 tag vocabulary, two runs of three:
+eight subject comparisons go from 45 to 56 ms at one tag per book to 624 to 644 ms
+at forty, while description and title stay flat. One subject comparison at forty
+tags is 78 to 80 ms, most of the 102 to 115 ms the whole budget buys. So a
+separate bound that does not know tags per book has to pick a density: set for
+forty it allows one subject comparison per query in every library, refusing
+`dc.subject any "two words"` that costs about 12 ms at one tag, and it is still
+wrong past forty. A bound that does know tags per book is this shape plus a
+second calibrated constant. The measurement this shape needs costs 6 to 16 ms per
+request that names the index, on the same corpus.
+
+**Why the mean and the public shelf.** The `EXISTS` evaluates once per tag link,
+so the cost is links over the shelf: the mean, not the maximum. The charge
+reaches a client in a refusal's details, so a count including private books
+would publish an aggregate of them.
+
+**What was measured and not taken.** Rewriting the `EXISTS` as an uncorrelated
+`IN` over `book_tags` joined to `tags` still scales with tags per book (in8 151 to
+155 ms at ten tags, 577 to 585 ms at forty), so the SQL shape is not the lever.
+Vocabulary size from 40 to 30,000 at ten tags per book moves neither form.
+SQLite VM steps were tried as a deterministic instrument and rejected: they
+count one opcode for a LIKE over 2,000 characters, so they rank description below
+title. LIKE evaluations are the instrument the test pins.
+
+**Consequence.** A public shelf averaging more than 57 tags per book refuses every
+`dc.subject` query. One comparison there extrapolates to 109 to 117 ms, the
+whole budget's worth, so that is the bound working rather than a side effect.
+
+**Pinned by** `tests/test_sru.py::TestTheSubjectChargeFollowsTagsPerBook`.
+
+## A catalogue's own bound is applied at the door seam, inside the fan out's wait (2026-11-19)
+
+Ticket "bound each source separately" (GitLab 132), decision D8 of the source as data epic.
+
+`Target.timeout_seconds` ends one question to one catalogue: a lookup with its ISBN-10 retry, or one title search. It is applied in `metadata._within_its_own_bound`, which `_lookup_one` and `_search_one` call around the door, so one rule covers the SRU, Z39.50 and bespoke doors alike.
+
+**On a search, the shared deadline stays the ceiling by construction rather than by a comparison.** The bound runs inside `_within_deadline`'s wait, so a bound longer than the time left is never reached and the fan out's cancellation arrives first. Nothing reads `SEARCH_DEADLINE_SECONDS` to clamp a row, which is why `targets.py` does not import `metadata`. **A lookup holds no shared deadline**, so there the row's bound is the only one over the question beyond one request's own.
+
+**The two protocol doors are handed the same absolute moment.** `fetch.get_once(deadline=)` and `z3950.association(deadline=)` already took one; handing it on means the Z39.50 client's own socket timeout is derived from the row's bound rather than from `z3950.TIMEOUT_SECONDS`, so an abandoned association frees its thread at the bound instead of up to ten seconds later. The bespoke door's adapters own their clients and are bounded by the seam alone.
+
+**A row is refused a bound outside `0 < seconds <= targets.TIMEOUT_CEILING_SECONDS`**, the lower of `fetch.TIMEOUT_SECONDS` and `z3950.TIMEOUT_SECONDS`. Past the Z39.50 figure `z3950.association` raises `ValueError`, which would reach a member as a 500 rather than as one source being `UNAVAILABLE`; past the SRU figure the row would wait longer than it did before it had a bound. The comparison is written so NaN fails it, and `ck_catalogue_targets_timeout` holds the same rule in the table, so a restore cannot write a row the dataclass would refuse when one is read back.
+
+**A seed is a margin over a measurement, not the measurement.** The slowest ask the row answered, doubled and rounded up to whole seconds, at least 3 and at most 10. The slowest rather than the 95th percentile: over about 20 asks the percentile discards the one or two slowest, and at the BNE that left an observed ask at 80% of the bound. **The measurement is narrow, and a seed is read against it.** One run through `metadata._lookup_one` and `_search_one` from one cluster node (builder), on 2026-11-19 from 13:33Z to 13:37Z, one ask at a time per host at least 2 s apart: 22 ISBN lookups and 20 title searches per row answering each. It covers one time of day only, so a catalogue slower in its own evening is not measured, and most Z39.50 lookups were misses, so a hit's record transfer is barely sampled there. Generous because a leading source cut by its bound leaves a merged record without it in the cache for a day, where a miss is cached for minutes. **A Z39.50 row gets one second more**: YAZ takes whole seconds and `z3950_yaz._options` truncates what is left, which keeps an abandoned thread inside the bound but opens a 3 second row with a 2 second wait. A row with no trustworthy measurement keeps NULL, one request's own 10 seconds as before.
+
+**The seed migration updates each row by source, whatever it held.** No row can carry a household's choice yet, and the seeder writes `targets.SEEDED` over every seeded row on every boot; a condition on the old value would only let a restored archive and the constant disagree until that boot.
+
+**Rejected: wrapping only, with no deadline handed down.** It holds the bound, but leaves a Z39.50 thread running to the client's ten second socket timeout after every miss.
+
+## A Postgres URL naming any driver but pg8000 is refused at startup, never rewritten (2026-11-19)
+
+**`database._refuse_a_driver_this_image_lacks` refuses a URL whose backend is
+`postgresql` or `postgres` and whose driver is not `pg8000`, before `create_engine`
+imports anything.** The message names `postgresql+pg8000://` and never the URL, which
+carries the password. Owner, 2026-11-19 (GitLab 333, Q3): refuse rather than rewrite.
+
+**Wider than the bare scheme, deliberately.** SQLAlchemy 2.1 resolves a bare
+`postgresql://` to psycopg, which dies in `create_engine` with a `ModuleNotFoundError`.
+`postgres://` fails with SQLAlchemy's `NoSuchModuleError` and `postgresql+psycopg2://`
+with a `ModuleNotFoundError`, the same failure under other names, and nothing but pg8000
+is installed. The engine is pg8000
+shaped besides: `ssl_context`, the cleartext check and the SQLSTATE mapping read pg8000
+alone. A derived image that installs another driver on purpose is refused too, which is
+the cost of not rewriting: the message tells that operator what this image supports.
+
+**Placed in `_connect_args`, whose result is `create_engine`'s argument**, so it runs
+first by evaluation order. A child interpreter arm in `tests/test_database.py` holds the
+order: placed after `create_engine`, startup dies on the import error again.
+
+## The schema is behind sign in, its two viewers are gone, and `google_books_ready` stays public (2026-11-19)
+
+**`/openapi.json` requires `get_current_user`.** FastAPI's own is off (`openapi_url=None`)
+and `main._schema` serves it, `include_in_schema=False`. Owner, 2026-11-19 (GitLab 398, Q4).
+
+**`/docs` and `/redoc` are removed rather than gated** (`docs_url=None`, `redoc_url=None`,
+and no route of ours). They never rendered: the page's CSP (`script-src 'self'`) refuses
+the CDN script and the inline bootstrap both viewers depend on, so each was a blank page
+for everybody. Loosening the CSP for them was not worth it, since it guards every page of
+the app and the schema itself is what a caller reads. Both paths stay in
+`errors.API_PREFIXES`, so a browser opening one gets a JSON 404 rather than the app shell.
+`/docs/oauth2-redirect` went with them: FastAPI adds it only when `docs_url` is set.
+
+- **Every auth mode works through the one dependency**: a bearer token under local and
+  ldap (ldap issues the same token at sign in), the proxy's header under proxy.
+- **A browser navigation carries no bearer token**, and the only cookie is the cover
+  cookie at `Path=/covers`, so under local and ldap a member opening `/openapi.json` in a
+  tab gets 401. Widening the cover cookie was not taken: it is narrowed to one GET route
+  on purpose. A caller sends the token as `Authorization: Bearer <token>`.
+- **Regeneration is untouched**: `scripts/dump_openapi.py` calls `app.openapi()` in
+  process and Orval reads the committed `frontend/openapi.json`. Nothing fetches the
+  route. The public catalogue and the SRU server do not read it.
+
+**`google_books_ready` on `GET /api/settings/features` stays public, deliberately.** The
+backfill refusal, `catalogue_access.GOOGLE_BOOKS_IS_NOT_ASKED`, tells any member whether
+Google Books is asked; that is safe only because the flag tells anybody.
+Narrowing the flag fails
+`tests/test_catalogue_access.py::TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`,
+and that test goes with the refusal: whoever narrows the flag rewrites both in the same
+change. The constant's comment says so.
+
+## The SRU server has a switch of its own (2026-11-19)
+
+**Decision.** `/sru` needs library mode, the catalogue published, and `sru_server_enabled`,
+which defaults off. The switch is read after `routers.public.public_reader` by
+`routers.sru.sru_switch`, through `settings_store.sru_is_served`, which also reads the publish
+state. Off, the route answers the gate's own 404, same status and same body.
+
+**Why a switch.** Owner, 2026-09-05, on issues #176 and #178: publishing a catalogue to people
+and serving a machine protocol are two decisions, and an archive may want the first without
+the second. This revises "The SRU server borrows the public catalogue's gate rather than
+growing one": it still borrows the gate and adds one row after it.
+
+**Why a 404 and not an SRU diagnostic.** SRU's diagnostics are how a server that is answering
+refuses one request. A switched off server is not answering, and every SRU client reads a 404
+as "no SRU service at this address". A diagnostic (1/2, "system temporarily unavailable", was
+the candidate) would tell a stranger that a catalogue is here and its protocol is withheld,
+which is what the 404 rule exists not to say. It would also need a new member of
+`sru.Diagnostic`.
+
+**Why the conjunction is repeated in `sru_is_served`.** The router runs `public_reader` first
+for the rate limit, so the publish check runs twice per request. Two settings reads buy an
+answer that stays right for any caller that asks it alone, and a switch that cannot publish a
+catalogue whatever the dependency list says.
+
+**Why default off, and why an upgrade keeps SRU where it was served.** The owner's rule on
+#178: every export protocol defaults off, so a fresh install serves no SRU until an admin says
+so. The owner's decision of 2026-11-19: a deployment whose catalogue is published when it
+upgrades keeps answering on `/sru`. Revision `f73ebc9f0436` writes the switch on where no row for
+it exists and both library mode and the publish row read true as `settings_store` reads them,
+so an upgrade neither narrows nor widens what any deployment serves. Library mode is part of
+the condition because without it the public gate refused `/sru` before the switch existed.
+
+**One row per protocol, never a shared one.** #178's testing section: a shared gate is where
+two switches become one.
+
+## A public record says on the shelf or on loan, at its own path, for the title (2026-11-19)
+
+Owner's decision on issue #29, 2026-11-19: a stranger may see whether a copy is on the shelf or
+on loan, with no due date, behind its own switch, off by default. A due date says when a member
+will have the book at home, which is more than availability needs. The ticket's own text already
+ruled out the borrower, a member, a patron and a count.
+
+**Its own route, `GET /api/public/books/{id}/availability`, not a field on `PublicBookOut`.** A
+field would be `null` on every record and every listing row while the switch is off, which
+changes every public answer for a feature that is off by default. As a route, the record and
+the listing are byte for byte what they were with the switch on or off, and the switch decides
+only whether this path answers. The cost is a second request per record view, against the same
+rate limit; a person reading records stays far under 120 a minute.
+
+**The switch off is the gate's own 404**, as with SRU: a stranger cannot tell it from an
+unpublished catalogue. It runs after `public_reader`, so probing it spends the catalogue's rate
+limit. No migration: nothing showed availability before, so off is right for a fresh deployment
+and an upgraded one alike.
+
+**A stranger can tell when the answer changes, and that was accepted.** The payload says only
+on the shelf or on loan, but nothing coarsens it and no cache holds it, so somebody polling one
+record (the rate limit allows twice a second) learns when it went out and when it came back. They
+never learn when it is due back or who has it. The owner accepted availability on that basis: the
+due date was the line drawn, not the moment of change.
+
+**It answers for the title, not the row.** A copy is a row of its own, so the record reads on
+the shelf while it or any public copy in its `copy_group` has no open loan, and on loan only when
+every one is out. **Private copies count for nothing in either direction**: only the ids
+`Shelf.seen_by_the_public` returns are asked, through `Loans.open_on`. A private copy on the
+shelf making a title read as available, or its loan making one read as out, would tell a
+stranger the private copy exists. `tests/test_nothing_private_leaves.py::TestAPrivateLoanChangesNoPublicAnswer`
+lends a private copy of the public Book and asserts no public answer changes, once with the
+public copy out and once with it in, because each state hides one direction of a miscounted
+private loan; beside it, a control that lending the public copy does change one.
+
+**Search results do not carry it.** Story 2 asks to see that a copy is out; the item record is
+where a reader decides to come. Adding it to the listing would need a field on the listing row,
+which is the byte for byte cost above, or a request per row.

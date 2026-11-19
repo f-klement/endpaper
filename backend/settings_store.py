@@ -107,6 +107,16 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     SettingKey.PUBLIC_CATALOGUE_ENABLED: "false",
     # Off, so a published catalogue is `noindex` until somebody says otherwise.
     SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED: "false",
+    # Off, so a catalogue published to people is not also served over SRU until
+    # an admin says so; the owner's decision on issue #178 is that every export
+    # protocol starts off. **A deployment already serving SRU keeps it**:
+    # revision `f73ebc9f0436` writes the row on where the catalogue was
+    # published before the switch existed, since otherwise this default would
+    # read there and withdraw it.
+    SettingKey.SRU_SERVER_ENABLED: "false",
+    # Off: a public record says nothing about loans until an admin says so
+    # (owner's decision on issue #29). See `availability_is_shown`.
+    SettingKey.PUBLIC_AVAILABILITY_ENABLED: "false",
     # An empty JSON object: no sender has run yet. Not a preference, so it has
     # no field in `SettingsUpdate` and never reaches `_read_settings`.
     SettingKey.SENDER_HEALTH: "{}",
@@ -788,6 +798,29 @@ def public_catalogue_may_be_indexed(db: Session) -> bool:
     conjunction is the same shape as the one above and for the same reason.
     """
     return public_catalogue_is_published(db) and get_bool(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED)
+
+
+def sru_is_served(db: Session) -> bool:
+    """Whether the SRU server answers.
+
+    Its own switch **and** the publish state, the same shape as
+    `public_catalogue_may_be_indexed` and for the same reason: a switch that
+    could turn the protocol on while nothing is published would be a way to
+    publish the catalogue without saying so. `routers.sru` runs the public gate
+    before asking this, so the conjunction is repeated there on purpose: this
+    answer stays right for any caller that asks it alone.
+    """
+    return public_catalogue_is_published(db) and get_bool(db, SettingKey.SRU_SERVER_ENABLED)
+
+
+def availability_is_shown(db: Session) -> bool:
+    """Whether a public record says if its book is on the shelf or on loan.
+
+    Its own switch **and** the publish state, for `sru_is_served`'s reason: a
+    switch that answered while nothing is published would be a way to publish
+    something without saying so.
+    """
+    return public_catalogue_is_published(db) and get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED)
 
 
 def accounts_are_open_to_outsiders(db: Session) -> bool:

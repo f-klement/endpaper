@@ -121,12 +121,13 @@ const KEYS: Record<string, readonly unknown[]> = {
   }),
   authorWikipedia: books.getAuthorWikipediaQueryKey({ lang: Locale.en }),
   listCollections: collections.getListCollectionsQueryKey(),
-  // The published catalogue, and the **first three keys in this file with no
+  // The published catalogue, and the **first four keys in this file with no
   // session behind them**. They are deliberately not part of any write: see
   // "leaves the published catalogue to its own staleness rule" below.
   listPublicBooks: publicCatalogue.getListPublicBooksQueryKey(),
   listPublicBooksInfinite: publicCatalogue.getListPublicBooksInfiniteQueryKey(),
   getPublicBook: publicCatalogue.getGetPublicBookQueryKey(7),
+  getPublicAvailability: publicCatalogue.getGetPublicAvailabilityQueryKey(7),
   listLoans: loans.getListLoansQueryKey(),
   listOverdue: loans.getListOverdueQueryKey(),
   myOverdue: loans.getMyOverdueQueryKey(),
@@ -301,7 +302,10 @@ describe("the inventory is complete", () => {
     //
     // 65 on 2026-11-19, counted with that same command: a book's further cover
     // images, two reads (the list and one image's file) among five routes.
-    expect(Object.keys(KEYS).length).toBe(65);
+    //
+    // 66 on 2026-11-19, counted with that same command: whether a published
+    // record is on the shelf or on loan, one route and one key.
+    expect(Object.keys(KEYS).length).toBe(66);
   });
 });
 
@@ -376,7 +380,7 @@ describe("the catalogue is everything derived from the books table", () => {
   it("leaves the published catalogue to its own staleness rule", () => {
     // **Excluded by decision, and the decision is not the one the four outward
     // lookups get.** Those four are excluded because no write can make them
-    // stale. These three can: editing a book does change what a visitor sees.
+    // stale. These four can, a loan included: editing a book does change what a visitor sees.
     //
     // What decides it is who pays. The public queries are the only ones in
     // this file with no session behind them, and they are answered under a
@@ -390,7 +394,7 @@ describe("the catalogue is everything derived from the books table", () => {
     // What is given up is small and bounded. A signed-out reader never calls
     // any of this, because a session with no writes never invalidates
     // anything; the only client holding both is an admin previewing through
-    // "See what a visitor sees", and both public hooks carry
+    // "See what a visitor sees", and every public hook carries
     // `staleTime: 60_000`, so that preview is at most a minute behind.
     //
     // Measured rather than read off the regex: `/api/public/books` is not in
@@ -401,6 +405,7 @@ describe("the catalogue is everything derived from the books table", () => {
       "listPublicBooks",
       "listPublicBooksInfinite",
       "getPublicBook",
+      "getPublicAvailability",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }

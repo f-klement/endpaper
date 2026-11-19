@@ -1,8 +1,9 @@
 # API reference
 
-Base URL is the app's own origin. Interactive docs (Swagger) at `/docs`, the OpenAPI schema
-at `/openapi.json`. Both are generated from the code, so they cannot drift from it, and
-that schema is the input to the frontend's generated client.
+Base URL is the app's own origin. The OpenAPI schema is at `/openapi.json`, generated from
+the code so it cannot drift from it, and it is the input to the frontend's generated client.
+It is at the `user` level below: the schema carries every route's description, and that is
+for members.
 
 This page covers what the schema does not express: who may call what, and why a given
 status code comes back.
@@ -1860,8 +1861,9 @@ nothing about the others, and completing it from the defaults would read a reque
 disable one catalogue as an instruction to switch six on. A name this build does not know
 is refused with 422, and the list is bounded at the size of the roster.
 
-`PUT /api/settings` accepts `library_mode`, `public_catalogue_enabled` and
-`public_catalogue_indexing_enabled`, and **refuses no combination of them**: an admin may
+`PUT /api/settings` accepts `library_mode`, `public_catalogue_enabled`,
+`public_catalogue_indexing_enabled` and `sru_server_enabled`, and **refuses no combination
+of them**: an admin may
 store a publish row while library mode is off, and the catalogue stays unpublished because
 the routes ask `public_catalogue_is_published` rather than reading a row. Refusing the
 write instead would make the order two toggles are saved in matter, and would lose an
@@ -2053,7 +2055,8 @@ evaluated on the server, so a publish row left on while library mode is off serv
 |---|---|---|---|
 | GET | `/api/public/books` | **public** | Search the published catalogue. **404** when nothing is published |
 | GET | `/api/public/books/{book_id}` | **public** | One record. **404** for a book that is private, trashed or absent |
-| GET | `/sru` | **public** | The SRU base URL. Same switches, same rate limit. Not in the OpenAPI schema |
+| GET | `/api/public/books/{book_id}/availability` | **public** | `on_shelf` or `on_loan` for the title, any public copy in counting as on the shelf. **404** while its own switch is off, and for every reason the record route gives one |
+| GET | `/sru` | **public** | The SRU base URL. Same switches plus its own, same rate limit. Not in the OpenAPI schema |
 | GET | `/robots.txt` | **public** | Generated from the switches. Not in the OpenAPI schema |
 
 **`HEAD` answers 404 where `GET` answers 200**, on these routes and on every other GET
@@ -2109,7 +2112,10 @@ nofollow` and `/robots.txt` disallows everything.
 `/sru` is the same catalogue over the protocol other library systems speak: CQL in a query
 string, MARCXML out. It runs the **same** gate as the JSON catalogue above, which means the
 same two switches, the same 404 rather than 403, and the same 120 a minute counter shared
-with it rather than a second budget of its own.
+with it rather than a second budget of its own. Then it needs its own switch,
+`sru_server_enabled`, which is off by default; off, `/sru` answers the same 404 as an
+unpublished catalogue. The revision adding it writes it on where the catalogue was already
+published, so an upgraded deployment keeps answering.
 
 It is **not** in the OpenAPI schema, for the reason `/robots.txt` is not: it is a document
 another institution's software fetches, not an operation this application's own client
@@ -2160,8 +2166,10 @@ Masking (`*` and `?`) is supported and anchoring (`^`) is not.
 There is a sixth bound on what the query costs to **run**, which is a different question:
 comparing a term against an index is charged against a budget of **64 units** and a query
 that would spend more is refused. One comparison costs **1 unit** through most indexes and
-**8** through `dc.description` and `dc.subject`, which measured an order of magnitude
-dearer than the rest. `cql.serverChoice` and `bib.anywhere` compare three columns, so one
+**8** through `dc.description`, which measured an order of magnitude dearer than the rest.
+`dc.subject` costs 8 plus one unit for each tag per book above one, averaged over the public
+catalogue, because it compares every tag of every book: 17 where books carry ten tags on
+average. `cql.serverChoice` and `bib.anywhere` compare three columns, so one
 comparison through either costs **3**.
 
 **`=` compares a term once; `any` and `all` compare once per word.** So

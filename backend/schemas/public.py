@@ -107,6 +107,44 @@ class PublicBookSort(StrEnum):
         return BookSort(self.value)
 
 
+class PublicAvailability(StrEnum):
+    """Whether a reader with no account could take this title off the shelf.
+
+    Two values and no third, and the narrowness is the owner's decision on
+    issue #29: a stranger learns whether a copy is out now, never when it is
+    due back or who has it. Asking again and again does show when the answer
+    changes, which the owner accepted; the due date was the line drawn,
+    because it says when a member will have the book at home.
+    """
+
+    ON_SHELF = "on_shelf"
+    ON_LOAN = "on_loan"
+
+
+class PublicAvailabilityOut(BaseModel):
+    """Whether a published record is on the shelf or on loan, and nothing else.
+
+    **Its own payload at its own path, not a field on `PublicBookOut`**, so
+    the item record and the listing stay byte for byte what they were whether
+    the switch is on or off; the switch decides whether this path answers at
+    all. A field would be `null` on every record with the switch off, which is
+    a change to every public answer for a feature that is off by default.
+
+    **For the title, not for this one row.** A copy is a row of its own
+    (`docs/data-model.md`, *Copies*), so a record answers `on_shelf` when it
+    or any public copy beside it has no open loan, and `on_loan` only when
+    every one is out. Not a count either: issue #29 rules a count out beside
+    the borrower's name.
+
+    **A private copy counts for nothing either way.** Only the copies
+    `Shelf.seen_by_the_public` returns are asked, so a private copy on the
+    shelf cannot make a title read as available, and its loan cannot make one
+    read as out: either would tell a stranger the private copy exists.
+    """
+
+    status: PublicAvailability
+
+
 class PublicOnlineLinkOut(BaseModel):
     """A catalogue's online link, MARC 856: a fact about the object as a record.
 

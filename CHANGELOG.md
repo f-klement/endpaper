@@ -11,6 +11,15 @@
 - A book keeps up to seven more images beside its cover, such as the back, the spine or a dust jacket, and any of them can be made the shelf cover.
 - A replaced cover shows at once rather than after the browser's cache expires.
 - The image now ships the licence texts of the third party software it carries, linked from the Appearance page.
+- In library mode, each candidate in the title search picker names the catalogue it came from.
+- In library mode, a record offered for a file name in the rapid queue names the catalogue it came from, like the title search does.
+- The SRU server has its own switch, Serve this catalogue over SRU, under the public catalogue settings. It starts off on a new installation; a deployment already serving SRU finds it on and keeps serving.
+- An SRU search by subject is charged by how many tags the public catalogue's books carry on average, so a heavily tagged catalogue refuses a long subject query rather than running it slowly.
+- A published catalogue can show whether each book is on the shelf or on loan, never who has it or when it is due back. Turn it on with Show whether a book is on the shelf or on loan, in the public catalogue settings; it starts off.
+- A slow catalogue is now given up on after a few seconds of its own rather than after ten, so it holds up a lookup less.
+- A Postgres `DATABASE_URL` spelled without `+pg8000` now stops startup with a message naming `postgresql+pg8000://`, instead of an import error about psycopg.
+- `/openapi.json` now needs a signed in member; a request with no session answers 401.
+- `/docs` and `/redoc`, which the page's security policy kept blank, are gone; the schema stays at `/openapi.json` for a signed in member.
 
 ## v0.22.0
 

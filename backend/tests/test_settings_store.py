@@ -153,6 +153,37 @@ class TestLibraryModeAndThePublicCatalogue:
         different decisions, and the default answer to the second is no."""
         assert settings_store.DEFAULTS[SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED] == "false"
 
+    def test_the_sru_server_starts_off(self):
+        """Every export protocol starts off: a catalogue published to people is
+        not also served to software until an admin says so."""
+        assert settings_store.DEFAULTS[SettingKey.SRU_SERVER_ENABLED] == "false"
+
+    def test_availability_starts_off(self):
+        """Owner's decision on issue #29: a public record says nothing about
+        loans until an admin turns it on."""
+        assert settings_store.DEFAULTS[SettingKey.PUBLIC_AVAILABILITY_ENABLED] == "false"
+
+    def test_availability_needs_a_published_catalogue_as_well(self, db):
+        """The switch on its own shows nothing to anybody."""
+        settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        assert settings_store.availability_is_shown(db) is False
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
+        assert settings_store.availability_is_shown(db) is True
+
+    def test_sru_needs_a_published_catalogue_as_well(self, db):
+        """The switch on its own cannot publish a catalogue."""
+        settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        assert settings_store.sru_is_served(db) is False
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
+        assert settings_store.sru_is_served(db) is True
+
+    def test_a_published_catalogue_is_not_served_over_sru_by_default(self, db):
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
+        assert settings_store.sru_is_served(db) is False
+
     def test_a_fresh_database_publishes_nothing(self, db):
         """The default read through the accessor, not off the table: a default
         that is never consulted is not a default."""
@@ -195,7 +226,7 @@ class TestLibraryModeAndThePublicCatalogue:
         settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true")
         assert settings_store.public_catalogue_may_be_indexed(db) is True
 
-    def test_the_three_switches_are_not_pinnable_from_the_environment(self):
+    def test_the_publishing_switches_are_not_pinnable_from_the_environment(self):
         """Settings rather than environment variables, and pinned as a decision
         rather than left as an accident of an unedited table.
 
@@ -212,6 +243,8 @@ class TestLibraryModeAndThePublicCatalogue:
                 SettingKey.LIBRARY_MODE,
                 SettingKey.PUBLIC_CATALOGUE_ENABLED,
                 SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
+                SettingKey.SRU_SERVER_ENABLED,
+                SettingKey.PUBLIC_AVAILABILITY_ENABLED,
             )
             if config.env_variable_name(key)
         ]

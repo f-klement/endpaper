@@ -82,6 +82,34 @@ async function openCamera() {
   return user;
 }
 
+/** One search answer from the DNB, and the library mode flag as given. */
+function stubSearch(libraryMode: boolean) {
+  api.on("/api/settings/features", {
+    body: {
+      google_books_ready: false,
+      goodreads_lookup_enabled: false,
+      default_locale: "en",
+      library_mode: libraryMode,
+    },
+  });
+  api.on("/api/books/search", {
+    body: {
+      matches: [{ title: "Dune", source: "dnb" }],
+      asked: ["dnb"],
+      unasked: [],
+    },
+  });
+}
+
+async function search() {
+  const user = userEvent.setup();
+  await user.type(
+    screen.getByLabelText("Search by title or author"),
+    "dune{Enter}",
+  );
+  await screen.findByRole("button", { name: /Dune/ });
+}
+
 /** Press the printed number reader's read button once the engine is ready. */
 async function readPrinted(user: ReturnType<typeof userEvent.setup>) {
   const read = await screen.findByRole("button", {
@@ -127,6 +155,31 @@ describe("ScanPage", () => {
   it("offers manual ISBN entry alongside the camera", () => {
     renderWithProviders(<ScanPage accountId={ME} />);
     expect(screen.getByLabelText("ISBN")).toBeInTheDocument();
+  });
+
+  describe("the catalogue a search candidate came from", () => {
+    it("is named in library mode", async () => {
+      stubSearch(true);
+      renderWithProviders(<ScanPage accountId={ME} />);
+      await search();
+
+      expect(
+        await screen.findByText("Source: German National Library"),
+      ).toBeInTheDocument();
+    });
+
+    it("is not named in a household", async () => {
+      stubSearch(false);
+      renderWithProviders(<ScanPage accountId={ME} />);
+      await search();
+      // False is also the answer before the flags arrive, so the row is read
+      // only once they have been asked; the panel's own tests hold the rest.
+      await waitFor(() =>
+        expect(api.lastCall("/api/settings/features")).toBeDefined(),
+      );
+
+      expect(screen.queryByText(/^Source:/)).not.toBeInTheDocument();
+    });
   });
 
   describe("a file is the fourth way of choosing which book", () => {

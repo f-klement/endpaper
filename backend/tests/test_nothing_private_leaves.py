@@ -50,7 +50,9 @@ one that is:
   else does not**: no `loans` row, no `user_books` row, no `reading_progress`
   row, and no integer, date or boolean on the private Book. A route serving one of those
   for a private Book passes this sweep, and the fixture marking five related
-  tables is what would otherwise read as covering all of them.
+  tables is what would otherwise read as covering all of them. Whether a
+  private Book's open loan changes any public answer is asked separately, by
+  `TestAPrivateLoanChangesNoPublicAnswer`.
 
 **The public Book is swept too, for what its public record withholds.** Each
 free text column `tests/schemas/test_public.py::WITHHELD` names carries
@@ -74,6 +76,7 @@ from typing import cast, get_args, get_type_hints
 import pytest
 from sqlalchemy import CheckConstraint, String, Table, Text
 
+import ratelimit
 import settings_store
 from auth import get_current_user, get_current_user_for_cover
 from enums import (
@@ -88,9 +91,11 @@ from models import (
     Classification,
     CustomField,
     CustomFieldValue,
+    Loan,
     Note,
     Quote,
     Tag,
+    copy_group_token,
 )
 from tests.conftest import auth_header
 from tests.schemas.test_public import WITHHELD
@@ -178,6 +183,9 @@ UNAUTHENTICATED: dict[str, str] = {
     "GET /api/healthz": "liveness, and it reads no table",
     "GET /api/public/books": "the published catalogue, gated by the publish switch",
     "GET /api/public/books/{book_id}": "one published record, 404 for every other reason",
+    "GET /api/public/books/{book_id}/availability": (
+        "on the shelf or on loan for one published record, gated by its own switch as well"
+    ),
     "GET /api/settings/features": "which features the sign in page may offer",
     "GET /api/settings/login-image": "the sign in background, chosen by an admin",
     "GET /auth/config": "which auth mode this deployment runs, before a session exists",
@@ -193,7 +201,7 @@ UNAUTHENTICATED: dict[str, str] = {
     "POST /auth/verify": ("returning the confirmation code, which settles the account and issues no session"),
     "GET /covers/login_bg.{extension}": "the sign in background's bytes",
     "GET /robots.txt": "what a crawler is told, which must answer either way",
-    "GET /sru": "the SRU base URL, gated by the same publish switch",
+    "GET /sru": "the SRU base URL, gated by the same publish switch and its own",
     # KOReader's progress sync. A device cannot hold a session, so it signs in
     # on every call with a sync password; every route but these two answers 401
     # to a caller without one. See `routers/kosync.py`.
@@ -304,7 +312,8 @@ def _withheld_strings() -> list[str]:
 
 
 def _publish(db) -> None:
-    """Both switches on, so the catalogue answers rather than 404ing.
+    """Every publishing switch on, SRU's and availability's included, so the
+    catalogue answers rather than 404ing.
 
     The sweep is worth nothing against a deployment publishing nothing: every
     catalogue route would answer 404 and the marker would be absent for a reason
@@ -313,6 +322,8 @@ def _publish(db) -> None:
     settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
     settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
     settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true")
+    settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
+    settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
 
 
 @pytest.fixture
@@ -471,6 +482,76 @@ class TestNothingPrivateLeavesByARoute:
             "surface a stranger reaches, so each needs a line here saying why "
             "it needs no session."
         )
+
+
+def _every_answer(client, marked: dict) -> dict[tuple[str, str, int], tuple[int, str]]:
+    """Status and body of every call, probe and Book id the sweep drives.
+
+    The limiters are cleared first, so a later snapshot is not a 429 where an
+    earlier one answered.
+    """
+    for limiter in list(vars(ratelimit).values()):
+        if isinstance(limiter, ratelimit.SlidingWindowLimiter):
+            limiter.reset()
+    answers = {}
+    for call in _calls():
+        for probe in PROBES:
+            for book_id in (marked["private"], marked["public"]):
+                response = _drive(client, call, probe, book_id)
+                answers[call, probe, book_id] = (response.status_code, response.text)
+    return answers
+
+
+def _lend(db, book_id: int, lender_id: int) -> None:
+    """An open loan on this Book, with a borrower and a due date to leak."""
+    due = datetime(2031, 5, 6)
+    db.add(Loan(book_id=book_id, loaned_to_name=MARKER, loaned_by_user_id=lender_id, due_at=due))
+    db.commit()
+
+
+class TestAPrivateLoanChangesNoPublicAnswer:
+    """A loan is not a row the marker sweep marks (see the module docstring), so
+    availability gets a sweep of its own: an open loan on a private Book must
+    change no answer any public call gives.
+
+    **The private Book is a copy of the public one** for the length of the
+    test, because that is the shape where a loan could leak: a title read as
+    available or out by counting a copy the public cannot see.
+    """
+
+    @pytest.mark.parametrize("public_copy_lent", [True, False], ids=["public copy out", "public copy in"])
+    def test_lending_the_private_copy_changes_nothing(
+        self, client, db, marked, admin, member, public_copy_lent
+    ):
+        """Both states of the public copy, because each hides one direction: with
+        it out the title already reads `on_loan`, so a private loan wrongly
+        counted cannot move it, and only the state with it in can show that."""
+        group = copy_group_token()
+        for book_id in marked.values():
+            db.get(Book, book_id).copy_group = group
+        if public_copy_lent:
+            _lend(db, marked["public"], admin["user"]["id"])
+        db.commit()
+        before = _every_answer(client, marked)
+
+        _lend(db, marked["private"], member["user"]["id"])
+
+        after = _every_answer(client, marked)
+        changed = sorted(key for key, answer in after.items() if before[key] != answer)
+        assert changed == [], (
+            f"A private Book's loan changed these public answers: {changed}. A "
+            "stranger reading the difference learns the private copy exists and "
+            "is out. Ask only copies `Shelf.seen_by_the_public` returns."
+        )
+
+    def test_lending_the_public_copy_does_change_an_answer(self, client, db, marked, admin):
+        """The control: without it the test above passes on a driver that never
+        reaches the availability route at all."""
+        before = _every_answer(client, marked)
+        _lend(db, marked["public"], admin["user"]["id"])
+
+        changed = {key[0] for key, answer in _every_answer(client, marked).items() if before[key] != answer}
+        assert changed == {"GET /api/public/books/{book_id}/availability"}
 
 
 class TestTheSweepWouldNotice:

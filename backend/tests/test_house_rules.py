@@ -1003,7 +1003,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **149** models under `schemas/`, **52** of
+    Measured on the tree as it stands: **150** models under `schemas/`, **52** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -8651,7 +8651,9 @@ class TestOneDoorParsesAResponseBody:
         the distinction the companion rule turns on. It imports `fetch` for
         `pinned_client` and the address policy, keeps its own read loop, and
         parses nothing: an image is bytes. So it belongs in this set and has
-        nothing to be exempted from in the rule above.
+        nothing to be exempted from in the rule above. **`targets.py` is here
+        for one constant**, `fetch.TIMEOUT_SECONDS`, half of the ceiling on a
+        row's own bound, and fetches and parses nothing.
         """
         fetchers = {
             path.name for path in application_modules() if _imports_fetch(ast.parse(path.read_text()))
@@ -8664,6 +8666,7 @@ class TestOneDoorParsesAResponseBody:
             "opds.py",
             "covers.py",
             "readwise.py",
+            "targets.py",
         }
 
 

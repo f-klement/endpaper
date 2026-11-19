@@ -389,6 +389,9 @@ export const en = {
   // sends somebody off to type a book in by hand.
   "search.slow.nothingAsked":
     "Nothing was searched. Every catalogue this library has switched on is a slow one.",
+  // Library mode only: which catalogues produced a candidate, by the names the
+  // settings list shows. A merged row names every catalogue that answered.
+  "search.source.from": "Source: {names}",
 
   // ── Loans ───────────────────────────────────────────────────────────────
   "loans.title": "Loans",
@@ -679,6 +682,18 @@ export const en = {
   "settings.public.confirmIndexing":
     "Search engines are told to stay away until you allow them separately.",
   "settings.public.confirmAction": "Publish",
+  "settings.protocols.title": "Protocols for other libraries",
+  "settings.protocols.sruLabel": "Serve this catalogue over SRU",
+  "settings.protocols.sruHint":
+    "Another library's software can search the published catalogue at /sru and read its records as MARCXML. It sees exactly what a visitor sees.",
+  "settings.protocols.sruNeedsPublishing":
+    "Publish the catalogue first. SRU serves only a published catalogue.",
+  "settings.availability.label":
+    "Show whether a book is on the shelf or on loan",
+  "settings.availability.hint":
+    "Each published record says on the shelf or on loan. A visitor never sees who has a book or when it is due back.",
+  "settings.availability.confirmShown":
+    "Shown as well: whether each book is on the shelf or on loan, never who has it or when it is due back.",
   "settings.lending.title": "Lending",
   "settings.lending.summary":
     "Reminders for books that are late, and where they are sent.",
@@ -2170,6 +2185,8 @@ export const en = {
   "public.fact.pages": "Pages",
   "public.fact.format": "Format",
   "public.fact.series": "Series",
+  "public.availability.on_shelf": "On the shelf",
+  "public.availability.on_loan": "On loan",
   "origin.label": "Record source",
   "origin.unknown": "Unknown",
   "origin.manual": "Typed by hand",

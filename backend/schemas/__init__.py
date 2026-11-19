@@ -132,6 +132,8 @@ from schemas.opds import (
 )
 from schemas.progress import ProgressCreate, ProgressOut
 from schemas.public import (
+    PublicAvailability,
+    PublicAvailabilityOut,
     PublicBookOut,
     PublicBookSort,
     PublicClassificationOut,
@@ -322,6 +324,8 @@ __all__ = [
     "PrivacyUpdate",
     "ProgressCreate",
     "ProgressOut",
+    "PublicAvailability",
+    "PublicAvailabilityOut",
     "PublicBookOut",
     "PublicBookSort",
     "PublicClassificationOut",

@@ -1,6 +1,11 @@
 """The SRU base URL: one route, and everything it has to pass first.
 
-**The gate is `routers.public.public_reader`, imported rather than restated.**
+**Two gates, in order: `routers.public.public_reader`, then `sru_switch`.** The
+first is the published catalogue's own and decides whether anything is served
+at all; the second is this protocol's switch, because publishing a catalogue to
+people and serving it to another library's software are two decisions.
+
+**`public_reader` is imported rather than restated.**
 That dependency is the published catalogue's whole entry condition: the rate
 limit, then the two switches, in that order so that probing the gate is bounded
 too. Writing a second one here would be a second answer to "is anything
@@ -14,6 +19,14 @@ Consequences worth stating, because they are not obvious from one import:
   catalogue has not published it over a protocol either.
 * **404 and not 403.** A 403 would confirm that this deployment holds a
   catalogue it is declining to serve, to anybody who asked.
+* **The switch off is the same 404, not an SRU diagnostic.** A diagnostic in a
+  200 is how a server that is answering refuses one request; a switched off
+  server is not answering, and the honest thing to tell an SRU client is that
+  there is no SRU service at this address, which every client reads from a 404.
+  A diagnostic would also tell a stranger that a catalogue is here and its
+  protocol is withheld, which is what the 404 rule exists not to say. Both
+  gates refuse before the query string is read, so no answer depends on what
+  was asked, or on whether a Book matching it exists.
 * **The rate limit is the catalogue's, not a second one.** One published
   catalogue, one budget: a harvester and a browser reading the same records
   should not have two.
@@ -31,8 +44,9 @@ and in a printed record. `/api/` names the private half of this deployment.
 import re
 from typing import Final
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
+import settings_store
 import sru
 from dependencies import DbSession
 from routers.public import public_reader
@@ -90,7 +104,27 @@ _DEFAULT_PORTS: Final = {"https": 443, "http": 80}
 #: The largest number that is a port.
 _MAX_PORT: Final = 65535
 
-router = APIRouter(tags=["sru"], dependencies=[Depends(public_reader)])
+
+def sru_switch(db: DbSession) -> None:
+    """Refuse every SRU request while the protocol's own switch is off.
+
+    **Runs after `public_reader`, never instead of it**: the rate limit there is
+    what bounds probing this switch, and the router's dependency list is in
+    that order. The answer is the gate's own 404, the same status and the same
+    body, so a stranger cannot tell a switched off protocol from an unpublished
+    catalogue.
+
+    **No `@refuses(404)`**, unlike `public_reader`: `/sru` is not in the OpenAPI
+    schema, so no operation exists to declare the 404 on, and
+    `tests/test_refusals.py` exempts this raise for that reason.
+    """
+    if not settings_store.sru_is_served(db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+#: Both gates on the router rather than on the handler, so a route added here
+#: cannot be added without them. The order is load bearing; see `sru_switch`.
+router = APIRouter(tags=["sru"], dependencies=[Depends(public_reader), Depends(sru_switch)])
 
 
 def server_for(request: Request) -> sru.Server:

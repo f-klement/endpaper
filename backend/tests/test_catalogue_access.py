@@ -30,6 +30,7 @@ import settings_store
 import sources
 from tests.bindings import SourceNames
 from tests.corpus import application_sources
+from tests.helpers import enable_google_books
 
 TREE_GUARDS = {
     "TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings": ("application_sources",),
@@ -807,3 +808,26 @@ class TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings:
             f"{sorted(self.HANDLERS)}. Add the new one here and its path to the "
             "parametrisation above, or an unauthenticated caller reaches it unchecked"
         )
+
+
+class TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead:
+    """`GOOGLE_BOOKS_IS_NOT_ASKED` tells a member whether this library asks Google
+    Books, which is safe only because `GET /api/settings/features` publishes that to
+    anybody as `google_books_ready`, deliberately.
+
+    **Narrowing the flag fails here**, and that is the point: the refusal then
+    discloses what the flag no longer does, so the narrowing has to take the refusal
+    with it. The flag is the conjunction of the switch and a key, the refusal reads
+    the plan; under the default source list the two answer alike.
+    """
+
+    @pytest.mark.parametrize("ready", [False, True])
+    def test_a_caller_with_no_session_reads_what_the_refusal_tells_a_member(self, client, member, db, ready):
+        if ready:
+            enable_google_books(db)
+
+        anybody = client.get("/api/settings/features")
+        refused = client.post("/api/books/identifiers/backfill", headers=member["headers"]).status_code == 409
+
+        assert anybody.status_code == 200
+        assert anybody.json()["google_books_ready"] is not refused

@@ -1,4 +1,4 @@
-import { useMemo, type FormEvent } from "react";
+import type { FormEvent } from "react";
 
 import type { BookMatch, CatalogueSource } from "../../../api/generated/model";
 import { Button, HelpButton } from "../../../components";
@@ -6,6 +6,7 @@ import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 import { catalogueName } from "../../../lib/catalogueName";
 import { CoverImage } from "../../components";
+import MatchSource, { useNameList } from "./MatchSource";
 
 interface SearchPanelProps {
   /**
@@ -31,6 +32,11 @@ interface SearchPanelProps {
   onSearchHarder: () => void;
   isSearchingHarder: boolean;
   hasSearchedHarder: boolean;
+  /**
+   * Whether each row names the catalogues that produced it. A cataloguer must
+   * be able to say where a record came from; a household never sees it.
+   */
+  libraryMode: boolean;
 }
 
 /** A one-line description of an edition, skipping the parts it lacks. */
@@ -67,6 +73,7 @@ export default function SearchPanel({
   onSearchHarder,
   isSearchingHarder,
   hasSearchedHarder,
+  libraryMode,
 }: SearchPanelProps) {
   const { t } = useTranslation();
 
@@ -149,7 +156,11 @@ export default function SearchPanel({
         hasSearchedHarder={hasSearchedHarder}
       />
 
-      <Matches matches={matches} onChoose={onChoose} />
+      <Matches
+        matches={matches}
+        onChoose={onChoose}
+        libraryMode={libraryMode}
+      />
     </div>
   );
 }
@@ -177,14 +188,8 @@ function SlowCatalogues({
   SearchPanelProps,
   "unasked" | "onSearchHarder" | "isSearchingHarder" | "hasSearchedHarder"
 >) {
-  const { t, locale } = useTranslation();
-  // The same conjunction list the settings screen uses for registration groups,
-  // and for the same reason: it gets "and" right in both languages and handles
-  // one, two and three without a branch here.
-  const names = useMemo(
-    () => new Intl.ListFormat(locale, { type: "conjunction" }),
-    [locale],
-  );
+  const { t } = useTranslation();
+  const names = useNameList();
 
   return (
     <>
@@ -236,7 +241,8 @@ function SlowCatalogues({
 function Matches({
   matches,
   onChoose,
-}: Pick<SearchPanelProps, "matches" | "onChoose">) {
+  libraryMode,
+}: Pick<SearchPanelProps, "matches" | "onChoose" | "libraryMode">) {
   const { t } = useTranslation();
   if (matches.length === 0) return null;
   return (
@@ -251,6 +257,7 @@ function Matches({
             key={`${match.google_books_id ?? match.isbn13 ?? ""}-${index}`}
             match={match}
             onChoose={onChoose}
+            libraryMode={libraryMode}
           />
         ))}
       </ul>
@@ -264,9 +271,11 @@ function Matches({
 function MatchRow({
   match,
   onChoose,
+  libraryMode,
 }: {
   match: BookMatch;
   onChoose: (match: BookMatch) => void;
+  libraryMode: boolean;
 }) {
   return (
     <li>
@@ -293,6 +302,7 @@ function MatchRow({
           <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
             {summarise(match)}
           </span>
+          {libraryMode && <MatchSource source={match.source ?? ""} />}
         </span>
       </button>
     </li>

@@ -248,6 +248,27 @@ class TestUpdateSettings:
         assert res.status_code == 200, res.text
         assert settings_store.get_bool(db, settings_router._STORED_BOOL[field]) is value
 
+    def test_a_member_cannot_switch_the_sru_server_on(self, client, member, db):
+        res = client.put("/api/settings", json={"sru_server_enabled": True}, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED) is False
+
+    def test_a_member_cannot_switch_public_availability_on(self, client, member, db):
+        body = {"public_availability_enabled": True}
+        res = client.put("/api/settings", json=body, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED) is False
+
+    def test_the_sru_switch_reads_back_as_stored_while_nothing_is_published(self, client, admin):
+        """The admin's intent, not what is served: the route also needs the
+        catalogue published, which `public_catalogue_published` reports."""
+        body = client.put("/api/settings", json={"sru_server_enabled": True}, headers=admin["headers"]).json()
+
+        assert body["sru_server_enabled"] is True
+        assert body["public_catalogue_published"] is False
+
     def test_an_absent_field_is_left_alone(self, client, admin):
         """The reason the update is partial.
 

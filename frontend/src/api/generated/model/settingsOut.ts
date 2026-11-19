@@ -44,9 +44,11 @@ export interface SettingsOut {
   overdue_webhook_enabled?: boolean;
   overdue_webhook_secret_preview?: string;
   overdue_webhook_url?: string;
+  public_availability_enabled?: boolean;
   public_catalogue_enabled?: boolean;
   public_catalogue_indexing_enabled?: boolean;
   public_catalogue_published?: boolean;
+  sru_server_enabled?: boolean;
   telegram_bot_token_from_env?: boolean;
   telegram_bot_token_preview?: string;
   telegram_chat_id?: string;

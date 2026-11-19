@@ -770,7 +770,7 @@ is this table.
 | `/covers/*` | a FastAPI router | Uploaded cover images, from `DATA_DIR/covers` |
 | `/api/healthz` | a FastAPI route | Liveness and readiness. Runs a query **and** stats the data directory under its own timeout |
 | `/kosync/*` | a FastAPI router | KOReader's progress sync protocol |
-| `/sru` | a FastAPI route | The SRU server, behind the public catalogue's gate |
+| `/sru` | a FastAPI route | The SRU server, behind the public catalogue's gate and its own switch |
 | everything else | `StaticFiles(html=True)` | The compiled React bundle |
 
 **`SERVE_FRONTEND=false` skips that mount**, leaving the API on its own. The shipped image

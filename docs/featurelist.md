@@ -381,7 +381,12 @@ whenever library mode is off, so turning library mode back off cannot leave a
 catalogue public.
 
 What a reader with no account gets is **search and one item record, and nothing
-else**. The record names its source, the catalogue it came from or how it was
+else**, unless an admin turns on a switch of its own, off by default, that adds
+one thing to the record: whether the book is **on the shelf or on loan**. A
+title with several copies reads as on the shelf while any public copy is in. A
+stranger sees whether it is out now, and somebody who keeps checking can tell
+when that changes; nobody sees when it is due back or who has it, and a
+private copy counts for nothing either way. The record names its source, the catalogue it came from or how it was
 entered; whether it was changed here is not published. Ownership, lending
 willingness, reading status, member names, notes, purchase details, the trash
 and every per member field are absent from the payload, not merely hidden by a
@@ -391,7 +396,7 @@ catalogue is `noindex` until indexing is separately allowed, because
 publishing a catalogue and inviting a search engine to crawl it are different
 decisions.
 
-**An SRU server, on the same two switches.** A published catalogue can be
+**An SRU server, on the same two switches and one of its own.** A published catalogue can be
 searched by a person; being searched by another institution's software needs a
 protocol, and the one this domain uses is SRU. `/sru` takes a CQL query and
 answers MARCXML, and `operation=explain` tells a client which indexes exist
@@ -400,7 +405,10 @@ catalogue exposes and not one row more: the same gate, the same rows, the same
 rate limit, and records built by the same MARC writer the export uses. A hostile
 query is bounded five ways on the parse and once more on what it costs to run,
 and refused as an SRU diagnostic rather than as an error a client cannot read.
-With library mode off the endpoint does not exist.
+Publishing the catalogue and serving it over SRU are separate decisions, so the
+protocol has its own switch, off on a new installation until an admin turns it on, and
+on after an upgrade where the catalogue was already published. With library mode,
+publishing or that switch off, the endpoint does not exist.
 
 ## Deliberately not built
 

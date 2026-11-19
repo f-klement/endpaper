@@ -415,6 +415,13 @@ class SettingsOut(BaseModel):
     #: `library_mode and public_catalogue_enabled`, computed on the server so
     #: the browser cannot get the rule wrong. See `FeatureFlagsOut`.
     public_catalogue_published: bool = False
+    #: Whether the SRU server may answer, as stored. Like the two above it, the
+    #: route also needs the catalogue published, so with
+    #: `public_catalogue_published` false this is intent and nothing is served.
+    sru_server_enabled: bool = False
+    #: Whether a public record says if its book is on the shelf or on loan, as
+    #: stored. Like the SRU switch, it also needs the catalogue published.
+    public_availability_enabled: bool = False
 
     #: Whether accounts here belong to people outside the household.
     #:
@@ -609,6 +616,12 @@ class SettingsUpdate(BaseModel):
     library_mode: bool | None = None
     public_catalogue_enabled: bool | None = None
     public_catalogue_indexing_enabled: bool | None = None
+    #: The SRU server's own switch. Stored whatever the publish state, for the
+    #: reason the three above are: the route reads it with the publish state.
+    sru_server_enabled: bool | None = None
+    #: Whether a public record shows on the shelf or on loan. Stored whatever
+    #: the publish state, for the SRU switch's reason.
+    public_availability_enabled: bool | None = None
 
     #: Whether accounts here belong to people outside the household. Turning it
     #: on gates accounts created afterwards and never strands a member already

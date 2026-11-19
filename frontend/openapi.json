@@ -6284,6 +6284,28 @@
         "title": "ProgressOut",
         "type": "object"
       },
+      "PublicAvailability": {
+        "description": "Whether a reader with no account could take this title off the shelf.\n\nTwo values and no third, and the narrowness is the owner's decision on\nissue #29: a stranger learns whether a copy is out now, never when it is\ndue back or who has it. Asking again and again does show when the answer\nchanges, which the owner accepted; the due date was the line drawn,\nbecause it says when a member will have the book at home.",
+        "enum": [
+          "on_shelf",
+          "on_loan"
+        ],
+        "title": "PublicAvailability",
+        "type": "string"
+      },
+      "PublicAvailabilityOut": {
+        "description": "Whether a published record is on the shelf or on loan, and nothing else.\n\n**Its own payload at its own path, not a field on `PublicBookOut`**, so\nthe item record and the listing stay byte for byte what they were whether\nthe switch is on or off; the switch decides whether this path answers at\nall. A field would be `null` on every record with the switch off, which is\na change to every public answer for a feature that is off by default.\n\n**For the title, not for this one row.** A copy is a row of its own\n(`docs/data-model.md`, *Copies*), so a record answers `on_shelf` when it\nor any public copy beside it has no open loan, and `on_loan` only when\nevery one is out. Not a count either: issue #29 rules a count out beside\nthe borrower's name.\n\n**A private copy counts for nothing either way.** Only the copies\n`Shelf.seen_by_the_public` returns are asked, so a private copy on the\nshelf cannot make a title read as available, and its loan cannot make one\nread as out: either would tell a stranger the private copy exists.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PublicAvailability"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "PublicAvailabilityOut",
+        "type": "object"
+      },
       "PublicBookOut": {
         "description": "One catalogue record, as published.\n\nEvery field here is a fact about the work or about the object as a\ncatalogue record. Nothing on it depends on who is asking, which is the\nproperty that makes a public response cacheable and `BookOut` not: see the\nwarning at the top of `serialisation.py`.",
         "properties": {
@@ -7652,6 +7674,11 @@
             "title": "Overdue Webhook Url",
             "type": "string"
           },
+          "public_availability_enabled": {
+            "default": false,
+            "title": "Public Availability Enabled",
+            "type": "boolean"
+          },
           "public_catalogue_enabled": {
             "default": false,
             "title": "Public Catalogue Enabled",
@@ -7665,6 +7692,11 @@
           "public_catalogue_published": {
             "default": false,
             "title": "Public Catalogue Published",
+            "type": "boolean"
+          },
+          "sru_server_enabled": {
+            "default": false,
+            "title": "Sru Server Enabled",
             "type": "boolean"
           },
           "telegram_bot_token_from_env": {
@@ -7964,6 +7996,17 @@
             ],
             "title": "Overdue Webhook Url"
           },
+          "public_availability_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Availability Enabled"
+          },
           "public_catalogue_enabled": {
             "anyOf": [
               {
@@ -7985,6 +8028,17 @@
               }
             ],
             "title": "Public Catalogue Indexing Enabled"
+          },
+          "sru_server_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sru Server Enabled"
           },
           "telegram_bot_token": {
             "anyOf": [
@@ -17762,6 +17816,62 @@
           }
         },
         "summary": "One record from the published catalogue",
+        "tags": [
+          "public",
+          "public"
+        ]
+      }
+    },
+    "/api/public/books/{book_id}/availability": {
+      "get": {
+        "description": "On the shelf or on loan, for the title this record is a copy of.\n\n**Never a due date, a borrower or when the loan began**: the payload has\none field and `PublicAvailability` has two values. What a book with\nseveral copies answers, and why a private copy counts for nothing, is\n`PublicAvailabilityOut`'s docstring.\n\n404 for every reason `get_public_book` gives one, and for the switch off.",
+        "operationId": "get_public_availability",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicAvailabilityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Whether a published record is on the shelf or on loan",
         "tags": [
           "public",
           "public"

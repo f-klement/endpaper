@@ -38,8 +38,10 @@ export interface SettingsUpdate {
   overdue_webhook_enabled?: boolean | null;
   overdue_webhook_secret?: string | null;
   overdue_webhook_url?: string | null;
+  public_availability_enabled?: boolean | null;
   public_catalogue_enabled?: boolean | null;
   public_catalogue_indexing_enabled?: boolean | null;
+  sru_server_enabled?: boolean | null;
   telegram_bot_token?: string | null;
   telegram_chat_id?: string | null;
 }

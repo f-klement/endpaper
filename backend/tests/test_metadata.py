@@ -6970,7 +6970,7 @@ def z3950_asked(row: targets.Target, rendered: tuple[z3950.Record, ...]) -> meta
     """
     client = FakeClient(session=FakeSession(hits=len(rendered), records=list(rendered)))
     with mock.patch.object(z3950, "_default_client", return_value=client):
-        return asyncio.run(metadata._z3950_lookup(row, "9789722040801"))
+        return asyncio.run(metadata._z3950_lookup(row, "9789722040801", deadline=None))
 
 
 def _parses(response: fetch.Fetched) -> bool:
@@ -6995,8 +6995,8 @@ def asked(
         return response
 
     with mock.patch.object(fetch, "get_once", get_once):
-        lookup = asyncio.run(metadata._sru_lookup(looked_up, "9783161484100", None))
-        found = asyncio.run(metadata._sru_search(searched, "der zauberberg", 5, None))
+        lookup = asyncio.run(metadata._sru_lookup(looked_up, "9783161484100", None, deadline=None))
+        found = asyncio.run(metadata._sru_search(searched, "der zauberberg", 5, None, deadline=None))
     return lookup, found
 
 
@@ -9265,7 +9265,7 @@ class TestTheIsbn10RetryMovesOnFromAMissOnly:
     async def _asked(self, *bodies: str) -> tuple[metadata.Lookup, list[str]]:
         with respx.mock(assert_all_called=False) as mock:
             route = mock.get(url__startswith=K10PLUS).mock(side_effect=[_xml(body) for body in bodies])
-            result = await metadata._sru_lookup(self._row(), self.ISBN, None)
+            result = await metadata._sru_lookup(self._row(), self.ISBN, None, deadline=None)
             sent = [str(call.request.url) for call in route.calls]
         return result, sent
 
@@ -9498,6 +9498,133 @@ class TestTheZ3950DoorIsBehindTheSameDispatch:
 
         with pytest.raises(ValueError, match="answers a lookup"):
             metadata.resolve(z3950_row())
+
+
+class TestEachSourceIsBoundedByItsOwnRow:
+    """`Target.timeout_seconds` ends one source's answer at the seam every door sits behind.
+
+    The first three arms run on a door that sleeps, so they hold the seam and not
+    a protocol; the last two hold that each protocol door is handed the same moment.
+    """
+
+    _BOUND = 0.5
+    _SLOWER_THAN_THE_BOUND = 3.0
+
+    @staticmethod
+    def _door(monkeypatch, door) -> None:
+        doors = dict(metadata._DOORS)
+        doors[targets.Transport.Z3950] = dataclasses.replace(
+            doors[targets.Transport.Z3950], lookup=door, search=door
+        )
+        monkeypatch.setattr(metadata, "_DOORS", doors)
+
+    def test_a_search_past_its_own_bound_costs_its_own_rows_and_none_of_the_wait(self, monkeypatch):
+        """Red before the bound was read: the search waited 3.0s and kept the slow rows."""
+        clock = VirtualClock()
+        monkeypatch.setattr(deadline, "time", clock)
+        quick = z3950_row(source=CatalogueSource.LOC)
+        slow = z3950_row(source=CatalogueSource.SBN, timeout_seconds=self._BOUND)
+        delays = {quick.source: 0.1, slow.source: self._SLOWER_THAN_THE_BOUND}
+
+        async def door(target, *_rest):
+            await asyncio.sleep(delays[target.source])
+            return [Record(title=target.source.value)]
+
+        self._door(monkeypatch, door)
+
+        async def fan_out():
+            asked = [metadata._search_one(row, "gatsby", 5, "", credential=None) for row in (quick, slow)]
+            return await metadata._within_deadline(asked, metadata.SEARCH_DEADLINE_SECONDS), clock.now
+
+        tiers, elapsed = asyncio.run(fan_out(), loop_factory=clock.loop)
+
+        assert tiers == [[Record(title="loc")], []]
+        assert elapsed == pytest.approx(self._BOUND)
+
+    def test_the_fan_outs_deadline_still_ends_a_search_whose_own_bound_is_longer(self, monkeypatch):
+        """The ceiling half: a door that swallowed the fan out's cancellation would wait 6.0s here."""
+        clock = VirtualClock()
+        monkeypatch.setattr(deadline, "time", clock)
+        row = z3950_row(timeout_seconds=10.0)
+
+        async def door(target, *_rest):
+            await asyncio.sleep(6.0)
+            return [Record(title=target.source.value)]
+
+        self._door(monkeypatch, door)
+
+        async def fan_out():
+            asked = [metadata._search_one(row, "gatsby", 5, "", credential=None)]
+            return await metadata._within_deadline(asked, metadata.SEARCH_DEADLINE_SECONDS), clock.now
+
+        tiers, elapsed = asyncio.run(fan_out(), loop_factory=clock.loop)
+
+        assert tiers == []
+        assert elapsed == pytest.approx(metadata.SEARCH_DEADLINE_SECONDS)
+
+    def test_a_lookup_past_its_own_bound_is_unavailable(self, monkeypatch):
+        clock = VirtualClock()
+        monkeypatch.setattr(deadline, "time", clock)
+
+        async def door(target, *_rest):
+            await asyncio.sleep(self._SLOWER_THAN_THE_BOUND)
+            return metadata.Lookup(Outcome.FOUND, source=target.source.value)
+
+        self._door(monkeypatch, door)
+        row = z3950_row(timeout_seconds=self._BOUND)
+
+        async def ask():
+            return await metadata._lookup_one(row, "9780743273565", "", credential=None), clock.now
+
+        answer, elapsed = asyncio.run(ask(), loop_factory=clock.loop)
+
+        assert answer.outcome is Outcome.UNAVAILABLE
+        assert elapsed == pytest.approx(self._BOUND)
+
+    def test_a_timeout_error_that_is_not_the_bounds_own_is_raised_rather_than_read_as_a_miss(
+        self, monkeypatch
+    ):
+        async def door(*_args):
+            raise TimeoutError("somebody else's clock")
+
+        self._door(monkeypatch, door)
+
+        with pytest.raises(TimeoutError, match="somebody else's clock"):
+            asyncio.run(
+                metadata._lookup_one(
+                    z3950_row(timeout_seconds=self._BOUND), "9780743273565", "", credential=None
+                )
+            )
+
+    def test_the_z3950_door_opens_its_association_under_the_rows_bound(self, monkeypatch):
+        """Red before: the client was opened under `z3950.TIMEOUT_SECONDS`, 10.0s."""
+        monkeypatch.setattr(deadline, "time", VirtualClock())
+        client = FakeClient(session=FakeSession(hits=0, records=[]))
+        monkeypatch.setattr(z3950, "_default_client", lambda: client)
+
+        asyncio.run(
+            metadata._lookup_one(z3950_row(timeout_seconds=2.0), "9780743273565", "", credential=None)
+        )
+
+        assert [timeout for _target, timeout in client.opens] == [2.0]
+
+    def test_the_sru_door_hands_every_form_the_same_deadline(self, monkeypatch):
+        """One bound over the question: the ISBN-10 retry does not start a fresh one."""
+        monkeypatch.setattr(deadline, "time", VirtualClock())
+        handed: list[float | None] = []
+
+        async def get_once(*_args: object, deadline: float | None, **_kwargs: object) -> httpx.Response:
+            handed.append(deadline)
+            return sru_response()
+
+        monkeypatch.setattr(fetch, "get_once", get_once)
+        row = dataclasses.replace(
+            targets.SEEDED[CatalogueSource.K10PLUS], timeout_seconds=2.0, retries_as_isbn10=True
+        )
+
+        asyncio.run(metadata._lookup_one(row, "9780743273565", "", credential=None))
+
+        assert handed == [2.0, 2.0]
 
 
 class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:

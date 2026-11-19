@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 35,524 |
+|  | [Backend](decisions.md#backend) | 35,525 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -128,7 +128,7 @@ repeat the argument.
 | Backend | [SQLite folds case in ASCII and Python does not](decisions.md#sqlite-folds-case-in-ascii-and-python-does-not) | 382 |
 | Backend | [A collection's name folds in Python, and the migration that did it merges](decisions.md#a-collections-name-folds-in-python-and-the-migration-that-did-it-merges) | 393 |
 | Backend | [The migration merges, and four SQLite traps decided its shape](decisions.md#the-migration-merges-and-four-sqlite-traps-decided-its-shape) | 134 |
-| Backend | [A route docstring is API documentation, not an internal comment](decisions.md#a-route-docstring-is-api-documentation-not-an-internal-comment) | 292 |
+| Backend | [A route docstring is API documentation, not an internal comment](decisions.md#a-route-docstring-is-api-documentation-not-an-internal-comment) | 296 |
 | Backend | [`authorship.py` owns author identity, and `authors.py` stays pure underneath](decisions.md#authorshippy-owns-author-identity-and-authorspy-stays-pure-underneath) | 308 |
 | Backend | [Book duplicates are not author identity](decisions.md#book-duplicates-are-not-author-identity) | 99 |
 | Backend | [The alias mapping is library wide; the shelf is what `visible_to` filters](decisions.md#the-alias-mapping-is-library-wide-the-shelf-is-what-visible_to-filters) | 453 |
@@ -158,7 +158,7 @@ repeat the argument.
 | Backend | [A `ValueError` no SRU handler caught, and a bound that could not have helped](decisions.md#a-valueerror-no-sru-handler-caught-and-a-bound-that-could-not-have-helped) | 139 |
 | Backend | [What was deliberately not done](decisions.md#what-was-deliberately-not-done) | 38 |
 | Backend | [What adding a catalogue cost, which is the seam's own report card](decisions.md#what-adding-a-catalogue-cost-which-is-the-seams-own-report-card) | 31 |
-| Backend | [The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it](decisions.md#the-privacy-rule-covers-the-tables-that-belong-only-to-a-book-and-does-not-try-to-be-clever-about-it) | 485 |
+| Backend | [The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it](decisions.md#the-privacy-rule-covers-the-tables-that-belong-only-to-a-book-and-does-not-try-to-be-clever-about-it) | 482 |
 | Backend | [The shared bibliographic vocabulary is a module, and MARC reading is not](decisions.md#the-shared-bibliographic-vocabulary-is-a-module-and-marc-reading-is-not) | 248 |
 | Backend | [The catalogue family publishes its decoders, and three readers are not decoders](decisions.md#the-catalogue-family-publishes-its-decoders-and-three-readers-are-not-decoders) | 281 |
 | Backend | [A list filter's toggle is a patch, not a helper over an array](decisions.md#a-list-filters-toggle-is-a-patch-not-a-helper-over-an-array) | 92 |
@@ -484,10 +484,10 @@ repeat the argument.
 | The refused long search names our own limit, not the catalogues' | [The runner checks its image against the pipeline for both toolchains, not one](decisions.md#the-runner-checks-its-image-against-the-pipeline-for-both-toolchains-not-one) | 451 |
 | The refused long search names our own limit, not the catalogues' | [What the pipeline now reports about its own CPU](decisions.md#what-the-pipeline-now-reports-about-its-own-cpu) | 622 |
 |  | [The library view is remembered per mode, and the household's key kept its name](decisions.md#the-library-view-is-remembered-per-mode-and-the-households-key-kept-its-name) | 349 |
-|  | [The SRU server borrows the public catalogue's gate rather than growing one](decisions.md#the-sru-server-borrows-the-public-catalogues-gate-rather-than-growing-one) | 149 |
+|  | [The SRU server borrows the public catalogue's gate rather than growing one](decisions.md#the-sru-server-borrows-the-public-catalogues-gate-rather-than-growing-one) | 173 |
 |  | [The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned](decisions.md#the-column-boundary-for-a-marc-record-is-marcpys-field-mapping-and-it-is-now-pinned) | 173 |
 |  | [Masking is supported because SQLite's LIKE does not backtrack](decisions.md#masking-is-supported-because-sqlites-like-does-not-backtrack) | 304 |
-|  | [The query bound is a cost budget, because a count of predicates is not a cost](decisions.md#the-query-bound-is-a-cost-budget-because-a-count-of-predicates-is-not-a-cost) | 238 |
+|  | [The query bound is a cost budget, because a count of predicates is not a cost](decisions.md#the-query-bound-is-a-cost-budget-because-a-count-of-predicates-is-not-a-cost) | 262 |
 |  | [The SRU response bound is charged in bytes, and the row count is not that bound](decisions.md#the-sru-response-bound-is-charged-in-bytes-and-the-row-count-is-not-that-bound) | 1,028 |
 |  | [An integer the storage engine cannot hold was three unauthenticated 500s](decisions.md#an-integer-the-storage-engine-cannot-hold-was-three-unauthenticated-500s) | 216 |
 |  | [A filter is a read of its column, and only the record writer was guarded](decisions.md#a-filter-is-a-read-of-its-column-and-only-the-record-writer-was-guarded) | 93 |
@@ -699,7 +699,7 @@ repeat the argument.
 |  | [A NUL arm is subsumed by a column type, not by an engine](decisions.md#a-nul-arm-is-subsumed-by-a-column-type-not-by-an-engine) | 129 |
 |  | [A refusal on Postgres is classified by SQLSTATE, and a bound is the narrowest engine's](decisions.md#a-refusal-on-postgres-is-classified-by-sqlstate-and-a-bound-is-the-narrowest-engines) | 291 |
 |  | [Creation is not preservation](decisions.md#creation-is-not-preservation) | 347 |
-|  | [The Postgres driver is a runtime dependency, and the image is the reason](decisions.md#the-postgres-driver-is-a-runtime-dependency-and-the-image-is-the-reason) | 791 |
+|  | [The Postgres driver is a runtime dependency, and the image is the reason](decisions.md#the-postgres-driver-is-a-runtime-dependency-and-the-image-is-the-reason) | 794 |
 |  | [The channel's loans are the public shelf's, not a second spelling of it](decisions.md#the-channels-loans-are-the-public-shelfs-not-a-second-spelling-of-it) | 106 |
 |  | [The loan door has three constructors, not two](decisions.md#the-loan-door-has-three-constructors-not-two) | 138 |
 |  | [What stayed outside that door, and why](decisions.md#what-stayed-outside-that-door-and-why) | 137 |
@@ -1074,4 +1074,10 @@ repeat the argument.
 | Further images of a book (2026-11-19) | [Files are named by the row, not the book](decisions.md#files-are-named-by-the-row-not-the-book) | 70 |
 | Further images of a book (2026-11-19) | [What each path does with the images](decisions.md#what-each-path-does-with-the-images) | 181 |
 |  | [The image ships one generated notices file, served at /licences/third-party.txt (2026-11-19)](decisions.md#the-image-ships-one-generated-notices-file-served-at-licencesthird-partytxt-2026-11-19) | 727 |
+|  | [`dc.subject` is charged by the public shelf's tags per book (2026-11-19)](decisions.md#dcsubject-is-charged-by-the-public-shelfs-tags-per-book-2026-11-19) | 389 |
+|  | [A catalogue's own bound is applied at the door seam, inside the fan out's wait (2026-11-19)](decisions.md#a-catalogues-own-bound-is-applied-at-the-door-seam-inside-the-fan-outs-wait-2026-11-19) | 595 |
+|  | [A Postgres URL naming any driver but pg8000 is refused at startup, never rewritten (2026-11-19)](decisions.md#a-postgres-url-naming-any-driver-but-pg8000-is-refused-at-startup-never-rewritten-2026-11-19) | 163 |
+|  | [The schema is behind sign in, its two viewers are gone, and `google_books_ready` stays public (2026-11-19)](decisions.md#the-schema-is-behind-sign-in-its-two-viewers-are-gone-and-google_books_ready-stays-public-2026-11-19) | 289 |
+|  | [The SRU server has a switch of its own (2026-11-19)](decisions.md#the-sru-server-has-a-switch-of-its-own-2026-11-19) | 365 |
+|  | [A public record says on the shelf or on loan, at its own path, for the title (2026-11-19)](decisions.md#a-public-record-says-on-the-shelf-or-on-loan-at-its-own-path-for-the-title-2026-11-19) | 486 |
 <!-- index: end -->

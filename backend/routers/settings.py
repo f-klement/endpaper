@@ -82,6 +82,12 @@ _STORED_BOOL: Final[dict[str, SettingKey]] = {
     # reason: an account policy turned on by mistake has to be correctable
     # without a redeploy.
     "accounts_open_to_outsiders": SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS,
+    # The SRU server's switch. Stored whatever the publish state, like the
+    # publish row: `settings_store.sru_is_served` reads both.
+    "sru_server_enabled": SettingKey.SRU_SERVER_ENABLED,
+    # Whether a public record shows on the shelf or on loan. Stored whatever
+    # the publish state: `settings_store.availability_is_shown` reads both.
+    "public_availability_enabled": SettingKey.PUBLIC_AVAILABILITY_ENABLED,
 }
 
 _SENDER_BOOL: Final[dict[str, SettingKey]] = {
@@ -281,6 +287,8 @@ def _read_settings(db: DbSession) -> SettingsOut:
             db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
         ),
         public_catalogue_published=settings_store.public_catalogue_is_published(db),
+        sru_server_enabled=settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED),
+        public_availability_enabled=settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED),
         accounts_open_to_outsiders=settings_store.accounts_are_open_to_outsiders(db),
         # **The stored list, not the one in force.** An admin has to see what
         # they set: a screen that hid Google Books because no key is configured
@@ -309,8 +317,11 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
     has_key = bool(settings_store.google_books_api_key(db))
 
     return FeatureFlagsOut(
-        # The conjunction alone. The raw toggle is admin-only on purpose: see
-        # `FeatureFlagsOut.google_books_ready`.
+        # The conjunction alone; the raw toggle is admin-only: see
+        # `FeatureFlagsOut.google_books_ready`. Public deliberately, and
+        # `catalogue_access.GOOGLE_BOOKS_IS_NOT_ASKED` relies on it: that refusal tells a
+        # member no more than this tells anybody. Narrowing this fails
+        # `TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`, and the refusal goes with it.
         google_books_ready=google_books_enabled and has_key,
         goodreads_lookup_enabled=settings_store.get_bool(db, SettingKey.GOODREADS_LOOKUP_ENABLED),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),

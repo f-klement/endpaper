@@ -15,11 +15,13 @@
 import { keepPreviousData, type InfiniteData } from "@tanstack/react-query";
 
 import {
+  useGetPublicAvailability,
   useGetPublicBook,
   useListPublicBooksInfinite,
 } from "../../api/generated/endpoints/public/public";
 import type {
   PagePublicBookOut,
+  PublicAvailability,
   PublicBookOut,
 } from "../../api/generated/model";
 import { ApiError } from "../../api/mutator";
@@ -144,6 +146,24 @@ export function usePublicBook(bookId: number): UsePublicBookResult {
     error: result.error,
     isMissing: isNotFound(result.error),
   };
+}
+
+/**
+ * Whether one published record is on the shelf or on loan, or `undefined`
+ * while that is unknown or not shown.
+ *
+ * **A failure of any kind reads as "not shown"**, and the 404 is the usual
+ * one: the server answers it while the library has not switched availability
+ * on, which is the default. The record above it is unaffected, so there is
+ * nothing for the reader to be told.
+ */
+export function usePublicAvailability(
+  bookId: number,
+): PublicAvailability | undefined {
+  const result = useGetPublicAvailability(bookId, {
+    query: { retry: false, staleTime: 60_000 },
+  });
+  return result.data?.status;
 }
 
 /**

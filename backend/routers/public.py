@@ -3,8 +3,8 @@
 **This is the first surface in the application reachable without a session**,
 and everything unusual about this module follows from that one fact.
 
-Six rules apply here that apply nowhere else, and each is enforced in a
-different place on purpose, because a single check that did all six would be a
+Seven rules apply here that apply nowhere else, and each is enforced in a
+different place on purpose, because a single check that did all seven would be a
 single check to get wrong:
 
 | Question | Answered by |
@@ -14,6 +14,7 @@ single check to get wrong:
 | Which **columns** may be shown? | `schemas/public.py` |
 | May these rows leave the instance? | `shelf.Outbound` |
 | How fast may a stranger ask? | `ratelimit.public_catalogue_limiter` |
+| May a stranger learn a book is on loan? | `availability_switch`, asking `settings_store` |
 | May a crawler index it? | `middleware.SecurityHeadersMiddleware` |
 
 **`Outbound` is the type the rows arrive in, and it is the one rule here that
@@ -58,10 +59,11 @@ from fastapi.responses import PlainTextResponse
 import settings_store
 from dependencies import DbSession, Paging, RowId, TagIdList, row_ids
 from enums import BookFormat
+from lending import Loans
 from models import SERIES_NAME_MAX, Book
 from ratelimit import client_address, public_catalogue_limiter
 from refusals import refuses
-from schemas import Page, PublicBookOut, PublicBookSort
+from schemas import Page, PublicAvailability, PublicAvailabilityOut, PublicBookOut, PublicBookSort
 from serialisation import books_to_public_out
 from shelf import BookFilters, Loading, Shelf, order_for
 
@@ -223,6 +225,68 @@ def get_public_book(
     if not books:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
     return books_to_public_out(books)[0]
+
+
+@refuses(404)
+def availability_switch(db: DbSession) -> None:
+    """Refuse the availability route while its own switch is off.
+
+    **Runs after `public_reader`, never instead of it**: the rate limit there
+    bounds probing this switch too, and FastAPI runs a router's dependencies
+    before a route's. The answer is the gate's own 404, so a stranger cannot
+    tell the switch off from a catalogue that is not published.
+    """
+    if not settings_store.availability_is_shown(db):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+@catalogue.get(
+    "/books/{book_id}/availability",
+    response_model=PublicAvailabilityOut,
+    summary="Whether a published record is on the shelf or on loan",
+    dependencies=[Depends(availability_switch)],
+)
+@refuses(404)
+def get_public_availability(
+    book_id: RowId,
+    db: DbSession,
+) -> PublicAvailabilityOut:
+    """On the shelf or on loan, for the title this record is a copy of.
+
+    **Never a due date, a borrower or when the loan began**: the payload has
+    one field and `PublicAvailability` has two values. What a book with
+    several copies answers, and why a private copy counts for nothing, is
+    `PublicAvailabilityOut`'s docstring.
+
+    404 for every reason `get_public_book` gives one, and for the switch off.
+    """
+    copies = _public_copies_of(db, book_id)
+    if not copies:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+    # `Loans.open_on` is the loan door for ids already authorised, and these
+    # came off the public shelf. One open loan per Book is a unique index, so
+    # fewer open loans than copies means at least one copy is in.
+    out = len(Loans.open_on(db, copies))
+    return PublicAvailabilityOut(
+        status=PublicAvailability.ON_SHELF if out < len(copies) else PublicAvailability.ON_LOAN
+    )
+
+
+def _public_copies_of(db: DbSession, book_id: int) -> list[int]:
+    """The ids of this record and every public copy beside it, or none.
+
+    Both reads go through `Shelf.seen_by_the_public`, so a private or trashed
+    copy is never in the list, and a private or trashed `book_id` gives an
+    empty one: the caller's 404.
+    """
+    shelf = Shelf.seen_by_the_public(db)
+    row = shelf.where(Book.id == book_id).select(Book.copy_group).first()
+    if row is None:
+        return []
+    if row.copy_group is None:
+        return [book_id]
+    copies = shelf.where(Book.copy_group == row.copy_group).select(Book.id)
+    return [copy_id for (copy_id,) in copies.all()]
 
 
 @router.get("/robots.txt", include_in_schema=False, response_class=PlainTextResponse)

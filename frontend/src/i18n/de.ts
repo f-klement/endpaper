@@ -351,6 +351,7 @@ export const de: Messages = {
     "Es läuft immer nur eine lange Suche gleichzeitig. Bitte gleich noch einmal versuchen.",
   "search.slow.nothingAsked":
     "Es wurde nichts durchsucht. Jeder Katalog, den diese Bibliothek eingeschaltet hat, ist ein langsamer.",
+  "search.source.from": "Quelle: {names}",
 
   // ── Ausleihen ───────────────────────────────────────────────────────────
   "loans.title": "Ausleihen",
@@ -590,6 +591,18 @@ export const de: Messages = {
   "settings.public.confirmIndexing":
     "Suchmaschinen wird gesagt, dass sie fernbleiben sollen, bis sie eigens zugelassen werden.",
   "settings.public.confirmAction": "Veröffentlichen",
+  "settings.protocols.title": "Protokolle für andere Bibliotheken",
+  "settings.protocols.sruLabel": "Diesen Katalog über SRU anbieten",
+  "settings.protocols.sruHint":
+    "Die Software einer anderen Bibliothek kann den veröffentlichten Katalog unter /sru durchsuchen und seine Datensätze als MARCXML lesen. Die Software sieht genau das, was ein Besucher sieht.",
+  "settings.protocols.sruNeedsPublishing":
+    "Zuerst den Katalog veröffentlichen. SRU bietet nur einen veröffentlichten Katalog an.",
+  "settings.availability.label":
+    "Zeigen, ob ein Buch im Regal steht oder ausgeliehen ist",
+  "settings.availability.hint":
+    "Jede veröffentlichte Aufnahme sagt, ob das Buch im Regal steht oder ausgeliehen ist. Wer es hat und wann es zurückkommt, sieht ein Besucher nie.",
+  "settings.availability.confirmShown":
+    "Außerdem sichtbar: ob ein Buch im Regal steht oder ausgeliehen ist, nie wer es hat oder wann es zurückkommt.",
   "settings.lending.title": "Ausleihe",
   "settings.lending.summary":
     "Erinnerungen an überfällige Bücher, und wohin sie gehen.",
@@ -1901,6 +1914,8 @@ export const de: Messages = {
   "public.fact.pages": "Seiten",
   "public.fact.format": "Ausgabeform",
   "public.fact.series": "Reihe",
+  "public.availability.on_shelf": "Im Regal",
+  "public.availability.on_loan": "Ausgeliehen",
   "origin.label": "Herkunft der Aufnahme",
   "origin.unknown": "Unbekannt",
   "origin.manual": "Von Hand erfasst",

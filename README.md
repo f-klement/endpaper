@@ -119,7 +119,8 @@ DATA_DIR=./data uv run uvicorn main:app --reload
 ```
 `DATA_DIR` decides where the SQLite file and uploaded covers live. It defaults to
 `/app/data` (the path inside the container), so set it when running outside one.
-Interactive API docs are then at `http://localhost:8000/docs`.
+The OpenAPI schema is then at `http://localhost:8000/openapi.json`, for a signed in member
+only: send the token as `Authorization: Bearer <token>`.
 
 **Frontend**, with [Bun](https://bun.com) 1.3:
 ```bash

@@ -61,9 +61,14 @@ export default function PublicCatalogueSettingsPage() {
               onConfirm={setConfirming}
             />
 
+            <ProtocolsSection settings={settings} state={state} />
+
             {confirming !== null && (
               <PublishConfirmation
                 confirming={confirming}
+                showsAvailability={
+                  settings.public_availability_enabled ?? false
+                }
                 state={state}
                 onClose={() => setConfirming(null)}
               />
@@ -164,6 +169,7 @@ function PublishSection({ settings, state, onConfirm }: SectionProps) {
       )}
 
       <IndexingField settings={settings} state={state} />
+      <AvailabilityField settings={settings} state={state} />
     </SettingsSection>
   );
 }
@@ -193,13 +199,83 @@ function IndexingField({
   );
 }
 
+/**
+ * Whether a published record says on the shelf or on loan: disabled until the
+ * catalogue is live, like indexing, because the server answers only then
+ * (`settings_store.availability_is_shown`). No confirmation: it shows a
+ * stranger that a loan is open and never who has the book or when it returns.
+ */
+function AvailabilityField({
+  settings,
+  state,
+}: {
+  settings: SettingsOut;
+  state: UseSettingsResult;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="mt-4">
+      <ToggleField
+        label={t("settings.availability.label")}
+        hint={t("settings.availability.hint")}
+        checked={settings.public_availability_enabled ?? false}
+        disabled={state.isSaving || !settings.public_catalogue_published}
+        onChange={(checked) =>
+          state.save({ public_availability_enabled: checked })
+        }
+      />
+    </div>
+  );
+}
+
+/**
+ * The protocols this catalogue is served over to other libraries' software.
+ *
+ * **Under publishing, and disabled until the catalogue is live**, like the
+ * indexing switch: the server serves SRU only when the catalogue is published
+ * as well (`settings_store.sru_is_served`), so the control says so rather than
+ * accepting a switch that does nothing yet. Each export protocol gets a toggle
+ * of its own here, and no confirmation: a protocol serves exactly what the
+ * published catalogue already shows, which is what the publish confirmation
+ * named.
+ */
+function ProtocolsSection({
+  settings,
+  state,
+}: {
+  settings: SettingsOut;
+  state: UseSettingsResult;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <SettingsSection title={t("settings.protocols.title")} icon="library">
+      <ToggleField
+        label={t("settings.protocols.sruLabel")}
+        hint={
+          settings.public_catalogue_published
+            ? t("settings.protocols.sruHint")
+            : t("settings.protocols.sruNeedsPublishing")
+        }
+        checked={settings.sru_server_enabled ?? false}
+        disabled={state.isSaving || !settings.public_catalogue_published}
+        onChange={(checked) => state.save({ sru_server_enabled: checked })}
+      />
+    </SettingsSection>
+  );
+}
+
 /** The dialog either route into publishing opens. */
 function PublishConfirmation({
   confirming,
+  showsAvailability,
   state,
   onClose,
 }: {
   confirming: Exclude<Confirming, null>;
+  /** The availability row is stored on, so publishing shows loans at once. */
+  showsAvailability: boolean;
   state: UseSettingsResult;
   onClose: () => void;
 }) {
@@ -217,6 +293,9 @@ function PublishConfirmation({
       </p>
       <ul className="mt-3 space-y-1 text-sm text-paper-700 list-disc pl-5 dark:text-paper-300">
         <li>{t("settings.public.confirmShown")}</li>
+        {showsAvailability && (
+          <li>{t("settings.availability.confirmShown")}</li>
+        )}
         <li>{t("settings.public.confirmWithheld")}</li>
         <li>{t("settings.public.confirmPrivate")}</li>
         <li>{t("settings.public.confirmIndexing")}</li>

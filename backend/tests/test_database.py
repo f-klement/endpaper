@@ -546,6 +546,80 @@ class TestTheDefaultChangesNoDeploymentsBehaviour:
         assert database._connect_args("sqlite:///./data/library.db", "", "") == {"check_same_thread": False}
 
 
+class TestAPostgresUrlNamingAnotherDriverIsRefused:
+    """Every Postgres spelling but pg8000 stops startup naming the one that works.
+
+    The pg8000 spelling passing is the rest of this file: every TLS arm builds
+    connect arguments from `_PG_URL`.
+    """
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "postgresql://endpaper:secret@db.invalid:5432/endpaper",
+            "postgres://endpaper:secret@db.invalid:5432/endpaper",
+            "postgresql+psycopg2://endpaper:secret@db.invalid:5432/endpaper",
+        ],
+    )
+    def test_the_refusal_names_the_working_scheme_and_not_the_password(self, url: str) -> None:
+        with pytest.raises(RuntimeError, match=r"postgresql\+pg8000://") as refused:
+            database._connect_args(url, "", "")
+
+        assert "secret" not in str(refused.value)
+
+    def test_the_refusal_wins_over_a_tls_setting_beside_it(self) -> None:
+        """The TLS refusal would say the URL is wrong without saying how."""
+        with pytest.raises(RuntimeError, match="carries only pg8000"):
+            database._connect_args("postgresql://u:p@db.invalid/endpaper", "require", "")
+
+    def test_startup_says_so_before_sqlalchemy_asks_for_psycopg(self, tmp_path: Path) -> None:
+        """Through a real import, because the order is the whole fix.
+
+        A refusal placed after `create_engine` never runs: the engine imports
+        psycopg first, the child's `except RuntimeError` does not catch the
+        `ModuleNotFoundError`, and no verdict is printed.
+        """
+        said = _what_the_import_child_refused("postgresql://u:p@127.0.0.1:1/db", tmp_path)
+
+        assert "carries only pg8000" in said, said
+
+
+#: What the import child prints in front of the refusal it caught.
+_REFUSED_MARKER = "REFUSED:"
+
+#: A child that imports the application's own module and reports a refusal raised
+#: at import, and only that kind: any other exception escapes and prints nothing.
+_IMPORT_CHILD = f"""
+import sys
+sys.path.insert(0, {str(BACKEND)!r})
+try:
+    import database
+except RuntimeError as error:
+    print("{_REFUSED_MARKER}" + str(error).replace(chr(10), " "))
+"""
+
+
+def _what_the_import_child_refused(url: str, tmp_path: Path) -> str:
+    """The refusal a fresh interpreter raised importing `database` under `url`."""
+    finished = subprocess.run(
+        [sys.executable, "-c", _IMPORT_CHILD],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(tmp_path),
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_URL": url,
+            "SECRET_KEY": "a" * 40,
+        },
+    )
+    for line in finished.stdout.splitlines():
+        if line.startswith(_REFUSED_MARKER):
+            return line[len(_REFUSED_MARKER) :]
+    return f"no verdict: stdout={finished.stdout!r} stderr={finished.stderr!r}"
+
+
 class TestASettingTheConnectionCannotHonourIsRefused:
     """Never ignored, and the two refusals are one rule.
 

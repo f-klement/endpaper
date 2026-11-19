@@ -1306,6 +1306,18 @@ BOOK_OWNED_READERS = {
             "filtered `books` and the join is on `book_tags.book_id == books.id`.",
         ),
     ],
+    "sru.py": [
+        (
+            "links, books = ( Shelf.seen_by_the_public(db) .select(func.count(book_tags.c.tag_id), "
+            "func.count(distinct(Book.id))) .outerjoin(book_tags, book_tags.c.book_id == Book.id) .one() )",
+            "Tags per book on the public shelf, which the SRU subject charge publishes in a refusal. "
+            "**Correct, and reported anyway**"
+            ": written through `Shelf.seen_by_the_public().select()`, the FROM is the filtered `books` "
+            "and the join is on `book_tags.book_id == books.id`, so a private or trashed Book adds no "
+            "link. Run against a public Book with one tag and a private one with fifty: "
+            "`tests/test_sru.py::TestTheSubjectChargeFollowsTagsPerBook` answers one.",
+        ),
+    ],
 }
 
 

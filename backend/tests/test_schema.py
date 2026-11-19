@@ -30,6 +30,7 @@ import credentials
 import filing
 import models  # registers the tables on Base.metadata
 import schema
+import settings_store
 import targets
 from database import Base, engine
 from dialect import AddedRule, SwappedRule
@@ -37,6 +38,7 @@ from enums import (
     AuthorityScheme,
     BookFormat,
     BookIdentifierScheme,
+    CatalogueSource,
     ClassificationScheme,
 )
 from migrations.versions import (
@@ -57,6 +59,10 @@ from migrations.versions import (
 from migrations.versions import (
     f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
 )
+from migrations.versions import (
+    f73ebc9f0436_a_published_catalogue_keeps_its_sru_server as keeps_its_sru_server,
+)
+from routers.sru import SRU_PREFIX
 from schemas.opds import OpdsServerIn
 from tests import sqlite_only
 from tests.corpus import BACKEND, application_modules
@@ -2839,6 +2845,183 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
                 text("UPDATE catalogue_targets SET requires_isbn_claim = FALSE WHERE source = 'dnb'")
             )
             connection.commit()
+
+
+class TestEachCatalogueCarriesItsOwnBound:
+    """Revision `e59cee46d754`: the seeded bounds, and the rule a restored row meets.
+
+    The class is in the pipeline's Postgres selection, because it is the one
+    test that upgrades this revision over existing rows on that engine."""
+
+    PREVIOUS = "8a7989a3fab0"
+    REVISION = "e59cee46d754"
+
+    @staticmethod
+    def _bound(source: str) -> object:
+        with engine.connect() as connection:
+            return connection.execute(
+                text("SELECT timeout_seconds FROM catalogue_targets WHERE source = :source"),
+                {"source": source},
+            ).scalar()
+
+    @pytest.mark.parametrize("seconds", [0.0, -1.0, 10.5])
+    def test_a_restore_cannot_write_a_bound_the_dataclass_would_refuse(self, seconds: float) -> None:
+        at_head()
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(
+                text("UPDATE catalogue_targets SET timeout_seconds = :seconds WHERE source = 'oenb'"),
+                {"seconds": seconds},
+            )
+
+        assert "ck_catalogue_targets_timeout" in str(refusal.value)
+
+    @pytest.mark.parametrize("seconds", [10.0, None])
+    def test_the_ceiling_and_no_bound_are_written(self, seconds: float | None) -> None:
+        """The control for the arm above, so a rule refusing every value fails here."""
+        at_head()
+        with engine.connect() as connection:
+            connection.execute(
+                text("UPDATE catalogue_targets SET timeout_seconds = :seconds WHERE source = 'oenb'"),
+                {"seconds": seconds},
+            )
+            connection.commit()
+
+        assert self._bound("oenb") == seconds
+
+    def test_the_upgrade_clears_a_bound_out_of_range_rather_than_failing_on_it(self) -> None:
+        """A hand edited archive restored before this revision does not stop the upgrade.
+
+        The DNB because its seed is NULL, so what it ends with is the clear's
+        work and not a seed written over it. Without the clear, adding the rule
+        refuses the row on both engines and the boot fails.
+        """
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("UPDATE catalogue_targets SET timeout_seconds = 30.0 WHERE source = 'dnb'")
+            )
+            connection.commit()
+
+        schema.upgrade_to(self.REVISION)
+
+        assert self._bound("dnb") is None
+
+    def test_the_upgrade_writes_the_seed_over_whatever_a_row_held(self) -> None:
+        """By source alone, so a restored row and the constant agree before the first boot."""
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("UPDATE catalogue_targets SET timeout_seconds = 9.0 WHERE source = 'loc'")
+            )
+            connection.commit()
+
+        schema.upgrade_to(self.REVISION)
+
+        seeded = targets.SEEDED[CatalogueSource.LOC].timeout_seconds
+        assert seeded != 9.0
+        assert self._bound("loc") == seeded
+
+    def test_the_downgrade_clears_every_bound_and_drops_the_rule(self) -> None:
+        from alembic import command
+
+        at_revision(self.REVISION)
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+        with engine.connect() as connection:
+            bounds = connection.execute(text("SELECT timeout_seconds FROM catalogue_targets")).scalars().all()
+            connection.execute(
+                text("UPDATE catalogue_targets SET timeout_seconds = 30.0 WHERE source = 'oenb'")
+            )
+            connection.commit()
+
+        assert set(bounds) == {None}
+        assert self._bound("oenb") == 30.0
+
+
+class TestAPublishedCatalogueKeepsItsSruServer:
+    """Revision `f73ebc9f0436`: a deployment publishing its catalogue before the
+    SRU switch existed keeps answering on `/sru`; any other stays at the default.
+
+    The class is in the pipeline's Postgres selection, because it is the one
+    test that upgrades this revision over existing rows on that engine."""
+
+    PREVIOUS = "e59cee46d754"
+    REVISION = "f73ebc9f0436"
+
+    @staticmethod
+    def _write(rows: dict[str, str]) -> None:
+        with engine.connect() as connection:
+            for key, value in rows.items():
+                connection.execute(
+                    text("INSERT INTO settings (key, value) VALUES (:key, :value)"),
+                    {"key": key, "value": value},
+                )
+            connection.commit()
+
+    @staticmethod
+    def _switch() -> object:
+        with engine.connect() as connection:
+            return connection.execute(
+                text("SELECT value FROM settings WHERE key = 'sru_server_enabled'")
+            ).scalar()
+
+    def _upgrade_over(self, rows: dict[str, str]) -> None:
+        at_revision(self.PREVIOUS)
+        self._write(rows)
+        schema.upgrade_to(self.REVISION)
+
+    @pytest.mark.parametrize("truthy", ["true", "1", " Yes\n", "ON"])
+    def test_a_published_deployment_upgrading_still_answers_on_sru(self, client, truthy: str) -> None:
+        """Every spelling `settings_store` reads as true, so a row stored as `1`
+        reads published here as it does in the app."""
+        self._upgrade_over({"library_mode": truthy, "public_catalogue_enabled": truthy})
+
+        assert client.get(SRU_PREFIX).status_code == 200
+
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            {},
+            {"library_mode": "true", "public_catalogue_enabled": "false"},
+            {"library_mode": "false", "public_catalogue_enabled": "true"},
+            {"public_catalogue_enabled": "true"},
+            {"library_mode": "true", "public_catalogue_enabled": "maybe"},
+        ],
+        ids=["nothing", "unpublished", "library-mode-off", "library-mode-default", "not-a-truthy-value"],
+    )
+    def test_an_unpublished_deployment_upgrading_gets_no_switch(self, rows: dict[str, str]) -> None:
+        self._upgrade_over(rows)
+
+        assert self._switch() is None
+
+    def test_a_fresh_install_that_publishes_serves_no_sru(self, client) -> None:
+        at_head()
+        self._write({"library_mode": "true", "public_catalogue_enabled": "true"})
+
+        assert client.get(SRU_PREFIX).status_code == 404
+
+    def test_a_row_an_admin_already_wrote_is_untouched(self, client) -> None:
+        self._upgrade_over(
+            {"library_mode": "true", "public_catalogue_enabled": "true", "sru_server_enabled": "false"}
+        )
+
+        assert self._switch() == "false"
+        assert client.get(SRU_PREFIX).status_code == 404
+
+    def test_the_downgrade_removes_the_written_row_and_keeps_an_admins_off(self) -> None:
+        from alembic import command
+
+        self._upgrade_over({"library_mode": "true", "public_catalogue_enabled": "true"})
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+        removed = self._switch()
+        self._write({"sru_server_enabled": "false"})
+        schema.upgrade_to(self.REVISION)
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        assert removed is None
+        assert self._switch() == "false"
+
+    def test_the_revision_reads_true_as_the_settings_store_does_at_head(self) -> None:
+        assert keeps_its_sru_server._TRUE_VALUES == settings_store._TRUE_VALUES
 
 
 class TestTheStoredShelfKey:
@@ -6198,7 +6381,7 @@ class TestABlankTextColumnIsNull:
     is `btrim` on PostgreSQL and could disagree with SQLite's about a character
     outside ASCII. CI runs this class on PostgreSQL 18 in the nightly whole
     suite run; the `test:postgres` selection on the release paths does not
-    include this file.
+    include this class.
     """
 
     PREVIOUS = "c7b41e92f80a"

@@ -6,6 +6,7 @@ import type { BookLookup, BookMatch } from "../../../api/generated/model";
 import type { AudioFailure } from "../../../lib/audiobook";
 import type { FileFailure } from "../../../lib/fileReaders";
 import { isBeingDecided } from "../queue";
+import MatchSource from "./MatchSource";
 import type {
   NamedScanReason,
   QueueFigures,
@@ -321,6 +322,11 @@ interface RapidQueueProps {
    */
   onAddAsCopy: (key: string) => void;
   isAddingCopy: boolean;
+  /**
+   * Whether each offered record names the catalogues that produced it, as the
+   * title search does. A household never sees it.
+   */
+  libraryMode: boolean;
 }
 
 /**
@@ -358,6 +364,7 @@ export default function RapidQueue({
   onDropSubject,
   onAddAsCopy,
   isAddingCopy,
+  libraryMode,
 }: RapidQueueProps) {
   const { t } = useTranslation();
   // A copy in flight counts: a batch started then re-walks the row it is
@@ -432,6 +439,7 @@ export default function RapidQueue({
             entry={entry}
             busy={busy}
             actions={actions}
+            libraryMode={libraryMode}
           />
         ))}
       </ul>
@@ -677,10 +685,12 @@ function QueueRow({
   entry,
   busy,
   actions,
+  libraryMode,
 }: {
   entry: ScannedEntry;
   busy: boolean;
   actions: RowActions;
+  libraryMode: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -753,6 +763,7 @@ function QueueRow({
           matches={entry.matches}
           onChoose={actions.onChoose}
           onKeepName={actions.onKeepName}
+          libraryMode={libraryMode}
         />
       )}
     </li>
@@ -962,11 +973,13 @@ function Matches({
   matches,
   onChoose,
   onKeepName,
+  libraryMode,
 }: {
   entry: ScannedEntry;
   matches: BookMatch[];
   onChoose: (key: string, match: BookMatch) => void;
   onKeepName: (key: string) => void;
+  libraryMode: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -980,8 +993,11 @@ function Matches({
             key={`${match.google_books_id ?? match.isbn13 ?? ""}:${index}`}
             className="flex items-center gap-2 text-xs"
           >
-            <span className="min-w-0 flex-1 truncate text-paper-700 dark:text-paper-200">
-              {recordLine(match)}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-paper-700 dark:text-paper-200">
+                {recordLine(match)}
+              </span>
+              {libraryMode && <MatchSource source={match.source ?? ""} />}
             </span>
             <button
               type="button"

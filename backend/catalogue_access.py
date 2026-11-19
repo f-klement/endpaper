@@ -114,6 +114,12 @@ NOTHING_IS_SWITCHED_ON: Final[str] = (
 #: accession number and nothing else in the world resolves one, so naming any other
 #: catalogue would be useless. Two things have to hold, the section being on and a key
 #: being in force, and the sentence names both because either one missing produces this.
+#:
+#: **Safe to tell any member only because `GET /api/settings/features` tells anybody**,
+#: as `google_books_ready`, which is public deliberately. Narrowing that flag makes this
+#: refusal the disclosure, so the two move together: narrowing the flag fails
+#: `tests/test_catalogue_access.py::TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`,
+#: and that test goes with this refusal.
 GOOGLE_BOOKS_IS_NOT_ASKED: Final[str] = (
     "This Library does not ask Google Books, so a Google volume id cannot be "
     "resolved. An administrator can switch Google Books on in Settings and add an "

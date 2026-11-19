@@ -71,6 +71,7 @@ from bibliographic import (
     strip_isbd_punctuation,
 )
 from catalogue import Heading, Record, Subject, uncontrolled
+from deadline import in_, left
 from enums import (
     Capability,
     CatalogueSource,
@@ -3997,15 +3998,21 @@ async def _first_answer(forms: tuple[str, ...], ask: Callable[[str], Awaitable[L
     return answer
 
 
-async def _sru_lookup(target: targets.Target, isbn: str, credential: fetch.Credential | None) -> Lookup:
-    """One ISBN lookup against an SRU target, one request per form `_first_answer` asks for."""
+async def _sru_lookup(
+    target: targets.Target, isbn: str, credential: fetch.Credential | None, *, deadline: float | None
+) -> Lookup:
+    """One ISBN lookup against an SRU target, one request per form `_first_answer` asks for.
+
+    `deadline` is the row's own, from `_within_its_own_bound`, and every form
+    shares it: the bound is on the question, not on each request.
+    """
     return await _first_answer(
-        target.isbn_forms(isbn), lambda asked: _sru_ask(target, isbn, asked, credential)
+        target.isbn_forms(isbn), lambda asked: _sru_ask(target, isbn, asked, credential, deadline)
     )
 
 
 async def _sru_ask(
-    target: targets.Target, isbn: str, asked: str, credential: fetch.Credential | None
+    target: targets.Target, isbn: str, asked: str, credential: fetch.Credential | None, deadline: float | None
 ) -> Lookup:
     """One SRU request for `asked`, a form of `isbn`, read against `isbn` itself.
 
@@ -4023,7 +4030,9 @@ async def _sru_ask(
     name = target.source.value
     try:
         params = target.sru_params(target.isbn_query(asked), target.lookup_records)
-        response = await fetch.get_once(target.base_url, params=params, credential=credential)
+        response = await fetch.get_once(
+            target.base_url, params=params, deadline=deadline, credential=credential
+        )
         if response.status_code == 429:
             return Lookup(Outcome.RATE_LIMITED, source=name)
         if response.status_code != 200:
@@ -4052,7 +4061,12 @@ async def _sru_ask(
 
 
 async def _sru_search(
-    target: targets.Target, query: str, limit: int, credential: fetch.Credential | None
+    target: targets.Target,
+    query: str,
+    limit: int,
+    credential: fetch.Credential | None,
+    *,
+    deadline: float | None,
 ) -> list[Record]:
     """One title search against an SRU target.
 
@@ -4069,7 +4083,9 @@ async def _sru_search(
         return []
     try:
         params = target.sru_params(target.title_query(terms), target.search_records(limit))
-        response = await fetch.get_once(target.base_url, params=params, credential=credential)
+        response = await fetch.get_once(
+            target.base_url, params=params, deadline=deadline, credential=credential
+        )
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
@@ -4141,13 +4157,14 @@ def _z3950_root(target: targets.Target, answer: z3950.Answer) -> ElementTree.Ele
     return collection
 
 
-async def _z3950_lookup(target: targets.Target, isbn: str) -> Lookup:
+async def _z3950_lookup(target: targets.Target, isbn: str, *, deadline: float | None) -> Lookup:
     """One ISBN lookup through the Z39.50 seam, every form on one association.
 
     **Every bound arrives from the seam by construction**: the bytes across the
     records (`z3950.MAX_RESPONSE_BYTES`), their count (`targets.Target`
     refuses a row past `z3950.MAX_RECORDS`) and one deadline over the whole
-    association (`z3950.TIMEOUT_SECONDS`, under the fan out's own). The two
+    association (`z3950.TIMEOUT_SECONDS`, or the row's own `deadline` where it
+    has one, under the fan out's own). The two
     `fetch` bounds with no counterpart, a redirect off the host and a content
     encoding, name things the protocol does not have.
 
@@ -4160,7 +4177,7 @@ async def _z3950_lookup(target: targets.Target, isbn: str) -> Lookup:
     `z3950.association` names. A failure on any form is the whole lookup's.
     """
     try:
-        async with z3950.association(target.z3950_target) as open_:
+        async with z3950.association(target.z3950_target, deadline=deadline) as open_:
             return await _first_answer(
                 target.isbn_forms(isbn), lambda asked: _z3950_ask(open_, target, isbn, asked)
             )
@@ -4199,7 +4216,9 @@ async def _z3950_asked_through_temporary_refusals(
     return await z3950.search(open_, pqf, records=records)
 
 
-async def _z3950_search(target: targets.Target, query: str, limit: int) -> list[Record]:
+async def _z3950_search(
+    target: targets.Target, query: str, limit: int, *, deadline: float | None
+) -> list[Record]:
     """One title search through the Z39.50 seam, bounded as `_z3950_lookup` is.
 
     The query is `targets.Target.title_query`'s PQF phrase, and the record
@@ -4210,7 +4229,9 @@ async def _z3950_search(target: targets.Target, query: str, limit: int) -> list[
     if not terms or records < 1:
         return []
     try:
-        answer = await z3950.search_once(target.z3950_target, target.title_query(terms), records=records)
+        answer = await z3950.search_once(
+            target.z3950_target, target.title_query(terms), records=records, deadline=deadline
+        )
         root = _z3950_root(target, answer)
     except _Z3950_FAILURES:
         logger.warning("%s search failed for %r", target.source.value, query, exc_info=True)
@@ -4398,11 +4419,55 @@ async def _lookup_one(
     read once rather than a branch at each call site, and the secret's `match`
     is `_bespoke_lookup`'s, the one door it concerns.
     """
-    return await _DOORS[target.transport].lookup(target, isbn, api_key, credential)
+    door = _DOORS[target.transport]
+    return await _within_its_own_bound(
+        target,
+        lambda ends: door.lookup(target, isbn, api_key, credential, ends),
+        Lookup(Outcome.UNAVAILABLE, source=target.source.value),
+    )
+
+
+async def _within_its_own_bound[T](
+    target: targets.Target, ask: Callable[[float | None], Awaitable[T]], missed: T
+) -> T:
+    """One question to one target, ended at `target.timeout_seconds` with `missed` as its answer.
+
+    **Applied here, at the seam every door sits behind, so one rule covers all
+    three.** The bespoke door's adapters hold their own clients and are reached
+    by nothing else; the SRU and Z39.50 doors are handed the same absolute
+    moment as `ask`'s argument, so `fetch`'s clock and the association's agree
+    with this one, and the Z39.50 client's own socket timeout is derived from
+    it rather than from `z3950.TIMEOUT_SECONDS`, which frees the association's
+    thread at the row's bound instead of up to ten seconds later.
+
+    **The fan out's deadline is the ceiling without being read here.** This
+    runs inside the caller's wait, so a bound longer than what is left of it is
+    never reached and the caller's cancellation arrives first, untouched:
+    `asyncio.timeout` converts only its own.
+
+    **`expired()` is what tells the row's bound from any other `TimeoutError`**,
+    which would otherwise be reported as this source missing its bound. A miss
+    costs this source's answer only, which is `missed`: `UNAVAILABLE` for a
+    lookup and no rows for a search, both of which every caller already handles.
+    """
+    ends = None if target.timeout_seconds is None else in_(target.timeout_seconds)
+    bound = asyncio.timeout(left(ends))
+    try:
+        async with bound:
+            return await ask(ends)
+    except TimeoutError:
+        if not bound.expired():
+            raise
+    logger.info("%s missed its own bound of %ss", target.source.value, target.timeout_seconds)
+    return missed
 
 
 async def _bespoke_lookup(
-    target: targets.Target, isbn: str, api_key: str, _credential: fetch.Credential | None
+    target: targets.Target,
+    isbn: str,
+    api_key: str,
+    _credential: fetch.Credential | None,
+    _deadline: float | None,
 ) -> Lookup:
     """The bespoke door's lookup, handed the key only where the row names it. See `_lookup_one`."""
     match target.secret:
@@ -4434,11 +4499,19 @@ async def _search_one(
     would have been handed Google's key by arriving, exactly as at the lookup
     door.
     """
-    return await _DOORS[target.transport].search(target, query, limit, api_key, credential)
+    door = _DOORS[target.transport]
+    return await _within_its_own_bound(
+        target, lambda ends: door.search(target, query, limit, api_key, credential, ends), []
+    )
 
 
 async def _bespoke_search(
-    target: targets.Target, query: str, limit: int, api_key: str, _credential: fetch.Credential | None
+    target: targets.Target,
+    query: str,
+    limit: int,
+    api_key: str,
+    _credential: fetch.Credential | None,
+    _deadline: float | None,
 ) -> list[Record]:
     """The bespoke door's search, handed the key on the lookup door's terms. See `_search_one`."""
     match target.secret:
@@ -4458,8 +4531,13 @@ class _Door:
     arguments it has no use for: the SRU door the key, the Z39.50 door both.
     """
 
-    lookup: Callable[[targets.Target, str, str, fetch.Credential | None], Awaitable[Lookup]]
-    search: Callable[[targets.Target, str, int, str, fetch.Credential | None], Awaitable[list[Record]]]
+    #: The last argument is the row's own deadline, an absolute moment or None,
+    #: which `_within_its_own_bound` already enforces around the call; a door
+    #: with a clock of its own hands it on so the two agree.
+    lookup: Callable[[targets.Target, str, str, fetch.Credential | None, float | None], Awaitable[Lookup]]
+    search: Callable[
+        [targets.Target, str, int, str, fetch.Credential | None, float | None], Awaitable[list[Record]]
+    ]
     #: Whether a sealed login handed to this door leaves the process. See
     #: `carries_a_credential`, which reads it.
     carries_a_credential: bool
@@ -4485,9 +4563,11 @@ class _Door:
 _DOORS: Final[Mapping[targets.Transport, _Door]] = MappingProxyType(
     {
         targets.Transport.SRU: _Door(
-            lookup=lambda target, isbn, _key, credential: _sru_lookup(target, isbn, credential),
-            search=lambda target, query, limit, _key, credential: _sru_search(
-                target, query, limit, credential
+            lookup=lambda target, isbn, _key, credential, ends: _sru_lookup(
+                target, isbn, credential, deadline=ends
+            ),
+            search=lambda target, query, limit, _key, credential, ends: _sru_search(
+                target, query, limit, credential, deadline=ends
             ),
             carries_a_credential=True,
             lookup_readers=lambda _target: _LOOKUP_READERS.keys(),
@@ -4496,8 +4576,10 @@ _DOORS: Final[Mapping[targets.Transport, _Door]] = MappingProxyType(
         # Which of the XML readers a Z39.50 row may name for its record syntax is
         # narrower still, and `targets.Target` refuses the rest.
         targets.Transport.Z3950: _Door(
-            lookup=lambda target, isbn, _key, _credential: _z3950_lookup(target, isbn),
-            search=lambda target, query, limit, _key, _credential: _z3950_search(target, query, limit),
+            lookup=lambda target, isbn, _key, _credential, ends: _z3950_lookup(target, isbn, deadline=ends),
+            search=lambda target, query, limit, _key, _credential, ends: _z3950_search(
+                target, query, limit, deadline=ends
+            ),
             carries_a_credential=False,
             lookup_readers=lambda _target: _LOOKUP_READERS.keys(),
             search_readers=lambda _target: _SEARCH_READERS.keys(),

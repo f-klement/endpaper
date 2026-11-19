@@ -103,6 +103,7 @@ function renderQueue(
     onDropSubject: vi.fn<RapidQueueProps["onDropSubject"]>(),
     onAddAsCopy: vi.fn<RapidQueueProps["onAddAsCopy"]>(),
     isAddingCopy: false,
+    libraryMode: false,
     ...rest,
   };
   const { container, rerender } = renderLocalised(<RapidQueue {...props} />, {
@@ -1315,6 +1316,26 @@ describe("RapidQueue and a book taken from its file name", () => {
       },
       "The Dispossessed.pdf",
     );
+
+  it("names the catalogues an offered record came from in library mode", () => {
+    renderQueue({
+      entries: [offering({ ...MATCH, source: "dnb+open_library" })],
+      libraryMode: true,
+    });
+
+    expect(
+      screen.getByText("Source: German National Library and Open Library"),
+    ).toBeInTheDocument();
+  });
+
+  it("names no catalogue for an offered record in a household", () => {
+    renderQueue({
+      entries: [offering({ ...MATCH, source: "dnb" })],
+      libraryMode: false,
+    });
+
+    expect(screen.queryByText(/^Source:/)).not.toBeInTheDocument();
+  });
 
   it("shows the title the name gave and says where it came from", () => {
     renderQueue({ entries: [derived] });

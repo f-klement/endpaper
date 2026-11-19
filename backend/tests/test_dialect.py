@@ -727,6 +727,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
             ("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_base_url"),
             ("6ecb05b436b5", "catalogue_targets", "ck_catalogue_targets_record_charset"),
             ("2d87a872d78e", "catalogue_targets", "ck_catalogue_targets_isbn10_retry"),
+            ("e59cee46d754", "catalogue_targets", "ck_catalogue_targets_timeout"),
         ]
 
     def test_an_addition_is_compared_with_the_swap_that_followed_it(self):

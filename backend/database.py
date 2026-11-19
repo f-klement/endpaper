@@ -183,8 +183,34 @@ def _check_the_ca_file(chosen: str, ca_file: str) -> None:
         )
 
 
+def _refuse_a_driver_this_image_lacks(url: str) -> None:
+    """Refuse a Postgres URL naming any driver but pg8000, before SQLAlchemy loads it.
+
+    **A bare `postgresql://` asks SQLAlchemy for psycopg**, and this image carries
+    pg8000 alone, so left to SQLAlchemy that URL dies in `create_engine` with a
+    `ModuleNotFoundError` naming a package that is not the problem. `postgres://`
+    fails the same way under another name, and so does any other driver spelled
+    after the `+`: nothing else here is installed, and `ssl_context` and the error
+    mapping below speak pg8000 alone. Refused rather than rewritten, by the
+    owner's ruling: a URL that silently became a different URL would hide itself
+    from somebody who installed another driver on purpose.
+
+    **It must run before `create_engine`**, which imports the driver; `_connect_args`
+    is evaluated first because it is that call's argument. The message names the
+    driver and never the URL, which carries the password.
+    """
+    parsed = make_url(url)
+    if parsed.get_backend_name() in {"postgresql", "postgres"} and parsed.drivername != _PG8000:
+        raise RuntimeError(
+            f"DATABASE_URL asks for the {parsed.drivername!r} Postgres driver, and this "
+            f"image carries only pg8000. Spell the scheme `{_PG8000}://`, as in "
+            f"`{_PG8000}://user:password@host/endpaper`."
+        )
+
+
 def _connect_args(url: str, mode: str, ca_file: str) -> dict[str, Any]:
     """Everything handed to the driver that the URL cannot carry."""
+    _refuse_a_driver_this_image_lacks(url)
     args: dict[str, Any] = {}
     if "sqlite" in url:
         # SQLite guards connections against cross-thread use; FastAPI hands the

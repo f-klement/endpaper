@@ -22,7 +22,7 @@ from xml.sax.saxutils import escape
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from sqlalchemy import Text, text
+from sqlalchemy import Text, event, text
 
 import marc
 import sru
@@ -58,6 +58,11 @@ MARC21 = "{http://www.loc.gov/MARC21/slim}"
 #: A reserved name from RFC 2606, so nothing here resolves and nothing here
 #: names a deployment.
 SERVER = sru.Server(host="catalogue.example", port=443, database="sru")
+
+
+def one_tag_per_book() -> float:
+    """The tag density `Cost`'s classes were measured at, for a test with no shelf."""
+    return 1.0
 
 
 def respond(db: Any, **parameters: str) -> ElementTree.Element:
@@ -491,7 +496,7 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         """
         from sqlalchemy.dialects import sqlite
 
-        compiled = sru.criteria(sru.parse(query)).compile(
+        compiled = sru.criteria(sru.parse(query), one_tag_per_book).compile(
             dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}
         )
         return str(compiled).count("LIKE")
@@ -514,28 +519,28 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         """64 cheap comparisons are spendable, 65 are not."""
         assert self._comparisons(self._widest("dc.title", 8, 8)) == 64
         with pytest.raises(sru.SruError) as refused:
-            sru.criteria(sru.parse(self._widest("dc.title", 8, 8) + " or dc.title=x"))
+            sru.criteria(sru.parse(self._widest("dc.title", 8, 8) + " or dc.title=x"), one_tag_per_book)
         assert refused.value.diagnostic == sru.Diagnostic.TOO_MANY_BOOLEAN_OPERATORS
 
     def test_the_expensive_ceiling_is_an_eighth_of_it(self):
         """`dc.description` is weighted 8, so 8 comparisons spend the budget."""
         assert self._comparisons(self._widest("dc.description", 1, 8)) == 8
         with pytest.raises(sru.SruError) as refused:
-            sru.criteria(sru.parse(self._widest("dc.description", 2, 8)))
+            sru.criteria(sru.parse(self._widest("dc.description", 2, 8)), one_tag_per_book)
         assert refused.value.diagnostic == sru.Diagnostic.TOO_MANY_BOOLEAN_OPERATORS
 
     def test_the_shape_that_was_measured_at_two_seconds_is_refused(self):
         """The finding, as a test. 16 clauses of 8 words over the unbounded
         column: inside every parse bound, and 2091 to 2284 ms."""
         with pytest.raises(sru.SruError) as refused:
-            sru.criteria(sru.parse(self._widest("dc.description", 16, 8)))
+            sru.criteria(sru.parse(self._widest("dc.description", 16, 8)), one_tag_per_book)
         assert refused.value.diagnostic == sru.Diagnostic.TOO_MANY_BOOLEAN_OPERATORS
 
     def test_the_shape_the_old_bound_called_the_ceiling_is_refused_too(self):
         """384 comparisons through the three column index, 584 to 650 ms. The
         old rule permitted it and named it the worst case; it was neither."""
         with pytest.raises(sru.SruError) as refused:
-            sru.criteria(sru.parse(self._widest("cql.serverChoice", 16, 8)))
+            sru.criteria(sru.parse(self._widest("cql.serverChoice", 16, 8)), one_tag_per_book)
         assert refused.value.diagnostic == sru.Diagnostic.TOO_MANY_BOOLEAN_OPERATORS
 
     def test_the_subject_index_is_charged_as_expensive(self):
@@ -543,7 +548,7 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         type would call it cheap. It is a correlated EXISTS and measures 1067 to
         1143 ms at 64 comparisons, which is where its weight comes from."""
         with pytest.raises(sru.SruError):
-            sru.criteria(sru.parse(self._widest("dc.subject", 2, 8)))
+            sru.criteria(sru.parse(self._widest("dc.subject", 2, 8)), one_tag_per_book)
         assert self._comparisons(self._widest("dc.subject", 1, 8)) >= 0
 
     @pytest.mark.parametrize(
@@ -569,7 +574,7 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         """**The half a ceiling test always needs.** A bound that refuses real
         queries is not a tighter bound, it is a broken server, and the previous
         bound admitted all of these."""
-        assert sru.criteria(sru.parse(query)) is not None
+        assert sru.criteria(sru.parse(query), one_tag_per_book) is not None
 
     #: Every index that can actually exhaust the budget, and what one
     #: comparison through it costs.
@@ -599,7 +604,7 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         """
         charge = self.EXHAUSTING[qualified]
         with pytest.raises(sru.SruError) as refused:
-            sru.criteria(sru.parse(self._widest(qualified, 16, 8)))
+            sru.criteria(sru.parse(self._widest(qualified, 16, 8)), one_tag_per_book)
         assert refused.value.details == (
             f"{qualified}: {charge} a comparison, {sru.MAX_COMPARISON_BUDGET} a query"
         )
@@ -621,9 +626,12 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         longest = ""
         for index in sru.INDEXES:
             columns = 3 if index.field is sru.Field.ANYWHERE else 1
+            # A million tags per book, because the subject charge grows with
+            # the shelf and its digits are the one part of a message a library
+            # rather than this module decides.
+            weight = sru._subject_weight(1e6) if index.field is sru.Field.SUBJECT else index.cost.value
             details = (
-                f"{index.qualified}: {columns * index.cost.value} a comparison, "
-                f"{sru.MAX_COMPARISON_BUDGET} a query"
+                f"{index.qualified}: {columns * weight} a comparison, {sru.MAX_COMPARISON_BUDGET} a query"
             )
             assert sru._safe(details) == details, (
                 f"`{details}` is truncated by `_safe`, so a client is told what "
@@ -648,9 +656,9 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
             assert charge == columns * index.cost.value
             # And the budget really is exhausted at the count that charge implies.
             affordable = sru.MAX_COMPARISON_BUDGET // charge
-            assert sru.criteria(sru.parse(self._words(qualified, affordable))) is not None
+            assert sru.criteria(sru.parse(self._words(qualified, affordable)), one_tag_per_book) is not None
             with pytest.raises(sru.SruError):
-                sru.criteria(sru.parse(self._words(qualified, affordable + 1)))
+                sru.criteria(sru.parse(self._words(qualified, affordable + 1)), one_tag_per_book)
 
     @staticmethod
     def _words(index: str, count: int) -> str:
@@ -675,14 +683,123 @@ class TestTheCostOfTheWorstLegalQueryIsBounded:
         server accepts, twice in a row, is the whole guard.
         """
         widest = self._widest("dc.title", 8, 8)
-        assert sru.criteria(sru.parse(widest)) is not None
-        assert sru.criteria(sru.parse(widest)) is not None
+        assert sru.criteria(sru.parse(widest), one_tag_per_book) is not None
+        assert sru.criteria(sru.parse(widest), one_tag_per_book) is not None
 
     def test_the_budget_is_spent_across_the_whole_query_not_per_clause(self):
         """One budget threaded through the tree, so sixteen cheap clauses of
         four words each cannot each spend sixty four."""
         with pytest.raises(sru.SruError):
-            sru.criteria(sru.parse(self._widest("dc.title", 16, 8)))
+            sru.criteria(sru.parse(self._widest("dc.title", 16, 8)), one_tag_per_book)
+
+
+class TestTheSubjectChargeFollowsTagsPerBook:
+    """`dc.subject` is charged by the public shelf's tags per book.
+
+    Its `EXISTS` evaluates the matcher once per tag link, so a flat weight was
+    right at one tag per book and five times low at forty. The calibration is in
+    `Cost`'s docstring; what is pinned here is the shape under it.
+    """
+
+    #: Four comparisons: 32 at one tag per book, 68 at ten, against 64.
+    QUERY = 'dc.subject any "zq0 zq1 zq2 zq3"'
+
+    @staticmethod
+    def _tag(db: Any, books: list[Book], tags_each: int, prefix: str) -> None:
+        for number, book in enumerate(books):
+            book.tags.extend(
+                Tag(name=f"{prefix} {number} {n}", category=TagCategory.CUSTOM) for n in range(tags_each)
+            )
+        db.add_all(books)
+        db.commit()
+
+    @pytest.mark.parametrize(("tags_each", "refused"), [(1, False), (10, True)])
+    def test_a_query_a_lightly_tagged_shelf_affords_is_refused_on_a_heavily_tagged_one(
+        self, db, tags_each, refused
+    ):
+        """The flat weight charged 32 at either density and answered both."""
+        books = [Book(isbn=f"978000000010{n}", **SHARED) for n in range(2)]
+        self._tag(db, books, tags_each, "dense")
+        root = respond(db, operation="searchRetrieve", version="1.2", query=self.QUERY)
+        if refused:
+            assert details_of(root) == f"dc.subject: 17 a comparison, {sru.MAX_COMPARISON_BUDGET} a query"
+        else:
+            assert diagnostic_of(root) is None
+
+    def test_a_private_book_s_tags_are_not_counted(self, db):
+        """The figure reaches a client in a refusal, so it is the public shelf's."""
+        public = Book(isbn="9780000000201", **SHARED)
+        private = Book(isbn="9780000000202", is_private=True, **SHARED)
+        self._tag(db, [public], 1, "open")
+        self._tag(db, [private], 50, "hidden")
+        assert sru.public_tags_per_book(db) == 1.0
+
+    @pytest.mark.parametrize("tags_each", [1, 4])
+    def test_subject_evaluates_once_per_public_tag_link_and_title_once_per_public_book(
+        self, tmp_path, tags_each
+    ):
+        """**The ratio the charge rests on.** Counted in LIKE evaluations, which
+        unlike a duration is the same on every machine: one `dc.title`
+        comparison evaluates once per book, one `dc.subject` comparison once per
+        tag link. So each tag per book above one adds one cheap comparison's
+        work, which is `SUBJECT_CHARGE_PER_TAG`. A rewrite of the subject SQL
+        that changes how often the matcher runs fails here, and the wall clock
+        calibration in `Cost` is then out of date too. The cost of one
+        evaluation is that calibration and is not pinned.
+
+        A heavily tagged private book and a trashed one sit on the shelf because
+        the charge is the public shelf's mean: a plan scanning their links would
+        cost more than it charges."""
+        from datetime import UTC, datetime
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from database import Base
+        from shelf import Shelf
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'likes.db'}")
+        evaluations = 0
+
+        def counting_like(*_: object) -> bool:
+            nonlocal evaluations
+            evaluations += 1
+            return False
+
+        @event.listens_for(engine, "connect")
+        def _count(connection: sqlite3.Connection, _: object) -> None:
+            connection.create_function("like", 3, counting_like)
+
+        # After the listener, so the pooled connection the build opens counts too.
+        Base.metadata.create_all(engine)
+        books = 5
+        with Session(engine) as session:
+            shelf = [Book(isbn=f"97800000003{n:02d}", **SHARED) for n in range(books)]
+            self._tag(session, shelf, tags_each, "counted")
+            hidden = [
+                Book(isbn="9780000000390", is_private=True, **SHARED),
+                Book(isbn="9780000000391", deleted_at=datetime.now(UTC).replace(tzinfo=None), **SHARED),
+            ]
+            self._tag(session, hidden, 50, "hidden")
+
+            def evaluations_of(query: str) -> int:
+                nonlocal evaluations
+                evaluations = 0
+                predicate = sru.criteria(sru.parse(query), one_tag_per_book)
+                Shelf.seen_by_the_public(session).where(predicate).count()
+                return evaluations
+
+            title = evaluations_of('dc.title="zq"')
+            subject = evaluations_of('dc.subject="zq"')
+        engine.dispose()
+
+        assert title == books
+        assert subject == books * tags_each
+        assert (subject - title) / title == sru.SUBJECT_CHARGE_PER_TAG * (tags_each - 1)
+
+    def test_the_charge_rises_by_the_calibrated_figure_per_tag(self):
+        """The class at one tag, then `SUBJECT_CHARGE_PER_TAG` a tag, rounded up."""
+        assert [sru._subject_weight(tags) for tags in (0, 1, 1.1, 10, 40)] == [8, 8, 9, 17, 47]
 
 
 class TestTheCostOfTheWidestLegalResponseIsBounded:
@@ -1896,7 +2013,7 @@ class TestEveryIndexSearchesOnlyAPublishedColumn:
         from sqlalchemy.dialects import sqlite
 
         term = "1990" if index.field in (sru.Field.DATE, sru.Field.RECORD_ID) else "x"
-        clause = sru.criteria(sru.parse(f'{index.qualified}="{term}"'))
+        clause = sru.criteria(sru.parse(f'{index.qualified}="{term}"'), one_tag_per_book)
         rendered = str(clause.compile(dialect=sqlite.dialect(), compile_kwargs={"literal_binds": True}))
         return set(re.findall(r"books\.(\w+)", rendered))
 

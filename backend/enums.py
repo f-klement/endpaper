@@ -821,6 +821,22 @@ class SettingKey(StrEnum):
     # different decisions, so the second is its own row. Off by default, which
     # is what makes the public routes send `X-Robots-Tag: noindex`.
     PUBLIC_CATALOGUE_INDEXING_ENABLED = "public_catalogue_indexing_enabled"
+    # Whether the SRU server answers, as a third switch under the two above.
+    # Publishing a catalogue to people and serving it to another library's
+    # software are separate decisions: an archive may want the first without
+    # the second. `settings_store.sru_is_served` reads it together with the
+    # publish state, so it can never publish a catalogue on its own. Each
+    # export protocol gets a row of its own beside this one rather than a
+    # shared one, because a shared row is where two switches become one.
+    SRU_SERVER_ENABLED = "sru_server_enabled"
+    # Whether a public record says if the book is on the shelf or on loan.
+    # Its own row, off by default: a loan is a member's activity, and showing
+    # a stranger that one is open is a decision of its own rather than part of
+    # publishing. `settings_store.availability_is_shown` reads it with the
+    # publish state, so it can never publish anything on its own. No migration:
+    # nothing showed availability before, so off is the default for a fresh
+    # deployment and an upgraded one alike.
+    PUBLIC_AVAILABILITY_ENABLED = "public_availability_enabled"
 
     # The last outcome of each reminder sender, as one JSON object keyed by
     # sender. A settings row rather than a table because a table would need a

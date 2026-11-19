@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { useLibraryMode } from "../../app/hooks";
 import { Button, ErrorState, Icon, Spinner } from "../../components";
 import { FolderSweepNotice, LocationField } from "../components";
 import { useTranslation, type MessageKey } from "../../i18n";
@@ -51,9 +52,11 @@ function RapidSwitch({
 function RapidPanel({
   rapid,
   onRejected,
+  libraryMode,
 }: {
   rapid: UseRapidIntakeResult;
   onRejected: (code: string) => void;
+  libraryMode: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -117,6 +120,7 @@ function RapidPanel({
             onDropSubject={rapid.dropSubject}
             onAddAsCopy={rapid.addAsCopy}
             isAddingCopy={rapid.isAddingCopy}
+            libraryMode={libraryMode}
           />
         </>
       )}
@@ -418,6 +422,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
   const { t } = useTranslation();
   const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`), accountId);
   const search = useBookSearch();
+  const libraryMode = useLibraryMode();
   const rapid = useRapidIntake();
   const folderSweep = useFolderSweep();
   const [showSearchHelp, setShowSearchHelp] = useState(false);
@@ -476,7 +481,11 @@ export default function ScanPage({ accountId }: ScanPageProps) {
         )}
       </div>
 
-      <RapidPanel rapid={rapid} onRejected={setRejectedCode} />
+      <RapidPanel
+        rapid={rapid}
+        onRejected={setRejectedCode}
+        libraryMode={libraryMode}
+      />
 
       {/* Above the entry panel, which is back on screen so a different book
           can be scanned instead. */}
@@ -526,6 +535,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             onSearchHarder={search.searchHarder}
             isSearchingHarder={search.isSearchingHarder}
             hasSearchedHarder={search.hasSearchedHarder}
+            libraryMode={libraryMode}
           />
 
           {/* The fourth way in, and the only one that starts from something

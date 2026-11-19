@@ -176,6 +176,8 @@ export * from "./previewImportParams.ts";
 export * from "./privacyUpdate.ts";
 export * from "./progressCreate.ts";
 export * from "./progressOut.ts";
+export * from "./publicAvailability.ts";
+export * from "./publicAvailabilityOut.ts";
 export * from "./publicBookOut.ts";
 export * from "./publicBookSort.ts";
 export * from "./publicClassificationOut.ts";

@@ -3931,6 +3931,16 @@ class CatalogueTarget(Base):
             ),
             name="ck_catalogue_targets_use_attribute",
         ),
+        # **The bound `targets.Target._check_timeout` refuses**, so a restore
+        # cannot write a row the dataclass would refuse when one is read back.
+        # The 10.0 is `targets.TIMEOUT_CEILING_SECONDS` as a literal, which
+        # `test_targets.py` holds the two together on. NaN is refused on
+        # Postgres because it compares above every number there; SQLite stores
+        # it as NULL.
+        CheckConstraint(
+            "timeout_seconds IS NULL OR (timeout_seconds > 0 AND timeout_seconds <= 10.0)",
+            name="ck_catalogue_targets_timeout",
+        ),
     )
 
     #: The `CatalogueSource` this row is, and the primary key. Closed, because
@@ -3962,8 +3972,8 @@ class CatalogueTarget(Base):
     refuses_component_parts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     requires_isbn_claim: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     reads_author_identifiers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    #: NULL on every seeded row. #132 enforces it, under
-    #: `metadata.SEARCH_DEADLINE_SECONDS` as the ceiling over the whole fan out.
+    #: `targets.Target.timeout_seconds`, which says what reads it and why a
+    #: Z39.50 row's seed carries an extra second.
     timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     #: Whether this row is still the application's rather than the household's.
     #:
