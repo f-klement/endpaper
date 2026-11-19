@@ -1003,7 +1003,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **148** models under `schemas/`, **52** of
+    Measured on the tree as it stands: **149** models under `schemas/`, **52** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The

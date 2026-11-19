@@ -301,6 +301,24 @@ export const en = {
     "Nothing is recorded and the camera stays closed until you start it.",
   "scan.notABook":
     "Read {code}, which is not a book barcode. Look for the one above the ISBN.",
+  "scan.printed.open": "Barcode will not scan? Read the printed number",
+  "scan.printed.close": "Scan the barcode instead",
+  "scan.printed.aim":
+    "Fill the box with the ISBN line, or the digits under the barcode",
+  "scan.printed.loading": "Loading the text reader...",
+  "scan.printed.read": "Read the number",
+  "scan.printed.reading": "Reading...",
+  "scan.printed.confirm":
+    "Check this against the number printed on the book before looking it up.",
+  "scan.printed.found": "Read ISBN {isbn}",
+  "scan.printed.lookUp": "Look it up",
+  "scan.printed.misread":
+    "Read {code}, but its check digit does not match, so a digit was misread. Hold the book still, closer to the light, and read again.",
+  "scan.printed.nothing":
+    "No ISBN in the box. Line the number up inside it and read again.",
+  "scan.printed.again": "Read again",
+  "scan.printed.unavailable":
+    "The text reader could not start in this browser. Type the ISBN below instead.",
   "scan.tryAgain": "Try again",
   "scan.cameraUnavailable": "Camera unavailable",
   "scan.orEnterManually": "Or enter ISBN manually:",
@@ -820,6 +838,11 @@ export const en = {
     "The palettes below are used under the MIT licence, with their values taken from each project's own repository. None of these projects endorses this one.",
   "appearance.licencesMorris":
     "The Morris pattern names identify the historical designs the drawings are after. This project is not affiliated with, or endorsed by, Morris & Co.",
+  "appearance.licencesSoftware":
+    "Endpaper is built on other people's open source software, and ships their licences:",
+  "appearance.licencesThirdParty": "Third party notices",
+  "appearance.licencesEngine":
+    "The printed ISBN reader's text recognition engine",
   "settings.language": "Language",
   "settings.languageHint": "Applies to you on this device.",
   "settings.defaultLanguage": "Default language for new visitors",
@@ -1649,6 +1672,23 @@ export const en = {
   "copies.addFailed": "That copy could not be added.",
   "copies.loadFailed": "The other copies of this book could not be loaded.",
   "copies.badge": "{count} copies",
+
+  // ── Further images of this copy ─────────────────────────────────────────
+  // The images panel on the book page, beside the files.
+  "coverImages.title": "More images",
+  "coverImages.hint":
+    "The back, the spine, a dust jacket: images of this copy kept beside the cover the shelf shows.",
+  "coverImages.alt": "Image {number} of {title}",
+  "coverImages.add": "Add an image",
+  "coverImages.adding": "Adding...",
+  "coverImages.shelve": "Show on the shelf",
+  "coverImages.shelveFor": "Show image {number} on the shelf",
+  "coverImages.remove": "Remove",
+  "coverImages.removeFor": "Remove image {number}",
+  "coverImages.removeConfirm":
+    "Remove this image? Nothing brings an uploaded image back.",
+  "coverImages.loadFailed": "This copy's images could not be loaded.",
+  "coverImages.failed": "The images could not be changed.",
 
   // ── Where this copy's files are, and a file held in another format ──────
   // The Files panel on the book page and the copy offer on the scan queue.

@@ -104,6 +104,7 @@ function stubLoad({
   // the only one, and that is what the endpoint answers.
   api.on("/api/books/1/copies", { body: [book] });
   api.on("/api/books/1/digital-references", { body: references });
+  api.on("/api/books/1/cover-images", { body: [] });
   api.on("/api/kosync/books/1/documents", { body: kosyncLinked });
   api.on("/api/kosync/inbox", { body: kosyncWaiting });
   api.on("/api/books/tags", { body: tags });
@@ -1282,7 +1283,9 @@ describe("BookDetail", () => {
 
   it("uploads a replacement cover", async () => {
     stubLoad();
-    api.on("/api/books/1/cover", {
+    // Anchored: a string matches by substring and would answer the further
+    // images' list at `/api/books/1/cover-images` with a book.
+    api.on(/\/api\/books\/1\/cover$/, {
       body: makeBook({ id: 1, cover_url: "/covers/1.png" }),
     });
     renderDetail();
@@ -1293,7 +1296,7 @@ describe("BookDetail", () => {
       .upload(input, new File(["png"], "cover.png", { type: "image/png" }));
 
     await waitFor(() =>
-      expect(api.lastCall("/api/books/1/cover", "POST")).toBeDefined(),
+      expect(api.lastCall(/\/api\/books\/1\/cover$/, "POST")).toBeDefined(),
     );
   });
 });
@@ -2192,6 +2195,7 @@ describe("BookDetail over any answer the schema permits", () => {
             ],
             ["list_copies", empty],
             ["list_digital_references", empty],
+            ["list_cover_images", empty],
             ["list_custom_fields", empty],
             [
               "get_custom_fields",

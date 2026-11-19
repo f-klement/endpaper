@@ -1010,7 +1010,7 @@ repeat the argument.
 | SonarQube is read by hand before a release tag, and never gated on | [The error page takes the app's accent as literal values](decisions.md#the-error-page-takes-the-apps-accent-as-literal-values) | 145 |
 | SonarQube is read by hand before a release tag, and never gated on | [A bidirectional control character is refused in every file the suite reads](decisions.md#a-bidirectional-control-character-is-refused-in-every-file-the-suite-reads) | 132 |
 |  | [The local gate runs the backend job's two ruff steps](decisions.md#the-local-gate-runs-the-backend-jobs-two-ruff-steps) | 129 |
-|  | [The gate runs its legs side by side](decisions.md#the-gate-runs-its-legs-side-by-side) | 441 |
+|  | [The gate runs its legs side by side](decisions.md#the-gate-runs-its-legs-side-by-side) | 449 |
 |  | [One backend run per handoff](decisions.md#one-backend-run-per-handoff) | 78 |
 |  | [The backend suite keeps `--dist loadfile`, because the profile found nothing to rebalance](decisions.md#the-backend-suite-keeps---dist-loadfile-because-the-profile-found-nothing-to-rebalance) | 156 |
 |  | [A test that restates a constant, a derivation or a type is deleted, and an agreement between two artefacts is kept](decisions.md#a-test-that-restates-a-constant-a-derivation-or-a-type-is-deleted-and-an-agreement-between-two-artefacts-is-kept) | 344 |
@@ -1063,4 +1063,15 @@ repeat the argument.
 |  | [A list of ISBNs joins the rapid queue and its paced run, and adds no route (2026-11-18)](decisions.md#a-list-of-isbns-joins-the-rapid-queue-and-its-paced-run-and-adds-no-route-2026-11-18) | 809 |
 |  | [ORCID is asked by name only in library mode; a stored iD resolves in either (2026-11-18)](decisions.md#orcid-is-asked-by-name-only-in-library-mode-a-stored-id-resolves-in-either-2026-11-18) | 287 |
 |  | [A Portuguese author number is checked against the BNP's authority file and looked up there, and the other five are not (2026-11-18)](decisions.md#a-portuguese-author-number-is-checked-against-the-bnps-authority-file-and-looked-up-there-and-the-other-five-are-not-2026-11-18) | 1,489 |
+|  | [picomatch ReDoS advisory accepted, not overridden (2026-11-19)](decisions.md#picomatch-redos-advisory-accepted-not-overridden-2026-11-19) | 204 |
+|  | [The printed ISBN is read in the browser, lazy loaded (2026-11-19)](decisions.md#the-printed-isbn-is-read-in-the-browser-lazy-loaded-2026-11-19) | 976 |
+|  | [Further images of a book (2026-11-19)](decisions.md#further-images-of-a-book-2026-11-19) | 1,151 |
+| Further images of a book (2026-11-19) | [Slot count: the shelf cover plus seven](decisions.md#slot-count-the-shelf-cover-plus-seven) | 60 |
+| Further images of a book (2026-11-19) | [The shelf image: `books.cover_url`, unchanged, chosen by a swap](decisions.md#the-shelf-image-bookscover_url-unchanged-chosen-by-a-swap) | 374 |
+| Further images of a book (2026-11-19) | [The storage bound per book: eight times the upload cap](decisions.md#the-storage-bound-per-book-eight-times-the-upload-cap) | 97 |
+| Further images of a book (2026-11-19) | [A replaced cover gets a new URL: `?v=` on `cover_url`](decisions.md#a-replaced-cover-gets-a-new-url-v-on-cover_url) | 185 |
+| Further images of a book (2026-11-19) | [Catalogue cover and uploaded images](decisions.md#catalogue-cover-and-uploaded-images) | 106 |
+| Further images of a book (2026-11-19) | [Files are named by the row, not the book](decisions.md#files-are-named-by-the-row-not-the-book) | 70 |
+| Further images of a book (2026-11-19) | [What each path does with the images](decisions.md#what-each-path-does-with-the-images) | 181 |
+|  | [The image ships one generated notices file, served at /licences/third-party.txt (2026-11-19)](decisions.md#the-image-ships-one-generated-notices-file-served-at-licencesthird-partytxt-2026-11-19) | 727 |
 <!-- index: end -->

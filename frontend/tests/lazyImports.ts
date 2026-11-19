@@ -58,6 +58,7 @@ const LOADERS: Record<string, () => Promise<unknown>> = {
   "lib/pdf.ts": () => import("../src/lib/pdf"),
   "lib/sqlite.ts": () => import("../src/lib/sqlite"),
   "lib/takeout.ts": () => import("../src/lib/takeout"),
+  "lib/textRecognition.ts": () => import("../src/lib/textRecognition"),
   "lib/zip.ts": () => import("../src/lib/zip"),
 };
 

@@ -44,6 +44,7 @@ import type {
   BackfillCoversParams,
   BackfillFromIdentifiersParams,
   BodyUploadCover,
+  BodyUploadCoverImage,
   BookCreate,
   BookDetailsUpdate,
   BookDiscussUpdate,
@@ -61,6 +62,7 @@ import type {
   ConfirmedIdentifierOut,
   CopyCreate,
   CoverBackfillOut,
+  CoverImageOut,
   CustomFieldCreate,
   CustomFieldOut,
   CustomFieldRename,
@@ -9110,6 +9112,529 @@ export const useUploadCover = <
   TContext
 > => {
   return useMutation(getUploadCoverMutationOptions(options), queryClient);
+};
+export const getListCoverImagesUrl = (bookId: number) => {
+  return `/api/books/${bookId}/cover-images`;
+};
+
+/**
+ * The further images kept of this book, oldest first. Not the shelf cover.
+ *
+ * **Served here rather than on `BookOut`**, like notes: no listing shows
+ * them, and putting them on every card would cost every page a query.
+ * `BookForRead` is the whole privacy check, as it is for quotes.
+ * @summary List Cover Images
+ */
+export const listCoverImages = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CoverImageOut[]> => {
+  return customFetch<CoverImageOut[]>(getListCoverImagesUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListCoverImagesQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/cover-images`] as const;
+};
+
+export const getListCoverImagesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCoverImages>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCoverImages>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListCoverImagesQueryKey(bookId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listCoverImages>>> = ({
+    signal,
+  }) => listCoverImages(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCoverImages>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListCoverImagesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCoverImages>>
+>;
+export type ListCoverImagesQueryError = Refusal | HTTPValidationError;
+
+/**
+ * The further images kept of this book, oldest first. Not the shelf cover.
+ *
+ * **Served here rather than on `BookOut`**, like notes: no listing shows
+ * them, and putting them on every card would cost every page a query.
+ * `BookForRead` is the whole privacy check, as it is for quotes.
+ * @summary List Cover Images
+ */
+export function useListCoverImages<
+  TData = Awaited<ReturnType<typeof listCoverImages>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCoverImages>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCoverImages>>,
+          TError,
+          Awaited<ReturnType<typeof listCoverImages>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The further images kept of this book, oldest first. Not the shelf cover.
+ *
+ * **Served here rather than on `BookOut`**, like notes: no listing shows
+ * them, and putting them on every card would cost every page a query.
+ * `BookForRead` is the whole privacy check, as it is for quotes.
+ * @summary List Cover Images
+ */
+export function useListCoverImages<
+  TData = Awaited<ReturnType<typeof listCoverImages>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCoverImages>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listCoverImages>>,
+          TError,
+          Awaited<ReturnType<typeof listCoverImages>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The further images kept of this book, oldest first. Not the shelf cover.
+ *
+ * **Served here rather than on `BookOut`**, like notes: no listing shows
+ * them, and putting them on every card would cost every page a query.
+ * `BookForRead` is the whole privacy check, as it is for quotes.
+ * @summary List Cover Images
+ */
+export function useListCoverImages<
+  TData = Awaited<ReturnType<typeof listCoverImages>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCoverImages>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The further images kept of this book, oldest first. Not the shelf cover.
+ *
+ * **Served here rather than on `BookOut`**, like notes: no listing shows
+ * them, and putting them on every card would cost every page a query.
+ * `BookForRead` is the whole privacy check, as it is for quotes.
+ * @summary List Cover Images
+ */
+export function useListCoverImages<
+  TData = Awaited<ReturnType<typeof listCoverImages>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listCoverImages>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListCoverImagesQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUploadCoverImageUrl = (bookId: number) => {
+  return `/api/books/${bookId}/cover-images`;
+};
+
+/**
+ * Keep one more image of this book. Answers with the whole list.
+ *
+ * The bounds of the shelf cover's upload, through the same reader: 413 past
+ * the size cap and 400 for anything but a JPEG, PNG or WebP image.
+ *
+ * **409 `cover_image_ceiling` past `MAX_COVER_IMAGES_PER_BOOK`**, counted
+ * after the insert and under the lock a merge onto the book takes, the rule
+ * the file reference ceiling keeps, so two uploads at once cannot both pass.
+ * A refused upload's file goes with its rollback.
+ * @summary Upload Cover Image
+ */
+export const uploadCoverImage = async (
+  bookId: number,
+  bodyUploadCoverImage: BodyUploadCoverImage,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CoverImageOut[]> => {
+  const formData = new FormData();
+  formData.append(`file`, bodyUploadCoverImage.file);
+
+  return customFetch<CoverImageOut[]>(getUploadCoverImageUrl(bookId), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getUploadCoverImageMutationKey = () =>
+  ["uploadCoverImage"] as const;
+
+export const getUploadCoverImageMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof uploadCoverImage>>,
+    TError,
+    UploadCoverImageMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof uploadCoverImage>>,
+  TError,
+  UploadCoverImageMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUploadCoverImageMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof uploadCoverImage>>,
+    UploadCoverImageMutationVariables
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return uploadCoverImage(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UploadCoverImageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof uploadCoverImage>>
+>;
+export type UploadCoverImageMutationBody = BodyUploadCoverImage;
+export type UploadCoverImageMutationError = Refusal | HTTPValidationError;
+export type UploadCoverImageMutationVariables = {
+  bookId: number;
+  data: BodyUploadCoverImage;
+};
+
+/**
+ * Keep one more image of this book. Answers with the whole list.
+ *
+ * The bounds of the shelf cover's upload, through the same reader: 413 past
+ * the size cap and 400 for anything but a JPEG, PNG or WebP image.
+ *
+ * **409 `cover_image_ceiling` past `MAX_COVER_IMAGES_PER_BOOK`**, counted
+ * after the insert and under the lock a merge onto the book takes, the rule
+ * the file reference ceiling keeps, so two uploads at once cannot both pass.
+ * A refused upload's file goes with its rollback.
+ * @summary Upload Cover Image
+ */
+export const useUploadCoverImage = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof uploadCoverImage>>,
+      TError,
+      UploadCoverImageMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof uploadCoverImage>>,
+  TError,
+  UploadCoverImageMutationVariables,
+  TContext
+> => {
+  return useMutation(getUploadCoverImageMutationOptions(options), queryClient);
+};
+export const getDeleteCoverImageUrl = (bookId: number, imageId: number) => {
+  return `/api/books/${bookId}/cover-images/${imageId}`;
+};
+
+/**
+ * Let one further image go. The file goes once the delete commits.
+ * @summary Delete Cover Image
+ */
+export const deleteCoverImage = async (
+  bookId: number,
+  imageId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteCoverImageUrl(bookId, imageId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteCoverImageMutationKey = () =>
+  ["deleteCoverImage"] as const;
+
+export const getDeleteCoverImageMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteCoverImage>>,
+    TError,
+    DeleteCoverImageMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteCoverImage>>,
+  TError,
+  DeleteCoverImageMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteCoverImageMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteCoverImage>>,
+    DeleteCoverImageMutationVariables
+  > = (props) => {
+    const { bookId, imageId } = props ?? {};
+
+    return deleteCoverImage(bookId, imageId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteCoverImageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteCoverImage>>
+>;
+
+export type DeleteCoverImageMutationError = Refusal | HTTPValidationError;
+export type DeleteCoverImageMutationVariables = {
+  bookId: number;
+  imageId: number;
+};
+
+/**
+ * Let one further image go. The file goes once the delete commits.
+ * @summary Delete Cover Image
+ */
+export const useDeleteCoverImage = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteCoverImage>>,
+      TError,
+      DeleteCoverImageMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteCoverImage>>,
+  TError,
+  DeleteCoverImageMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeleteCoverImageMutationOptions(options), queryClient);
+};
+export const getShelveCoverImageUrl = (bookId: number, imageId: number) => {
+  return `/api/books/${bookId}/cover-images/${imageId}/shelf`;
+};
+
+/**
+ * Make one further image the cover the shelf shows. A swap, not a copy.
+ *
+ * The image becomes the book's stored cover, written through the same store
+ * door an upload is, and its row goes. **The cover it replaces becomes a
+ * further image in its place**, so the count is unchanged and nothing a
+ * member kept is lost. A cover that is only a catalogue's link, with no file
+ * behind it, is let go rather than kept: a slot holds a file, and refreshing
+ * the metadata asks the catalogue for it again. Answers with the book.
+ * @summary Shelve Cover Image
+ */
+export const shelveCoverImage = async (
+  bookId: number,
+  imageId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getShelveCoverImageUrl(bookId, imageId), {
+    ...options,
+    method: "PUT",
+  });
+};
+
+export const getShelveCoverImageMutationKey = () =>
+  ["shelveCoverImage"] as const;
+
+export const getShelveCoverImageMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof shelveCoverImage>>,
+    TError,
+    ShelveCoverImageMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof shelveCoverImage>>,
+  TError,
+  ShelveCoverImageMutationVariables,
+  TContext
+> => {
+  const mutationKey = getShelveCoverImageMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof shelveCoverImage>>,
+    ShelveCoverImageMutationVariables
+  > = (props) => {
+    const { bookId, imageId } = props ?? {};
+
+    return shelveCoverImage(bookId, imageId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ShelveCoverImageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof shelveCoverImage>>
+>;
+
+export type ShelveCoverImageMutationError = Refusal | HTTPValidationError;
+export type ShelveCoverImageMutationVariables = {
+  bookId: number;
+  imageId: number;
+};
+
+/**
+ * Make one further image the cover the shelf shows. A swap, not a copy.
+ *
+ * The image becomes the book's stored cover, written through the same store
+ * door an upload is, and its row goes. **The cover it replaces becomes a
+ * further image in its place**, so the count is unchanged and nothing a
+ * member kept is lost. A cover that is only a catalogue's link, with no file
+ * behind it, is let go rather than kept: a slot holds a file, and refreshing
+ * the metadata asks the catalogue for it again. Answers with the book.
+ * @summary Shelve Cover Image
+ */
+export const useShelveCoverImage = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof shelveCoverImage>>,
+      TError,
+      ShelveCoverImageMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof shelveCoverImage>>,
+  TError,
+  ShelveCoverImageMutationVariables,
+  TContext
+> => {
+  return useMutation(getShelveCoverImageMutationOptions(options), queryClient);
 };
 export const getGetCustomFieldsUrl = (bookId: number) => {
   return `/api/books/${bookId}/custom-fields`;

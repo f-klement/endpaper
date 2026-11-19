@@ -77,6 +77,7 @@ from schemas.collection import (
     CollectionUpdate,
 )
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID, Page
+from schemas.cover_image import CoverImageOut
 from schemas.custom_field import (
     CustomFieldCreate,
     CustomFieldOut,
@@ -257,6 +258,7 @@ __all__ = [
     "ConfirmedIdentifierOut",
     "CopyCreate",
     "CoverBackfillOut",
+    "CoverImageOut",
     "CredentialKeyOut",
     "CurrencyTotal",
     "CustomFieldCreate",

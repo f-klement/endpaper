@@ -98,6 +98,11 @@ const KEYS: Record<string, readonly unknown[]> = {
   // `useBookHighlights` and the import hook, which invalidate this key. A merge
   // moves them onto the survivor, and merging calls `everything()`.
   getHighlights: books.getGetHighlightsQueryKey(7),
+  // A book's images beside its shelf cover, a child of `/api/books/{id}`
+  // classified with notes and quotes: `useBookCoverImages` writes them and
+  // invalidates this key itself. Shelving one rewrites the book's cover, and
+  // that hook drops the book too. A merge calls `everything()`.
+  listCoverImages: books.getListCoverImagesQueryKey(7),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -143,6 +148,9 @@ const KEYS: Record<string, readonly unknown[]> = {
   me: auth.getMeQueryKey(),
   downloadBackup: backup.getDownloadBackupQueryKey(),
   getCover: covers.getGetCoverQueryKey(7, "jpg"),
+  // One of those images as a file, read by URL in an `<img>` as the shelf
+  // cover is and never through react-query.
+  getCoverImage: covers.getGetCoverImageQueryKey(7, 3, "jpg"),
   getLoginBackground: covers.getGetLoginBackgroundQueryKey("jpg"),
   healthz: system.getHealthzQueryKey(),
   // The household's own OPDS servers. **Deliberately not catalogue queries**:
@@ -290,7 +298,10 @@ describe("the inventory is complete", () => {
     //
     // 63 on 2026-11-07, counted with that same command: the scan card's
     // duplicate warning, one route and one key.
-    expect(Object.keys(KEYS).length).toBe(63);
+    //
+    // 65 on 2026-11-19, counted with that same command: a book's further cover
+    // images, two reads (the list and one image's file) among five routes.
+    expect(Object.keys(KEYS).length).toBe(65);
   });
 });
 
@@ -407,6 +418,7 @@ describe("the catalogue is everything derived from the books table", () => {
       "getCustomFields",
       "listAccessRequests",
       "getHighlights",
+      "listCoverImages",
       "listKosyncDocuments",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);

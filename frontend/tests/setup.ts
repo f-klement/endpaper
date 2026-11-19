@@ -4,6 +4,7 @@ import { cleanup } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
 
 import { forgetPreferences } from "../src/lib/preference";
+import { resetTextRecognitionDouble } from "./doubles/textRecognition";
 import { resetZxingDouble } from "./doubles/zxing";
 import { domLeftBehind } from "./lib/domLeftBehind";
 import { openLedger, uncontrolled } from "./lib/doorLedger";
@@ -440,6 +441,8 @@ beforeEach((context) => {
   // its spies as part of installing it: a file that never opens a camera should
   // not have one.
   resetZxingDouble();
+  // The text recogniser's double, for the same reason.
+  resetTextRecognitionDouble();
   // **Centrally for the same reason.** `lib/preference.ts` holds its decoded
   // snapshots and its listeners at module scope, because a snapshot has to be
   // the same value until its stored string changes and a listener set has to

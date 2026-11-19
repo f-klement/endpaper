@@ -23,11 +23,13 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
+    "@tesseract.js-data/eng": "^1.0.0",
     "@zxing/library": "^0.23.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
-    "sql.js": "^1.15.1"
+    "sql.js": "^1.15.1",
+    "tesseract.js-core": "^7.0.0"
   },
   "devDependencies": {
     "@socketsecurity/bun-security-scanner": "1.1.3",

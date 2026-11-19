@@ -13,6 +13,7 @@ import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import { useFolderSweep } from "../hooks";
 import LookupResult from "./components/LookupResult";
+import PrintedIsbnReader from "./components/PrintedIsbnReader";
 import RapidQueue from "./components/RapidQueue";
 import {
   useBookSearch,
@@ -203,16 +204,124 @@ function Drafted({
   );
 }
 
-/** The camera, idle or reading, its switch, and what it last refused. */
+/**
+ * What the entry panel's camera is doing: nothing, decoding barcodes, or
+ * reading the printed number for a barcode that will not scan.
+ */
+type CameraMode = "off" | "barcode" | "printed";
+
+/** The camera's picture while it is off. */
+function CameraIdle() {
+  const { t } = useTranslation();
+  return (
+    <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
+      <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
+        <Icon name="camera" className="w-5 h-5" />
+      </span>
+      <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
+        {t("scan.cameraIdle")}
+      </p>
+      <p className="text-xs text-paper-600 text-center px-8 dark:text-paper-400">
+        {t("scan.cameraIdleHint")}
+      </p>
+    </div>
+  );
+}
+
+/** The camera's picture for its mode. */
+function CameraView({
+  mode,
+  onDetected,
+  onRejected,
+}: {
+  mode: CameraMode;
+  onDetected: (isbn: string) => void;
+  onRejected: (code: string) => void;
+}) {
+  if (mode === "barcode") {
+    return (
+      <BarcodeScanner active onDetected={onDetected} onRejected={onRejected} />
+    );
+  }
+  if (mode === "printed") return <PrintedIsbnReader onConfirm={onDetected} />;
+  return <CameraIdle />;
+}
+
+/** Starts the barcode camera, or stops whichever reading is on. */
+function CameraSwitch({
+  mode,
+  onMode,
+}: {
+  mode: CameraMode;
+  onMode: (mode: CameraMode) => void;
+}) {
+  const { t } = useTranslation();
+  const look =
+    mode === "off"
+      ? {
+          variant: "primary" as const,
+          icon: <Icon name="camera" className="w-4 h-4" />,
+          next: "barcode" as const,
+          label: t("scan.startScanning"),
+        }
+      : {
+          variant: "secondary" as const,
+          icon: null,
+          next: "off" as const,
+          label: t("scan.stopScanning"),
+        };
+  return (
+    <Button
+      variant={look.variant}
+      fullWidth
+      className="mt-3"
+      icon={look.icon}
+      onClick={() => onMode(look.next)}
+    >
+      {look.label}
+    </Button>
+  );
+}
+
+/**
+ * The fallback for a barcode that is damaged, creased past reading or
+ * missing: the same camera reads the digits printed with it. Offered from the
+ * idle camera too, for a book that never had a barcode.
+ */
+function PrintedSwitch({
+  mode,
+  onMode,
+}: {
+  mode: CameraMode;
+  onMode: (mode: CameraMode) => void;
+}) {
+  const { t } = useTranslation();
+  const look =
+    mode === "printed"
+      ? { next: "barcode" as const, label: t("scan.printed.close") }
+      : { next: "printed" as const, label: t("scan.printed.open") };
+  return (
+    <Button
+      variant="ghost"
+      fullWidth
+      className="mt-2"
+      onClick={() => onMode(look.next)}
+    >
+      {look.label}
+    </Button>
+  );
+}
+
+/** The camera, idle or reading, its switches, and what it last refused. */
 function CameraPanel({
-  isOn,
-  onToggle,
+  mode,
+  onMode,
   onDetected,
   rejectedCode,
   onRejected,
 }: {
-  isOn: boolean;
-  onToggle: () => void;
+  mode: CameraMode;
+  onMode: (mode: CameraMode) => void;
   onDetected: (isbn: string) => void;
   rejectedCode: string | null;
   onRejected: (code: string) => void;
@@ -220,35 +329,9 @@ function CameraPanel({
   const { t } = useTranslation();
   return (
     <>
-      {isOn ? (
-        <BarcodeScanner
-          active
-          onDetected={onDetected}
-          onRejected={onRejected}
-        />
-      ) : (
-        <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
-          <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
-            <Icon name="camera" className="w-5 h-5" />
-          </span>
-          <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
-            {t("scan.cameraIdle")}
-          </p>
-          <p className="text-xs text-paper-600 text-center px-8 dark:text-paper-400">
-            {t("scan.cameraIdleHint")}
-          </p>
-        </div>
-      )}
-
-      <Button
-        variant={isOn ? "secondary" : "primary"}
-        fullWidth
-        className="mt-3"
-        icon={isOn ? null : <Icon name="camera" className="w-4 h-4" />}
-        onClick={onToggle}
-      >
-        {isOn ? t("scan.stopScanning") : t("scan.startScanning")}
-      </Button>
+      <CameraView mode={mode} onDetected={onDetected} onRejected={onRejected} />
+      <CameraSwitch mode={mode} onMode={onMode} />
+      <PrintedSwitch mode={mode} onMode={onMode} />
 
       {/* A barcode that decoded but is not a book. Saying so is the whole
           point: silence here reads as a scanner that does not work, when
@@ -347,7 +430,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
   // left, so walking past the Scan tab lit the phone's camera indicator and
   // held it there. Opening a camera is not something a page should do because
   // somebody looked at it.
-  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [camera, setCamera] = useState<CameraMode>("off");
   const [rejectedCode, setRejectedCode] = useState<string | null>(null);
 
   // The one field of the pending book this page reads for itself: it decides
@@ -371,7 +454,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
     // Close the camera on a hit. The next step is confirming a draft, and
     // leaving the stream running behind that form keeps the indicator lit for
     // as long as somebody takes to check a title.
-    setIsCameraOn(false);
+    setCamera("off");
     setRejectedCode(null);
     scan.lookup(isbn);
   }
@@ -386,7 +469,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
           <RapidSwitch
             rapid={rapid}
             onSwitch={() => {
-              setIsCameraOn(false);
+              setCamera("off");
               setRejectedCode(null);
             }}
           />
@@ -402,10 +485,10 @@ export default function ScanPage({ accountId }: ScanPageProps) {
       {showEntry && (
         <>
           <CameraPanel
-            isOn={isCameraOn}
-            onToggle={() => {
+            mode={camera}
+            onMode={(mode) => {
               setRejectedCode(null);
-              setIsCameraOn((on) => !on);
+              setCamera(mode);
             }}
             onDetected={handleDetected}
             rejectedCode={rejectedCode}

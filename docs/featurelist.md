@@ -26,6 +26,12 @@ chaining them: of 50 Greek ISBNs the other free sources answer 8 between
 them and the Greek national catalogue answers 37, and of 50 Czech ISBNs they
 answer 10 and the Czech national catalogue answers 49.
 
+**A barcode that will not scan** (damaged, creased, or never printed) is read
+from its printed digits instead: the camera reads the ISBN line in the browser,
+so no picture leaves the device, and the number read is offered for confirmation
+before anything is looked up. A read whose check digit fails is reported as a
+misread and offered another read, never a lookup.
+
 **Rapid mode** scans a whole shelf without stopping between books. The batch is
 reviewed before anything is written, so a misread barcode is caught before it
 becomes a row.
@@ -90,6 +96,11 @@ they are protected is in [the configuration reference](configuration.md#catalogu
 checked before it is offered, so a broken link never becomes a book's cover, and
 a stored cover survives the source going away. Fetching is restricted to an
 allowlist of hosts.
+
+**More than one image of a book.** Beside the cover the shelf shows, a book keeps up
+to seven more: the back, the spine, a dust jacket variant, as evidence of which edition
+you hold. Any of them can be made the shelf cover, and the one it replaces is kept in
+its place.
 
 ## Bringing a library in
 

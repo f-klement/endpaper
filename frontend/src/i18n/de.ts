@@ -280,6 +280,25 @@ export const de: Messages = {
     "Es wird nichts aufgezeichnet, die Kamera bleibt geschlossen, bis sie gestartet wird.",
   "scan.notABook":
     "{code} gelesen, das ist kein Buch-Barcode. Der gesuchte Code steht über der ISBN.",
+  "scan.printed.open":
+    "Barcode lässt sich nicht scannen? Die gedruckte Nummer lesen",
+  "scan.printed.close": "Stattdessen den Barcode scannen",
+  "scan.printed.aim":
+    "Die ISBN-Zeile oder die Ziffern unter dem Barcode in den Rahmen bringen",
+  "scan.printed.loading": "Texterkennung wird geladen...",
+  "scan.printed.read": "Nummer lesen",
+  "scan.printed.reading": "Wird gelesen...",
+  "scan.printed.confirm":
+    "Vor dem Nachschlagen mit der Nummer im Buch vergleichen.",
+  "scan.printed.found": "ISBN {isbn} gelesen",
+  "scan.printed.lookUp": "Nachschlagen",
+  "scan.printed.misread":
+    "{code} gelesen, aber die Prüfziffer stimmt nicht, also wurde eine Ziffer falsch gelesen. Das Buch ruhig und näher am Licht halten und erneut lesen.",
+  "scan.printed.nothing":
+    "Keine ISBN im Rahmen. Die Nummer im Rahmen ausrichten und erneut lesen.",
+  "scan.printed.again": "Erneut lesen",
+  "scan.printed.unavailable":
+    "Die Texterkennung startet in diesem Browser nicht. Die ISBN bitte unten eintippen.",
   "scan.tryAgain": "Erneut versuchen",
   "scan.cameraUnavailable": "Kamera nicht verfügbar",
   "scan.orEnterManually": "Oder ISBN von Hand eingeben:",
@@ -712,6 +731,10 @@ export const de: Messages = {
     "Die Farbwelten unten stehen unter der MIT-Lizenz, ihre Werte stammen aus dem jeweils eigenen Repository. Keines dieser Projekte unterstützt dieses hier.",
   "appearance.licencesMorris":
     "Die Morris-Musternamen bezeichnen die historischen Entwürfe, denen die Zeichnungen folgen. Dieses Projekt steht in keiner Verbindung zu Morris & Co und wird von dort nicht unterstützt.",
+  "appearance.licencesSoftware":
+    "Endpaper baut auf quelloffener Software anderer auf und liefert deren Lizenzen mit:",
+  "appearance.licencesThirdParty": "Hinweise zu Software von Dritten",
+  "appearance.licencesEngine": "Die Texterkennung zum Lesen gedruckter ISBN",
   "settings.language": "Sprache",
   "settings.languageHint": "Gilt nur auf diesem Gerät.",
   "settings.defaultLanguage": "Standardsprache für neue Besucher",
@@ -1388,6 +1411,23 @@ export const de: Messages = {
   "copies.loadFailed":
     "Die anderen Exemplare dieses Buchs konnten nicht geladen werden.",
   "copies.badge": "{count} Exemplare",
+
+  // ── Weitere Bilder dieses Exemplars ─────────────────────────────────────
+  "coverImages.title": "Weitere Bilder",
+  "coverImages.hint":
+    "Die Rückseite, der Buchrücken, ein Schutzumschlag: Bilder dieses Exemplars neben dem Titelbild, das das Regal zeigt.",
+  "coverImages.alt": "Bild {number} von {title}",
+  "coverImages.add": "Bild hinzufügen",
+  "coverImages.adding": "Wird hinzugefügt...",
+  "coverImages.shelve": "Als Titelbild verwenden",
+  "coverImages.shelveFor": "Bild {number} als Titelbild verwenden",
+  "coverImages.remove": "Entfernen",
+  "coverImages.removeFor": "Bild {number} entfernen",
+  "coverImages.removeConfirm":
+    "Dieses Bild entfernen? Ein hochgeladenes Bild lässt sich nicht zurückholen.",
+  "coverImages.loadFailed":
+    "Die Bilder dieses Exemplars konnten nicht geladen werden.",
+  "coverImages.failed": "Die Bilder konnten nicht geändert werden.",
 
   // ── Where this copy's files are, and a file held in another format ──────
   // The Files panel on the book page and the copy offer on the scan queue.

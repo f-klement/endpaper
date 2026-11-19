@@ -300,6 +300,27 @@ class TestTheDirectoryDoesNotDriftFromTheDatabase:
         assert cover_store.book_ids() == {keeper["id"]}
         assert res.json()["cover_url"] == f"/covers/{keeper['id']}.jpg"
 
+    def test_merging_adopts_a_cover_whose_url_carries_a_version(self, client, admin, make_book, covers_dir):
+        """An uploaded cover's URL carries `?v=`, so a merge comparing it whole
+        with the loser's file name swept that file rather than adopting it."""
+        keeper = make_book(admin["headers"], title="Dune")
+        loser = make_book(admin["headers"], title="Dune")
+        client.post(
+            f"/api/books/{loser['id']}/cover",
+            files={"file": ("cover.jpg", JPEG_BYTES, "image/jpeg")},
+            headers=admin["headers"],
+        )
+
+        res = client.post(
+            "/api/books/merge",
+            json={"book_ids": [keeper["id"], loser["id"]], "keep_id": keeper["id"]},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 200, res.text
+        assert cover_store.book_ids() == {keeper["id"]}
+        assert res.json()["cover_url"] == f"/covers/{keeper['id']}.jpg"
+
     def test_a_failed_adoption_keeps_the_bytes_and_the_row_honest(
         self, client, admin, make_book, covers_dir, db, monkeypatch
     ):
@@ -528,6 +549,31 @@ class TestARaiseInTheBodyRunsNoTail:
 
         assert res.status_code == 500
         assert (covers_dir / f"{book['id']}.jpg").is_file()
+
+    def test_swapping_in_an_image_of_the_same_format_puts_the_old_cover_back(
+        self, client, admin, make_book, covers_dir, db, refuse_commits
+    ):
+        """The old cover was kept only as the further image the rollback
+        removes, so leaving the new bytes under the name lost it outright."""
+        book = make_book(admin["headers"], title="Dune")
+        _give_a_cover(db, covers_dir, book["id"])
+        image = client.post(
+            f"/api/books/{book['id']}/cover-images",
+            files={"file": ("back.jpg", JPEG_BYTES + b"back", "image/jpeg")},
+            headers=admin["headers"],
+        ).json()[0]
+        refuse_commits(kind="dirty")
+
+        res = client.put(
+            f"/api/books/{book['id']}/cover-images/{image['id']}/shelf", headers=admin["headers"]
+        )
+
+        assert res.status_code == 500
+        assert (covers_dir / f"{book['id']}.jpg").read_bytes() == JPEG_BYTES
+        slots = {
+            path.name for path in covers_dir.iterdir() if path.name.startswith(cover_store.IMAGE_SLOT_PREFIX)
+        }
+        assert slots == {f"{cover_store.IMAGE_SLOT_PREFIX}{image['id']}.jpg"}
 
 
 def download_a_png(monkeypatch) -> None:

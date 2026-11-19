@@ -23,6 +23,7 @@ import fc from "fast-check";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { installCamera } from "../../doubles/camera";
+import * as recogniser from "../../doubles/textRecognition";
 import { decodeFromStream, emitBarcode } from "../../doubles/zxing";
 
 import { en } from "../../../src/i18n/en";
@@ -79,6 +80,15 @@ async function openCamera() {
   // decoder has been handed its callback goes nowhere.
   await waitFor(() => expect(decodeFromStream).toHaveBeenCalled());
   return user;
+}
+
+/** Press the printed number reader's read button once the engine is ready. */
+async function readPrinted(user: ReturnType<typeof userEvent.setup>) {
+  const read = await screen.findByRole("button", {
+    name: "Read the number",
+  });
+  await waitFor(() => expect(read).toBeEnabled());
+  await user.click(read);
 }
 
 async function scan(code = "9780441013593") {
@@ -401,6 +411,67 @@ describe("ScanPage", () => {
       await user.click(screen.getByRole("button", { name: "Stop scanning" }));
 
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the printed number, for a barcode that will not scan", () => {
+    it("switches the open camera from the barcode to the printed number", async () => {
+      renderWithProviders(<ScanPage accountId={ME} />);
+      const user = await openCamera();
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "Barcode will not scan? Read the printed number",
+        }),
+      );
+
+      expect(
+        await screen.findByRole("button", { name: "Read the number" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Scan the barcode instead" }),
+      ).toBeInTheDocument();
+    });
+
+    it("looks up the ISBN read only once the member confirms it", async () => {
+      api.on("/api/books/lookup", { body: LOOKUP });
+      recogniser.read.mockResolvedValue("ISBN 978-0-441-01359-3");
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "Barcode will not scan? Read the printed number",
+        }),
+      );
+      await readPrinted(user);
+      await screen.findByText("Read ISBN 9780441013593");
+      expect(api.lastCall("/api/books/lookup")).toBeUndefined();
+
+      await user.click(screen.getByRole("button", { name: "Look it up" }));
+
+      expect(await screen.findByText("Dune")).toBeInTheDocument();
+      expect(api.lastCall("/api/books/lookup")?.url).toContain(
+        "isbn=9780441013593",
+      );
+    });
+
+    it("looks nothing up from a read whose check digit fails", async () => {
+      recogniser.read.mockResolvedValue("ISBN 978-0-441-01359-4");
+      const user = userEvent.setup();
+      renderWithProviders(<ScanPage accountId={ME} />);
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "Barcode will not scan? Read the printed number",
+        }),
+      );
+      await readPrinted(user);
+
+      expect(
+        await screen.findByText(/check digit does not match/),
+      ).toBeInTheDocument();
+      expect(api.lastCall("/api/books/lookup")).toBeUndefined();
     });
   });
 

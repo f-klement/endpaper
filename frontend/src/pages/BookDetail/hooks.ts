@@ -42,12 +42,17 @@ import {
   getForgetOnlineLinkMutationOptions,
   getForgetDigitalReferenceMutationOptions,
   getListDigitalReferencesQueryKey,
+  getListCoverImagesQueryKey,
+  getDeleteCoverImageMutationOptions,
+  getShelveCoverImageMutationOptions,
   getRemoveBookTagMutationOptions,
   useAddBookTag,
   useAddCopy,
   useDecideAccess,
   useListAccessRequests,
   useListDigitalReferences,
+  useListCoverImages,
+  useUploadCoverImage,
   useListCopies,
   useRequestAccess,
   useAddProgress,
@@ -110,6 +115,7 @@ import type {
   BookIdentifierOut,
   OnlineLinkOut,
   CollectionOut,
+  CoverImageOut,
   DigitalReferenceOut,
   CustomFieldOut,
   CustomFieldValueOut,
@@ -842,6 +848,72 @@ export function useBookFiles(bookId: number): UseBookFilesResult {
     forgetting: forget.pendingRows,
     listError: references.error,
     error: forget.error,
+  };
+}
+
+export interface UseBookCoverImagesResult {
+  /** The further images kept of this book, oldest first. */
+  images: CoverImageOut[];
+  /** Keep one more image. */
+  upload: (file: File) => void;
+  isUploading: boolean;
+  /** Let one image go, after confirming. */
+  remove: (image: CoverImageOut) => void;
+  /** Make one image the shelf cover; the old cover takes its place. */
+  shelve: (image: CoverImageOut) => void;
+  /** The images being removed or shelved right now, by id. */
+  busy: ReadonlySet<number>;
+  /** Why the list could not be read, apart from why a write failed. */
+  listError: unknown;
+  error: unknown;
+}
+
+/**
+ * A back cover, a spine, a dust jacket: images kept beside the shelf cover.
+ *
+ * **Read only through the per book route**, as the file references are, so an
+ * image reaches this page exactly when its book does. Shelving one rewrites
+ * the book's `cover_url`, so it drops the book as well as this list; the other
+ * two writes touch nothing a listing shows.
+ */
+export function useBookCoverImages(bookId: number): UseBookCoverImagesResult {
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
+  const { t } = useTranslation();
+  const images = useListCoverImages(bookId);
+  const dropList = () =>
+    void queryClient.invalidateQueries({
+      queryKey: getListCoverImagesQueryKey(bookId),
+    });
+
+  const upload = useUploadCoverImage({ mutation: { onSuccess: dropList } });
+  const remove = useRowWrite(
+    getDeleteCoverImageMutationOptions,
+    "imageId",
+    dropList,
+  );
+  const shelve = useRowWrite(
+    getShelveCoverImageMutationOptions,
+    "imageId",
+    () => {
+      dropList();
+      invalidate.book(bookId);
+    },
+  );
+
+  return {
+    images: images.data ?? [],
+    upload: (file) => upload.mutate({ bookId, data: { file } }),
+    isUploading: upload.isPending,
+    remove: (image) => {
+      // Asked, because nothing brings an uploaded image back.
+      if (confirm(t("coverImages.removeConfirm")))
+        remove.mutate({ bookId, imageId: image.id });
+    },
+    shelve: (image) => shelve.mutate({ bookId, imageId: image.id }),
+    busy: new Set([...remove.pendingRows, ...shelve.pendingRows]),
+    listError: images.error,
+    error: upload.error ?? remove.error ?? shelve.error,
   };
 }
 

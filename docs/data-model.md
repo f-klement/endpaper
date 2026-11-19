@@ -220,7 +220,8 @@ endpoint reads like the status and rating ones.
 
 **Cover images are files** under `data/covers/<book id>.<ext>`, not a column. `cover_url` is
 the pointer a client renders: `/covers/<id>.<ext>` for a cover this app holds, the remote URL
-for a book whose download failed. `docs/decisions.md` records why that rather than a BLOB,
+for a book whose download failed. A cover a member replaced carries a `?v=` version, because
+the file keeps its name and a browser keeps an image for a week. `docs/decisions.md` records why that rather than a BLOB,
 with the measurements, and what it costs.
 
 The cost, in one line so it is not rediscovered: **a row delete does not delete a file.**
@@ -592,6 +593,14 @@ member's file reference, which the export never writes. The URL is `http` or `ht
 a host (`custom_fields.web_link`, then `ck_online_links_scheme`), at most eight to a book.
 A row carries no member, so it is in `BOOK_OWNED_TABLES` and on the published catalogue:
 it is a fact about the object as a catalogue record.
+
+**`cover_images`.** Further images of a book beside the shelf cover: the back, the spine, a
+dust jacket variant. A row is an id and the file's `extension`; the file is `image_<id>` in
+the covers directory, named by the row rather than the book, so a merge carries the row to
+the survivor and moves no file. At most seven to a book through the upload. The shelf
+cover stays `books.cover_url`, and choosing an image for the shelf swaps the two. Served
+behind the book's read rule and nowhere else: not on a listing, the OPDS feed, the export
+or the published catalogue. A row carries no member, so it is in `BOOK_OWNED_TABLES`.
 
 **`digital_references`.** Where a member says one of their book files is: a `root_label`,
 a `relative_path` beneath it, and a fingerprint. **Never the file.** Endpaper takes no
@@ -1165,7 +1174,7 @@ scanned the barcode on its back cover.
 ## Cascades
 
 Deleting a book removes its `user_books`, `loans`, `access_requests`, `notes`, `book_tags`,
-`digital_references` and `custom_field_values` rows. Deleting a custom field definition removes its values, and
+`digital_references`, `cover_images` and `custom_field_values` rows, and a purge removes the image files once it commits. Deleting a custom field definition removes its values, and
 `custom_fields.remove` does that itself rather than trusting the cascade, for the reason
 `delete_tag` clears its association rows: SQLite enforces a foreign key only while
 `PRAGMA foreign_keys` is on, and a migration's connection does not have it. A member's `member_logins` and `readwise_books` rows cascade from `users`, the rule that a

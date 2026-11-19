@@ -88,8 +88,14 @@ ENV CI_COMMIT_TAG=$APP_VERSION
 # `chmod -R a+rX,go-w dist` for the reasons the app stage gives: Vite copies `public/`
 # with the modes the checkout gave it, so the app's user may be unable to read a file, or
 # able to write one.
+#
+# `collect-notices.ts` writes the JavaScript half of the third party notices, from the
+# record the build just left and the licence files in node_modules, so it runs before
+# node_modules goes. A shipped package with no licence text fails the build here. The
+# notices stage below formats it; its output lands outside dist, which ships whole.
 RUN BUN_INSTALL_CACHE_DIR=/tmp/bun-install-cache bun install --frozen-lockfile \
     && bun run build \
+    && bun run scripts/collect-notices.ts /app/notices/javascript.json \
     && chmod -R a+rX,go-w dist \
     && rm -rf node_modules /tmp/bun-install-cache
 
@@ -167,7 +173,29 @@ COPY backend/ .
 RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash . \
     && chmod -R a+rX,go-w .
 
-# ── Stage 5: The FastAPI server ────────────────────────────────────────────
+# ── Stage 5: The third party notices ──────────────────────────────────────
+#
+# One file naming every third party package the image ships and carrying its licence
+# text: the JavaScript the browser is served, every distribution in the virtualenv, and
+# YAZ. MIT, BSD and Apache each ask for the notice to travel with copies, and an image
+# published on Docker Hub is a copy. `docker/notices.py` says what it reads and what
+# fails it; it is standard library only, so it runs offline on the base. The script and
+# the copied venv stay in this stage, and only the one file crosses, into `static`
+# beside the OCR engine's notice, where the Appearance page links both.
+FROM ${BASE} AS notices
+ARG YAZ_VERSION
+WORKDIR /notices
+COPY docker/notices.py docker/ocr-engine-notices.txt ./
+COPY --from=frontend /app/notices/javascript.json ./javascript.json
+COPY --from=venv /app/.venv/lib ./venv-lib
+COPY --from=yaz /opt/yaz-notice/LICENSE ./yaz-LICENSE
+RUN python -I notices.py --javascript javascript.json \
+        --site-packages venv-lib/python3.*/site-packages \
+        --yaz yaz-LICENSE --yaz-version "${YAZ_VERSION}" \
+        --extra ocr-engine-notices.txt --out third-party.txt \
+    && chmod a+r,go-w third-party.txt
+
+# ── Stage 6: The FastAPI server ────────────────────────────────────────────
 #
 # Alpine, matching stage 1. Moved off python:3.14.7-slim (Debian 13) on 2026-08-18,
 # alongside the same move in the webpage project, where the first gating image scan
@@ -293,6 +321,7 @@ COPY --from=app /app /app
 # Only the compiled assets cross from the frontend stage: no Bun, no node_modules,
 # no TypeScript sources in the shipped image.
 COPY --from=frontend /app/frontend/dist ./static
+COPY --from=notices /notices/third-party.txt ./static/licences/third-party.txt
 
 # The licence travels with the copy, because MIT conditions the grant on the
 # notice being included in every copy of the software and an image is a copy.

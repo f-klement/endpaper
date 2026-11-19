@@ -29,9 +29,11 @@ import {
   ALREADY_HELD_SETTLE_MS,
   useAlreadyHeldWarning,
   useBookSearch,
+  usePrintedIsbnReader,
   useRapidIntake,
   useScanFlow,
 } from "../../../src/pages/ScanPage/hooks";
+import * as recogniser from "../../doubles/textRecognition";
 import {
   FALLBACK_INTERVAL_MS,
   FALLBACK_STARTS_PER_MINUTE,
@@ -121,6 +123,7 @@ describe("the modules the scan page loads lazily", () => {
         "lib/pdf.ts",
         "lib/sqlite.ts",
         "lib/takeout.ts",
+        "lib/textRecognition.ts",
         "lib/zip.ts",
       ],
       unloadable: [],
@@ -4643,5 +4646,98 @@ describe("asking whether the draft is already held", () => {
 
     await wait(1);
     expect(titlesAsked()).toEqual(["D", "Dun"]);
+  });
+});
+
+function video() {
+  return document.createElement("video");
+}
+
+/** The printed number reader, rendered and waited on until it is ready. */
+async function openReader() {
+  const rendered = renderHookWithProviders(() => usePrintedIsbnReader());
+  await waitFor(() => expect(rendered.result.current.state.kind).toBe("ready"));
+  return rendered;
+}
+
+describe("usePrintedIsbnReader", () => {
+  const REGION = { left: 0, top: 0, width: 1, height: 1 };
+
+  it("is loading until the engine has opened", () => {
+    recogniser.opening.mockReturnValue(new Promise(() => {}));
+    const { result } = renderHookWithProviders(() => usePrintedIsbnReader());
+    expect(result.current.state.kind).toBe("loading");
+  });
+
+  it("says the reader cannot run when the engine refuses to open", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    recogniser.opening.mockRejectedValue(new Error("no SIMD"));
+    const { result } = renderHookWithProviders(() => usePrintedIsbnReader());
+    await waitFor(() => expect(result.current.state.kind).toBe("unavailable"));
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it("hands back the ISBNs a read found, and looks nothing up", async () => {
+    recogniser.read.mockResolvedValue("ISBN 978-3-16-148410-0\n");
+    const { result } = await openReader();
+    act(() => result.current.read(video(), REGION));
+    await waitFor(() =>
+      expect(result.current.state).toEqual({
+        kind: "read",
+        found: { isbns: ["9783161484100"], misread: [] },
+      }),
+    );
+    expect(api.calls).toEqual([]);
+  });
+
+  it("reads the region it is given", async () => {
+    const { result } = await openReader();
+    const frame = video();
+    act(() => result.current.read(frame, REGION));
+    await waitFor(() => expect(result.current.state.kind).toBe("read"));
+    expect(recogniser.read).toHaveBeenCalledWith(frame, REGION);
+  });
+
+  it("counts a read that failed as nothing read, and offers another", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    recogniser.read.mockRejectedValue(new Error("no frame yet"));
+    const { result } = await openReader();
+    act(() => result.current.read(video(), REGION));
+    await waitFor(() =>
+      expect(result.current.state).toEqual({
+        kind: "read",
+        found: { isbns: [], misread: [] },
+      }),
+    );
+    act(() => result.current.again());
+    expect(result.current.state.kind).toBe("ready");
+  });
+
+  it("closes the engine's worker when the reader closes", async () => {
+    const { unmount } = await openReader();
+    unmount();
+    expect(recogniser.close).toHaveBeenCalledOnce();
+  });
+
+  it("abandons the engine's load when the reader closes before it opens", () => {
+    recogniser.opening.mockReturnValue(new Promise(() => {}));
+    const { unmount } = renderHookWithProviders(() => usePrintedIsbnReader());
+    unmount();
+    return waitFor(() =>
+      expect(recogniser.opening.mock.calls[0]?.[0].aborted).toBe(true),
+    );
+  });
+
+  it("closes an engine that opens after the reader has closed", async () => {
+    let open!: () => void;
+    recogniser.opening.mockReturnValue(
+      new Promise<void>((resolve) => {
+        open = resolve;
+      }),
+    );
+    const { unmount } = renderHookWithProviders(() => usePrintedIsbnReader());
+    unmount();
+    await act(async () => open());
+    await waitFor(() => expect(recogniser.close).toHaveBeenCalledOnce());
   });
 });

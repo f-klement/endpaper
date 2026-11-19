@@ -829,6 +829,20 @@
         "title": "Body_upload_cover",
         "type": "object"
       },
+      "Body_upload_cover_image": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_cover_image",
+        "type": "object"
+      },
       "BookColumns": {
         "description": "Everything on a Book payload that a Book row answers for itself.\n\nA column, or something derived from one by a string operation with no\nstatement behind it. Validating this from an ORM object is complete: every\nfield here has a value the moment the row is loaded.\n\n**Split from the rest so that the rest cannot be forgotten.** See `BookOut`.",
         "properties": {
@@ -3333,6 +3347,25 @@
           "next_after_id"
         ],
         "title": "CoverBackfillOut",
+        "type": "object"
+      },
+      "CoverImageOut": {
+        "description": "Where one further image of a Book is served, and what addresses it.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url"
+        ],
+        "title": "CoverImageOut",
         "type": "object"
       },
       "CredentialKeyOut": {
@@ -12238,6 +12271,317 @@
         ]
       }
     },
+    "/api/books/{book_id}/cover-images": {
+      "get": {
+        "description": "The further images kept of this book, oldest first. Not the shelf cover.\n\n**Served here rather than on `BookOut`**, like notes: no listing shows\nthem, and putting them on every card would cost every page a query.\n`BookForRead` is the whole privacy check, as it is for quotes.",
+        "operationId": "list_cover_images",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CoverImageOut"
+                  },
+                  "title": "Response List Cover Images",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Cover Images",
+        "tags": [
+          "books"
+        ]
+      },
+      "post": {
+        "description": "Keep one more image of this book. Answers with the whole list.\n\nThe bounds of the shelf cover's upload, through the same reader: 413 past\nthe size cap and 400 for anything but a JPEG, PNG or WebP image.\n\n**409 `cover_image_ceiling` past `MAX_COVER_IMAGES_PER_BOOK`**, counted\nafter the insert and under the lock a merge onto the book takes, the rule\nthe file reference ceiling keeps, so two uploads at once cannot both pass.\nA refused upload's file goes with its rollback.",
+        "operationId": "upload_cover_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_cover_image"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CoverImageOut"
+                  },
+                  "title": "Response Upload Cover Image",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Upload Cover Image",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/cover-images/{image_id}": {
+      "delete": {
+        "description": "Let one further image go. The file goes once the delete commits.",
+        "operationId": "delete_cover_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Image Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Cover Image",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/cover-images/{image_id}/shelf": {
+      "put": {
+        "description": "Make one further image the cover the shelf shows. A swap, not a copy.\n\nThe image becomes the book's stored cover, written through the same store\ndoor an upload is, and its row goes. **The cover it replaces becomes a\nfurther image in its place**, so the count is unchanged and nothing a\nmember kept is lost. A cover that is only a catalogue's link, with no file\nbehind it, is let go rather than kept: a slot holds a file, and refreshing\nthe metadata asks the catalogue for it again. Answers with the book.",
+        "operationId": "shelve_cover_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Image Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Shelve Cover Image",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/{book_id}/custom-fields": {
       "get": {
         "description": "What this book holds in the library's own fields.\n\nOnly the fields it has something in: a book with no value for a field is\nabsent from this list rather than present and empty, because clearing a\nvalue deletes the row. Ask `GET /api/books/custom-fields` for the ones that\ncould be filled in.",
@@ -19685,6 +20029,104 @@
           }
         ],
         "summary": "Get Cover",
+        "tags": [
+          "covers"
+        ]
+      }
+    },
+    "/covers/{book_id}/images/{image_id}.{extension}": {
+      "get": {
+        "description": "A further image of a book the caller may see: a back cover, a spine.\n\nThe same read rule as the cover, through the same dependency, and then the\nimage has to be one of **this** book's: an image id is a counter too, and\nnaming a visible book beside another book's image id answers 404 as an\ninvisible book does.",
+        "operationId": "get_cover_image",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Image Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "extension",
+            "required": true,
+            "schema": {
+              "pattern": "^[A-Za-z]{3,4}$",
+              "title": "Extension",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "Successful Response"
+          },
+          "206": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {},
+              "multipart/byteranges": {}
+            },
+            "description": "Partial Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Cover Image",
         "tags": [
           "covers"
         ]

@@ -178,12 +178,12 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("readwise_books", "ck_readwise_books_bounds"),
         }
 
-    def test_fifteen_of_the_twenty_nine_tables_carry_one(self):
+    def test_fifteen_of_the_thirty_tables_carry_one(self):
         """The other half of the ADR's sentence, from the same source. A set of
         names and a count of tables are two different claims, and stating both
         here is what stopped the first one going out with the wrong number."""
         assert len({table for table, _, _ in _dialect_checks()}) == 15
-        assert len(Base.metadata.tables) == 29
+        assert len(Base.metadata.tables) == 30
 
 
 class TestTheStringifierIsNotAnEngine:

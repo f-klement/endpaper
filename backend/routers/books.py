@@ -63,7 +63,7 @@ from authorship import (
 )
 from categories import join_categories
 from classifications import add_headings, bounded_headings
-from database import on_commit
+from database import hold_book_ceilings, on_commit, on_rollback
 from dependencies import (
     BookForOwner,
     BookForRead,
@@ -106,6 +106,7 @@ from models import (
     DIGITAL_REFERENCE_PATH_MAX,
     ISBN_MAX,
     LOCATION_MAX,
+    MAX_COVER_IMAGES_PER_BOOK,
     MAX_SERIES_INDEX,
     QUOTE_TEXT_MAX,
     SERIES_NAME_MAX,
@@ -114,6 +115,7 @@ from models import (
     AuthorIdentifier,
     Book,
     BookIdentifier,
+    CoverImage,
     CustomField,
     DigitalReference,
     Highlight,
@@ -172,6 +174,7 @@ from schemas import (
     ConfirmedIdentifierOut,
     CopyCreate,
     CoverBackfillOut,
+    CoverImageOut,
     CustomFieldCreate,
     CustomFieldOut,
     CustomFieldRename,
@@ -3261,10 +3264,12 @@ def merge_books(
     # here is this transaction's own business: the covers on disk, the copy
     # group tokens, and when the commit happens.
     #
-    # **A writer holding a loser can deadlock with the merge**, which holds its
-    # keeper and then deletes the loser, and Postgres then aborts one of the
-    # two. Aborted, the merge has written nothing: every write is before this
-    # commit, and the cover files move only after it.
+    # **A writer holding a loser can deadlock with the merge**, which holds
+    # every Book it touches in ascending id, and Postgres then aborts one of
+    # the two; and another merge can delete one of those Books while this one
+    # waits for it, which `fold` raises as `MetAnotherChange`. Either way the
+    # merge has written nothing: every write is before this commit, and the
+    # cover files move only after it.
     with a_lost_race_answers_409(db, _MET_ANOTHER_CHANGE):
         folding.fold(db, keeper, losers)
 
@@ -3336,7 +3341,8 @@ def _merge_parties(payload: MergeRequest, db: Session, current_user: User) -> tu
     return keeper, losers
 
 
-#: The 409 for a merge Postgres aborted to break a deadlock.
+#: The 409 for a merge Postgres aborted to break a deadlock, or one that found
+#: a Book another merge deleted.
 _MET_ANOTHER_CHANGE = (
     "Another change to the same books met this merge, and nothing was merged. Merge them again."
 )
@@ -3369,7 +3375,7 @@ class _MergeCovers:
 
         Called for each loser while it is still loaded, before it is deleted.
         """
-        if self._keeper.cover_url == covers.local_url_for(loser.id):
+        if covers.unversioned(self._keeper.cover_url) == covers.local_url_for(loser.id):
             planned = covers.adoption_url(self._keeper.id, loser.id)
             self._keeper.cover_url = planned
             if planned is not None:
@@ -4452,9 +4458,15 @@ def _purge(book: Book, db: Session) -> None:
     """
     book_id = book.id
     token = book.copy_group
+    # Read before the delete, which cascades the rows away. The cascade loads
+    # this collection to delete it anyway, so naming the files costs nothing
+    # the delete did not already spend.
+    slots = [image.id for image in book.cover_images]
     db.delete(book)
     # A partial rather than a lambda, so a failure's log line names the id.
     on_commit(db, partial(cover_store.remove, book_id))
+    for image_id in slots:
+        on_commit(db, partial(cover_store.remove_image_slot, image_id))
 
     # Only when this row was one of several copies, which almost none are. The
     # flush is what makes the count in `_normalise_copy_group` see the delete,
@@ -5432,15 +5444,205 @@ async def upload_cover(
     # refusal. What the file is called, and that the other formats of this book
     # go with it, are `cover_store`'s.
     data = await read_image_upload(file)
+    # Held before the file is written, because a swap writes the same name
+    # under the same lock (`_held_for_a_swap`). Taken at the commit's UPDATE
+    # instead, the two wrote over each other and each settled against a
+    # `before` the other had changed, so one row could name a file the other
+    # swept.
+    _hold_the_book(db, book)
     before = cover_store.on_disk(book.id)
     destination = cover_store.write(book.id, data)
-    book.cover_url = covers.local_url(book.id, destination.suffix.lstrip("."))
+    # Versioned, because the same format writes the same name and a browser
+    # would otherwise show the old image for a week (`covers.replaced_url`).
+    book.cover_url = covers.replaced_url(book.id, destination.suffix.lstrip("."))
     # The other formats go once the row names the new file, and the new file
     # goes if it never does. `cover_store.settle` says what each half stops.
     covers.settle(db, book.id, book.cover_url, before)
     db.commit()
     db.refresh(book)
     return book_to_out(book, current_user, db)
+
+
+# ── Further cover images ──────────────────────────────────────────────────────
+#
+# A back cover, a spine, a dust jacket variant: images of the book a member
+# keeps beside the shelf cover, as evidence of which edition they hold.
+# `models.CoverImage` says why the shelf cover stays `books.cover_url` and why a
+# file is named by its row. Read through `Book.cover_images` only, since the
+# rows carry no member and the book is their whole privacy.
+
+
+def _hold_the_book(db: Session, book: Book) -> None:
+    """`hold_book_ceilings` for a route writing one Book's cover files, or 404.
+
+    **404 where a merge deleted the Book while this waited for it**, the
+    answer the route's own dependency gives the second send, raised before
+    anything is written. Going on wrote a file named for the dead id, which
+    the merge could then move onto its keeper, and answered 500 at the stale
+    UPDATE or the foreign key.
+    """
+    if not hold_book_ceilings(db, book.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+
+
+#: The `detail.code` on the 409 when an upload would put the Book past
+#: `MAX_COVER_IMAGES_PER_BOOK`.
+COVER_IMAGE_CEILING: Final = "cover_image_ceiling"
+
+
+def _cover_image(book: Book, image_id: int) -> CoverImage:
+    """One of this book's further images, or 404 as if it did not exist.
+
+    Through the book's own collection, so an image id belonging to another
+    book, visible or not, is the same 404 as one that was never issued.
+    """
+    image = next((held for held in book.cover_images if held.id == image_id), None)
+    if image is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+    return image
+
+
+def _keep_cover_image(db: Session, book: Book, data: bytes) -> CoverImage:
+    """Add a row for `data` and write its file, tied to `db`'s transaction.
+
+    The row first, because the file is named by its id. The file goes if the
+    row never commits, by name, which `cover_store.remove_image_slot` says is
+    safe for a slot where it is not for a shelf cover. Raises `NotAnImage` and
+    `OSError` as `cover_store.write_image_slot` does.
+    """
+    image = CoverImage(book_id=book.id, extension=cover_store.extension_of(data))
+    db.add(image)
+    db.flush()
+    on_rollback(db, partial(cover_store.remove_image_slot, image.id))
+    cover_store.write_image_slot(image.id, data)
+    return image
+
+
+@router.get("/{book_id}/cover-images", response_model=list[CoverImageOut])
+def list_cover_images(book: BookForRead) -> list[CoverImage]:
+    """The further images kept of this book, oldest first. Not the shelf cover.
+
+    **Served here rather than on `BookOut`**, like notes: no listing shows
+    them, and putting them on every card would cost every page a query.
+    `BookForRead` is the whole privacy check, as it is for quotes.
+    """
+    return list(book.cover_images)
+
+
+@router.post(
+    "/{book_id}/cover-images",
+    response_model=list[CoverImageOut],
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_cover_image(
+    book: BookForWrite,
+    db: DbSession,
+    file: Annotated[UploadFile, File()],
+) -> list[CoverImage]:
+    """Keep one more image of this book. Answers with the whole list.
+
+    The bounds of the shelf cover's upload, through the same reader: 413 past
+    the size cap and 400 for anything but a JPEG, PNG or WebP image.
+
+    **409 `cover_image_ceiling` past `MAX_COVER_IMAGES_PER_BOOK`**, counted
+    after the insert and under the lock a merge onto the book takes, the rule
+    the file reference ceiling keeps, so two uploads at once cannot both pass.
+    A refused upload's file goes with its rollback.
+    """
+    data = await read_image_upload(file)
+    _hold_the_book(db, book)
+    _keep_cover_image(db, book, data)
+    db.refresh(book, ["cover_images"])
+    if len(book.cover_images) > MAX_COVER_IMAGES_PER_BOOK:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": f"This book already keeps {MAX_COVER_IMAGES_PER_BOOK} further images",
+                "code": COVER_IMAGE_CEILING,
+            },
+        )
+    db.commit()
+    db.refresh(book, ["cover_images"])
+    return list(book.cover_images)
+
+
+@router.delete("/{book_id}/cover-images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
+@refuses(404)
+def delete_cover_image(image_id: RowId, book: BookForWrite, db: DbSession) -> None:
+    """Let one further image go. The file goes once the delete commits."""
+    image = _cover_image(book, image_id)
+    db.delete(image)
+    on_commit(db, partial(cover_store.remove_image_slot, image.id))
+    db.commit()
+
+
+@router.put("/{book_id}/cover-images/{image_id}/shelf", response_model=BookOut)
+@refuses(404)
+def shelve_cover_image(
+    image_id: RowId,
+    book: BookForWrite,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BookOut:
+    """Make one further image the cover the shelf shows. A swap, not a copy.
+
+    The image becomes the book's stored cover, written through the same store
+    door an upload is, and its row goes. **The cover it replaces becomes a
+    further image in its place**, so the count is unchanged and nothing a
+    member kept is lost. A cover that is only a catalogue's link, with no file
+    behind it, is let go rather than kept: a slot holds a file, and refreshing
+    the metadata asks the catalogue for it again. Answers with the book.
+    """
+    image = _held_for_a_swap(db, book, image_id)
+    data = cover_store.image_slot_bytes(image.id, image.extension)
+    if data is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
+    _demote_the_shelf_cover(db, book)
+    before = cover_store.on_disk(book.id)
+    # `write_over` rather than `write`: a rollback puts the old cover back,
+    # since the further image it was copied to goes with the same rollback.
+    destination = cover_store.write_over(db, book.id, data)
+    book.cover_url = covers.replaced_url(book.id, destination.suffix.lstrip("."))
+    # `upload_cover`'s settle, for its reason: the other formats go once the
+    # row names the new file, and the new file goes if it never does.
+    covers.settle(db, book.id, book.cover_url, before)
+    db.delete(image)
+    on_commit(db, partial(cover_store.remove_image_slot, image.id))
+    db.commit()
+    db.refresh(book)
+    return book_to_out(book, current_user, db)
+
+
+def _held_for_a_swap(db: Session, book: Book, image_id: int) -> CoverImage:
+    """The image to shelve, read under the lock both cover uploads and a merge take.
+
+    Without the lock, two swaps on one book each demoted the same old cover and
+    the last write won, so one chosen image survived nowhere; and a swap on a
+    book a merge was carrying away deleted a row the merge had just moved.
+    **`cover_url` is expired after it**, because `BookForWrite` loaded it
+    before: on Postgres a shelf cover uploaded meanwhile was read as the remote
+    link it replaced, so it was not demoted and the write went over it. SQLite
+    cannot show this, since its stale snapshot fails the first write. Those two
+    attributes and not the whole book, so nothing here reloads the row itself:
+    a book a merge deleted meanwhile is `_hold_the_book`'s 404.
+    """
+    _hold_the_book(db, book)
+    db.expire(book, ["cover_url", "cover_images"])
+    return _cover_image(book, image_id)
+
+
+def _demote_the_shelf_cover(db: Session, book: Book) -> None:
+    """Keep the book's stored cover as a further image, before it is replaced.
+
+    Nothing when the cover is not a file this app holds: a remote link names
+    no bytes to keep, which is the one loss `shelve_cover_image` records.
+    """
+    if not covers.is_local(book.cover_url):
+        return
+    data = cover_store.cover_bytes(book.id)
+    if data is not None:
+        _keep_cover_image(db, book, data)
 
 
 # ── Metadata refresh ──────────────────────────────────────────────────────────

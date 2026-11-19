@@ -7,6 +7,10 @@
 - An author with a Portuguese national library number and no GND, Library of Congress or ORCID number is now looked up in the Biblioteca Nacional de Portugal's authority file by that number.
 - Confirming an author's GND number now checks the Portuguese national library number it brings against the Biblioteca Nacional de Portugal's own record, and keeps it only where that record names the same person or links the same VIAF cluster; where the library cannot answer, or answers with an empty record set, the number is kept unchecked.
 - Outside library mode an author lookup no longer offers ORCID's researchers for a name the GND and the Library of Congress do not hold; an ORCID iD already stored still resolves.
+- When a barcode will not scan, the scan page can read the printed ISBN from the camera instead, in the browser so no picture leaves the device, and offers the number read for confirmation before looking it up; a read whose check digit fails is reported as a misread and offered another read.
+- A book keeps up to seven more images beside its cover, such as the back, the spine or a dust jacket, and any of them can be made the shelf cover.
+- A replaced cover shows at once rather than after the browser's cache expires.
+- The image now ships the licence texts of the third party software it carries, linked from the Appearance page.
 
 ## v0.22.0
 

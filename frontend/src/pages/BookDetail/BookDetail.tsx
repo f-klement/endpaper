@@ -29,6 +29,7 @@ import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
 import ClassificationPanel from "./components/ClassificationPanel";
 import CustomFieldsPanel from "./components/CustomFieldsPanel";
+import CoverImagesPanel from "./components/CoverImagesPanel";
 import DigitalReferencesPanel from "./components/DigitalReferencesPanel";
 import OnlineLinksPanel from "./components/OnlineLinksPanel";
 import EnrichPicker from "./components/EnrichPicker";
@@ -44,6 +45,7 @@ import {
   useBookAccess,
   useBookActions,
   useBookCopies,
+  useBookCoverImages,
   useBookCustomFields,
   useBookEnrichment,
   useBookFiles,
@@ -119,6 +121,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const enrichment = useBookEnrichment(bookId);
   const copies = useBookCopies(bookId);
   const files = useBookFiles(bookId);
+  const coverImages = useBookCoverImages(bookId);
   const customFields = useBookCustomFields(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
   // Above the early returns, because hooks are. Null until the book lands, and
@@ -227,6 +230,20 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               listError={files.listError}
               error={files.error}
               onForget={files.forget}
+            />
+
+            {/* Here for the files' reason: an image of the back or the jacket
+                is evidence of which object this row is. */}
+            <CoverImagesPanel
+              title={book.title}
+              images={coverImages.images}
+              isUploading={coverImages.isUploading}
+              busy={coverImages.busy}
+              listError={coverImages.listError}
+              error={coverImages.error}
+              onUpload={coverImages.upload}
+              onRemove={coverImages.remove}
+              onShelve={coverImages.shelve}
             />
           </CollapsibleSection>
 

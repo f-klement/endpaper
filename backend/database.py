@@ -594,13 +594,28 @@ def _month_bucket_unsupported(element: MonthBucket, compiler: Any, **kw: Any) ->
 # ── One Book's capped child tables, one writer at a time ─────────────────────
 
 
-def hold_book_ceilings(db: Session, book_id: int) -> None:
+def hold_book_ceilings(db: Session, book_id: int) -> bool:
     """Hold one Book's capped child tables until this transaction ends.
 
+    **Answers whether the Book is still there.** A merge that deleted it
+    while this waited releases the lock with no row left to hold, and a
+    writer going on regardless writes onto a dead id: a file named for it, or
+    a row its foreign key or its stale UPDATE refuses as a 500. The cover
+    writers and the merge stop on False before they write anything: a route
+    on one Book with its 404, a merge with `errors.MetAnotherChange`.
+
+    **A transaction holding several Books takes them in ascending id.** Two
+    merges with their keepers swapped otherwise each hold one Book and wait on
+    the other's, and Postgres aborts one for the deadlock. `folding.fold` keeps
+    the order; a MARC import, which holds each Book in record order until its
+    one commit, is the known exception, and its deadlock answers 409.
+
     Taken before the count by the file reference report, the heading writer
-    and a MARC import's link writer, and by the merge for its keeper before it
-    carries rows. The identifier writer takes none: its one caller writes onto
-    a Book its own transaction created, which no other transaction can see.
+    and a MARC import's link writer, by the merge for its keeper and each
+    loser before it carries rows, and by every writer of a Book's stored
+    cover or further images. The identifier writer takes none: its one caller
+    writes onto a Book its own transaction created, which no other
+    transaction can see.
     **One lock per Book for every capped table rather than one per table**,
     because a merge carries several of them in one transaction: a lock for one
     table alone leaves the merge racing the writers of every other.
@@ -617,20 +632,20 @@ def hold_book_ceilings(db: Session, book_id: int) -> None:
       waits for the holder's commit. The file reference report, the heading
       writer and the link writer therefore take it only when they would add a
       row (the last two judged from the rows they loaded); the merge takes it
-      always, for its keeper, before it reads anything.
-    * **SQLite** takes nothing here. It serialises writers from a transaction's
-      first write to its commit, which covers a writer whose count follows its
-      own insert and not one that counts before it writes.
+      always, for every Book it touches, before it reads anything.
+    * **SQLite** takes no lock here and only reads the row. It serialises
+      writers from a transaction's first write to its commit, which covers a
+      writer whose count follows its own insert and not one that counts before
+      it writes.
 
     **Whatever is counted has to be read after this call.** A collection loaded
     before it is a count the lock did not cover, so a caller expires or
     refreshes one it may already hold.
     """
+    statement = "SELECT id FROM books WHERE id = :book"
     if db.get_bind().dialect.name == "postgresql":
-        db.execute(
-            text("SELECT id FROM books WHERE id = :book FOR NO KEY UPDATE"),
-            {"book": book_id},
-        )
+        statement += " FOR NO KEY UPDATE"
+    return db.execute(text(statement), {"book": book_id}).first() is not None
 
 
 # ── What a transaction runs once it commits ──────────────────────────────────

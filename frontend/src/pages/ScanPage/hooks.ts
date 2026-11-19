@@ -98,6 +98,8 @@ import {
   type HolderQuestion,
   type Landing,
 } from "../../lib/fileLanding";
+import { readPrintedIsbns, type PrintedIsbns } from "../../lib/printedIsbn";
+import type { FrameRegion, TextRecogniser } from "../../lib/textRecognition";
 import { locate } from "../hooks";
 import {
   FALLBACK_INTERVAL_MS,
@@ -2512,4 +2514,90 @@ function paramsOf(
     ...(author ? { author } : {}),
     ...(isbn ? { isbn } : {}),
   };
+}
+
+/** Where the printed number reader is: the engine, then each read. */
+export type PrintedReaderState =
+  | { readonly kind: "loading" }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "ready" }
+  | { readonly kind: "reading" }
+  | { readonly kind: "read"; readonly found: PrintedIsbns };
+
+export interface UsePrintedIsbnReaderResult {
+  state: PrintedReaderState;
+  /** Read the ISBN printed inside `region` of the frame `video` shows. */
+  read: (video: HTMLVideoElement, region: FrameRegion) => void;
+  /** Put the last read aside and wait for the next. */
+  again: () => void;
+}
+
+/** What a read that never reached the engine's answer counts as. */
+const NOTHING_READ: PrintedIsbns = { isbns: [], misread: [] };
+
+/** The engine, through `await import`: `lib/textRecognition.ts` says why. */
+async function openRecogniser(closing: AbortSignal): Promise<TextRecogniser> {
+  const { openTextRecogniser } = await import("../../lib/textRecognition");
+  return openTextRecogniser(closing);
+}
+
+/**
+ * The printed number reader for as long as the calling component is mounted:
+ * the engine opens on mount, and its worker is closed on unmount.
+ *
+ * **Opened on mount rather than on the first read**, so the engine and its
+ * model download while the member lines the book up.
+ *
+ * A read never looks anything up. It hands back what the text held, and the
+ * member confirms an ISBN before the page looks it up: `readPrintedIsbns` says
+ * why the check digit is what makes that safe.
+ */
+export function usePrintedIsbnReader(): UsePrintedIsbnReaderResult {
+  const [state, setState] = useState<PrintedReaderState>({ kind: "loading" });
+  const recogniser = useRef<TextRecogniser | null>(null);
+
+  useEffect(() => {
+    // Aborted on unmount, which ends a load still running rather than
+    // leaving it to finish for nobody.
+    const closing = new AbortController();
+    openRecogniser(closing.signal).then(
+      (opened) => {
+        if (closing.signal.aborted) {
+          opened.close();
+          return;
+        }
+        recogniser.current = opened;
+        setState({ kind: "ready" });
+      },
+      (error: unknown) => {
+        if (closing.signal.aborted) return;
+        console.warn("The text reader did not start:", error);
+        setState({ kind: "unavailable" });
+      },
+    );
+    return () => {
+      closing.abort();
+      recogniser.current?.close();
+      recogniser.current = null;
+    };
+  }, []);
+
+  const read = useCallback((video: HTMLVideoElement, region: FrameRegion) => {
+    const opened = recogniser.current;
+    if (opened === null) return;
+    setState({ kind: "reading" });
+    opened.read(video, region).then(
+      (text) => setState({ kind: "read", found: readPrintedIsbns(text) }),
+      (error: unknown) => {
+        // A frame the camera had not delivered yet, most often: the member is
+        // told nothing was read, which is true, and offered another go.
+        console.warn("The text reader could not read the frame:", error);
+        setState({ kind: "read", found: NOTHING_READ });
+      },
+    );
+  }, []);
+
+  const again = useCallback(() => setState({ kind: "ready" }), []);
+
+  return { state, read, again };
 }

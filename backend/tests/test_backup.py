@@ -567,6 +567,30 @@ class TestRoundTrip:
         assert res.json()["covers"] == 1
         assert list(covers_dir.glob("*.jpg"))
 
+    def test_a_further_image_of_a_book_comes_back(self, client, admin, library, covers_dir):
+        """Its file is named by its row, not its book, so the archive carries
+        it only because `cover_store.files` lists it and the restore accepts
+        the name."""
+        [image] = client.post(
+            f"/api/books/{library['book']['id']}/cover-images",
+            files={"file": ("back.png", PNG_BYTES, "image/png")},
+            headers=admin["headers"],
+        ).json()
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        for stored in covers_dir.iterdir():
+            stored.unlink()
+
+        client.post(
+            "/api/backup/restore",
+            params={"confirm": True},
+            files={"file": ("backup.zip", data, "application/zip")},
+            headers=admin["headers"],
+        )
+
+        served = client.get(image["url"], headers=_sign_in(client, admin))
+        assert served.status_code == 200
+        assert served.content == PNG_BYTES
+
     def test_the_login_background_comes_back_too(self, client, admin, library, covers_dir):
         """It lives in the same directory and belongs to no book. Losing it on a
         restore would leave the one screen every visitor sees looking wrong."""

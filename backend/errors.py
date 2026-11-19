@@ -285,9 +285,10 @@ class MetAnotherChange(Exception):
 
     Raised by an import that failed on a Book it had matched and loaded, once
     that Book is found deleted, a merge's loser for instance
-    (`importing._a_vanished_match_met_another_change`). Like a deadlock it is a
-    race the other side won, and a second send meets the catalogue that side
-    left.
+    (`importing._a_vanished_match_met_another_change`), and by a merge whose
+    lock finds one of its Books deleted by another (`folding.fold`). Like a
+    deadlock it is a race the other side won, and a second send meets the
+    catalogue that side left.
     """
 
 

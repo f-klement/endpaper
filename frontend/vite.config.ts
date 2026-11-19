@@ -21,6 +21,8 @@ import { VitePWA } from "vite-plugin-pwa";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { bundleRecorder } from "./scripts/notices";
+
 /**
  * The property generator and its random source, as the bundler resolves them.
  *
@@ -137,14 +139,20 @@ function junit(): ["junit", { outputFile: string }][] {
   return outputFile ? [["junit", { outputFile }]] : [];
 }
 
+// What the bundles carry, for the image's third party notices. One record
+// shared by the application's bundle and every worker's, so it is made once
+// here; `scripts/notices.ts` says what it records and who reads it.
+const recorder = bundleRecorder();
+
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   // A worker is built with this list and never with `plugins` below, so the
   // generator guard is named in both; `withoutTheGenerator` says what each
   // holds.
-  worker: { plugins: () => [withoutTheGenerator()] },
+  worker: { plugins: () => [withoutTheGenerator(), recorder.worker()] },
   plugins: [
     withoutTheGenerator(),
+    recorder.main,
     react(),
     // Tailwind 4 runs as a Vite plugin; there is no postcss.config.js any more.
     tailwindcss(),
@@ -180,6 +188,17 @@ export default defineConfig({
         // having: once a navigation is through the portal, the page paints from
         // cache.
         globPatterns: ["**/*.{js,css,ico,png,svg,woff2}"],
+        // **The printed number reader's engine is fetched when it opens, and
+        // never by a session that does not open it.** Its loader and its worker
+        // are `.js` and the pattern above would precache them on every visit;
+        // its WebAssembly and its model match no pattern above. The names are
+        // the files' own, which Vite keeps in front of the hash:
+        // `src/lib/textRecognition.worker.ts` imports them.
+        globIgnores: [
+          "**/textRecognition*",
+          "**/tesseract-core-*",
+          "**/eng.traineddata-*",
+        ],
         // The other half, and it stays. The plugin defaults this to
         // "index.html", which registers a NavigationRoute answering EVERY
         // navigation from the precache. That default was removed when this bug
@@ -318,9 +337,29 @@ export default defineConfig({
     //
     // `test.alias` and not `resolve.alias`: the application build resolves the
     // real library, and only the suite sees the double.
+    //
+    // The text recogniser is a module of this app rather than a package, so
+    // its keys are the relative specifiers that load it, one per depth an
+    // importer sits at, and not the worker beside it, which only the
+    // recogniser names. Strings, not a pattern: the door walk in
+    // `tests/propertyBudget.test.ts` applies the run's aliases and is handed
+    // only string keys. An importer at a new depth loads the real module, and
+    // its tests fail on the worker a test DOM does not have.
     alias: {
       "@zxing/library": fileURLToPath(
         new URL("./tests/doubles/zxing.ts", import.meta.url),
+      ),
+      ...Object.fromEntries(
+        [
+          "../src/lib/textRecognition",
+          "../../lib/textRecognition",
+          "../../../lib/textRecognition",
+        ].map((find) => [
+          find,
+          fileURLToPath(
+            new URL("./tests/doubles/textRecognition.ts", import.meta.url),
+          ),
+        ]),
       ),
     },
     isolate: false,

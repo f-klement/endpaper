@@ -100,8 +100,8 @@ export const NOT_MODULES: readonly string[] = [
 ];
 
 /**
- * Every directory of `tests/`, which mirrors the directories of `src/` plus
- * the ones the suite needs for itself.
+ * Every directory of `tests/`, which mirrors the directories of `src/` and
+ * `scripts/`, plus the ones the suite needs for itself.
  *
  * **A closed set completed rather than a floor.** Narrowing by directory is
  * the evasion that survives an extension check, and it is this list that reds
@@ -118,6 +118,7 @@ export const TOP_LEVEL_DIRECTORIES: readonly string[] = [
   "i18n",
   "lib",
   "pages",
+  "scripts",
   "theme",
 ];
 

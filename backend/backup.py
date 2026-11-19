@@ -64,6 +64,7 @@ from models import (
     CatalogueTarget,
     Classification,
     Collection,
+    CoverImage,
     CustomField,
     CustomFieldValue,
     DegradingEnum,
@@ -213,6 +214,12 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # Absent from `_REQUIRED_TABLES` for their reason: an archive taken
         # before this table existed restores with none.
         ("online_links", OnlineLink),
+        # The rows naming a book's further images. The files ride in the
+        # archive's covers beside the shelf covers (`cover_store.files` lists
+        # both), so a restore writes each back under the name its row gives.
+        # Absent from `_REQUIRED_TABLES` for the links' reason: an archive taken
+        # before this table existed restores with none.
+        ("cover_images", CoverImage),
         # The author merge decisions. Its only foreign key is `users`, which is
         # first in this tuple, so it could sit anywhere after that; it is here
         # beside the other tables that hold what members decided rather than

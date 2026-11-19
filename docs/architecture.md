@@ -814,12 +814,22 @@ flowchart LR
   frontend["frontend: install from the lockfile, build dist"]
   venv["venv: the locked runtime dependencies, no dev tools"]
   appstage["app: the backend sources, compiled"]
+  notices["notices: one third party notices file"]
   final["final: Python Alpine base, uid 1000"]
   yaz -->|"/opt/yaz-runtime"| final
   frontend -->|"dist as static"| final
   venv -->|"/app/.venv"| final
   appstage -->|"/app"| final
+  frontend -->|"the bundle's packages and their licence texts"| notices
+  venv -->|"every installed distribution's metadata"| notices
+  yaz -->|"YAZ's LICENSE"| notices
+  notices -->|"static/licences/third-party.txt"| final
 ```
+
+The notices stage writes one file naming every third party package the image ships, with its
+licence text: the JavaScript the bundle carries (read from the build's module graph, not from
+`package.json`), every distribution installed in the virtualenv, and YAZ. A package with no
+licence text fails the build. The Appearance page links the file.
 
 Only the compiled assets cross from the frontend stage, so Bun, `node_modules` and the
 TypeScript sources are absent from the shipped image. Only the virtualenv crosses from the

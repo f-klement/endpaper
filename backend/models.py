@@ -48,6 +48,7 @@ from enums import (
     CustomFieldKind,
     HeadingKind,
     HighlightSource,
+    ImageExtension,
     LendingWillingness,
     LinkRelationship,
     MemberLoginService,
@@ -1391,6 +1392,14 @@ class Book(Base):
         back_populates="book",
         cascade="all, delete-orphan",
         order_by="OnlineLink.id",
+    )
+    # Cascaded, and the files go with the row through `_purge`. Ordered by id,
+    # which is the order they were added.
+    cover_images: Mapped[list[CoverImage]] = relationship(
+        "CoverImage",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        order_by="CoverImage.id",
     )
 
     @validates(*BLANK_IS_NULL)
@@ -3153,6 +3162,60 @@ class OnlineLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     book: Mapped[Book] = relationship("Book", back_populates="online_links")
+
+
+#: How many images a Book keeps beside its shelf cover: a back cover, a spine,
+#: a dust jacket variant and room to spare. With the shelf cover that is eight,
+#: so one Book holds at most eight times `config.MAX_UPLOAD_BYTES` on disk
+#: through the writers that add one. `docs/decisions.md` records why eight.
+MAX_COVER_IMAGES_PER_BOOK = 7
+
+
+class CoverImage(Base):
+    """A further image of a Book, kept beside the cover the shelf shows.
+
+    **The shelf cover stays `books.cover_url`**, so every listing, the OPDS feed
+    and the public catalogue read exactly what they read before; a row here is
+    only ever shown on the book page. Choosing one as the shelf cover swaps the
+    two: `routers/books.shelve_cover_image` says how.
+
+    **Book owned, with no Member of its own**, like `OnlineLink`: an image of a
+    Book is the household's evidence of which edition it holds, so its
+    visibility is the Book's entirely. Named in `BOOK_OWNED_TABLES` in
+    `tests/test_shelf.py`, and read only through `Book.cover_images`.
+
+    **The file is named by this row's id, not the Book's**: see
+    `cover_store.write_image_slot`. That is what lets a merge carry a row to
+    the survivor without touching the disk.
+
+    **`sqlite_autoincrement`**, because the id is the file's name and a reused
+    id on SQLite would hand a new row a cached URL that once served somebody
+    else's image. Postgres never reissues a sequence value.
+    """
+
+    __tablename__ = "cover_images"
+
+    __table_args__ = (
+        # The extensions `cover_store` writes, which are the ones the cover
+        # route serves. A row naming another could never be served. Derived,
+        # and the migration writes out the set as it stood that day.
+        CheckConstraint(_enum_check("extension", ImageExtension), name="ck_cover_images_extension"),
+        {"sqlite_autoincrement": True},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    book_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    extension: Mapped[str] = mapped_column(String(4), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    book: Mapped[Book] = relationship("Book", back_populates="cover_images")
+
+    @property
+    def url(self) -> str:
+        """Where the cover route serves this image, behind the Book's read rule."""
+        return covers.image_slot_url(self.book_id, self.id, self.extension)
 
 
 #: The longest name a Library may give one of its own fields.

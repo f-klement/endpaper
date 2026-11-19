@@ -39,6 +39,7 @@ import reading
 from book_columns import FILLABLE_FROM_ANOTHER_ROW
 from database import Base, hold_book_ceilings
 from enums import BookIdentifierScheme, ClassificationScheme
+from errors import MetAnotherChange
 from logvalues import clipped
 from models import (
     MAX_ONLINE_LINKS_PER_BOOK,
@@ -46,6 +47,7 @@ from models import (
     Book,
     BookIdentifier,
     Classification,
+    CoverImage,
     DigitalReference,
     Highlight,
     KosyncDocument,
@@ -394,6 +396,13 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
             ceiling=MAX_ONLINE_LINKS_PER_BOOK,
         ),
     ),
+    # Further images move whole, and no file moves with them: each is named by
+    # its own row (`cover_store.IMAGE_SLOT_PREFIX`), so repointing the row is
+    # the whole carry. **No ceiling, deliberately**: the images are already on
+    # disk, so a merge adds no bytes, and dropping one would delete a picture a
+    # member took that nothing puts back. A survivor past
+    # `MAX_COVER_IMAGES_PER_BOOK` takes no upload until one goes.
+    _Transfer(_table(CoverImage.__tablename__), _moves_wholesale(CoverImage)),
     _Transfer(_table(Loan.__tablename__), _carry_loans),
     # Requests carry no uniqueness, so every row travels. Two open requests
     # from one member can result, which the holder answers like any other.
@@ -490,6 +499,17 @@ def _absorb_fields(keeper: Book, losers: Sequence[Book], isbn: str | None) -> No
 # ── The door ──────────────────────────────────────────────────────────────────
 
 
+def _hold_every_book(db: Session, books: Sequence[Book]) -> None:
+    """Hold each Book in ascending id and expire it, or raise on one gone.
+
+    `fold`'s docstring says why every Book and why this order.
+    """
+    for book in sorted(books, key=lambda held: held.id):
+        if not hold_book_ceilings(db, book.id):
+            raise MetAnotherChange
+        db.expire(book)
+
+
 def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
     """Fold the losing Books into the survivor. Everything but the delete.
 
@@ -508,17 +528,28 @@ def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
     every transfer is written to read the database as it stands rather than what
     a caller has already repointed.
 
-    **The keeper's ceilings are held first, before anything reads what it
-    already carries.** A capped transfer counts the keeper's rows and then
-    moves the losers' in, so a writer adding to the keeper between the two
-    lands it past the ceiling: a file reference report, an enrichment's
-    headings or an import's links, each of which takes the same lock. The keeper is expired after
-    it, so every count is read under the lock rather than from a collection a
-    caller loaded before. That discards nothing only while this is the
-    transaction's first write to the keeper, which the one caller keeps.
+    **Every Book it touches is held before anything reads what it carries**,
+    keeper and losers alike, in ascending id as `database.hold_book_ceilings`
+    asks of a transaction holding several. A capped transfer counts the
+    keeper's rows and then moves the losers' in, so a writer adding to the
+    keeper between the two lands it past the ceiling: a file reference report,
+    an enrichment's headings or an import's links, each of which takes the
+    same lock. A writer holding a loser, a cover swap demoting the shelf cover
+    into a further image for one, otherwise commits a row after the transfer's
+    UPDATE read the loser's children and before the loser's DELETE, which
+    waits for it, so the cascade took a picture nobody had moved. Ascending
+    id rather than keeper first, because the keeper is whichever Book the
+    member chose: two merges with their keepers swapped each held one Book and
+    waited on the other's, and Postgres aborted one.
+
+    Each Book is expired after its lock, so every count is read under it
+    rather than from a collection a caller loaded before. That discards
+    nothing only while this is the transaction's first write to them, which
+    the one caller keeps. **A Book the lock finds gone raises
+    `MetAnotherChange`**: another merge deleted it while this one waited, and
+    nothing has been written yet.
     """
-    hold_book_ceilings(db, keeper.id)
-    db.expire(keeper)
+    _hold_every_book(db, [keeper, *losers])
 
     absorbed_isbn = next((loser.isbn for loser in losers if loser.isbn), None)
     if keeper.isbn is None and absorbed_isbn is not None:

@@ -1330,6 +1330,22 @@ class HighlightSource(StrEnum):
     READWISE = "readwise"
 
 
+class ImageExtension(StrEnum):
+    """An image format a cover, a further image or the login background is
+    stored in. `config.ALLOWED_IMAGE_EXTENSIONS` is these values.
+
+    **SVG is deliberately absent**: these files are served back from the
+    app's own origin, and an SVG can carry script, which would make it a
+    stored XSS vector. A member here is also a value
+    `ck_cover_images_extension` admits, so adding one needs a revision.
+    """
+
+    JPEG = "jpeg"
+    JPG = "jpg"
+    PNG = "png"
+    WEBP = "webp"
+
+
 class MemberLoginService(StrEnum):
     """A service where a member holds a login of their own, sealed in
     `member_logins`.

@@ -826,8 +826,26 @@ class TestCoverUpload:
             headers=admin["headers"],
         )
         assert res.status_code == 200
-        assert res.json()["cover_url"] == f"/covers/{book['id']}.png"
+        assert covers.unversioned(res.json()["cover_url"]) == f"/covers/{book['id']}.png"
         assert (covers_dir / f"{book['id']}.png").exists()
+
+    def test_a_cover_replaced_in_the_same_format_is_given_a_new_url(
+        self, client, admin, make_book, covers_dir
+    ):
+        """The file keeps its name and a browser keeps an image for a week, so
+        an unchanged URL would show the old cover until that week ran out."""
+        book = make_book(admin["headers"])
+        urls = [
+            client.post(
+                f"/api/books/{book['id']}/cover",
+                files={"file": (name, PNG_BYTES, "image/png")},
+                headers=admin["headers"],
+            ).json()["cover_url"]
+            for name in ("a.png", "b.png")
+        ]
+
+        assert urls[0] != urls[1]
+        assert client.get(urls[1], headers=admin["headers"]).content == PNG_BYTES
 
     def test_rejects_a_disallowed_extension(self, client, admin, make_book, covers_dir):
         book = make_book(admin["headers"])
@@ -979,7 +997,7 @@ class TestRefreshMetadata:
             headers=admin["headers"],
         )
         res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
-        assert res.json()["cover_url"] == f"/covers/{book['id']}.png"
+        assert covers.unversioned(res.json()["cover_url"]) == f"/covers/{book['id']}.png"
 
     def test_the_local_cover_rule_is_covers_own(
         self, client, admin, make_book, monkeypatch, open_library_hit

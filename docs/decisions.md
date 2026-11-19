@@ -25250,7 +25250,7 @@ on condition that it is measured once on a quiet cluster.
 
 **Why the narrower legs run one at a time, not all at once.** With two nodes held by the
 suites, only the third is free; a second concurrent leg would find every node busy and wait for
-builder behind the backend.
+the first of them to free, which is one the suites hold.
 
 **What a refusal does.** No leg starts after it; a leg already running is waited for and its
 verdict reported. The refusals met in practice (a stale generated file) come before a node is
@@ -26755,3 +26755,289 @@ put back to its own library by the number the cluster carries.
   and a confirmation 9 requests over four hosts, 15 on the fallback, 150 a minute at the ceiling.
 - **Terms**: the BNP's open data page offers the URN service for retrieval by identifier, mainly for
   library systems, and states nothing beyond a contact.
+
+## picomatch ReDoS advisory accepted, not overridden (2026-11-19)
+
+GHSA-fc5q-39xc-vjpf (HIGH, CVE-2026-112366) covers picomatch `<= 4.0.7` with no patched
+version: an extglob with one repeated branch, such as `+(*)` or `+(*a)`, skips the
+`analyzeRepeatedExtglob` guard in `lib/parse.js` and compiles to a regex that backtracks
+exponentially on a short crafted string. 4.0.7 is picomatch's latest release, so there is
+nothing to override to, and bun's range resolution did not block anything. GitHub withdrew
+the advisory on 2026-11-18, and npm's bulk audit endpoint no longer returns it for 4.0.7.
+
+It is accepted in `.trivyignore` rather than pinned, because:
+
+| Question | Answer |
+|---|---|
+| Who pulls it | vite, vitest, tinyglobby and @rollup/pluginutils (fdir as an optional peer), at build and test time only |
+| Does the image carry it | No. The runtime stage copies only `frontend/dist`; the v0.22.0 image has no node_modules, no node or bun binary, and no picomatch code in its static bundle |
+| Who writes its patterns | The repository: `vite.config.ts` globs, vitest `include`, the PWA `globPatterns`. None is an extglob and none comes from a request |
+
+The entry expires on 2027-02-17, the 90 day ceiling the acceptance file test enforces. If the
+withdrawal holds, no scanner reports it by then and the entry can lapse.
+
+## The printed ISBN is read in the browser, lazy loaded (2026-11-19)
+
+The owner decided the recognition runs in the browser and is lazy loaded; what follows is
+what the build settled inside that.
+
+**The engine is Tesseract, through `tesseract.js-core` alone, not the `tesseract.js`
+wrapper.** The wrapper's defaults fetch its worker, its engine and its model from jsdelivr,
+start the worker from a `blob:` URL, and its two bundles carry `Function` fallbacks
+(regenerator runtime and webpack's global shim) that `scripts/check-build.ts` refuses. All
+three are refused by the content security policy, which is unchanged. What it would add over
+the hundred and thirty lines of `src/lib/textRecognition.worker.ts` is a job queue and an
+IndexedDB cache, neither needed: every asset is a hashed file the browser keeps under the
+backend's year long `immutable` rule. Going to the core directly also drops nine transitive
+packages (`node-fetch`, `idb-keyval`, `zlibjs`, `bmp-js` and the rest) to none. The core's
+emitted loader scans clean for string evaluation.
+
+**One build of the engine: SIMD, LSTM only.** A browser without WebAssembly SIMD lacks
+`DecompressionStream` too (Safari gained both in 16.4), and the model needs that, so the
+plain build would serve nobody the SIMD one does not. Such a browser is told the reader
+cannot start and to type the ISBN.
+
+**The model is the English `best_int` LSTM model** from `@tesseract.js-data/eng`, the one
+the wrapper itself defaults to for an LSTM only engine. No digits only model is published
+as a package; a character whitelist (`0123456789X-ISBN: `) does the narrowing instead, and
+the space in it is load bearing: without it the engine dropped every space and glued a
+barcode's price add-on onto its EAN.
+
+**Sizes, measured on the build of this branch** (raw; the backend sends no compression):
+
+| File | Raw | Gzipped |
+|---|---|---|
+| Worker chunk | 1.26 kB | |
+| Lazy main thread chunk | 1.09 kB | 0.60 kB |
+| Engine loader | 89.27 kB | |
+| Engine WebAssembly | 2,857.60 kB | 1,077.41 kB |
+| Model (gzip on disk) | 2,952.87 kB | |
+
+The first open fetches about 5.9 MB; nothing of it is precached (`globIgnores` in
+`vite.config.ts`), so a session that never opens the reader pays nothing, and the shipped
+image grows by the same 5.9 MB. The main chunk grows by 7.02 kB raw and 1.98 kB gzipped (1,494.20 to 1,501.22 kB, 403.42 to 405.40 kB gzipped, base against this branch), which is the reader's page code and its strings; the precache grows by 6.88 KiB, so no engine file is in it. `scripts/check-build.ts` passes over the emitted engine loader and worker.
+
+**First open, timed in headless Chromium against a local server** sending this app's policy,
+so with no network cost: the engine and model opened in 193 ms and 1,428 ms on two runs, and
+a read of one ISBN line took 66 ms to 581 ms. On a phone over the LAN the 5.9 MB download
+dominates; that was not measured.
+
+**The frame is cropped to the guide box before it is read**: a copyright page holds a dozen
+lines of numbers, and every line read costs time. The box is drawn with the same fractions
+over a picture shown at its own aspect ratio, so what is in the box on screen is what is
+read.
+
+**What the member sees.** A read whose check digit holds is offered as "Read ISBN …" with a
+Look it up button; nothing is looked up without that tap. A read shaped like an ISBN whose
+check digit fails says so, names what was read, and offers only another read. A read with
+nothing ISBN shaped says the box held no ISBN. Where one read finds more than one valid
+ISBN (a copyright page printing the ISBN-10 and ISBN-13 of different editions), each is
+offered.
+
+**Why groups are joined only at their boundaries.** A barcode's digits are printed in
+spaced groups (`9 783161 484100`), so a line's groups are joined to ten or thirteen
+characters, but never by cutting a group: the first ten digits of an EAN pass the ISBN-10
+check one time in eleven. A one digit group only starts a join, so a printer's key
+(`10 9 8 7 …`) is not read as a misread.
+
+**A camera frame is a member's bytes, and two rules hold the claim that none leaves.**
+The server cannot back it the way it backs the book file claim, because the cover route
+accepts any image, and the frame is reachable outside `src/lib/` (the reader owns the
+`<video>`). So the premise is the encoding: a frame carries nothing until something turns it
+into bytes, and `tests/houseRules.test.ts` holds that exactly one module under `src/`
+names a pixel encoder, `lib/textRecognition.ts`, which sits under the `lib/` network rule
+with its worker. The worker's three requests (the loader by `importScripts`, the engine's
+WebAssembly through `locateFile`, the model by `fetch`) are each exempted by expression,
+pinned to its `?url` import and to two occurrences of its name; `importScripts` is otherwise
+refused in `lib/`. `RTCPeerConnection` is on both lists, since WebRTC is not bound by
+`connect-src` and can carry a frame without encoding it by name. The encoder list is an
+enumeration and says so.
+
+**Closing the reader abandons a load in flight.** `openTextRecogniser` takes an
+`AbortSignal`; aborting it terminates the worker mid download, so closing and reopening
+never runs two loads.
+
+**Third party notices for the engine.** `tesseract.js-core` and the Tesseract model are
+Apache-2.0, whose clause 4(a) asks for the licence with every copy, and the engine's
+WebAssembly statically links Leptonica, libtiff, libpng, zlib, the IJG libjpeg, giflib, libwebp
+and OpenLibm, each under its own terms. `frontend/public/licences/tesseract.txt` reproduces
+every one of those licences from the commit `tesseract.js-core` 7.0.0 pins, so it is in the
+build at `/licences/` and in the image beside the engine files. `frontend/tests/licence.test.ts`
+holds one phrase per library, and that the build copies `public/` into the served dist.
+
+## Further images of a book (2026-11-19)
+
+A book holds further images beside its shelf cover, shown on its page only.
+
+### Slot count: the shelf cover plus seven
+
+`models.MAX_COVER_IMAGES_PER_BOOK = 7`, so eight images a book. The use is evidence of an
+edition: front, back, spine, a dust jacket and its variants, a title page, a colophon. Eight
+covers that with room, and stays a bounded number a household can sort through on a phone.
+uBiblio's sixteen buys nothing this use needs and doubles the disk bound below.
+
+### The shelf image: `books.cover_url`, unchanged, chosen by a swap
+
+The shelf cover stays the one column every listing, the OPDS feed, the export, the MARC
+doors and the public catalogue already read, so none of them changed. Further images live
+in a child table `cover_images` and are shown only on the book page.
+
+Choosing one for the shelf (`PUT /api/books/{id}/cover-images/{image_id}/shelf`) is a
+**swap**: the image's bytes are written as the book's cover through `cover_store.write` and
+settled like an upload, its row goes, and the cover it replaced is kept as a new further
+image. The count is unchanged and nothing a member kept is lost.
+
+Every writer of a book's cover files holds `hold_book_ceilings` before it writes one: both
+uploads, the swap, and a merge, which holds every book it touches, keeper and losers, in
+ascending id, because taking the keeper first deadlocked two merges whose keepers were
+swapped. The
+swap reads `cover_url` and the image only after the lock: two swaps on one book otherwise
+both demoted the same old cover and one chosen image survived nowhere, and on Postgres a shelf
+cover uploaded while the swap waited was read as the link it replaced and written over. The
+shelf cover upload holds it before writing the file, since a swap writes the same name. A
+merge holding only its keeper repointed a loser's images and then waited at the loser's
+DELETE, whose cascade took an image a writer holding the loser had added meanwhile. Each of
+the three is proved against a live Postgres in
+`tests/test_database_ceilings_on_a_real_server.py`, because SQLite serialises writers and
+cannot show any of them. The lock answers whether the book is still there: a book a merge
+deleted while a writer waited makes the upload, the further image upload and the swap answer
+404 and a merge answer 409, each before it writes anything. A
+rollback of a same format swap writes the old cover's bytes back over the shelf name
+(`cover_store.write_over`), because the further image they were copied to goes with the same
+rollback; an upload does not, since the member asked to replace.
+
+Rejected: letting `cover_url` point at a slot. Every reader of `cover_url` (merge adoption,
+the backfill, `covers.settle`, the public schema's local cover rule) reasons about
+`<book id>.<ext>`, and each would have learnt a second shape.
+
+### The storage bound per book: eight times the upload cap
+
+Every slot is written only through the shelf cover's bounds: `uploads.read_image_upload`
+(5 MB cap, 413; JPEG, PNG or WebP by magic number, 400) and `cover_store`'s sniff on every
+write. So one book holds at most 8 × `MAX_UPLOAD_BYTES` = 40 MB through the writers that add
+one. The ceiling is counted after the insert under `hold_book_ceilings`, as the file
+reference ceiling is, and a refused upload's file goes with its rollback.
+
+A merge may carry a survivor past seven (below); it adds no bytes to the disk, and the
+survivor takes no further upload until one goes.
+
+### A replaced cover gets a new URL: `?v=` on `cover_url`
+
+The cover route caches for a week (`private, max-age=604800`), and a same format replace
+writes the same `<id>.<ext>`, which a swap makes the common case. So the two routes that write
+a stored cover over its own name, the upload and the swap, record `covers.replaced_url`: the
+plain URL plus `?v=` and eight random hex digits. Random rather than the file's change time,
+because it needs no `stat`. Every other writer (a catalogue store, an adoption, a copy) puts
+a file under a name no browser fetched with a 200, so it stays unversioned.
+
+Two readers compared `cover_url` with a URL built from a name, and both would have failed
+silently on a version: `covers.settle` (no sweep of the other format on commit, no discard on
+a rollback) and the merge's adoption plan (the loser's file swept rather than adopted). Both
+compare through `covers.unversioned`, which strips the query.
+
+Rejected: a versioned file name, which breaks every reader of `<id>.<ext>`; `no-cache` with
+revalidation, since Starlette's `FileResponse` sets an ETag and answers no `If-None-Match`, so
+every listing would refetch every cover in full. Existing rows need no migration.
+
+### Catalogue cover and uploaded images
+
+A catalogue cover lives only in the shelf slot, as it always has: fetched through
+`covers.py`'s host allowlist and size cap and stored as `<book id>.<ext>`. A further image
+is always an upload; no catalogue writes a slot, so the fetch path gained no new writer.
+
+When an image is shelved over a catalogue cover that was **stored**, the catalogue's bytes
+become a further image like any other. When the shelf cover is only a remote link (the
+download failed and the URL was kept), there are no bytes to keep, and the link is let go:
+a metadata refresh asks the catalogue for it again.
+
+### Files are named by the row, not the book
+
+`image_<row id>.<ext>` in the covers directory. A merge then carries a row by repointing it
+and moves no file; `cover_store.book_ids` never counts one (its stem is not an integer);
+`cover_store.files` lists them, so a backup carries them and a restore writes them back by
+name. `sqlite_autoincrement` on the table, because a reused id on SQLite would hand a new
+row a URL a browser cached for another image (`private, max-age=604800`).
+
+### What each path does with the images
+
+| Path | What happens |
+|---|---|
+| Read | `GET /api/books/{id}/cover-images` behind `BookForRead`; the file at `/covers/{book id}/images/{image id}.{ext}` behind `BookForCover`. An invisible book, an image of another book, and a wrong extension are each 404. |
+| Trash | Rows and files stay: a trashed book is restored whole. |
+| Purge | Rows cascade; `_purge` queues each file's removal on the commit, as the cover's. |
+| Merge | `folding` moves every row to the survivor (`_moves_wholesale`), no ceiling: dropping one would delete a photograph nothing puts back. A loser's own shelf cover keeps the existing adoption rule; it is not turned into a further image. |
+| Add a copy | Not copied. A copy is another object, and its jacket is its own evidence. |
+| Backup and restore | The table is in the archive's manifest; the files ride with the covers. |
+| Export (CSV, JSON, MARC), OPDS, public catalogue | Nothing: they carry the shelf cover only. The public schema already drops a local cover, and further images have no public route. |
+
+## The image ships one generated notices file, served at /licences/third-party.txt (2026-11-19)
+
+**Decision.** A Dockerfile stage, `notices`, writes `static/licences/third-party.txt`
+beside the OCR engine's `licences/tesseract.txt`, and the Appearance page's licences
+section links both. It credits three populations: the JavaScript the browser is served,
+every distribution in the runtime virtualenv, and YAZ. A package with no licence text
+fails the image build and nothing is written.
+
+**Why the JavaScript is read from the module graph, not the lockfile.** The
+`dependencies` closure in `package.json` and `bun.lock` both overshoots (tree shaken
+packages) and misses: Vite's preload helper, Rolldown's runtime, Tailwind's preflight in
+the stylesheet, the Workbox runtime and its module loader in the service worker. None is
+a dependency and all of them ship. So a Vite plugin (`bundleRecorder`, in
+`frontend/scripts/notices.ts`) records every `node_modules` package with a module or an
+asset in the application's bundle and in each worker's, and `collect-notices.ts` then
+accounts for every file in `dist/`: emitted by the bundle, copied from `public/`, or one
+of the PWA plugin's templated files (`sw.js`, `workbox-*.js`, `registerSW.js`). A file
+nothing accounts for fails the build; a virtual module id with no owner fails it.
+
+**Why the Python side reads the installed venv, not `uv.lock`.** What is credited is
+what was installed. Every `*.dist-info` is read: `licenses/` (PEP 639) and any top level
+LICENSE, COPYING, COPYRIGHT, UNLICENSE or NOTICE.
+
+**What counts as licence text.** Both collectors take the same file names, and both drop a
+file that is empty or only whitespace before the check, so an empty `LICENSE` does not pass
+as one. `AUTHORS` is not read: it names people and grants nothing, so a package carrying
+only that would pass as licensed.
+
+**A gap reds the merge request that brings it.** Renovate automerges minors and patches,
+and `build:merge-request` fires on no lockfile, so a refusal only in the image build would
+first red `build` on `main`, after the merge. So both halves also run on every merge
+request, in jobs that already have their dependencies installed: `test:frontend` runs
+`collect-notices.ts` over the build `check:build` has just made, and `test:backend` syncs
+a runtime only virtualenv under `/tmp` and runs `notices.py check-venv` on it. Runtime only
+because the job's own venv carries the dev group, which the image does not ship; under
+`/tmp` because the suite's tree walks would read a venv inside the checkout. Not chosen:
+adding the lockfiles to `build:merge-request`'s `changes:`, which is a full image build per
+Renovate merge request. A pipeline test pins the steps, and that neither job's merge
+request rule carries `changes:` or `when:`.
+
+**Offline.** No new dependency and no network: the JS half is a bun script over
+`node_modules`, the rest is a standard library Python script (`docker/notices.py`) on
+the base image. YAZ's `LICENSE` is kept aside by `docker/build-yaz.sh` at
+`/opt/yaz-notice/LICENSE`, outside the runtime subset so it ships once.
+
+**Packages with no licence file of their own.** `SHIPPED_NOTICE` in `notices.ts` maps
+`tesseract.js-core` and `@tesseract.js-data/eng` to `licences/tesseract.txt`; the
+generated entry points there. A row whose package leaves the bundle fails, so the table
+cannot outlive what it describes.
+
+**The OCR engine's residue.** libwebp's PATENTS grant and OpenLibm's per file notices,
+which `tesseract.txt` points at without reproducing, are committed as
+`docker/ocr-engine-notices.txt` and appended whole to the generated file. Taken from
+libwebp at 20ef03ee and OpenLibm at ae2d9169 (the commits `tesseract.txt` names); the
+OpenLibm part is every distinct licence comment in the directories a wasm32 build
+compiles (src, wasm32, bsdsrc, include), one copy each with the files carrying it. It
+overshoots a little: a handful of other architectures' headers live in src. Two of those
+comments, the FDLIBM notice and Stephen L. Moshier's ISC notice, are word for word in
+OpenLibm's own licence, which `tesseract.txt` carries; their entries keep the file list and
+point there, so the generated file holds each text once.
+
+**Bounds.**
+- A file is accounted for, not every byte: a tool that starts injecting a helper of a
+  new package into a file the bundle already emits is not seen. `INJECTED` names the
+  one known (Tailwind's banner).
+- The base image's own software (CPython, musl, Alpine's libxml2, libxslt, gnutls) is
+  not credited; Alpine ships those under its own terms.
+- Vite's `LICENSE.md` is about 98 KB because it carries the notices of Vite's own bundled
+  Node dependencies; it is included whole rather than trimmed by a special case.
+- The link to `/licences/third-party.txt` is a 404 under `bun run dev`: the file exists
+  only in a built image.
