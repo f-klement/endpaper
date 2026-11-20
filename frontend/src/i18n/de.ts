@@ -61,6 +61,7 @@ export const de: Messages = {
   "nav.loans": "Ausleihen",
   "nav.stats": "Statistik",
   "nav.settings": "Einstellungen",
+  "nav.patrons": "Benutzer:innen",
   "nav.menu": "Menü",
   "nav.menuFor": "Menü für {name}",
   "nav.switchAccount": "Konto wechseln",
@@ -125,6 +126,13 @@ export const de: Messages = {
   "library.channelBroken":
     "Erinnerungen an überfällige Bücher kommen über {channels} nicht an.",
   "library.channelBrokenAction": "Einstellungen prüfen",
+  "library.vocabularyOffer":
+    "Noch ist kein Schlagwortvokabular hier kopiert, daher fragt jede Schlagwortsuche die Quelle. Eine Kopie lässt sich in den Einstellungen unter Schlagwortvokabulare herunterladen.",
+  "library.vocabularyOfferAction": "Einstellungen öffnen",
+  "library.vocabularyOfferDismiss": "Ausblenden",
+  "library.vocabularyLoading":
+    "Ein Schlagwortvokabular wird gerade hierher kopiert. Der Fortschritt steht in den Einstellungen unter Schlagwortvokabulare.",
+  "library.vocabularyLoadingAction": "Fortschritt anzeigen",
 
   // ── Bibliothek ──────────────────────────────────────────────────────────
   "library.title": "Bibliothek",
@@ -352,6 +360,15 @@ export const de: Messages = {
   "search.slow.nothingAsked":
     "Es wurde nichts durchsucht. Jeder Katalog, den diese Bibliothek eingeschaltet hat, ist ein langsamer.",
   "search.source.from": "Quelle: {names}",
+  "search.narrow.title": "Nur einige Kataloge fragen",
+  "search.narrow.chosen": "Es werden nur {names} gefragt",
+  "search.narrow.lookupHint":
+    "Für die nächste gescannte oder eingegebene ISBN. Ist nichts angekreuzt, wird jeder Katalog gefragt.",
+  "search.narrow.searchHint":
+    "Nur für die nächste Suche. Ist nichts angekreuzt, wird jeder Katalog gefragt.",
+  "search.narrow.asked": "Es wurden nur {names} gefragt.",
+  "search.narrow.refused":
+    "Die Kataloge, die diese Bibliothek fragt, haben sich geändert, daher wurde nichts gefragt. Die angebotene Auswahl ist jetzt aktuell.",
 
   // ── Ausleihen ───────────────────────────────────────────────────────────
   "loans.title": "Ausleihen",
@@ -412,6 +429,52 @@ export const de: Messages = {
   "customFields.editButton": "Angaben bearbeiten",
   "customFields.valuePlaceholder": "Leer lassen, um zu löschen",
   "customFields.opensElsewhere": "Öffnet in einem neuen Tab",
+
+  // ── Klassifikationen ────────────────────────────────────────────────────
+  "schemes.title": "Klassifikationen",
+  "schemes.explain":
+    "Die Klassifikationen, aus denen die Einordnung eines Buches stammen kann. Eine eigene lässt sich hinzufügen, um nach einer Klassifikation zu katalogisieren, die Endpaper nicht kennt; wie deren Nummern sortiert werden, wird dabei einmal festgelegt.",
+  "schemes.codeLabel": "Kürzel",
+  "schemes.nameLabel": "Name",
+  "schemes.ruleLabel": "Sortiert wie",
+  "schemes.ruleGeneric": "Einfacher Text",
+  "schemes.ruleDewey": "Dewey",
+  "schemes.ruleLcc": "Library of Congress",
+  "schemes.addButton": "Klassifikation hinzufügen",
+  "schemes.renameLabel": "Neuer Name für {name}",
+  "schemes.deleteConfirm":
+    "{name} löschen? Das lässt sich nicht rückgängig machen.",
+  "schemes.inUse":
+    "{count} sichtbare Bücher verwenden diese Klassifikation noch, daher lässt sie sich nicht löschen.",
+  "schemes.inUseOne":
+    "1 sichtbares Buch verwendet diese Klassifikation noch, daher lässt sie sich nicht löschen.",
+  "schemes.inUseUnseen":
+    "Nicht sichtbare Bücher verwenden diese Klassifikation noch, daher lässt sie sich nicht löschen.",
+
+  // ── Schlagwortvokabulare ────────────────────────────────────────────────
+  "vocabularies.title": "Schlagwortvokabulare",
+  "vocabularies.explain":
+    "Eine lokale Kopie eines Vokabulars beantwortet Schlagwortsuchen, ohne jedes Mal die Quelle zu fragen. Bis eine Kopie heruntergeladen ist, und während des Herunterladens, fragen Suchen die Quelle direkt.",
+  "vocabularies.download": "Herunterladen",
+  "vocabularies.refresh": "Aktualisieren",
+  "vocabularies.licence": "Lizenz: {licence}",
+  "vocabularies.licenceNone": "Keine Lizenz angegeben",
+  "vocabularies.notCopyable":
+    "Die Lizenz erlaubt keine lokale Kopie, daher fragen Suchen immer die Quelle direkt.",
+  "vocabularies.notLoaded":
+    "Noch nicht heruntergeladen. Suchen fragen die Quelle direkt.",
+  "vocabularies.fetched": "Abgerufen am {date}, {count} Einträge.",
+  "vocabularies.released": "Von der Quelle veröffentlicht am {date}.",
+  "vocabularies.releasedUnknown":
+    "Die Quelle nennt kein Veröffentlichungsdatum.",
+  "vocabularies.phaseQueued": "Wartet auf den Start",
+  "vocabularies.phaseFetching": "Wird heruntergeladen",
+  "vocabularies.phaseConverting": "Wird umgewandelt",
+  "vocabularies.phaseLoading": "Wird geladen",
+  "vocabularies.phaseFailed": "Das letzte Herunterladen ist fehlgeschlagen.",
+  "vocabularies.phasePercent": "{phase}: {percent} %",
+  "vocabularies.failedBecause":
+    "Das letzte Herunterladen ist fehlgeschlagen: {error}",
 
   // ── Zitate ──────────────────────────────────────────────────────────────
   "quotes.title": "Zitate",
@@ -597,6 +660,18 @@ export const de: Messages = {
     "Die Software einer anderen Bibliothek kann den veröffentlichten Katalog unter /sru durchsuchen und seine Datensätze als MARCXML lesen. Die Software sieht genau das, was ein Besucher sieht.",
   "settings.protocols.sruNeedsPublishing":
     "Zuerst den Katalog veröffentlichen. SRU bietet nur einen veröffentlichten Katalog an.",
+  "settings.protocols.oaiLabel":
+    "Aggregatoren diesen Katalog über OAI-PMH einsammeln lassen",
+  "settings.protocols.oaiHint":
+    "Ein Verbundkatalog oder Aggregator kann die veröffentlichten Datensätze unter /oai einsammeln. Er sieht dieselben Datensätze wie ein Besucher, dazu den Tag, an dem sich jeder zuletzt geändert hat, und welche den Katalog verlassen haben.",
+  "settings.protocols.oaiNeedsPublishing":
+    "Zuerst den Katalog veröffentlichen. OAI-PMH bietet nur einen veröffentlichten Katalog an.",
+  "settings.protocols.oaiNeedsAddress":
+    "Zuerst unten eine Kontaktadresse eintragen. OAI-PMH zeigt sie jedem Aggregator.",
+  "settings.protocols.oaiAddressLabel": "Kontaktadresse des Katalogs",
+  "settings.protocols.oaiAddressHint":
+    "Jeder Aggregator sieht diese Adresse. Am besten eine Funktionsadresse, keine persönliche.",
+  "settings.protocols.oaiAddressSave": "Adresse speichern",
   "settings.availability.label":
     "Zeigen, ob ein Buch im Regal steht oder ausgeliehen ist",
   "settings.availability.hint":
@@ -1119,6 +1194,47 @@ export const de: Messages = {
   "collections.browse": "Diese Bücher anzeigen",
   "collections.couldNotLoad": "Die Sammlungen konnten nicht geladen werden.",
   "collections.saving": "Wird einsortiert...",
+
+  // ── Benutzer:innen ──────────────────────────────────────────────────────
+  // Die Wörter einer Bibliothek: Benutzer:in, Anmeldung, Neuanmeldung,
+  // Benutzerkonto suchen. Nie "Kunde".
+  "patrons.title": "Benutzer:innen",
+  "patrons.explain":
+    "Die Menschen, die hier ausleihen, ohne ein Konto in dieser Bibliothek zu haben. Nur Admins sehen diese Seite.",
+  "patrons.search": "Benutzerkonto suchen",
+  "patrons.searchPlaceholder": "Name, E-Mail oder Ausweisnummer",
+  "patrons.searchHint":
+    "Benutzer:innen lassen sich über Name, E-Mail oder Ausweisnummer finden.",
+  "patrons.noMatch": "Kein Benutzerkonto passt zu dieser Suche.",
+  "patrons.capped":
+    "Die ersten {count} Treffer. Eine genauere Suche findet den Rest.",
+  "patrons.couldNotLoad": "Die Suche nach Benutzer:innen ist fehlgeschlagen.",
+  "patrons.couldNotSave": "Das Benutzerkonto konnte nicht gespeichert werden.",
+  "patrons.couldNotDelete": "Das Benutzerkonto konnte nicht gelöscht werden.",
+  "patrons.new": "Neuanmeldung",
+  "patrons.newTitle": "Neuanmeldung",
+  "patrons.editTitle": "{name} bearbeiten",
+  "patrons.register": "Neu anmelden",
+  "patrons.registering": "Wird angemeldet...",
+  "patrons.name": "Name",
+  "patrons.cardNumber": "Ausweisnummer",
+  "patrons.cardNumberHint":
+    "Buchstaben und Ziffern, verbunden höchstens durch Punkt, Schrägstrich oder Bindestrich. Buchstaben werden groß gespeichert.",
+  "patrons.contact": "Kontakt",
+  "patrons.email": "E-Mail",
+  "patrons.phone": "Telefon",
+  "patrons.address": "Adresse",
+  "patrons.street": "Straße",
+  "patrons.houseNumber": "Hausnummer",
+  "patrons.postcode": "Postleitzahl",
+  "patrons.city": "Ort",
+  "patrons.expiresOn": "Anmeldung gültig bis",
+  "patrons.card": "Ausweis {number}",
+  "patrons.expiredOn": "Anmeldung abgelaufen am {date}",
+  "patrons.validUntil": "Angemeldet bis {date}",
+  "patrons.noExpiry": "Ohne Ablaufdatum",
+  "patrons.deleteConfirm":
+    "{name} löschen? Der Eintrag wird gelöscht, und das lässt sich nicht rückgängig machen. Die Ausleihen behalten, wann jedes Buch ausgeliehen und zurückgegeben wurde, nennen die Person aber nicht mehr. Ein Buch, das diese Person noch ausgeliehen hat, bleibt als ausgeliehen verzeichnet, dann ohne Entleiher:in.",
 
   // ── Autorinnen und Autoren ──────────────────────────────────────────────
   "authors.title": "Autorinnen und Autoren",
@@ -1980,6 +2096,24 @@ export const de: Messages = {
     "Zu langsam für eine schnelle Suche. Wird nur gefragt, wenn jemand gründlicher sucht.",
   "providers.slowLegend":
     "Ein als langsam markierter Katalog kann eine Titelsuche nicht innerhalb der Frist beantworten, die die schnelle Suche zulässt. Er bleibt deshalb bei dieser außen vor und wird nur gefragt, wenn jemand danach verlangt. Einen Scan beantwortet er genauso wie die anderen.",
+  "providers.how.sru": "SRU {version}",
+  "providers.how.z3950": "Z39.50",
+  "providers.how.bespoke": "Eigene JSON-Schnittstelle",
+  "providers.how.schema": "Datensatzschema: {schema}",
+  "providers.how.noSchema": "Kein Datensatzschema angegeben",
+  "providers.how.encrypted": "Verschlüsselt",
+  "providers.how.unencrypted": "Nicht verschlüsselt",
+  "providers.how.apiKey": "Braucht einen API-Schlüssel",
+  "providers.how.login": "Braucht eine Anmeldung",
+  "providers.how.supplies": "Liefert {schemes}",
+  "providers.scheme.ddc": "Dewey",
+  "providers.scheme.lcc": "Library of Congress Classification",
+  "providers.scheme.gnd": "GND",
+  "providers.scheme.lcsh": "Library of Congress Subject Headings",
+  "providers.confirm.lastSupplier":
+    "Von den Katalogen, die antworten können, liefert nur {name} {schemes}. Bücher, die ab jetzt nachgeschlagen werden, bekommen sie nicht mehr. Trotzdem ausschalten?",
+  "providers.confirm.allOff":
+    "Danach ist kein Katalog mehr eingeschaltet, der antworten kann. Das Nachschlagen eines Buchs findet dann nichts, und jedes Buch wird von Hand katalogisiert. Trotzdem ausschalten?",
   // ── Highlights: marked on a reading device, imported from KOReader ──────
   "highlights.title": "Markierungen",
   "highlights.private": "Nur für mich sichtbar",

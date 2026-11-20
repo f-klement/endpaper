@@ -274,7 +274,7 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,524 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,924 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
 | An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 205 |
@@ -289,7 +289,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [The runtime `COPY` shipped with the builder image, not with the transport](decisions.md#the-runtime-copy-shipped-with-the-builder-image-not-with-the-transport) | 188 |
 | An identifier two files disagree about is shown and never stored | [The YAZ build id names what is built, never what it is built against](decisions.md#the-yaz-build-id-names-what-is-built-never-what-it-is-built-against) | 343 |
 | An identifier two files disagree about is shown and never stored | [The YAZ pin is trust on first use, and nothing else watches it](decisions.md#the-yaz-pin-is-trust-on-first-use-and-nothing-else-watches-it) | 175 |
-| An identifier two files disagree about is shown and never stored | [YAZ encrypts a TLS connection and does not authenticate it](decisions.md#yaz-encrypts-a-tls-connection-and-does-not-authenticate-it) | 141 |
+| An identifier two files disagree about is shown and never stored | [YAZ checks a TLS target's certificate](decisions.md#yaz-checks-a-tls-targets-certificate) | 545 |
 | An identifier two files disagree about is shown and never stored | [A suite pod must not outlive the run that made it](decisions.md#a-suite-pod-must-not-outlive-the-run-that-made-it) | 219 |
 | An identifier two files disagree about is shown and never stored | [The suite pod registry is untrusted, and what that bought is a bound rather than safety](decisions.md#the-suite-pod-registry-is-untrusted-and-what-that-bought-is-a-bound-rather-than-safety) | 310 |
 | An identifier two files disagree about is shown and never stored | [A member's address is served only where it is named, and never on `UserOut`](decisions.md#a-members-address-is-served-only-where-it-is-named-and-never-on-userout) | 328 |
@@ -350,8 +350,10 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [The release image reads nothing from this project's registry](decisions.md#the-release-image-reads-nothing-from-this-projects-registry) | 161 |
 | An identifier two files disagree about is shown and never stored | [A finding with no advisory id is refused](decisions.md#a-finding-with-no-advisory-id-is-refused) | 65 |
 | An identifier two files disagree about is shown and never stored | [A guard proved on one validated field, then trusted for the fields beside it](decisions.md#a-guard-proved-on-one-validated-field-then-trusted-for-the-fields-beside-it) | 333 |
-|  | [Open, and not resolved in this ticket](decisions.md#open-and-not-resolved-in-this-ticket) | 1,234 |
+|  | [Open, and not resolved in this ticket](decisions.md#open-and-not-resolved-in-this-ticket) | 1,715 |
 | Open, and not resolved in this ticket | [The provider order is the order sources are asked, and nothing else](decisions.md#the-provider-order-is-the-order-sources-are-asked-and-nothing-else) | 217 |
+| Open, and not resolved in this ticket | [An institution's order is an ask order too, and trust stays measured](decisions.md#an-institutions-order-is-an-ask-order-too-and-trust-stays-measured) | 219 |
+| Open, and not resolved in this ticket | [Which schemes a catalogue supplies is declared per reader](decisions.md#which-schemes-a-catalogue-supplies-is-declared-per-reader) | 239 |
 | Open, and not resolved in this ticket | [The tier a source is asked in is a position, not a property of the source](decisions.md#the-tier-a-source-is-asked-in-is-a-position-not-a-property-of-the-source) | 162 |
 | Open, and not resolved in this ticket | [Google Books has two switches and they are conjoined in one place](decisions.md#google-books-has-two-switches-and-they-are-conjoined-in-one-place) | 118 |
 | Open, and not resolved in this ticket | [The provider list does not reach the cover and authority hosts](decisions.md#the-provider-list-does-not-reach-the-cover-and-authority-hosts) | 76 |
@@ -1080,4 +1082,46 @@ repeat the argument.
 |  | [The schema is behind sign in, its two viewers are gone, and `google_books_ready` stays public (2026-11-19)](decisions.md#the-schema-is-behind-sign-in-its-two-viewers-are-gone-and-google_books_ready-stays-public-2026-11-19) | 289 |
 |  | [The SRU server has a switch of its own (2026-11-19)](decisions.md#the-sru-server-has-a-switch-of-its-own-2026-11-19) | 365 |
 |  | [A public record says on the shelf or on loan, at its own path, for the title (2026-11-19)](decisions.md#a-public-record-says-on-the-shelf-or-on-loan-at-its-own-path-for-the-title-2026-11-19) | 486 |
+|  | [The OAI-PMH provider (2026-11-20)](decisions.md#the-oai-pmh-provider-2026-11-20) | 1,442 |
+| The OAI-PMH provider (2026-11-20) | [The OAI-PMH provider keeps persistent tombstones of an id and a datestamp, with no backfill](decisions.md#the-oai-pmh-provider-keeps-persistent-tombstones-of-an-id-and-a-datestamp-with-no-backfill) | 127 |
+| The OAI-PMH provider (2026-11-20) | [No tombstone before the provider first served a request](decisions.md#no-tombstone-before-the-provider-first-served-a-request) | 130 |
+| The OAI-PMH provider (2026-11-20) | [Datestamps are served to the day, and the day a Book was added is an accepted disclosure](decisions.md#datestamps-are-served-to-the-day-and-the-day-a-book-was-added-is-an-accepted-disclosure) | 118 |
+| The OAI-PMH provider (2026-11-20) | [The datestamp is kept by session events registered from models.py, not by each write path](decisions.md#the-datestamp-is-kept-by-session-events-registered-from-modelspy-not-by-each-write-path) | 223 |
+| The OAI-PMH provider (2026-11-20) | [A restore re-stamps every record and raises the Book id counter](decisions.md#a-restore-re-stamps-every-record-and-raises-the-book-id-counter) | 192 |
+| The OAI-PMH provider (2026-11-20) | [OAI-PMH is GET only](decisions.md#oai-pmh-is-get-only) | 26 |
+| The OAI-PMH provider (2026-11-20) | [Identify serves a repository contact address an admin stores](decisions.md#identify-serves-a-repository-contact-address-an-admin-stores) | 103 |
+| The OAI-PMH provider (2026-11-20) | [Identifiers are oai:<request host>:<book id>](decisions.md#identifiers-are-oairequest-hostbook-id) | 80 |
+| The OAI-PMH provider (2026-11-20) | [The resumption token carries only what a fresh request could ask, and no bound finer than a day](decisions.md#the-resumption-token-carries-only-what-a-fresh-request-could-ask-and-no-bound-finer-than-a-day) | 238 |
+| The OAI-PMH provider (2026-11-20) | [Known limit: datestamp against responseDate](decisions.md#known-limit-datestamp-against-responsedate) | 64 |
+|  | [One search or lookup narrowed to some catalogues (2026-11-20)](decisions.md#one-search-or-lookup-narrowed-to-some-catalogues-2026-11-20) | 407 |
+| One search or lookup narrowed to some catalogues (2026-11-20) | [A narrowing is refused rather than intersected, with a 409](decisions.md#a-narrowing-is-refused-rather-than-intersected-with-a-409) | 136 |
+| One search or lookup narrowed to some catalogues (2026-11-20) | [The ticks are a draft spent by the one request they narrow](decisions.md#the-ticks-are-a-draft-spent-by-the-one-request-they-narrow) | 115 |
+| One search or lookup narrowed to some catalogues (2026-11-20) | [A refused narrowing asks for the roster again](decisions.md#a-refused-narrowing-asks-for-the-roster-again) | 84 |
+|  | [Classification schemes are rows a library can add to (2026-11-20)](decisions.md#classification-schemes-are-rows-a-library-can-add-to-2026-11-20) | 732 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The four built in schemes are locked](decisions.md#the-four-built-in-schemes-are-locked) | 62 |
+| Classification schemes are rows a library can add to (2026-11-20) | [A scheme's filing rule is fixed when it is defined](decisions.md#a-schemes-filing-rule-is-fixed-when-it-is-defined) | 41 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The sort key is derived at flush, under the row's rule](decisions.md#the-sort-key-is-derived-at-flush-under-the-rows-rule) | 51 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The delete refusal counts only books the caller may see, and says so](decisions.md#the-delete-refusal-counts-only-books-the-caller-may-see-and-says-so) | 100 |
+| Classification schemes are rows a library can add to (2026-11-20) | [What the enum gave, each answered in code](decisions.md#what-the-enum-gave-each-answered-in-code) | 182 |
+| Classification schemes are rows a library can add to (2026-11-20) | [A filter naming a scheme with no row matches no book](decisions.md#a-filter-naming-a-scheme-with-no-row-matches-no-book) | 87 |
+| Classification schemes are rows a library can add to (2026-11-20) | [A chip shows a library's own scheme by its code](decisions.md#a-chip-shows-a-librarys-own-scheme-by-its-code) | 41 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The API field is `scheme`, not `code`](decisions.md#the-api-field-is-scheme-not-code) | 20 |
+| Classification schemes are rows a library can add to (2026-11-20) | [Defining a scheme is admin only](decisions.md#defining-a-scheme-is-admin-only) | 26 |
+|  | [A local copy of the GND and LCSH subject vocabularies (2026-11-20)](decisions.md#a-local-copy-of-the-gnd-and-lcsh-subject-vocabularies-2026-11-20) | 765 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [An LCSH entry's id is its id.loc.gov URI](decisions.md#an-lcsh-entrys-id-is-its-idlocgov-uri) | 128 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [A subject field's second indicator is read as a thesaurus only on a Library of Congress record](decisions.md#a-subject-fields-second-indicator-is-read-as-a-thesaurus-only-on-a-library-of-congress-record) | 300 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [The GND converter reads JSON-LD, not MARC21 XML](decisions.md#the-gnd-converter-reads-json-ld-not-marc21-xml) | 32 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [A data file is streamed and checked twice over one handle](decisions.md#a-data-file-is-streamed-and-checked-twice-over-one-handle) | 56 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [Points the ADR leaves open, decided in code](decisions.md#points-the-adr-leaves-open-decided-in-code) | 81 |
+|  | [The subject vocabulary download (2026-11-20)](decisions.md#the-subject-vocabulary-download-2026-11-20) | 369 |
+| The subject vocabulary download (2026-11-20) | [It is offered in library settings, and by a notice to an admin](decisions.md#it-is-offered-in-library-settings-and-by-a-notice-to-an-admin) | 88 |
+| The subject vocabulary download (2026-11-20) | [A restore holds off a download, and nothing else](decisions.md#a-restore-holds-off-a-download-and-nothing-else) | 102 |
+| The subject vocabulary download (2026-11-20) | [The download's first URL is not checked for https](decisions.md#the-downloads-first-url-is-not-checked-for-https) | 55 |
+| The subject vocabulary download (2026-11-20) | [Converting and loading share the interpreter with requests](decisions.md#converting-and-loading-share-the-interpreter-with-requests) | 81 |
+|  | [Option AC: a subject field with no `$2`, outside a Library of Congress record (2026-11-20)](decisions.md#option-ac-a-subject-field-with-no-2-outside-a-library-of-congress-record-2026-11-20) | 252 |
+|  | [Patron records (2026-11-20)](decisions.md#patron-records-2026-11-20) | 305 |
+| Patron records (2026-11-20) | [A card number is stored upper cased](decisions.md#a-card-number-is-stored-upper-cased) | 77 |
+| Patron records (2026-11-20) | [The search carries its term in a POST body](decisions.md#the-search-carries-its-term-in-a-post-body) | 59 |
+| Patron records (2026-11-20) | [An erasure zeroes the row on SQLite](decisions.md#an-erasure-zeroes-the-row-on-sqlite) | 78 |
+| Patron records (2026-11-20) | [Accepted as built](decisions.md#accepted-as-built) | 61 |
 <!-- index: end -->

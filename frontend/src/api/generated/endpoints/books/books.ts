@@ -90,6 +90,7 @@ import type {
   LocationOut,
   LookupIsbnParams,
   MergeRequest,
+  NarrowableCatalogue,
   NoteCreate,
   NoteOut,
   OwnershipUpdate,
@@ -5873,6 +5874,15 @@ export const getLookupIsbnUrl = (params: LookupIsbnParams) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ["only"];
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? "null" : String(v));
+      });
+      return;
+    }
+
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? "null" : String(value));
     }
@@ -6015,6 +6025,210 @@ export function useLookupIsbn<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getLookupIsbnQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListNarrowableCataloguesUrl = () => {
+  return `/api/books/lookup/catalogues`;
+};
+
+/**
+ * The catalogues a cataloguer may narrow one lookup or search to.
+ *
+ * **Library mode only, refused with the narrowing's own 403**, because a
+ * household is never offered the narrowing and this list exists to offer it.
+ * Read off the plan in force rather than the stored one, so a source with no
+ * key is not offered: naming it would be refused.
+ *
+ * Declared before `/{book_id}`, like `/export`.
+ * @summary List Narrowable Catalogues
+ */
+export const listNarrowableCatalogues = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<NarrowableCatalogue[]> => {
+  return customFetch<NarrowableCatalogue[]>(getListNarrowableCataloguesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListNarrowableCataloguesQueryKey = () => {
+  return [`/api/books/lookup/catalogues`] as const;
+};
+
+export const getListNarrowableCataloguesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+  TError = Refusal,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListNarrowableCataloguesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listNarrowableCatalogues>>
+  > = ({ signal }) => listNarrowableCatalogues({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListNarrowableCataloguesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listNarrowableCatalogues>>
+>;
+export type ListNarrowableCataloguesQueryError = Refusal;
+
+/**
+ * The catalogues a cataloguer may narrow one lookup or search to.
+ *
+ * **Library mode only, refused with the narrowing's own 403**, because a
+ * household is never offered the narrowing and this list exists to offer it.
+ * Read off the plan in force rather than the stored one, so a source with no
+ * key is not offered: naming it would be refused.
+ *
+ * Declared before `/{book_id}`, like `/export`.
+ * @summary List Narrowable Catalogues
+ */
+export function useListNarrowableCatalogues<
+  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+  TError = Refusal,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+          TError,
+          Awaited<ReturnType<typeof listNarrowableCatalogues>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The catalogues a cataloguer may narrow one lookup or search to.
+ *
+ * **Library mode only, refused with the narrowing's own 403**, because a
+ * household is never offered the narrowing and this list exists to offer it.
+ * Read off the plan in force rather than the stored one, so a source with no
+ * key is not offered: naming it would be refused.
+ *
+ * Declared before `/{book_id}`, like `/export`.
+ * @summary List Narrowable Catalogues
+ */
+export function useListNarrowableCatalogues<
+  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+          TError,
+          Awaited<ReturnType<typeof listNarrowableCatalogues>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The catalogues a cataloguer may narrow one lookup or search to.
+ *
+ * **Library mode only, refused with the narrowing's own 403**, because a
+ * household is never offered the narrowing and this list exists to offer it.
+ * Read off the plan in force rather than the stored one, so a source with no
+ * key is not offered: naming it would be refused.
+ *
+ * Declared before `/{book_id}`, like `/export`.
+ * @summary List Narrowable Catalogues
+ */
+export function useListNarrowableCatalogues<
+  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The catalogues a cataloguer may narrow one lookup or search to.
+ *
+ * **Library mode only, refused with the narrowing's own 403**, because a
+ * household is never offered the narrowing and this list exists to offer it.
+ * Read off the plan in force rather than the stored one, so a source with no
+ * key is not offered: naming it would be refused.
+ *
+ * Declared before `/{book_id}`, like `/export`.
+ * @summary List Narrowable Catalogues
+ */
+export function useListNarrowableCatalogues<
+  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListNarrowableCataloguesQueryOptions(options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,
@@ -6543,6 +6757,15 @@ export const getSearchBooksUrl = (params: SearchBooksParams) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ["only"];
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? "null" : String(v));
+      });
+      return;
+    }
+
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? "null" : String(value));
     }

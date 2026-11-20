@@ -1146,24 +1146,43 @@ class TestCache:
 
         assert route.call_count == 2
 
-    def test_an_answer_past_its_lifetime_is_forgotten(self):
-        metadata._cache[GERMAN_ISBN] = (-1.0, metadata.Lookup(Outcome.NOT_FOUND, source="dnb"))
+    @pytest.mark.asyncio
+    async def test_a_lookup_asking_a_different_chain_is_not_served_the_cached_record(self):
+        """A narrowed lookup is its own question, so its own entry.
 
-        assert metadata._cached(GERMAN_ISBN) is None
-        assert GERMAN_ISBN not in metadata._cache
+        Keyed on the ISBN alone, the second lookup below answered from the first one's
+        record and asked the DNB nothing.
+        """
+        dnb_only = sources.in_force(ALL_SOURCES, frozenset({CatalogueSource.DNB}))
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
+            route = mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
+            await lookup(GERMAN_ISBN)
+            await lookup(GERMAN_ISBN, plan=dnb_only)
+
+        assert route.call_count == 2
+
+    def test_an_answer_past_its_lifetime_is_forgotten(self):
+        key = (GERMAN_ISBN, ALL_SOURCES.lookup_chain)
+        metadata._cache[key] = (-1.0, metadata.Lookup(Outcome.NOT_FOUND, source="dnb"))
+
+        assert metadata._cached(key) is None
+        assert key not in metadata._cache
 
     def test_a_full_cache_forgets_its_oldest_quarter_to_make_room(self):
         answer = metadata.Lookup(Outcome.NOT_FOUND, source="dnb")
+        chain = ALL_SOURCES.lookup_chain
         for n in range(metadata._MAX_ENTRIES):
-            metadata._cache[f"older {n}"] = (math.inf, answer)
+            metadata._cache[(f"older {n}", chain)] = (math.inf, answer)
 
-        metadata._remember(GERMAN_ISBN, answer)
+        metadata._remember((GERMAN_ISBN, chain), answer)
 
         quarter = metadata._MAX_ENTRIES // 4
-        assert "older 0" not in metadata._cache
-        assert f"older {quarter - 1}" not in metadata._cache
-        assert f"older {quarter}" in metadata._cache
-        assert GERMAN_ISBN in metadata._cache
+        assert ("older 0", chain) not in metadata._cache
+        assert (f"older {quarter - 1}", chain) not in metadata._cache
+        assert (f"older {quarter}", chain) in metadata._cache
+        assert (GERMAN_ISBN, chain) in metadata._cache
 
 
 class TestDnbRecord:
@@ -1757,14 +1776,25 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         ) == [Subject("Kochbuch", None, None)]
 
     def test_an_identifier_with_no_vocabulary_beside_it_is_still_kept(self):
-        """K10plus writes `$0 (OCoLC)fst…` with no `$2` at all, on 3 of 133
-        live `650` fields. The ticket asks for the identifier *whatever* the
-        scheme, and a missing `$2` is not a reason to drop one."""
+        """K10plus writes a ZBW house number, `655 $0 (DE-206)34`, with no
+        `$2`, and that prefix names no vocabulary. The ticket asks for the
+        identifier *whatever* the scheme, and a missing `$2` is not a reason
+        to drop one."""
+        assert self._subjects(
+            '<datafield tag="655" ind1=" " ind2="4">'
+            '<subfield code="0">(DE-206)34</subfield>'
+            '<subfield code="a">Graue Literatur</subfield></datafield>'
+        ) == [Subject("Graue Literatur", None, "(DE-206)34")]
+
+    def test_an_identifier_naming_its_vocabulary_names_it_where_no_dollar_two_does(self):
+        """K10plus writes `$0 (OCoLC)fst…` with no `$2` on 3 of 133 live `650`
+        fields. The prefix decides on the catalogue path as on an upload
+        (option AC, owner's ruling 2026-11-20), and the identifier is kept."""
         assert self._subjects(
             '<datafield tag="650" ind1=" " ind2=" ">'
             '<subfield code="a">Psychology</subfield>'
             '<subfield code="0">(OCoLC)fst01081447</subfield></datafield>'
-        ) == [Subject("Psychology", None, "(OCoLC)fst01081447")]
+        ) == [Subject("Psychology", "fast", "(OCoLC)fst01081447")]
 
     def test_a_vocabulary_with_no_identifier_beside_it_is_still_kept(self):
         """The OENB's `655 $2 bellobv`, which carries no `$0`."""

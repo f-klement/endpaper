@@ -6160,21 +6160,55 @@ would have been permanent. A Renovate custom manager now raises the version from
 new hash, so the merge request is expected to be red at `sha256sum -c` until a person
 supplies it, and that failure is the design rather than a defect.
 
-### YAZ encrypts a TLS connection and does not authenticate it
+### YAZ checks a TLS target's certificate
 
 
 Up to 5.37.3 YAZ performed no certificate verification: `verify_peers`,
 `set_x509_system_trust`, `session_set_verify_cert`, `set_x509_trust_file` and
 `GNUTLS_CERT` appeared nowhere in `src/` or `client/`, checked on 5.35.1 and 5.37.3, and
 `src/tcpip.c` allocated certificate credentials without ever loading a trust store.
-5.38.0 added it as an opt in, checked with the same grep: `gnutls_certificate_verify_peers3`
-against the system trust, behind the ZOOM option `check_cert`, which defaults to 0. This
-application does not set it (the options it does set are `_options()` in
-`backend/z3950_yaz.py`), so the position is unchanged by the upgrade: an `ssl:`
-target is protected against a passive listener and not against anyone who can answer for
-the address. Recorded rather than acted on: no target this application reaches uses TLS.
-Turning `check_cert` on is an issue in the tracker, not done here, because the first
-`ssl:` target added would then need its certificate to verify.
+5.38.0 added it as an opt in: `gnutls_certificate_verify_peers3` against the system trust,
+behind the ZOOM option `check_cert`, which defaults to 0. Without it an `ssl:` target is
+protected against a passive listener and not against anyone who can answer for the address.
+
+**`_options()` in `backend/z3950_yaz.py` sets `check_cert` to 1 on every connection, and
+no target can turn it off**, because a setting a target can switch off is a default rather
+than a bound. It is on before any target uses TLS, so the first `ssl:` target added has
+to verify from its first lookup. None does yet, though four seeded rows reach Z39.50: a
+row's address is `z3950://host:port/database` in `_Z3950_ADDRESS`'s grammar in
+`backend/targets.py`, whose host admits no colon, so no row can spell `ssl:` and every
+live lookup is `tcp:`. The first `ssl:` target arrives with a change to that grammar.
+
+**An older YAZ would ignore the option without a word**, as ZOOM ignores any key it does
+not know, and connect unverified. `test_z3950_yaz.py` holds the Dockerfile's pinned
+version at 5.38.0 or later for that reason.
+
+Measured 2026-11-19 in a pod on the released image (YAZ 5.38.1, running as uid 1000),
+driving `CtypesBindings` with `_options()` as it stands:
+
+| Target | `check_cert` 1 | `check_cert` 0 |
+|---|---|---|
+| `ssl:` to a self signed certificate | `[10000] Connect failed` in 0.05 s | `[10007] Timeout` after the handshake |
+| `ssl:` to a public host by IP, so the name does not match | `[10000] Connect failed` | `[10007] Timeout` |
+| `ssl:` to a public host by name, valid certificate, not Z39.50 | `[10007] Timeout`: verified, then no Init answer | the same |
+| `tcp:` to a plain listener | `[10007] Timeout` | the same |
+| `lx2.loc.gov:210` | connected, and a search answered | the same |
+
+gnutls loaded 118 certificates from the system trust, `ca-certificates`. The base image
+carries it, and the runtime stage's `apk add` names it anyway, because a base without it
+would refuse every `ssl:` target in a way that looks like each being down. **YAZ does not log that count** and offers no hook to ask for it, so a check at
+startup would mean binding gnutls directly for one log line; the valid public certificate
+verifying is the same fact, shown end to end. With an empty store the check fails closed:
+every `ssl:` target is refused.
+
+**A refused certificate reaches a caller as an ordinary connect failure.** ZOOM reports
+`ZOOM_ERROR_CONNECT` with the address as its detail; the reason gnutls gave (`status=66`
+for an unknown signer, `16386` for a wrong name) goes only to YAZ's own log, which is off.
+So `classify` makes it `Unreachable`, the same as a closed port. To learn why a new `ssl:`
+target is down, set `YAZ_LOG=comstack` in the container's environment and restart it:
+YAZ reads that variable once when the library initialises, and writes `TLS certificate
+verification failed: status=... host=...` to standard error, which is the pod log. That
+level logs every connection, so it is for the diagnosis and comes off after.
 
 ### A suite pod must not outlive the run that made it
 
@@ -7498,6 +7532,50 @@ household never touched moves, which the ticket forbids.
 A design seat proposed a stored cut position driving `_SECONDARY_SOURCES` and it
 was refused on that measurement. Recorded because it is the obvious next
 proposal and the reason it does not work is not obvious.
+
+### An institution's order is an ask order too, and trust stays measured
+
+Ticket 32's second story asked an institution to order its sources "so that the catalogue we
+trust most fills a field first". That is the trust order, and the stored list is the ask order;
+the entry above gives the three measured reasons one list cannot drive both. The owner chose
+on 2026-11-19 to narrow the story to ask order rather than add a second list or let the ask
+order overturn `_MATCH_PRECEDENCE` and `_preferred_source`.
+
+**Why not a second list.** Scanning asks with nobody watching, so whatever decides a contested
+field decides it for every book scanned. The measured precedence is the better default there,
+and an order an admin sets once for compliance reasons is not evidence about which catalogue
+spells a title better. Where a cataloguer does want a say, per search narrowing (ticket 133)
+gives it at the moment the choice is made, which is the shape Koha's human in the loop takes.
+
+**Why not make the ask order the trust order.** It would move the field a household never
+touched: an institution that switches off Open Library and K10plus on compliance grounds would
+also change which catalogue's title wins, without being told.
+
+The settings page already says the order changes who is asked and not who is believed, so the
+screen needed no new line.
+
+### Which schemes a catalogue supplies is declared per reader
+
+The provider list warns before switching off the last supplier in force of a classification
+scheme. The supplier map is `sources.CLASSIFIES`, keyed on the reader, and a source's schemes
+follow from `targets.Target.reader`. The ticket named the DNB as the only supplier of GND and
+the Library of Congress as the only one of LCC; read off the decoders, neither holds: every row
+whose reader is `MARC_GND` can supply GND, and Open Library supplies LCC. So on the roster of
+2026-11-19, with every row in force, the warning fires for one row alone: the Library of
+Congress, the only supplier of LCSH. Switching off the DNB, the case the ticket named, warns of
+nothing, because every other `MARC_GND` row counts as a GND supplier whether or not its records
+carry GND headings. The owner accepted that on 2026-11-19. A seeded row changes it without
+touching this table.
+
+**A supplier is a row in force**, switched on and able to answer, which is what
+`sources.in_force` asks of a lookup. A row without its key is no supplier, and switching it off
+asks nothing.
+
+**A capability, not a measurement of any catalogue's records.** A reader that can produce a
+scheme counts as a supplier whether or not that library fills the field, so the warning errs
+towards silence. Measuring each catalogue's actual yield would need live sampling per source
+and would go stale; the declaration is held to the decoders by
+`tests/test_decoders.py::TestEveryReaderDeclaresTheSchemesItProduces`.
 
 ### The tier a source is asked in is a position, not a property of the source
 
@@ -27228,3 +27306,420 @@ private loan; beside it, a control that lending the public copy does change one.
 **Search results do not carry it.** Story 2 asks to see that a copy is out; the item record is
 where a reader decides to come. Adding it to the listing would need a field on the listing row,
 which is the byte for byte cost above, or a request per row.
+
+## The OAI-PMH provider (2026-11-20)
+
+The provider at `/oai` answers harvesters while the catalogue is published, its own switch is
+on, and a contact address is stored (`settings_store.oai_is_served`).
+
+### The OAI-PMH provider keeps persistent tombstones of an id and a datestamp, with no backfill
+
+Owner's decision for the provider: `deletedRecord` is `persistent`, the tombstone holds the
+identifier and the datestamp only, and any record a harvester could have seen that it can no
+longer see answers as a deleted header. The table is `oai_tombstones` (book id, datestamp); the
+id carries no foreign key, because the Book it names may be gone. **No tombstone is backfilled
+by the migration**: nothing was served over OAI-PMH before it, so no harvester holds a record it
+could need told about. A tombstone is written only for a Book that was public immediately before
+the write, read off `Shelf.seen_by_the_public`, so a Book that was always private never gets one.
+**Public there means not private and not trashed, whatever the publish state**, which the next
+entry bounds.
+
+### No tombstone before the provider first served a request
+
+Owner's decision (Q7, 2026-11-19). `routers/oai.py` records the first moment it answers a
+request as the `oai_first_served` setting, once. Before it, no departure is tombstoned: no
+harvester could have seen the record, and a tombstone would publish its id and the day it left,
+which is how a Book made private before the catalogue was ever harvested reached a deleted
+header. After it, every departure is tombstoned whether or not the switch is on at that moment,
+since a harvester may still hold the record. A restore counts the provider as served when either
+the database or the archive says so, and keeps the earlier moment. Rejected: tombstoning only
+while the switch is on, which would lose a departure during a short switch off that a harvester
+still needs told about.
+
+### Datestamps are served to the day, and the day a Book was added is an accepted disclosure
+
+Owner's decision (Q6, 2026-11-19). `Identify` advertises `YYYY-MM-DD`, every header carries the
+day, and a `from` or `until` given to the second is `badArgument`, as the specification makes
+a granularity finer than the repository's. Datestamps are still stored to the second, so a
+write's order is kept. **What remains disclosed, accepted**: a record never edited carries the
+day its Book was added, which `PublicBookSort` withholds from the JSON catalogue, and every
+record carries the day it last changed or left. The day narrows the second, which would have
+dated an acquisition to the moment. The migration stamps every existing Book with the one moment
+of the upgrade, never its `added_at`, so the disclosure starts with changes made after it.
+
+### The datestamp is kept by session events registered from models.py, not by each write path
+
+One mechanism a new write path cannot forget: `harvest.py` registers `before_flush`,
+`after_flush_postexec` and `do_orm_execute` on `Session`, and `models.py` imports it at its foot.
+The watched set is derived from `PublicBookOut`, so a new public field is watched without an
+edit. Rejected: bumping in each router (forgettable), a database trigger (two dialects, and the
+visibility rule would be restated in SQL). **Blind spots, accepted**: text SQL and a bare
+`Connection`. `tests/test_harvest.py::TestNothingWritesPastBothDoors` refuses a literal text
+write to the harvested tables, driver SQL, and a `connection()` or zero argument `connect()`
+call outside `harvest.py`, the migration runner and the database creation script; a
+`Connection` reached under another name (`engine.begin()`, `session.bind`) and text built from a
+variable pass it. Migrations are outside it: a migration changing published values leaves
+datestamps unmoved, which under reports a change and never publishes a row. A bulk INSERT into a
+child table whose Books its parameters do not name is refused outright, and a bulk child UPDATE
+that sets the column naming a Book stamps the Book it moves to as well as the one it left. Cost:
+two primary key SELECTs per flush that deletes a Book or changes a column the public shelf reads,
+none for any other edit or for one that only creates; a bulk UPDATE or DELETE of `books` asks twice
+per statement whatever it sets.
+
+### A restore re-stamps every record and raises the Book id counter
+
+`backup.restore` runs under `harvest.wholesale`: both events suspended, then every Book stamped
+now, public ids before minus after tombstoned (where the provider has served), after's
+tombstones cleared, and the Book id counter raised past every tombstone. A restore can change
+any record to anything, so a harvester re-collects the whole catalogue once; the alternative,
+comparing restored rows to the old ones, is a second copy of the record definition. **The
+counter**: an archive carries Books with their ids and not the counter, so on a fresh database
+the next Book would take the id of a record purged before the backup, and a harvester's
+identifier would come to name another work. Raised on SQLite through `sqlite_sequence` and on
+Postgres with `setval`, never lowered. Rejected: refusing such an archive, which would refuse
+every ordinary backup taken after a purge.
+
+**Every other table's counter on Postgres** is raised to its highest restored row by
+`backup._raise_the_id_counters`: Postgres moves a sequence only when it issues the id, so
+without it the first insert into any restored table on a fresh database would take a restored
+row's id. SQLite needs nothing, since it issues above the highest row.
+
+### OAI-PMH is GET only
+
+The specification also allows POST. No harvester this serves needs it, and a second method is a
+second way in to keep equal to the first.
+
+### Identify serves a repository contact address an admin stores
+
+Owner's decision (Q8, 2026-11-19). `Identify` must name an address, and a member's would put on
+an unauthenticated surface what the JSON catalogue withholds, so it is a setting of its own,
+`oai_admin_email`, given on the public catalogue screen beside the switch. The switch cannot be
+stored on while the address is empty: `PUT /api/settings` answers 409 for a write that would
+leave it so, whichever field it changes, and the screen disables the switch and says why.
+`settings_store.oai_is_served` also requires it, so a restored or hand edited row with the
+switch on and no address serves nothing. The reserved `.invalid` placeholder is gone.
+
+### Identifiers are oai:<request host>:<book id>
+
+The host is the one the request named, read by `routers.sru.server_for` against its bounded
+pattern, falling back to `localhost`. An id is never issued twice: `AUTOINCREMENT` and the
+Postgres sequence never step back at head, and a restore raises the counter past every tombstone
+(above), so an identifier never comes to name a different Book. Cost: a deployment reached under
+two names gives the same record two identifiers; a harvester is configured with one base URL, so
+it sees one.
+
+### The resumption token carries only what a fresh request could ask, and no bound finer than a day
+
+base64url of format, window start and end as day numbers (`date.toordinal`), and the last id
+served; at most 64 characters, parsed strictly. The page size (50) and the row filter are the
+server's. Paging is by id rather than offset, so a record changing mid harvest is neither served
+twice nor makes another skip; one whose datestamp moves out of the window is caught by the next
+incremental harvest. A token from before an upgrade that changed its shape is
+`badResumptionToken`, which tells the harvester to start again.
+
+**Day granularity holds at the comparison, not only at the door.** `oai._within` compares each
+bound as the start of its day, whatever built the `Harvest`, so neither the arguments nor a
+forged token can bisect a day to recover a stored datestamp to the second, which for a
+never edited Book is its `added_at`.
+
+**Rejected: an HMAC over the token**, keyed with the JWT secret the app already holds. It would
+stop a forged token, and that is all it would do: a token reaches no more than a fresh request
+once its bounds are days, so signing adds nothing to privacy, while it ties every in flight
+harvest to the session key (a rotation, or a restore onto another machine, ends them) and
+lengthens the token. The truncation holds without a secret, and covers any later path that builds
+a `Harvest`, which a signature on one path does not.
+
+### Known limit: datestamp against responseDate
+
+Datestamps are served to the day and taken in the flush, before commit. A record committed on
+the day a harvester's `until` names, after that harvest ran, is caught by the next one, since a
+harvester at day granularity overlaps `from` with the day of its last `responseDate`. A
+harvester that sets `from` to the day after its last harvest misses it. Not fixed.
+
+## One search or lookup narrowed to some catalogues (2026-11-20)
+
+In library mode a member may name, for one request, the catalogues an ISBN lookup or a title
+search asks, as `only` on either route. The route `GET /api/books/lookup/catalogues` offers
+the names, since a member cannot read the settings.
+
+### A narrowing is refused rather than intersected, with a 409
+
+`catalogue_access._narrowed_access` checks the names against the path's own roster in force,
+`lookup_chain` for a lookup and `searched_harder` for a search, and refuses the request when
+any name falls outside it: switched off, without its key, or unable to answer that path, such
+as the BnF on an ISBN. It intersects nothing. A request that quietly asked fewer catalogues
+than it named would answer from a set the member did not choose and say nothing. The refusal
+comes before the allowance is charged, and an unknown name is FastAPI's own 422.
+
+**409, not 422.** `tests/test_errors.py` refuses a string detail under 422, because the
+committed schema types that status with a list detail, and 409 is the status every refusal
+about what this Library asks already answers with. Library mode off answers 403, as the
+MARCXML export does.
+
+### The ticks are a draft spent by the one request they narrow
+
+A submit or a lookup carries the ticks and clears them, so a tick never sends a request
+and the next search or ISBN asks every catalogue. Rejected: ticks held until cancel, which made
+"this search only" false and fired a fan out on every tick.
+
+**The line under an answer names what was asked, not what was ticked.** A narrowed search
+still leaves a slow catalogue to a harder search and may be refused that slot, so the search
+names the ticks the answer's `asked` holds. A lookup has no `asked` on the wire and asks every
+ticked catalogue on a miss, so it names its ticks, except above a draft entered by hand.
+
+### A refused narrowing asks for the roster again
+
+A narrowed request refused with 409 means the page's roster is out of date: the plan in force
+moved since the page read it. The page asks for the roster again, drops a tick it no longer
+offers, says the list changed, and offers no retry, which would send the same names and be
+refused again. Rejected: refetching the roster on focus, which the app turns off for every
+query and which would miss a second admin's write made while this tab stays focused.
+
+## Classification schemes are rows a library can add to (2026-11-20)
+
+A scheme was a closed enum of four. It is now a row of `classification_schemes`, which a
+library's admin can add to, rename and delete while no book uses it.
+
+### The four built in schemes are locked
+
+`ddc`, `lcc`, `gnd` and `lcsh` cannot be renamed, refiled or deleted. Readers produce them
+(`sources.CLASSIFIES`), `BookSort` orders by two of them and the MARC export writes fields
+for them, so a delete or a new rule would break code rather than data. This extends the
+owner's rule of 2026-11-19 (refuse a delete while something references the row) to a
+reference from code.
+
+### A scheme's filing rule is fixed when it is defined
+
+Every stored `classifications.sort_key` was computed under the rule. Changing it would need
+every heading under the scheme refiled in the same transaction, so the edit route renames
+only, and a different rule means deleting the unused scheme and defining it again.
+
+### The sort key is derived at flush, under the row's rule
+
+The `@validates` hook read a closed enum at assignment. A rule is now a row, so mapper
+`before_insert` and `before_update` events derive the key, reading the rules once per session
+through a cache in `Session.info` (`models.filing_rules`) that every scheme write drops. A
+side effect: an unflushed instance has no key yet.
+
+### The delete refusal counts only books the caller may see, and says so
+
+The refusal counts through `Shelf.seen_by` plus `Shelf.trashed_by`, like every count of
+books, and words the number as that count: "N books you can see still use this scheme"
+(owner, 2026-11-20). A heading on another member's private book still blocks the delete and
+is not counted. Where only such books block it, the refusal gives no number: refusing at all
+already says some book quotes the scheme, and a count would say how many of another member's
+private books do. The 409 carries `code` `scheme_in_use` and the `count` beside the English
+sentence, so the client words it in English and German.
+
+### What the enum gave, each answered in code
+
+- **Graceful degradation.** Response schemas type `scheme` as a string. A restore adds a row
+  for each code its headings quote, degrades an unknown filing value to `generic`, and a
+  missing or overlong name to the code or the column's width; the migration adds a row for
+  each code already stored. `add_headings` drops and logs a heading from a record under a
+  code with no row, rather than failing the book at the foreign key.
+- **An unknown scheme on a member's write is still a 422.** `POST /api/books`,
+  `POST /api/books/scan` and `POST /api/books/{book_id}/enrich/apply` refuse a heading whose
+  code has no row, naming the field, as they did while the scheme was an enum. A member named
+  the scheme, so a typo or a wrong case (`DDC`) is told rather than dropped. A record is a
+  third party's, so MARC upload and lookup keep dropping.
+- **The check constraint** becomes `fk_classifications_scheme`, `ON DELETE RESTRICT`.
+- **The closed client union** is gone for headings. The client keeps it for the four built in
+  labels, and `CatalogueSourceOut.classification_schemes`, what a reader yields, stays the
+  enum.
+
+### A filter naming a scheme with no row matches no book
+
+`GET /api/books?classification=bogus:004` answered the whole library while the scheme was an
+enum, because the filter dropped a value it could not parse. Now any scheme reaches the
+query, an empty one or one longer than any code included, and matches no book. Dropping it
+would widen the listing silently, for a link that asked for less. The filter does not ask
+the table whether the scheme exists, which would cost every listing a statement. A value
+with no colon or no number is still dropped, as before.
+
+### A chip shows a library's own scheme by its code
+
+The book page, the filter and the table draw a library's own scheme as its code in capitals
+rather than its name, so no page that draws a heading has to fetch the scheme list. The
+settings card shows the name.
+
+### The API field is `scheme`, not `code`
+
+`ClassificationSchemeOut.scheme` matches the field a heading carries, and a field named `code`
+reads as a one time code to `TestAOneTimeCodeIsServedOnlyWhereItIsNamed`.
+
+### Defining a scheme is admin only
+
+Unlike a custom field, a scheme's rule orders the library's shelves and cannot be changed
+afterwards. Listing is open to any member, and carries no count.
+
+## A local copy of the GND and LCSH subject vocabularies (2026-11-20)
+
+The owner's answers of 2026-11-20 fix the shape. The copy is a table in the existing
+database, so it rides the existing backup and restore and the suggest field is an indexed
+query on both engines. Its download runs in the background with progress and is
+refreshed by hand from settings; where it is offered is the entry on the vocabulary
+download below. GND subjects and LCSH both
+land as first class vocabularies: "Given that this is going to be a FOSS project, both of
+these have to be first class citizens." This wave ships the loader and the two converters;
+the table and the download come with the next migration.
+
+### An LCSH entry's id is its id.loc.gov URI
+
+ADR 0009 decided an entry id takes the form imported records store as their first `$0`, and
+said LCSH's form was unmeasured. Measured 2026-11-20: the two LC MODS fixtures hold 35
+`<subject authority="lcsh">`, none with a valueURI or href, and the MODS subject reader in
+`metadata.py` stores no identifier anyway. 100 live LC MARCXML records carry 117 LCSH subject
+fields and no `$0` on any. So the ADR's rule has nothing to copy for LCSH.
+
+The owner chose the id.loc.gov URI, `http://id.loc.gov/authorities/subjects/sh...` (https
+mapped to http), in `vocabularies._URI_TO_STORED`. It is the publisher's spelling, stable
+across LC revisions, and what a catalogue writes in `$0` when it writes one. Rejected: the
+authorised string, which equals the stored LCSH classification number but changes across
+revisions, and the bare `sh` number.
+
+### A subject field's second indicator is read as a thesaurus only on a Library of Congress record
+
+MARC 21 defines the second indicator of `600`, `650`, `651` and `655` as the thesaurus: 0
+LCSH, 1 LC children's, 2 MeSH, 3 NAL, 5 Canadian, 6 RVM, 4 unspecified, 7 named in `$2`. LC
+writes LCSH as `#0` with no `$2` (117 of 117 above), so `marc_fields.Subfields.subject_vocabulary`
+falls back to the indicator where `$2` is absent, mapped to the MARC source codes `lcsh`,
+`lcshac`, `mesh`, `nal`, `cash` and `rvm`, **but only on a record whose `040 $a` is `DLC`**
+(`marc_fields._INDICATOR_TRUSTING_AGENCIES`).
+
+Other catalogues miscode it. Of 21 ÖNB `650` fields with indicator 0 and no `$2` in 150 live
+records (2026-11-20), at least 10 were MeSH from Austrian medical libraries, which an upload
+would have stored as LCSH and the SRU server republished as `$2 lcsh`. The owner's ruling:
+"Only for LC". On every other record a field with no `$2` declares no vocabulary, and `$2`
+wins where both are present. `689` is excluded: its second indicator numbers the heading
+inside an RSWK chain. `lcshac` is kept for indicator 1 although the source list now prefers
+`cyac`, because LC's MODS writes it and the MODS reader reads it.
+
+**The fallback for German speaking catalogues comes with the vocabulary table.** No German
+record in the live samples carries `040 $a DLC`, so the rule above labels nothing there.
+Judged by hand over 589 subject fields, trusting the indicator everywhere was 94.0% precise;
+the chosen rule was 99.8% (432 of 433) at 76.1% coverage. It reads a `$0` prefix where there
+is one, and otherwise the indicator's vocabulary only when the heading is an exact preferred
+label in that vocabulary's local copy. It needs the GND and LCSH copies, so it shipped beside
+the vocabulary table, with a MeSH match added when a MeSH copy exists: the entry on option AC
+below.
+
+### The GND converter reads JSON-LD, not MARC21 XML
+
+The DNB's open data page serves the Sachbegriff file as JSON-LD, RDF/XML and Turtle only,
+measured 2026-11-20, and the stable MARC file names answer 404. So the declaration says
+`origin-format: [gzip, json]`.
+
+### A data file is streamed and checked twice over one handle
+
+`vocabularies.read_entries` yields entries: it checks the SHA-256 before the first and the
+count after the last, over one open handle, so the next slot's loader writes beside the copy
+in use and discards what it took when the iterator raises. YAML is still parsed whole; JSON
+Lines and CSV are read a line at a time.
+
+### Points the ADR leaves open, decided in code
+
+- `origin` and `origin-format` are refused one without the other, and `origin-format` is
+  checked whatever the licence.
+- An unknown licence drops `origin` with the `data-file`.
+- The licences permitting a copy are `CC0-1.0` and `public-domain` only.
+- A conversion writes at most `vocabulary_dumps.MAX_DATA_FILE` bytes, 4 GiB, which nobody
+  has measured against a whole release.
+- The shipped declaration has no `suggest`: no source row has a suggest capability yet, so
+  the loader takes the capable source names from its caller.
+
+## The subject vocabulary download (2026-11-20)
+
+### It is offered in library settings, and by a notice to an admin
+
+The owner's answer of 2026-11-20 had the download offered at first initialization, and the
+app has no first run flow. So library settings carry a Subject vocabularies section, admin
+only, and an admin sees a notice on the library page pointing at it until a copy is loaded
+or the notice is dismissed (owner, 2026-11-20). The dismissal is a settings row, so it holds
+for the installation rather than one browser. A first run flow was rejected as a piece of
+work of its own for one item.
+
+### A restore holds off a download, and nothing else
+
+A restore and a load take the same lock, `vocabulary_copy._ONE_LOAD`: a restore while a load
+runs is refused, a load asked for during a restore waits, and a second restore is refused as
+a restore, not as a download. The lock is a `threading.Lock`, so it holds within the one
+uvicorn worker the image starts. Other writers are not held off: on SQLite an async write
+during a restore's minute can fail after the 5 s busy timeout, and on Postgres a row
+committed meanwhile can outlive the restore. Synchronous routes already ran beside a restore
+before it left the event loop.
+
+### The download's first URL is not checked for https
+
+`fetch.download` refuses a redirect to http (`_https_hop`) and does not check the URL it
+starts from. Both origins in `backend/vocabularies.yaml` are https, and that file is shipped
+configuration rather than a response, so an http origin needs an edit to the image. Accepted
+rather than adding a refusal to a module most door guards read.
+
+### Converting and loading share the interpreter with requests
+
+A load converts and inserts on a thread of the application's process, and a restore now runs
+on one too, so both share the GIL with every request. Measured 2026-11-20 in a pod limited
+to 500m over a million `vocabulary_labels` rows: with the restore on a thread, the event
+loop's longest stall was 0.10 s over 600 ticks, which is the ticker's own resolution. Accepted
+at that figure. A load's own stall was not measured; its work has the same shape.
+
+## Option AC: a subject field with no `$2`, outside a Library of Congress record (2026-11-20)
+
+**A `$0` prefix names the vocabulary first.** That rule needs no local copy and covers both
+paths, the catalogue lookup and an uploaded file (owner, 2026-11-20). On the catalogue path it
+changes only `Subject.vocabulary`, which nothing persists; on an upload with no copy loaded a
+`$0` at id.loc.gov now stores an LCSH row.
+
+**Otherwise indicator 0 is LCSH only where `$a`, its closing full stop removed, is an exact
+preferred label of the local LCSH copy and no subdivision opens lower case.** Judged by hand
+over 589 live fields from five German speaking catalogues: 99.8% precise (432 of 433) at
+76.1% coverage, against 94.0% for trusting the indicator; the review's reproduction on the
+built code read 429 of 430 (99.8%) and 75.5%. Indicator 4 stays unknown. MeSH waits for a MeSH
+copy (`marc_fields._SUBDIVISION_FORMS`).
+
+**The heading is stored in the form it was matched in**, without the closing full stop, which
+is the form the copy's labels and the MODS heading take; storing the stop would equal neither
+and keep two rows for one heading. Migration `c2015421927e` put the LCSH rows stored earlier
+into that form, merged the twins this made on one book, and moved the OAI datestamp of every
+book it changed.
+
+**Restoring an archive taken before that revision brings the stop forms back, and that is
+accepted.** The consequence is a duplicate row on the next MARC read, not a refusal or a leak,
+and a second frozen copy of the merge inside `backup.restore` would cost more than it saves.
+
+## Patron records (2026-11-20)
+
+### A card number is stored upper cased
+
+`a12` and `A12` are one card. `schemas/patron.py` upper cases the number on create and edit,
+before the unique index sees it, and the hint under the field says letters are saved as
+capitals. No migration, because the table is new. A restore inserts what the archive holds
+without upper casing it; no released build has written a patron, so no archive holds a lower
+case card. `CHECK (card_number = upper(card_number))` is the cheap hold if that changes.
+
+### The search carries its term in a POST body
+
+A patron's name in a GET's query string reaches uvicorn's access log and every proxy's. A
+filter on the access log covered the first only; `POST /api/patrons/search` covers both.
+Orval generates a POST as a mutation, which a typed search box reads badly, so
+`orval.config.ts` overrides `search_patrons` to a query.
+`test_no_patron_route_takes_a_query_parameter` holds every patron route to no query
+parameter.
+
+### An erasure zeroes the row on SQLite
+
+`database.py` sets `PRAGMA secure_delete=ON`. The image's SQLite is built with it on and uv's
+Python's is not, so setting it pins the erasure off a compile flag at no cost to the image.
+What it leaves is in `data-model.md`: the WAL keeps the old page until later writes overwrite
+it, and Postgres keeps a dead tuple until vacuum. Closing the WAL as well, by
+`journal_size_limit` or a truncating checkpoint after each erasure, is the owner's call if
+wanted.
+
+### Accepted as built
+
+- Two admins registering the same card number at once: the second is a 500 rather than a 409,
+  because telling the unique index from a CHECK failure needs the constraint name read.
+  Admin only, one process.
+- The patron text columns carry no byte bound CHECK: `String(n)` is unenforced by SQLite only
+  on the restore path, which is admin only.

@@ -13,6 +13,9 @@ import {
   LendingWillingness,
   OwnershipStatus,
   ReadStatus,
+  VocabularyLoadPhase,
+  type VocabularyOut,
+  type VocabularyProgressOut,
 } from "../../../src/api/generated/model";
 import {
   PAGE_SIZE,
@@ -22,7 +25,9 @@ import {
   useSavedSearches,
   useUnconfirmedCount,
   useViewChoice,
+  useVocabularyOffer,
 } from "../../../src/pages/Home/hooks";
+import { getGetSettingsQueryKey } from "../../../src/api/generated/endpoints/settings/settings";
 import { DEFAULT_FILTERS } from "../../../src/lib/bookFilters";
 import {
   DEFAULT_COLUMNS,
@@ -37,6 +42,7 @@ import {
   resetIds,
 } from "../../factories";
 import {
+  createTestQueryClient,
   mockApi,
   renderHookWithProviders,
   type MockApi,
@@ -1103,5 +1109,169 @@ describe("useUnconfirmedCount", () => {
     // Zero rather than undefined, so the banner is simply absent rather than
     // flashing on with a blank number.
     expect(result.current).toBe(0);
+  });
+});
+
+const GND: VocabularyOut = {
+  scheme: "gnd",
+  name: "GND subjects",
+  licence: "CC0-1.0",
+  copyable: true,
+  entries: null,
+  fetched_at: null,
+  released: null,
+  progress: null,
+};
+const LCSH: VocabularyOut = {
+  ...GND,
+  scheme: "lcsh",
+  name: "Library of Congress Subject Headings",
+  licence: null,
+  copyable: false,
+};
+
+/** A load under way; a case sets its phase. */
+const PROGRESS: VocabularyProgressOut = {
+  done: 0,
+  error: null,
+  phase: VocabularyLoadPhase.fetching,
+  total: null,
+};
+
+/** The settings record as far as the offer reads it. */
+const UNDISMISSED: StubResponse = {
+  body: { vocabulary_offer_dismissed: false },
+};
+const DISMISSED: StubResponse = { body: { vocabulary_offer_dismissed: true } };
+const SETTINGS = /\/api\/settings$/;
+
+/** One timer: TanStack tells the hook of an answer on one, after the cache holds it. */
+function aTick(): Promise<void> {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+}
+
+/**
+ * The offer once every request it makes has answered. Read before then, every
+ * case would be false, so a test that wants false waits for the answers first.
+ * The settings record is asked only once the list would offer, so a test whose
+ * list offers passes the record's reply, and only then is it waited for: a
+ * query that is never asked stays pending, so waiting for it in every case
+ * would hang the ones that ask nothing.
+ */
+async function offerOnceAnswered(reply: StubResponse, settings?: StubResponse) {
+  api.on("/api/settings/vocabularies", reply, "GET");
+  api.on(SETTINGS, settings ?? UNDISMISSED, "GET");
+  const rendered = renderHookWithProviders(() => useVocabularyOffer());
+  const { queryClient } = rendered;
+  const answered = async (key: string) => {
+    await waitFor(() =>
+      expect(queryClient.getQueryState([key])?.status).not.toBe("pending"),
+    );
+    await aTick();
+  };
+  await answered("/api/settings/vocabularies");
+  if (settings) await answered("/api/settings");
+  return rendered;
+}
+
+describe("useVocabularyOffer", () => {
+  it("offers a copy while a vocabulary may be copied and none is", async () => {
+    const { result } = await offerOnceAnswered(
+      { body: [GND, LCSH] },
+      UNDISMISSED,
+    );
+    expect(result.current.offer).toBe("download");
+  });
+
+  it("stops offering once any copy is loaded", async () => {
+    const loaded = { ...GND, fetched_at: "2026-11-20T10:00:00", entries: 5 };
+    const { result } = await offerOnceAnswered({ body: [loaded, LCSH] });
+    expect(result.current.offer).toBeNull();
+    // The record is never asked for: without this, the answer could simply not
+    // have reached the hook yet, and the gate would go unpinned.
+    expect(api.lastCall(SETTINGS)).toBeUndefined();
+  });
+
+  it("offers nothing over a loaded copy even with the settings record already held", async () => {
+    // The settings pages share this key, so an admin who opened them holds the
+    // record. The rule must hold by the outcome, not by the fetch never going out.
+    const queryClient = createTestQueryClient();
+    queryClient.setQueryData(getGetSettingsQueryKey(), {
+      vocabulary_offer_dismissed: false,
+    });
+    const loaded = { ...GND, fetched_at: "2026-11-20T10:00:00", entries: 5 };
+    api.on("/api/settings/vocabularies", { body: [loaded, LCSH] }, "GET");
+    const { result } = renderHookWithProviders(() => useVocabularyOffer(), {
+      queryClient,
+    });
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(["/api/settings/vocabularies"])?.status,
+      ).toBe("success"),
+    );
+    await aTick();
+    expect(result.current.offer).toBeNull();
+  });
+
+  it("offers nothing when no vocabulary may be copied", async () => {
+    const { result } = await offerOnceAnswered({ body: [LCSH] });
+    expect(result.current.offer).toBeNull();
+    expect(api.lastCall(SETTINGS)).toBeUndefined();
+  });
+
+  it("says a copy is being made while a load runs", async () => {
+    const running = {
+      ...GND,
+      progress: { ...PROGRESS, phase: VocabularyLoadPhase.loading },
+    };
+    const { result } = await offerOnceAnswered(
+      { body: [running] },
+      UNDISMISSED,
+    );
+    expect(result.current.offer).toBe("loading");
+  });
+
+  it("offers the download again once a load has failed", async () => {
+    const failed = {
+      ...GND,
+      progress: {
+        ...PROGRESS,
+        phase: VocabularyLoadPhase.failed,
+        error: "refused",
+      },
+    };
+    const { result } = await offerOnceAnswered({ body: [failed] }, UNDISMISSED);
+    expect(result.current.offer).toBe("download");
+  });
+
+  it("offers nothing to a member, whom the list refuses", async () => {
+    const { result } = await offerOnceAnswered({
+      status: 403,
+      body: { detail: "Admins only" },
+    });
+    expect(result.current.offer).toBeNull();
+  });
+
+  it("offers nothing once an admin has dismissed it", async () => {
+    const { result } = await offerOnceAnswered({ body: [GND] }, DISMISSED);
+    expect(result.current.offer).toBeNull();
+  });
+
+  it("asks for the settings record only when the list would offer", async () => {
+    await offerOnceAnswered({ status: 403, body: { detail: "Admins only" } });
+    expect(api.lastCall(SETTINGS)).toBeUndefined();
+  });
+
+  it("stores the dismissal for the installation and stops offering", async () => {
+    const { result } = await offerOnceAnswered({ body: [GND] }, UNDISMISSED);
+    expect(result.current.offer).toBe("download");
+    api.on(SETTINGS, DISMISSED, "PUT");
+
+    act(() => result.current.dismiss());
+
+    await waitFor(() => expect(result.current.offer).toBeNull());
+    expect(api.lastCall(SETTINGS, "PUT")?.body).toEqual({
+      vocabulary_offer_dismissed: true,
+    });
   });
 });

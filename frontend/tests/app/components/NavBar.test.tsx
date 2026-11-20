@@ -161,6 +161,28 @@ describe("the menu", () => {
     }
   });
 
+  it("offers the patron register to an admin", async () => {
+    renderWithProviders(
+      <NavBar
+        user={makeUser({ username: "kim", is_admin: true })}
+        mode={AuthMode.local}
+        isSwitched={false}
+        onSignOut={vi.fn<Props["onSignOut"]>()}
+      />,
+    );
+    const { menu } = await openMenu();
+    expect(menu.getByRole("menuitem", { name: "Patrons" })).toHaveAttribute(
+      "href",
+      "/patrons",
+    );
+  });
+
+  it("offers no patron register to a member", async () => {
+    renderNav();
+    const { menu } = await openMenu();
+    expect(menu.queryByRole("menuitem", { name: "Patrons" })).toBeNull();
+  });
+
   it("keeps the wishlist as a filtered library view", async () => {
     renderNav();
     const { menu } = await openMenu();

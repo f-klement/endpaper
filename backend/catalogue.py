@@ -116,7 +116,8 @@ class Subject:
     `gatbeg`, `gnd`, `gnd-carrier`, `gnd-content`, `local`, `nlgaf`, `nlggf`,
     `VLK`), against a MARC source code list holding hundreds. Mapping one onto
     the other is a crosswalk, which #134 refuses outright, so the code is
-    carried as the record wrote it and nothing here reads it as a scheme.
+    carried as the record wrote it, by `$2`, or on a Library of Congress
+    record by the second indicator, and nothing here reads it as a scheme.
 
     **`vocabulary` is lower cased and `identifier` is not.** The folding is
     `marc_fields.Subfields.subject_vocabulary`'s, and the reason is in this repository
@@ -1182,8 +1183,9 @@ def _folded_subjects(subjects: Iterable[Subject]) -> tuple[Subject, ...]:
     `as_match` joins these labels into `categories`, `categories` is **stored on
     the Book**, and a person reads it, so "nothing reads the order" was false as
     written: a human reading the order is reading the order. K10plus reaches the
-    shape on its own (`650` declares nothing, `689` declares `gnd`) and a merge
-    of two catalogues reaches it without either doing so.
+    shape on its own (`650` declares nothing, carrying no `$2` on a record that
+    is not the Library of Congress's, so no indicator is read; `689` declares
+    `gnd`) and a merge of two catalogues reaches it without either doing so.
 
     Grouping by label rather than sorting keeps this linear: a dict preserves
     insertion order, and a label's first key is inserted at its first

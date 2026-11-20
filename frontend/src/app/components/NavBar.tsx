@@ -33,8 +33,13 @@ const PRIMARY: {
   { to: "/loans", label: "nav.loans", icon: "handshake", end: false },
 ];
 
-/** Everything else. Navigation only: the actions below are written out. */
-const SECONDARY: { to: string; label: MessageKey }[] = [
+/**
+ * Everything else. Navigation only: the actions below are written out.
+ *
+ * `adminOnly` is left out of a member's menu, matching a route `routes.tsx`
+ * mounts for an admin alone: a link a member could see would lead to a 404.
+ */
+const SECONDARY: { to: string; label: MessageKey; adminOnly?: boolean }[] = [
   { to: "/series", label: "series.title" },
   { to: "/authors", label: "authors.title" },
   { to: "/collections", label: "collections.title" },
@@ -43,6 +48,7 @@ const SECONDARY: { to: string; label: MessageKey }[] = [
   { to: "/settings", label: "nav.settings" },
   { to: "/?status=want_to_read&ownership=not_owned", label: "nav.wishlist" },
   { to: "/duplicates", label: "duplicates.title" },
+  { to: "/patrons", label: "nav.patrons", adminOnly: true },
   { to: "/trash", label: "nav.trash" },
 ];
 
@@ -223,8 +229,8 @@ export default function NavBar({
             aria-label={t("nav.menu")}
             className="absolute right-0 top-full mt-2 w-56 bg-paper-0 border border-paper-200 rounded-xl shadow-[var(--shadow-lift)] overflow-hidden dark:bg-paper-900 dark:border-paper-800"
           >
-            {SECONDARY.map((link) =>
-              menuLink(t(link.label), link.to, link.to, close),
+            {SECONDARY.filter((link) => user.is_admin || !link.adminOnly).map(
+              (link) => menuLink(t(link.label), link.to, link.to, close),
             )}
 
             <ExportItems

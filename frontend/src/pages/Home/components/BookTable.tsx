@@ -13,9 +13,9 @@ import {
 import { Icon, Skeleton } from "../../../components";
 import { tagName, useTranslation, type Translate } from "../../../i18n";
 import {
-  SCHEME_LABEL,
   headingKind,
   headingText,
+  schemeLabel,
 } from "../../../lib/classificationLabels";
 import { numericDate } from "../../../lib/date";
 import {
@@ -84,7 +84,7 @@ function number(value: number | null | undefined): string {
  * and neither is `location`, which is prose about a shelf in this house and
  * means nothing outside it.
  */
-const CALL_NUMBER_SCHEMES: ClassificationScheme[] = [
+const CALL_NUMBER_SCHEMES: readonly string[] = [
   ClassificationScheme.ddc,
   ClassificationScheme.lcc,
 ];
@@ -186,7 +186,7 @@ const COLUMNS: Record<ColumnKey, Column> = {
     // number at all, so a notation shown without its scheme cannot be read.
     render: (book, t) =>
       callNumbers(book)
-        .map((entry) => `${t(SCHEME_LABEL[entry.scheme])} ${entry.number}`)
+        .map((entry) => `${schemeLabel(entry.scheme, t)} ${entry.number}`)
         .join(" · "),
   },
   classification: {
@@ -484,7 +484,7 @@ function SortMarks({
           with the name rather than after the sort direction. */}
       {active?.scheme !== undefined && (
         <span className="font-normal text-paper-600 dark:text-paper-400">
-          {t(SCHEME_LABEL[active.scheme])}
+          {schemeLabel(active.scheme, t)}
         </span>
       )}
       {/* Always drawn, dimmed until this column is the one ordering the list.

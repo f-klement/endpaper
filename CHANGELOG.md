@@ -20,6 +20,23 @@
 - A Postgres `DATABASE_URL` spelled without `+pg8000` now stops startup with a message naming `postgresql+pg8000://`, instead of an import error about psycopg.
 - `/openapi.json` now needs a signed in member; a request with no session answers 401.
 - `/docs` and `/redoc`, which the page's security policy kept blank, are gone; the schema stays at `/openapi.json` for a signed in member.
+- In library mode, a cataloguer can ask only some of the library's catalogues for one ISBN lookup or one title search.
+- The catalogue list in the settings shows how each catalogue is asked: its protocol, its record schema, whether the connection is encrypted, whether it needs a key or a login, and which classifications it supplies. Switching off the only catalogue supplying a classification, or switching every catalogue off, now asks first.
+- A catalogue that cannot answer, such as Google Books without its key, no longer counts as a supplier when the settings ask before switching a catalogue off.
+- A published catalogue can be harvested by union catalogues and aggregators over OAI-PMH at /oai, which reports changed and withdrawn records. Turn it on with "Let aggregators harvest this catalogue over OAI-PMH" in the public catalogue settings, after setting a repository contact address there; it starts off.
+- Restoring a backup into a new PostgreSQL database no longer makes the next book, tag or account fail to save because its id is already taken.
+- An admin can add a library's own classification scheme in the library settings, choose how its numbers sort, rename it, and delete it while no book uses it.
+- An uploaded Library of Congress MARC file now keeps its Library of Congress subject headings as LCSH classifications.
+- A book list link filtering by a classification scheme the library does not have now shows no books rather than every book.
+- An admin can download a local copy of GND subjects or LCSH from the library settings, where the licence allows, and refresh it by hand; the copy rides the backup.
+- Until a subject vocabulary is copied, the library page points an admin at the settings that download one.
+- The library page's offer of a subject vocabulary copy can be dismissed by an admin, for the whole installation.
+- While a subject vocabulary copy is being made, the library page says so and links to its progress instead of offering the download.
+- A MARC upload from a German speaking catalogue names a subject's vocabulary from its $0, or as LCSH where the local LCSH copy holds the heading.
+- A MARC upload stores a Library of Congress subject heading without the full stop that closes it, as the Library of Congress catalogue sends it.
+- An LCSH heading imported from MARC before this release keeps no closing full stop, so importing the book again adds no second heading.
+- An admin can keep a register of patrons, borrowers with no account, and deleting one keeps their loans' dates and drops their name.
+- A staff page for patrons: search, register, edit and erase.
 
 ## v0.22.0
 

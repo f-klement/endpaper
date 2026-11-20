@@ -24,6 +24,7 @@ than a pre-pass. A row the file marks as deleted is dropped by every one of
 them, so that is not what choosing a reader decides.
 """
 
+import functools
 import logging
 from collections import Counter
 from typing import Annotated
@@ -35,6 +36,7 @@ import csv_import
 import marc
 import recognition
 import settings_store
+import vocabulary_copy
 from classifications import bounded_headings
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
@@ -273,9 +275,11 @@ def _require_library_mode(db: Session) -> None:
         raise HTTPException(status_code=403, detail="MARC import is a library mode feature.")
 
 
-def _read_marc(content: bytes) -> marc.ParsedMarc:
+def _read_marc(db: Session, content: bytes) -> marc.ParsedMarc:
+    """The file read with the local copies confirming a second indicator on a
+    record the Library of Congress did not catalogue, asked once for the file."""
     try:
-        return marc.read(content)
+        return marc.read(content, functools.partial(vocabulary_copy.held_preferred_labels, db))
     except marc.MarcError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -332,7 +336,7 @@ def preview_marc(
     _require_library_mode(db)
     import_limiter.check(current_user.username)
 
-    parsed = _read_marc(_read_upload(file))
+    parsed = _read_marc(db, _read_upload(file))
     index = recognition.Index.build(db, current_user.id, recognition.Source.CATALOGUE)
     # The same stored view the import matches on. Matching the raw record here
     # and the truncated one there would make the two screens disagree about the
@@ -361,8 +365,7 @@ def preview_marc(
                 author=record.author,
                 isbn=record.isbn,
                 classifications=[
-                    f"{heading.scheme.value}:{heading.number}"
-                    for heading in bounded_headings(record.headings)
+                    f"{heading.scheme}:{heading.number}" for heading in bounded_headings(record.headings)
                 ],
             )
             for record in stored[:_PREVIEW_RECORDS]
@@ -408,7 +411,7 @@ def import_marc(
     _require_library_mode(db)
     import_limiter.check(current_user.username)
 
-    parsed = _read_marc(_read_upload(file))
+    parsed = _read_marc(db, _read_upload(file))
 
     # **A merge over the same Books can deadlock with the import**, and Postgres
     # then aborts one of the two. The import locks each Book it adds a link or a

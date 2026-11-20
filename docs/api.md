@@ -1262,9 +1262,11 @@ other people's private books would restore to a library missing rows, which is
 the one thing a backup must never do.
 
 `confirm=true` is a query parameter rather than a body field so the destructive
-call cannot be made by anything replaying a plain upload. The archive is
-validated in full before the first row is deleted, because a restore that fails
-halfway leaves a library that is neither the backup nor what was there before.
+call cannot be made by anything replaying a plain upload. The manifest's shape
+is checked before the first row is deleted, and the rows are read as they are
+inserted; nothing commits until every table is in, because a restore that
+failed halfway would leave a library that is neither the backup nor what was
+there before.
 Cover entries are taken by filename only: a zip entry may name any path it
 likes, including one outside the covers directory.
 
@@ -1862,12 +1864,17 @@ disable one catalogue as an instruction to switch six on. A name this build does
 is refused with 422, and the list is bounded at the size of the roster.
 
 `PUT /api/settings` accepts `library_mode`, `public_catalogue_enabled`,
-`public_catalogue_indexing_enabled` and `sru_server_enabled`, and **refuses no combination
+`public_catalogue_indexing_enabled`, `sru_server_enabled` and `oai_provider_enabled`, and **refuses no combination
 of them**: an admin may
 store a publish row while library mode is off, and the catalogue stays unpublished because
 the routes ask `public_catalogue_is_published` rather than reading a row. Refusing the
 write instead would make the order two toggles are saved in matter, and would lose an
 admin's stated intent the moment they turned library mode off to look at something.
+
+**One pair is refused**: `oai_provider_enabled` true with `oai_admin_email`, the repository
+contact address OAI-PMH's `Identify` serves, empty. A write naming either field that would
+leave the switch on with no address is 409 and writes nothing, whichever of the two it
+changes. `oai_admin_email` is one address or an empty string, 422 otherwise.
 
 `GET /api/settings` never returns the Google Books API key, only a masked preview plus
 `has_google_books_api_key`. A masked string is not a truth value, so the UI keys off the
@@ -2057,6 +2064,7 @@ evaluated on the server, so a publish row left on while library mode is off serv
 | GET | `/api/public/books/{book_id}` | **public** | One record. **404** for a book that is private, trashed or absent |
 | GET | `/api/public/books/{book_id}/availability` | **public** | `on_shelf` or `on_loan` for the title, any public copy in counting as on the shelf. **404** while its own switch is off, and for every reason the record route gives one |
 | GET | `/sru` | **public** | The SRU base URL. Same switches plus its own, same rate limit. Not in the OpenAPI schema |
+| GET | `/oai` | **public** | The OAI-PMH base URL. Same switches plus its own, same rate limit. Not in the OpenAPI schema |
 | GET | `/robots.txt` | **public** | Generated from the switches. Not in the OpenAPI schema |
 
 **`HEAD` answers 404 where `GET` answers 200**, on these routes and on every other GET
@@ -2189,6 +2197,34 @@ rule: `a or b and c` is `(a or b) and c`. Parentheses are how a client says othe
 
 The records are `marc.py`'s, so they carry exactly the fields the MARC export does, which
 is a subset of what `PublicBookOut` publishes. See [security.md](security.md).
+
+### OAI-PMH
+
+`/oai` is the same catalogue for harvesting: OAI-PMH 2.0, GET only. It runs the **same** gate
+as `/sru` and then its own switch, `oai_provider_enabled`, off by default everywhere; off, it
+answers the same 404 as an unpublished catalogue. Not in the OpenAPI schema, for `/sru`'s reason.
+
+| Verb | Arguments | Answers |
+|---|---|---|
+| `Identify` | none | `deletedRecord` is `persistent`, granularity `YYYY-MM-DD`, `adminEmail` the stored contact address |
+| `ListMetadataFormats` | `identifier` optional | `oai_dc` and `marc21` |
+| `ListSets` | `resumptionToken` optional | always `noSetHierarchy` |
+| `GetRecord` | `identifier`, `metadataPrefix` | one record, or a deleted header |
+| `ListIdentifiers`, `ListRecords` | `metadataPrefix`, then `from`, `until`, `set` optional; or `resumptionToken` alone | 50 records a page, in id order |
+
+**Identifiers** are `oai:<host>:<book id>`, the host being the one the request named
+(`/sru`'s rule). **Datestamps are days**, and move on every write that changes the published
+record, a tag, a classification or a link included, and on nothing else. **`from` and `until`
+are both inclusive** and are days; a value with a time is `badArgument`, as the protocol says
+of a granularity finer than the repository's. A record leaving the catalogue answers as a
+deleted header from then on, once the provider has answered its first request.
+
+**A resumption token is opaque and carries nothing a fresh request could not ask for**: the
+format, the window in whole days and the last id served. Anything else, an old token after an upgrade
+included, is `badResumptionToken`; start the harvest again.
+
+Every refusal is an HTTP 200 carrying an OAI-PMH `<error>`. `badVerb` and `badArgument` echo
+no argument back. See [security.md](security.md#oai-pmh).
 
 ### KOReader progress sync
 

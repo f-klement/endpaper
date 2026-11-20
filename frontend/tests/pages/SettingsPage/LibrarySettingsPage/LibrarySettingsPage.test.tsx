@@ -166,6 +166,49 @@ describe("LibrarySettingsPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("draws an admin the subject vocabularies and the classification schemes", async () => {
+    api.on("/api/settings/vocabularies", { body: [] }, "GET");
+    api.on("/api/settings/classification-schemes", { body: [] }, "GET");
+    render();
+
+    expect(
+      await screen.findByRole("heading", { name: "Subject vocabularies" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Classification schemes" }),
+    ).toBeInTheDocument();
+  });
+
+  it("neither draws a member the vocabularies and schemes nor asks for them", async () => {
+    // Both routes answer a member 403. Drawn anyway, the cards would stand
+    // empty under an alert, and asked anyway, they would cost two refusals.
+    api.on(
+      /\/api\/settings$/,
+      { status: 403, body: { detail: "Admins only" } },
+      "GET",
+    );
+    render();
+
+    await screen.findByRole("heading", { name: "Bring a library across" });
+    await waitFor(() =>
+      expect(api.lastCall(/\/api\/settings$/, "GET")).toBeDefined(),
+    );
+
+    expect(
+      screen.queryByRole("heading", { name: "Subject vocabularies" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Classification schemes" }),
+    ).not.toBeInTheDocument();
+    expect(
+      api.calls.filter(
+        (call) =>
+          call.url.includes("/api/settings/vocabularies") ||
+          call.url.includes("/api/settings/classification-schemes"),
+      ),
+    ).toEqual([]);
+  });
+
   it("names the services a library can come from", async () => {
     // The import stopped being Goodreads-only. Somebody arriving from
     // LibraryThing or StoryGraph needs to see that this is for them too.

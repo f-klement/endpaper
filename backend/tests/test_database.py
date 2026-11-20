@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import socket
+import sqlite3
 import ssl
 import subprocess
 import sys
@@ -251,6 +252,20 @@ class TestSqlitePragmas:
     @pytest.mark.sqlite_only(reason="reads SQLite's pragmas")
     def test_a_busy_database_waits_rather_than_erroring(self, pragma):
         assert pragma("busy_timeout") == 5000
+
+    @pytest.mark.sqlite_only(reason="reads SQLite's pragmas")
+    def test_deleted_content_is_zeroed_whatever_the_build_default(self):
+        """Off, an erased patron stays in the file's free space. Read off a
+        connection switched off first, because the suite's SQLite, like the
+        image's, is built with it on, and a read of the pool would pass with
+        the setting deleted. `test_patrons.py` reads the file for the name."""
+        raw = sqlite3.connect(":memory:")
+        try:
+            raw.execute("PRAGMA secure_delete=OFF")
+            database._sqlite_pragmas(raw, None)
+            assert raw.execute("PRAGMA secure_delete").fetchone() == (1,)
+        finally:
+            raw.close()
 
 
 class TestForeignKeyIndexes:

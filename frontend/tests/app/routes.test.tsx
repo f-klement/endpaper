@@ -64,3 +64,32 @@ describe("AppRoutes", () => {
     expect(screen.getByRole("checkbox")).not.toBeChecked();
   });
 });
+
+describe("the patron register's route", () => {
+  it("opens the register for an admin", () => {
+    renderWithProviders(
+      <AppRoutes
+        user={makeUser({ is_admin: true })}
+        mode={AuthMode.local}
+        onSignIn={noop}
+      />,
+      { route: "/patrons" },
+    );
+
+    expect(
+      screen.getByRole("searchbox", { name: "Search patrons" }),
+    ).toBeInTheDocument();
+  });
+
+  it("is not there for a member, who meets the 404 page", () => {
+    renderWithProviders(
+      <AppRoutes user={makeUser()} mode={AuthMode.local} onSignIn={noop} />,
+      { route: "/patrons" },
+    );
+
+    expect(
+      screen.queryByRole("searchbox", { name: "Search patrons" }),
+    ).toBeNull();
+    expect(screen.getByText("Error 404")).toBeInTheDocument();
+  });
+});

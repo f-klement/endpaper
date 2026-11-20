@@ -39,7 +39,7 @@ from catalogue import Heading
 from database import hold_book_ceilings
 from enums import ClassificationScheme, HeadingKind
 from logvalues import clipped
-from models import Book, Classification
+from models import Book, Classification, filing_rules
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK, ClassificationIn
 
 logger = logging.getLogger("endpaper.classifications")
@@ -69,9 +69,10 @@ logger = logging.getLogger("endpaper.classifications")
 #: still a keeping rule rather than a display one, since nothing draws them
 #: in this order, but it is no longer invisible when it drops one.
 #:
-#: A scheme missing from here sorts last rather than raising, so adding one to
-#: `ClassificationScheme` cannot break the ceiling by forgetting this.
-SCHEME_ORDER: Final[dict[ClassificationScheme, int]] = {
+#: A scheme missing from here sorts last rather than raising, which is every
+#: scheme a library defined: no reader produces one, so only a member's own
+#: post carries it, and the four a catalogue supplies keep their order.
+SCHEME_ORDER: Final[dict[str, int]] = {
     ClassificationScheme.DDC: 0,
     ClassificationScheme.LCC: 1,
     ClassificationScheme.GND: 2,
@@ -116,8 +117,8 @@ def kind_of(kind: HeadingKind | None) -> HeadingKind:
 
     **Narrow rather than tolerant, and the first version was tolerant for a
     reason that turned out to be false.** It took `object` and degraded, citing
-    `filing.sort_key_for` and the archive `backup.restore` inserts through Core.
-    That analogy does not hold: `sort_key_for` **is** called on the restore
+    `filing.sort_key_under` and the archive `backup.restore` inserts through Core.
+    That analogy does not hold: `sort_key_under` **is** called on the restore
     value, at `backup._parse_row`, and this is not called on a column value
     anywhere. What guards the column is `ck_classifications_kind`, which is the
     strong side of the split `tests/test_house_rules.py` holds, so the tolerance
@@ -184,20 +185,19 @@ def bounded_headings(entries: Iterable[Heading]) -> list[ClassificationIn]:
     return headings[:MAX_CLASSIFICATIONS_PER_BOOK]
 
 
-def _key(scheme: str, number: str) -> tuple[ClassificationScheme, str]:
-    """The pair the unique index is on, with the scheme coerced through the enum.
+def _key(scheme: str, number: str) -> tuple[str, str]:
+    """The pair the unique index is on, with the scheme as the plain code.
 
-    A stored row's `scheme` comes back from a plain VARCHAR as a `str` and the
-    payload's is a `ClassificationScheme`, so comparing them raw works only for
-    as long as that is a `StrEnum`; coercing removes the dependency instead of
-    commenting on it.
+    A heading from a reader carries a `ClassificationScheme`, and a stored row
+    or a member's post carries a `str`. `str()` makes the three one type, so
+    the comparison does not rest on the enum being a `StrEnum`.
     """
-    return ClassificationScheme(scheme), number
+    return str(scheme), number
 
 
 def _headings_to_add(
     stored: Sequence[Classification], headings: Sequence[ClassificationIn]
-) -> dict[tuple[ClassificationScheme, str], ClassificationIn]:
+) -> dict[tuple[str, str], ClassificationIn]:
     """The headings `add_headings` inserts into `stored` as loaded, by `_key`.
 
     **The one place that says whether a row is added**: the check before the
@@ -209,7 +209,7 @@ def _headings_to_add(
     """
     held = {_key(entry.scheme, entry.number) for entry in stored}
     room = MAX_CLASSIFICATIONS_PER_BOOK - len(stored)
-    adds: dict[tuple[ClassificationScheme, str], ClassificationIn] = {}
+    adds: dict[tuple[str, str], ClassificationIn] = {}
     for heading in headings:
         if len(adds) >= room:
             break
@@ -285,6 +285,7 @@ def add_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) 
     makes this call add less, and every insert below follows the lock and the
     re-read. Filling in a caption or a kind adds no row.
     """
+    headings = _quoting_a_scheme(headings, db)
     if not headings:
         return []
     _hold_if_adding(book, headings, db)
@@ -318,6 +319,39 @@ def add_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) 
         existing[key] = row
         changed.append(heading.number)
     return changed
+
+
+def _quoting_a_scheme(headings: Sequence[ClassificationIn], db: Session) -> Sequence[ClassificationIn]:
+    """`headings` less any whose scheme has no row, each dropped with a log line.
+
+    **Dropped rather than refused** on the paths that reach here with one, a
+    MARC upload and a catalogue lookup, by `bounded_headings`' rule: a record
+    is a third party's, and one heading under a scheme nobody defined should
+    not fail the whole book, which `fk_classifications_scheme` would do at the
+    flush as a 500. A member's own post is refused before this, with a 422
+    naming the field (`routers.books._refuse_unknown_schemes`).
+    """
+    unknown = set(unknown_schemes(headings, db))
+    for index in sorted(unknown):
+        logger.info(
+            "Discarded a classification under a scheme with no row: %s", clipped(headings[index].scheme)
+        )
+    return (
+        [heading for index, heading in enumerate(headings) if index not in unknown] if unknown else headings
+    )
+
+
+def unknown_schemes(headings: Sequence[ClassificationIn], db: Session) -> list[int]:
+    """The positions in `headings` of each heading whose scheme has no row.
+
+    The table is read only where a heading names a scheme outside
+    `ClassificationScheme`, whose rows cannot be deleted, so a catalogue's
+    headings cost no statement here.
+    """
+    if all(heading.scheme in ClassificationScheme for heading in headings):
+        return []
+    known = filing_rules(db)
+    return [index for index, heading in enumerate(headings) if heading.scheme not in known]
 
 
 def _hold_if_adding(book: Book, headings: Sequence[ClassificationIn], db: Session) -> None:

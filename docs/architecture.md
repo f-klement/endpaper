@@ -177,6 +177,7 @@ The pages, read from `src/pages/`:
 - [`LoansPage`](../frontend/src/pages/LoansPage)
 - [`LoginPage`](../frontend/src/pages/LoginPage)
 - [`OverduePage`](../frontend/src/pages/OverduePage)
+- [`PatronsPage`](../frontend/src/pages/PatronsPage)
 - [`PublicCataloguePage`](../frontend/src/pages/PublicCataloguePage)
 - [`QuotesPage`](../frontend/src/pages/QuotesPage)
 - [`ScanPage`](../frontend/src/pages/ScanPage)
@@ -208,7 +209,9 @@ listed.
 | Routers | [`routers/imports.py`](../backend/routers/imports.py) | Bulk import from other services. |
 | Routers | [`routers/kosync.py`](../backend/routers/kosync.py) | KOReader's progress sync: the device protocol, and the member's screens for it. |
 | Routers | [`routers/loans.py`](../backend/routers/loans.py) | Lending: lending a book, returning it, and the overdue lists and reminders. |
+| Routers | [`routers/oai.py`](../backend/routers/oai.py) | The OAI-PMH base URL: one route, and the two gates in front of it. |
 | Routers | [`routers/opds.py`](../backend/routers/opds.py) | The household's own OPDS servers: configuring them, and syncing what they hold. |
+| Routers | [`routers/patrons.py`](../backend/routers/patrons.py) | Patrons: the admin's register of borrowers who are not members. |
 | Routers | [`routers/public.py`](../backend/routers/public.py) | The catalogue as a reader with no account sees it. |
 | Routers | [`routers/readwise.py`](../backend/routers/readwise.py) | A member's Readwise token and their pull, behind the ordinary session. |
 | Routers | [`routers/settings.py`](../backend/routers/settings.py) | *No module docstring.* |
@@ -223,6 +226,7 @@ listed.
 | Protocols and notifications | [`kosync.py`](../backend/kosync.py) | KOReader's progress sync, served from this library. |
 | Protocols and notifications | [`mailer.py`](../backend/mailer.py) | Sending one mail, over SMTP, with the refusals that belong to that transport. |
 | Protocols and notifications | [`notifications.py`](../backend/notifications.py) | Chasing overdue loans, by sending one digest on every channel that is on. |
+| Protocols and notifications | [`oai.py`](../backend/oai.py) | OAI-PMH, served: an aggregator harvests the published catalogue by date. |
 | Protocols and notifications | [`opds.py`](../backend/opds.py) | One reader for the self hosted OPDS servers, and it runs here rather than in the browser. |
 | Protocols and notifications | [`readwise.py`](../backend/readwise.py) | Pulling a member's Readwise highlights into `highlights`, and nothing back. |
 | Protocols and notifications | [`sru.py`](../backend/sru.py) | SRU, served rather than consumed, which is the other direction from `targets.py`. |
@@ -235,6 +239,7 @@ listed.
 | Domain | [`authorship.py`](../backend/authorship.py) | Who wrote what: the half of author identity that touches the database. |
 | Domain | [`book_columns.py`](../backend/book_columns.py) | What each column of `books` is about, for every writer that needs a set of them. |
 | Domain | [`catalogue_access.py`](../backend/catalogue_access.py) | Whether this Library may ask an outside catalogue, and what a Member is told if not. |
+| Domain | [`classification_schemes.py`](../backend/classification_schemes.py) | The classification schemes a library's headings may quote, as rows. |
 | Domain | [`classifications.py`](../backend/classifications.py) | The classifications table: what may be written to it, and how much. |
 | Domain | [`custom_fields.py`](../backend/custom_fields.py) | The facts a Library keeps about its Books that this schema does not know. |
 | Domain | [`disclosure.py`](../backend/disclosure.py) | Who may be told a Library wide vocabulary entry exists, for any vocabulary. |
@@ -242,15 +247,18 @@ listed.
 | Domain | [`fields.py`](../backend/fields.py) | Which of the Library's own fields one Member may be told exist, and which they may name by id. |
 | Domain | [`file_references.py`](../backend/file_references.py) | What one look at a file may write to its reference, and which Books hold a file. |
 | Domain | [`folding.py`](../backend/folding.py) | What becomes of everything pointing at a Book when two Books turn out to be one. |
+| Domain | [`harvest.py`](../backend/harvest.py) | What a harvester can see change: the OAI-PMH datestamp and the tombstone. |
 | Domain | [`highlights.py`](../backend/highlights.py) | The highlight ledger: what every source's import does once it has a key. |
 | Domain | [`identifiers.py`](../backend/identifiers.py) | The `book_identifiers` table: what may be written to it, and how much. |
 | Domain | [`koreader_highlights.py`](../backend/koreader_highlights.py) | A KOReader sidecar's highlights as the ledger's marks: how each is keyed. |
 | Domain | [`lending.py`](../backend/lending.py) | The lending desk: which Loans a reader may see, when one closes, and what a Loan is at a given moment. |
+| Domain | [`patrons.py`](../backend/patrons.py) | Patrons: finding one, and erasing one so that no loan keeps their name. |
 | Domain | [`reading.py`](../backend/reading.py) | One Member's reading of the Books in this Library, and the only place a `user_books` row is read or written. |
 | Domain | [`recognition.py`](../backend/recognition.py) | Which existing Book a record is, as one Member sees it. |
 | Domain | [`shelf.py`](../backend/shelf.py) | Every query that returns or counts many Books, and the only place the privacy predicate is applied. |
 | Domain | [`shelving.py`](../backend/shelving.py) | Which named parts of the shelf one Member may be told exist, and which they may file a Book into. |
 | Domain | [`tags.py`](../backend/tags.py) | Deciding a tag from a name, how many one Book may carry, and who may be told one exists. |
+| Domain | [`vocabulary_copy.py`](../backend/vocabulary_copy.py) | The local copy of each declared subject vocabulary: filled in the background, read by exact label. |
 | Settings | [`credentials.py`](../backend/credentials.py) | A login at somebody else's catalogue: sealed at rest, bound to one origin. |
 | Settings | [`settings_store.py`](../backend/settings_store.py) | Admin-editable settings that survive a restart. |
 | Catalogue | [`authority.py`](../backend/authority.py) | The authority files, read for a person rather than for a book. |
@@ -265,6 +273,8 @@ listed.
 | Catalogue | [`metadata.py`](../backend/metadata.py) | Turning a scanned ISBN into a book, across several catalogues. |
 | Catalogue | [`sources.py`](../backend/sources.py) | Which catalogues are asked about a book, and in what order. |
 | Catalogue | [`targets.py`](../backend/targets.py) | One catalogue target as data: where it is, how it is asked, what reads it back. |
+| Catalogue | [`vocabularies.py`](../backend/vocabularies.py) | The subject vocabularies this application knows, as ADR 0009 declares them. |
+| Catalogue | [`vocabulary_dumps.py`](../backend/vocabulary_dumps.py) | Turning a vocabulary's upstream release into its JSON Lines data file. |
 | Catalogue | [`xml_parse.py`](../backend/xml_parse.py) | What turning a stranger's XML into a tree may cost, and the one builder that holds it. |
 | Catalogue | [`z3950.py`](../backend/z3950.py) | One door for the Z39.50 requests this app makes, and every bound on them. |
 | Catalogue | [`z3950_yaz.py`](../backend/z3950_yaz.py) | The Z39.50 client: a `ctypes` binding to the ZOOM C API in the `libyaz` the image ships. |
@@ -300,14 +310,14 @@ one. Generated from the import statements, function local imports included.
 ```mermaid
 flowchart TB
   app["App, 3 modules"]
-  routers["Routers, 15 modules"]
+  routers["Routers, 17 modules"]
   request["Request support, 2 modules"]
   identity["Identity, 3 modules"]
-  protocols["Protocols and notifications, 6 modules"]
+  protocols["Protocols and notifications, 7 modules"]
   files["Imports and files, 6 modules"]
-  domain["Domain, 19 modules"]
+  domain["Domain, 22 modules"]
   settings["Settings, 2 modules"]
-  catalogue["Catalogue, 15 modules"]
+  catalogue["Catalogue, 17 modules"]
   contracts["Contracts, 1 module"]
   foundations["Foundations, 18 modules"]
   app --> routers
@@ -320,6 +330,7 @@ flowchart TB
   settings --> catalogue
   catalogue --> contracts
   contracts --> foundations
+  protocols -.->|"1"| request
   files -.->|"1"| app
   domain -.->|"1"| protocols
   catalogue -.->|"2"| files
@@ -327,6 +338,7 @@ flowchart TB
   contracts -.->|"1"| protocols
   contracts -.->|"1"| files
   contracts -.->|"2"| catalogue
+  foundations -.->|"1"| domain
   foundations -.->|"1"| catalogue
   foundations -.->|"1"| contracts
 ```
@@ -339,12 +351,20 @@ flowchart TB
 | `covers.py` | `uploads.py` |
 | `lending.py` | `notifications.py` |
 | `models.py` | `covers.py` |
+| `models.py` | `harvest.py` |
+| `oai.py` | `serialisation.py` |
 | `refusals.py` | `schemas/` |
 | `schemas/` | `bibliographic.py` |
 | `schemas/` | `covers.py` |
 | `schemas/` | `import_readers.py` |
 | `schemas/` | `mailer.py` |
 <!-- layers: end -->
+
+**Two of those pairs are the OAI-PMH provider's.** `models.py` imports `harvest.py` at its foot
+so that any process able to name a Book has the session events that keep the datestamp and the
+tombstones current; a write path added later cannot then forget them. `oai.py` imports
+`serialisation.py` for `books_to_public_out`, the one builder of `PublicBookOut`, so `oai_dc`
+crosses the same column boundary as the JSON catalogue rather than a second copy of it.
 
 ## The privacy rule as a seam
 
@@ -771,6 +791,7 @@ is this table.
 | `/api/healthz` | a FastAPI route | Liveness and readiness. Runs a query **and** stats the data directory under its own timeout |
 | `/kosync/*` | a FastAPI router | KOReader's progress sync protocol |
 | `/sru` | a FastAPI route | The SRU server, behind the public catalogue's gate and its own switch |
+| `/oai` | a FastAPI route | The OAI-PMH provider, behind the same gate and a switch of its own |
 | everything else | `StaticFiles(html=True)` | The compiled React bundle |
 
 **`SERVE_FRONTEND=false` skips that mount**, leaving the API on its own. The shipped image
@@ -910,9 +931,10 @@ dependency bot watching upstream's release tags, and the version and its hash ar
 bumped by hand together.
 
 **What that TLS is worth is worth knowing.** YAZ verifies the peer's certificate only
-when asked: the ZOOM option `check_cert` arrived in 5.38.0, defaults to off, and this
-application does not set it. An `ssl:` target is therefore encrypted against a passive
-listener and not authenticated against anyone able to answer for the address.
+when asked: the ZOOM option `check_cert` arrived in 5.38.0 and defaults to off, and this
+application sets it on every connection, with no switch to turn it off. An `ssl:` target
+whose certificate does not verify against the system trust fails its connect, and a `tcp:`
+target never reaches the check.
 
 **The install prefix is load bearing.** libtool records `/opt/yaz/lib` as `yaz-client`'s
 RUNPATH, which is why the binary resolves its library with no `LD_LIBRARY_PATH` and no

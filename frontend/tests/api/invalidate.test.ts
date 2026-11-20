@@ -18,6 +18,7 @@ import * as covers from "../../src/api/generated/endpoints/covers/covers";
 import * as kosync from "../../src/api/generated/endpoints/kosync/kosync";
 import * as loans from "../../src/api/generated/endpoints/loans/loans";
 import * as opds from "../../src/api/generated/endpoints/opds/opds";
+import * as patrons from "../../src/api/generated/endpoints/patrons/patrons";
 import * as publicCatalogue from "../../src/api/generated/endpoints/public/public";
 import * as readwise from "../../src/api/generated/endpoints/readwise/readwise";
 import * as settings from "../../src/api/generated/endpoints/settings/settings";
@@ -116,6 +117,9 @@ const KEYS: Record<string, readonly unknown[]> = {
   exportBooks: books.getExportBooksQueryKey(),
   lookupIsbn: books.getLookupIsbnQueryKey({ isbn: "9780441013593" }),
   searchBooks: books.getSearchBooksQueryKey({ q: "dune" }),
+  // The catalogues a cataloguer may narrow one lookup to. Read off the
+  // settings, so no book write moves it and no catalogue group holds it.
+  listNarrowableCatalogues: books.getListNarrowableCataloguesQueryKey(),
   authorAuthority: books.getAuthorAuthorityQueryKey({
     author: "Ursula K. Le Guin",
   }),
@@ -137,6 +141,18 @@ const KEYS: Record<string, readonly unknown[]> = {
   getLoginImage: settings.getGetLoginImageQueryKey(),
   getSenderHealth: settings.getGetSenderHealthQueryKey(),
   getCredentialKey: settings.getGetCredentialKeyQueryKey(),
+  // The classification schemes a heading may quote. Under `/api/settings`, so
+  // a catalogue write leaves it; only the settings section writes a scheme,
+  // and it refreshes this key itself.
+  listClassificationSchemes: settings.getListClassificationSchemesQueryKey(),
+  // Each subject vocabulary's local copy, admin only. Configuration like the
+  // schemes above; only its own section starts a download, and it refreshes
+  // this key itself.
+  listVocabularies: settings.getListVocabulariesQueryKey(),
+  // The admin's patron register. Under `/api/patrons`, so a catalogue write
+  // leaves it; only its own routes write a patron.
+  searchPatrons: patrons.getSearchPatronsQueryKey({ q: "pat" }),
+  getPatron: patrons.getGetPatronQueryKey(7),
   listUsers: users.getListUsersQueryKey(),
   getMyAppearance: users.getGetMyAppearanceQueryKey(),
   getMyEmail: users.getGetMyEmailQueryKey(),
@@ -305,7 +321,19 @@ describe("the inventory is complete", () => {
     //
     // 66 on 2026-11-19, counted with that same command: whether a published
     // record is on the shelf or on loan, one route and one key.
-    expect(Object.keys(KEYS).length).toBe(66);
+    //
+    // 67 on 2026-11-19, counted with that same command: the catalogues one
+    // lookup or search may be narrowed to, one route and one key.
+    //
+    // 68 on 2026-11-20, counted with that same command: the classification
+    // schemes a library may add to, four routes, one of them a read.
+    //
+    // 69 on 2026-11-20, counted with that same command: the subject
+    // vocabularies' local copies, two routes, one of them a read.
+    //
+    // 71 on 2026-11-20, counted with that same command: the admin's patron
+    // register, five routes, two of them reads (the search and one record).
+    expect(Object.keys(KEYS).length).toBe(71);
   });
 });
 
@@ -461,6 +489,8 @@ describe("the catalogue is everything derived from the books table", () => {
       "getMyEmail",
       "listEmails",
       "listTestAccounts",
+      "searchPatrons",
+      "getPatron",
       "authConfig",
       "me",
       "healthz",

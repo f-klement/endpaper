@@ -10611,6 +10611,10 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       .map(([path]) => path)
       .sort();
 
+  // **Thirty seconds, because this arm and the setup file arm below parse
+  // the whole test tree**: in a whole suite on a loaded node this one ran
+  // 5,902 ms against vitest's five second default, red with no assertion
+  // failed, and the other 4,181 ms.
   it("reads the committed schema in one module", () => {
     // Outside both trees, so the rule above lets it through; one reader is
     // `committedSchema.ts`'s rule, and its header says why. Seen as a glob
@@ -10636,7 +10640,7 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       .map(([path]) => path);
 
     expect(schemaReaders).toEqual(["./committedSchema.ts"]);
-  });
+  }, 30_000);
 
   it("resolves a one file pattern the way the corpus rule resolves a glob", () => {
     // **Each row is a read this tree had when the rule was written, or its
@@ -10714,7 +10718,7 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       readers(),
       "the reader found nothing at all, so it has stopped reading",
     ).toContain("./setup.ts");
-  });
+  }, 30_000);
 
   it("takes the exemption from the config rather than from a list here", () => {
     // **The derivation, driven, and what it is worth is narrower than it

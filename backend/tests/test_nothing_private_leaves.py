@@ -93,6 +93,7 @@ from models import (
     CustomFieldValue,
     Loan,
     Note,
+    Patron,
     Quote,
     Tag,
     copy_group_token,
@@ -162,7 +163,8 @@ UNMARKED_WITHHELD: dict[str, str] = {
 #:
 #: The SRU probe is here because the bare route answers `explain`, which carries
 #: no records at all: without it `/sru` is a 200 that proves nothing, which is
-#: what the first measurement of this sweep showed.
+#: what the first measurement of this sweep showed. The OAI-PMH probe is here for
+#: the same reason: the bare `/oai` is a `badVerb` carrying no record.
 #:
 #: **No probe carries either marker**, deliberately. A server that echoed the
 #: request back, which SRU diagnostics come close to doing, would put the string
@@ -172,6 +174,7 @@ PROBES: tuple[str, ...] = (
     "",
     f"q={SHARED_TERM}",
     f"operation=searchRetrieve&query={SHARED_TERM}",
+    "verb=ListRecords&metadataPrefix=oai_dc",
 )
 
 #: Every call this application answers with no member resolved, and why.
@@ -202,6 +205,7 @@ UNAUTHENTICATED: dict[str, str] = {
     "GET /covers/login_bg.{extension}": "the sign in background's bytes",
     "GET /robots.txt": "what a crawler is told, which must answer either way",
     "GET /sru": "the SRU base URL, gated by the same publish switch and its own",
+    "GET /oai": "the OAI-PMH base URL, gated by the same publish switch and its own",
     # KOReader's progress sync. A device cannot hold a session, so it signs in
     # on every call with a sync password; every route but these two answers 401
     # to a caller without one. See `routers/kosync.py`.
@@ -242,6 +246,7 @@ CARRIES_BOOKS: frozenset[str] = frozenset(
         "GET /api/public/books",
         "GET /api/public/books/{book_id}",
         "GET /sru",
+        "GET /oai",
     }
 )
 
@@ -312,7 +317,7 @@ def _withheld_strings() -> list[str]:
 
 
 def _publish(db) -> None:
-    """Every publishing switch on, SRU's and availability's included, so the
+    """Every publishing switch on, both protocols' and availability's included, so the
     catalogue answers rather than 404ing.
 
     The sweep is worth nothing against a deployment publishing nothing: every
@@ -323,6 +328,8 @@ def _publish(db) -> None:
     settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
     settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true")
     settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
+    settings_store.set_value(db, SettingKey.OAI_PROVIDER_ENABLED, "true")
+    settings_store.set_value(db, SettingKey.OAI_ADMIN_EMAIL, "catalogue@library.example")
     settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
 
 
@@ -484,6 +491,11 @@ class TestNothingPrivateLeavesByARoute:
         )
 
 
+#: OAI-PMH stamps every response with the second it was written, so two
+#: snapshots differ by the clock alone. Removed before they are compared.
+_RESPONSE_DATE = re.compile(r"<responseDate>[^<]*</responseDate>")
+
+
 def _every_answer(client, marked: dict) -> dict[tuple[str, str, int], tuple[int, str]]:
     """Status and body of every call, probe and Book id the sweep drives.
 
@@ -498,7 +510,7 @@ def _every_answer(client, marked: dict) -> dict[tuple[str, str, int], tuple[int,
         for probe in PROBES:
             for book_id in (marked["private"], marked["public"]):
                 response = _drive(client, call, probe, book_id)
-                answers[call, probe, book_id] = (response.status_code, response.text)
+                answers[call, probe, book_id] = (response.status_code, _RESPONSE_DATE.sub("", response.text))
     return answers
 
 
@@ -552,6 +564,71 @@ class TestAPrivateLoanChangesNoPublicAnswer:
 
         changed = {key[0] for key, answer in _every_answer(client, marked).items() if before[key] != answer}
         assert changed == {"GET /api/public/books/{book_id}/availability"}
+
+
+#: What a patron's every text column carries, so a body holding any of them is caught.
+PATRON_MARKER = "ZQPATRONQ"
+
+
+def _register_patron(db, card: str) -> Patron:
+    """A patron whose every text column carries `PATRON_MARKER`."""
+    patron = Patron(
+        card_number=f"{PATRON_MARKER}{card}",
+        name=PATRON_MARKER,
+        email=f"{PATRON_MARKER.lower()}@example.org",
+        phone=PATRON_MARKER,
+        street=PATRON_MARKER,
+        house_number=PATRON_MARKER,
+        postcode=PATRON_MARKER,
+        city=PATRON_MARKER,
+    )
+    db.add(patron)
+    db.commit()
+    return patron
+
+
+class TestAPatronIsNeverPublic:
+    """No patron field and no count in any answer given without a member.
+
+    Driven through every unauthenticated call `_every_answer` sweeps, with
+    the public Book on loan, because a loan is the one way a patron touches a
+    Book a stranger may read about.
+    """
+
+    def test_a_loan_to_a_patron_reads_exactly_as_a_loan_to_a_typed_name(self, client, db, marked, admin):
+        """Equal answers, so not the name, not the kind and not "on loan to" leaves."""
+        _lend(db, marked["public"], admin["user"]["id"])
+        typed = _every_answer(client, marked)
+
+        patron = _register_patron(db, "1")
+        loan = db.query(Loan).filter(Loan.book_id == marked["public"]).one()
+        loan.loaned_to_name = None
+        loan.loaned_to_patron_id = patron.id
+        db.commit()
+
+        assert _every_answer(client, marked) == typed
+
+    def test_no_answer_carries_a_patrons_details(self, client, db, marked, admin):
+        patron = _register_patron(db, "1")
+        db.add(
+            Loan(
+                book_id=marked["public"], loaned_to_patron_id=patron.id, loaned_by_user_id=admin["user"]["id"]
+            )
+        )
+        db.commit()
+
+        carrying = sorted(
+            key for key, (_, body) in _every_answer(client, marked).items() if PATRON_MARKER in body.upper()
+        )
+        assert carrying == []
+
+    def test_how_many_patrons_there_are_changes_no_answer(self, client, db, marked):
+        """The absence of a count, asserted as no answer moving when three arrive."""
+        before = _every_answer(client, marked)
+        for card in ("1", "2", "3"):
+            _register_patron(db, card)
+
+        assert _every_answer(client, marked) == before
 
 
 class TestTheSweepWouldNotice:

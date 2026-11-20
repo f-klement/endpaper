@@ -11,6 +11,7 @@ import of the same file does, and what a member may see in an export.
 
 import ast
 import inspect
+from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree
 from xml.sax.saxutils import escape
@@ -26,6 +27,7 @@ import main
 import marc
 import recognition
 import settings_store
+import vocabulary_copy
 from enums import LinkRelationship, SettingKey
 from models import (
     AUTHOR_LINE_MAX,
@@ -48,6 +50,7 @@ from routers import books as books_router
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 from tests.corpus import application_modules
 from tests.test_errors import postgres_shaped_error
+from vocabularies import Entry
 
 TREE_GUARDS = {
     "TestNoProductionModuleWritesAWholeCollection": ("application_modules",),
@@ -943,6 +946,30 @@ class TestTheImport:
             ("ddc", "813.54"),
             ("gnd", "4203576-4"),
         ]
+
+    def test_a_heading_the_local_lcsh_copy_confirms_is_written_as_lcsh(self, client, admin, db):
+        """Option AC on an OENB record from a medical library: indicator `0`
+        counts because the loaded LCSH copy holds `Toxicology`."""
+        library_mode(db)
+        lcsh = Entry(
+            id="http://id.loc.gov/authorities/subjects/sh1", scheme="lcsh", subject="Toxicology", synonyms=()
+        )
+        vocabulary_copy.load(db, "lcsh", iter([lcsh]), datetime(2026, 11, 20), None)
+
+        upload(
+            client,
+            admin["headers"],
+            collection(
+                record(
+                    field("040", ("a", "UBG")),
+                    field("245", ("a", "Gifte")),
+                    field("650", ("a", "Toxicology")).replace('ind2=" "', 'ind2="0"'),
+                )
+            ),
+        )
+
+        book = db.query(Book).filter(Book.title == "Gifte").one()
+        assert [(c.scheme, c.number) for c in book.classifications] == [("lcsh", "Toxicology")]
 
     def test_nothing_personal_is_written(self, client, admin, db):
         """A catalogue record carries no reading history, so `MarcImport` never

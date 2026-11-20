@@ -12,6 +12,7 @@ returning one of them.
 """
 
 from dependencies import MAX_HEADING_CHARS
+from models import CLASSIFICATION_SCHEME_CODE_MAX
 
 FACETS = "/api/books/classifications"
 
@@ -255,14 +256,36 @@ class TestTheHeadingFilter:
 
         assert body["items"] == []
 
-    def test_an_unrecognised_scheme_is_ignored_rather_than_refused(self, client, admin, make_book):
-        """`row_ids`'s contract: a link is not a form."""
-        make_book(admin["headers"], title="Kept")
+    def test_a_scheme_with_no_row_matches_no_book_rather_than_being_refused(self, client, admin, make_book):
+        """Not refused, since a link is not a form; not dropped either, since a
+        code is a row a library may add, and asking the table would cost every
+        listing a statement (`dependencies.headings`)."""
+        make_book(admin["headers"], title="Kept", classifications=[heading("ddc", "004")])
 
         res = client.get("/api/books", params={"classification": "bogus:004"}, headers=admin["headers"])
 
         assert res.status_code == 200
-        assert [row["title"] for row in res.json()["items"]] == ["Kept"]
+        assert res.json()["items"] == []
+
+    def test_a_scheme_longer_than_any_code_matches_no_book_rather_than_widening(
+        self, client, admin, make_book
+    ):
+        """Dropped, the value would leave the listing unfiltered: the whole library."""
+        make_book(admin["headers"], title="Kept", classifications=[heading("ddc", "004")])
+        scheme = "s" * (CLASSIFICATION_SCHEME_CODE_MAX + 1)
+
+        res = client.get("/api/books", params={"classification": f"{scheme}:004"}, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["items"] == []
+
+    def test_an_empty_scheme_matches_no_book_rather_than_widening(self, client, admin, make_book):
+        make_book(admin["headers"], title="Kept", classifications=[heading("ddc", "004")])
+
+        res = client.get("/api/books", params={"classification": ":004"}, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["items"] == []
 
     def test_a_scheme_with_no_heading_is_ignored_rather_than_refused(self, client, admin, make_book):
         make_book(admin["headers"], title="Kept")

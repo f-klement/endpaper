@@ -1,4 +1,4 @@
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 import type { BookMatch, CatalogueSource } from "../../../api/generated/model";
 import { Button, HelpButton } from "../../../components";
@@ -37,6 +37,13 @@ interface SearchPanelProps {
    * be able to say where a record came from; a household never sees it.
    */
   libraryMode: boolean;
+  /**
+   * The "ask only these" control, under the box, in library mode. A slot rather
+   * than its props, so this panel stays a renderer of results.
+   */
+  narrowing?: ReactNode;
+  /** The line naming what the search on screen was narrowed to, above its answer. */
+  narrowedTo?: ReactNode;
 }
 
 /** A one-line description of an edition, skipping the parts it lacks. */
@@ -74,6 +81,8 @@ export default function SearchPanel({
   isSearchingHarder,
   hasSearchedHarder,
   libraryMode,
+  narrowing,
+  narrowedTo,
 }: SearchPanelProps) {
   const { t } = useTranslation();
 
@@ -108,6 +117,7 @@ export default function SearchPanel({
           {t("search.button")}
         </Button>
       </form>
+      {narrowing}
 
       {/* Not a disabled state: search works. This says what a key adds, so an
           admin knows the option exists without anyone else being blocked. */}
@@ -132,6 +142,8 @@ export default function SearchPanel({
           {errorText(error, t("common.somethingWentWrong"), t)}
         </p>
       )}
+
+      {narrowedTo}
 
       {isEmpty && (
         <p className="text-sm text-paper-600 text-center mt-4 dark:text-paper-400">

@@ -25,6 +25,7 @@ from starlette.exceptions import HTTPException
 
 import main
 import refusals
+from routers.oai import oai_switch
 from routers.sru import sru_switch
 from tests.corpus import BACKEND, application_modules
 from tests.test_errors import _constructions, _Module, _resolve, _status_of
@@ -333,7 +334,7 @@ class TestEveryRouteDeclaresTheRefusalsItsCodeBuilds:
 
         Three are outside every walk, and rightly: `main.api_not_found` answers
         API paths no route matches, the SPA mount answers a missing file, and
-        `routers.sru.sru_switch` guards a route hidden from the schema, so none
+        `routers.sru.sru_switch` and `routers.oai.oai_switch` guard routes hidden from the schema, so none
         of them has an operation in the document to declare it on.
         """
         read = _read_by_every_route()
@@ -341,6 +342,7 @@ class TestEveryRouteDeclaresTheRefusalsItsCodeBuilds:
             (main.api_not_found, "main.py"),
             (main.CachePolicyStaticFiles.get_response, "main.py"),
             (sru_switch, "routers/sru.py"),
+            (oai_switch, "routers/oai.py"),
         ):
             found = _definition(nowhere)
             assert found is not None, nowhere

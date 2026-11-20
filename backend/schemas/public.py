@@ -54,7 +54,6 @@ from categories import split_categories
 from enums import (
     BookFormat,
     BookSort,
-    ClassificationScheme,
     HeadingKind,
     LinkRelationship,
     RecordOrigin,
@@ -175,7 +174,9 @@ class PublicClassificationOut(BaseModel):
     argument for sharing it. What differs is who may change it without a review.
     """
 
-    scheme: ClassificationScheme
+    #: The scheme's code, and not its name: a code is what another library's
+    #: system can match on, and a name is this library's own wording.
+    scheme: str
     number: str
     #: Absent where the source carried the number alone, which is every MARC
     #: 082. A client showing a heading has to be ready for the number by itself.

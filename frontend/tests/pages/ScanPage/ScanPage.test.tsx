@@ -92,6 +92,8 @@ function stubSearch(libraryMode: boolean) {
       library_mode: libraryMode,
     },
   });
+  // Library mode asks which catalogues a search may be narrowed to.
+  api.on("/api/books/lookup/catalogues", { body: [] });
   api.on("/api/books/search", {
     body: {
       matches: [{ title: "Dune", source: "dnb" }],
@@ -108,6 +110,27 @@ async function search() {
     "dune{Enter}",
   );
   await screen.findByRole("button", { name: /Dune/ });
+}
+
+/** Library mode offering the DNB and the BnF on both paths. */
+function offerBoth() {
+  api.on("/api/books/lookup/catalogues", {
+    body: [
+      { source: "dnb", answers_lookup: true, answers_search: true },
+      { source: "bnf", answers_lookup: true, answers_search: true },
+    ],
+  });
+}
+
+/** Tick `name` in the `which`th disclosure: 0 the lookup's, 1 the search's. */
+async function tick(which: number, name: string) {
+  const user = userEvent.setup();
+  const summaries = await screen.findAllByText("Ask only some catalogues", {
+    selector: "summary",
+  });
+  await user.click(summaries[which]!);
+  await user.click(screen.getAllByRole("checkbox", { name })[which]!);
+  return user;
 }
 
 /** Press the printed number reader's read button once the engine is ready. */
@@ -179,6 +202,134 @@ describe("ScanPage", () => {
       );
 
       expect(screen.queryByText(/^Source:/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("narrowing one search to some catalogues", () => {
+    it("asks only the ticked ones, from the box under the search", async () => {
+      stubSearch(true);
+      api.on("/api/books/lookup/catalogues", {
+        body: [
+          { source: "dnb", answers_lookup: true, answers_search: true },
+          { source: "bnf", answers_lookup: false, answers_search: true },
+        ],
+      });
+      renderWithProviders(<ScanPage accountId={ME} />);
+      const user = userEvent.setup();
+      // The lookup's box offers only the DNB, so it renders nothing, and the
+      // one disclosure on the page is the search's.
+      await user.click(
+        await screen.findByText("Ask only some catalogues", {
+          selector: "summary",
+        }),
+      );
+      await user.click(
+        screen.getByRole("checkbox", { name: "National Library of France" }),
+      );
+      await search();
+
+      const sent = new URL(
+        api.lastCall("/api/books/search")!.url,
+        "http://localhost",
+      ).searchParams;
+      expect(sent.getAll("only")).toEqual(["bnf"]);
+    });
+
+    it("names the catalogues the search on screen was narrowed to", async () => {
+      stubSearch(true);
+      offerBoth();
+      api.on("/api/books/search", {
+        body: {
+          matches: [{ title: "Dune", source: "bnf" }],
+          asked: ["bnf"],
+          unasked: [],
+        },
+      });
+      renderWithProviders(<ScanPage accountId={ME} />);
+      await tick(1, "National Library of France");
+      await search();
+
+      expect(
+        screen.getByText("Asked only National Library of France."),
+      ).toBeInTheDocument();
+    });
+
+    it("names the catalogues the lookup on screen was narrowed to", async () => {
+      stubSearch(true);
+      offerBoth();
+      api.on("/api/books/lookup?", { body: LOOKUP });
+      renderWithProviders(<ScanPage accountId={ME} />);
+      const user = await tick(0, "German National Library");
+      fireEvent.change(screen.getByLabelText("ISBN"), {
+        target: { value: "9780441013593" },
+      });
+      await user.click(screen.getByRole("button", { name: "Look up" }));
+
+      expect(
+        await screen.findByText("Asked only German National Library."),
+      ).toBeInTheDocument();
+    });
+
+    it("says the catalogue list changed when the narrowed lookup is refused", async () => {
+      stubSearch(true);
+      offerBoth();
+      api.on("/api/books/lookup?", {
+        status: 409,
+        body: { detail: "Only catalogues this Library asks can be chosen." },
+      });
+      renderWithProviders(<ScanPage accountId={ME} />);
+      const user = await tick(0, "German National Library");
+      // Switched off in another tab after this page read the list.
+      api.on("/api/books/lookup/catalogues", {
+        body: [{ source: "bnf", answers_lookup: true, answers_search: true }],
+      });
+      fireEvent.change(screen.getByLabelText("ISBN"), {
+        target: { value: "9780441013593" },
+      });
+      await user.click(screen.getByRole("button", { name: "Look up" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "The catalogues this library asks have changed",
+      );
+      // Retrying would send the same name and be refused again.
+      expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("checkbox", { name: "German National Library" }),
+        ).toBeNull(),
+      );
+    });
+
+    it("says the catalogue list changed when the narrowed search is refused", async () => {
+      stubSearch(true);
+      offerBoth();
+      api.on("/api/books/search", {
+        status: 409,
+        body: { detail: "Only catalogues this Library asks can be chosen." },
+      });
+      renderWithProviders(<ScanPage accountId={ME} />);
+      await tick(1, "National Library of France");
+      // Switched off in another tab after this page read the list.
+      api.on("/api/books/lookup/catalogues", {
+        body: [{ source: "dnb", answers_lookup: true, answers_search: true }],
+      });
+      const user = userEvent.setup();
+      await user.type(
+        screen.getByLabelText("Search by title or author"),
+        "dune{Enter}",
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "The catalogues this library asks have changed",
+      );
+      // One catalogue left is nothing to narrow, so the box goes.
+      await waitFor(() =>
+        expect(
+          screen.queryByText("Ask only some catalogues", {
+            selector: "summary",
+          }),
+        ).toBeNull(),
+      );
     });
   });
 

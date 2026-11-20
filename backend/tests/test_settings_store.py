@@ -184,6 +184,39 @@ class TestLibraryModeAndThePublicCatalogue:
         settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
         assert settings_store.sru_is_served(db) is False
 
+    def test_the_oai_provider_starts_off(self):
+        """Owner's decision: off on a fresh install and on an upgrade alike."""
+        assert settings_store.DEFAULTS[SettingKey.OAI_PROVIDER_ENABLED] == "false"
+
+    def test_oai_needs_a_published_catalogue_as_well(self, db):
+        settings_store.set_value(db, SettingKey.OAI_PROVIDER_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.OAI_ADMIN_EMAIL, "catalogue@library.example")
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        assert settings_store.oai_is_served(db) is False
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
+        assert settings_store.oai_is_served(db) is True
+
+    def test_oai_needs_a_contact_address_as_well(self, db):
+        """A restore can store the switch on without the write that refuses it."""
+        for key in (
+            SettingKey.OAI_PROVIDER_ENABLED,
+            SettingKey.LIBRARY_MODE,
+            SettingKey.PUBLIC_CATALOGUE_ENABLED,
+        ):
+            settings_store.set_value(db, key, "true")
+        assert settings_store.oai_is_served(db) is False
+
+    def test_the_first_service_is_recorded_once(self, db):
+        settings_store.set_value(db, SettingKey.OAI_FIRST_SERVED, "2026-01-02T03:04:05")
+        settings_store.record_oai_service(db)
+        assert settings_store.get_raw(db, SettingKey.OAI_FIRST_SERVED) == "2026-01-02T03:04:05"
+
+    def test_the_sru_switch_does_not_serve_oai(self, db):
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
+        assert settings_store.oai_is_served(db) is False
+
     def test_a_fresh_database_publishes_nothing(self, db):
         """The default read through the accessor, not off the table: a default
         that is never consulted is not a default."""

@@ -38,7 +38,7 @@ import lending
 import reading
 from book_columns import FILLABLE_FROM_ANOTHER_ROW
 from database import Base, hold_book_ceilings
-from enums import BookIdentifierScheme, ClassificationScheme
+from enums import BookIdentifierScheme
 from errors import MetAnotherChange
 from logvalues import clipped
 from models import (
@@ -329,7 +329,7 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
         _deduplicated(
             Classification,
             held=lambda book: book.classifications,
-            key=lambda row: (ClassificationScheme(row.scheme).value, row.number),
+            key=lambda row: (str(row.scheme), row.number),
             ceiling=MAX_CLASSIFICATIONS_PER_BOOK,
             absorb=_absorb_heading,
         ),

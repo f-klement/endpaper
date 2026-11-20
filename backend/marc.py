@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
@@ -36,7 +36,7 @@ import xml_parse
 from authors import NAME_SEPARATOR
 from catalogue import Heading, Link, Record
 from enums import ClassificationScheme, HeadingKind, LinkRelationship, RecordOrigin
-from marc_fields import Fields, Subfields
+from marc_fields import CopyQuestion, Fields, Subfields
 
 if TYPE_CHECKING:  # pragma: no cover
     from models import Book
@@ -235,7 +235,7 @@ _GND_PREFIX: Final = marc_fields.GND_PREFIX
 #: **This names the vocabulary and only the vocabulary.** What the citing record
 #: was asserting with the heading is `_HEADING_KIND_FIELD` below, because a
 #: vocabulary has a code for that only where its own publisher issued one.
-_SUBJECT_SOURCE: Final[dict[ClassificationScheme, str]] = {
+_SUBJECT_SOURCE: Final[dict[str, str]] = {
     ClassificationScheme.GND: "gnd",
     ClassificationScheme.LCSH: "lcsh",
 }
@@ -264,7 +264,7 @@ _SUBJECT_SOURCE: Final[dict[ClassificationScheme, str]] = {
 #: a kind exports without it and `tests/test_marc.py` pins that loss. The key
 #: admits a null kind so one lookup answers for every row; no entry carries one,
 #: because a record that declared nothing has nothing to spell.
-_HEADING_KIND_FIELD: Final[dict[tuple[ClassificationScheme, HeadingKind | None], tuple[str, str]]] = {
+_HEADING_KIND_FIELD: Final[dict[tuple[str, HeadingKind | None], tuple[str, str]]] = {
     (ClassificationScheme.GND, HeadingKind.CONTENT): ("655", "gnd-content"),
     (ClassificationScheme.GND, HeadingKind.CARRIER): ("655", "gnd-carrier"),
 }
@@ -342,8 +342,9 @@ def _cataloguing_agency(origin: RecordOrigin | None) -> str | None:
 _ILLEGAL_XML: Final = re.compile("[^\x09\x0a\x0d\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
 
 
-def _text(value: object) -> str:
-    """One subfield's value, as MARCXML may carry it.
+def xml_text(value: object) -> str:
+    """One subfield's value, as MARCXML may carry it. Public because `oai.py`
+    writes Dublin Core text under the same rule.
 
     Normalised to NFC, because `marc_fields` normalises what it reads:
     a round trip through two different normal forms compares unequal while
@@ -364,7 +365,7 @@ def _datafield(
     conditionals, and it means a Book with no publisher writes no `264` rather
     than one whose publisher is the empty string.
     """
-    written = [(code, _text(value)) for code, value in subfields if _text(value)]
+    written = [(code, xml_text(value)) for code, value in subfields if xml_text(value)]
     if not written:
         return None
     field = ElementTree.Element(
@@ -563,18 +564,17 @@ def _classifications(book: Book) -> Iterator[ElementTree.Element | None]:
     the catalogues' answers rather than a duplicate.
     """
     for entry in book.classifications:
-        # **Coerced, never compared raw.** `classifications.scheme` is a plain
-        # `String(20)` column, so a stored row hands back a `str` and not a
-        # `ClassificationScheme`. `is` against the enum is then False for every
-        # row and the export writes no call number at all, with a 200 and
-        # nothing in the log. `classifications.add_headings` states the same
-        # trap from the writing side; this is the reading side of it.
-        scheme = ClassificationScheme(entry.scheme)
-        if scheme is ClassificationScheme.DDC:
+        # **`==`, never `is`.** A stored row hands back a `str`, and `is`
+        # against the enum is False for every row: the export would write no
+        # call number at all, with a 200 and nothing in the log. A scheme a
+        # library defined matches neither arm and writes no field, since this
+        # app knows no MARC tag for it.
+        scheme = entry.scheme
+        if scheme == ClassificationScheme.DDC:
             # ind1 `0`: full edition. ind2 `4`: assigned by an agency other
             # than the Library of Congress, which is what this app is.
             yield _datafield("082", "0", "4", [("a", entry.number)])
-        elif scheme is ClassificationScheme.LCC:
+        elif scheme == ClassificationScheme.LCC:
             yield _datafield("050", " ", "4", [("a", entry.number)])
 
 
@@ -618,8 +618,9 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
     an identifier where a receiving catalogue prints a phrase.
     """
     for entry in book.classifications:
-        # Coerced for `_classifications`'s reason: a stored scheme is a `str`.
-        scheme = ClassificationScheme(entry.scheme)
+        # A stored scheme is a `str`, which looks up a `StrEnum` key by its
+        # value; a scheme a library defined has no entry and writes nothing.
+        scheme = entry.scheme
         vocabulary = _SUBJECT_SOURCE.get(scheme)
         if vocabulary is None:
             continue
@@ -637,8 +638,8 @@ def _subject_fields(book: Book) -> Iterator[ElementTree.Element | None]:
         # the record carries no identifier for one. So the caption is the
         # number there and the label everywhere else, which is
         # `ClassificationScheme` saying the same thing from the other side.
-        caption = entry.number if scheme is ClassificationScheme.LCSH else entry.label
-        identifier = f"{_GND_PREFIX}{entry.number}" if scheme is ClassificationScheme.GND else None
+        caption = entry.number if scheme == ClassificationScheme.LCSH else entry.label
+        identifier = f"{_GND_PREFIX}{entry.number}" if scheme == ClassificationScheme.GND else None
         # ind2 `7`: the source of the heading is named in `$2`.
         yield _datafield(tag, " ", "7", [("a", caption), ("0", identifier), ("2", source)])
 
@@ -897,11 +898,14 @@ def _extra_headings(fields: Fields) -> list[Heading]:
 
     * `050` is the Library of Congress call number, which is the field a MARC
       export exists to carry: it is what the receiving library shelves by.
-    * `650` with `$2 lcsh` and no `$0` is a Library of Congress subject
-      heading. `Fields.controlled_subjects` puts its `$a` in `subjects` and writes
-      no heading, because it looks for a GND number and there is none. The
+    * `650` declaring `lcsh` (by `$2`, a `$0` prefix, or second indicator 0 as
+      `Subfields.subject_vocabulary` reads it) and carrying no GND number is a
+      Library of Congress subject heading.
+      `Fields.controlled_subjects` puts its `$a` in `subjects` and writes no
+      heading, because it looks for a GND number and there is none. The
       authorised string **is** the identifier for LCSH, which is
-      `ClassificationScheme` saying so, so it goes in `number`.
+      `ClassificationScheme` saying so, so it goes in `number`, in
+      `Subfields.heading_label`'s form: the one a local copy confirmed it in.
 
     **The `$2` reader is `Subfields.subject_vocabulary` since #134**, where this
     module used to hold a second copy called `_uncontrolled_source`. Both lower
@@ -923,7 +927,7 @@ def _extra_headings(fields: Fields) -> list[Heading]:
         Heading(ClassificationScheme.LCSH, heading)
         for entry in fields.get("650")
         if entry.subject_vocabulary("650") == "lcsh" and entry.gnd_identifier() is None
-        for heading in [bibliographic.strip_isbd_punctuation(entry.get("a", ""))]
+        for heading in [entry.heading_label()]
         if heading
     ]
     return headings
@@ -986,7 +990,12 @@ def _record(fields: Fields) -> Record | None:
     )
 
 
-def read(content: bytes) -> ParsedMarc:
+#: A local copy's answer to `marc_fields.Fields.copy_questions`: the questions
+#: it confirms, asked once for a whole file.
+type CopyLookup = Callable[[set[CopyQuestion]], frozenset[CopyQuestion]]
+
+
+def read(content: bytes, copies: CopyLookup | None = None) -> ParsedMarc:
     """An uploaded MARCXML file as records, counting what it could not read.
 
     **One unreadable record costs one record.** A file a library hands over is
@@ -1008,14 +1017,24 @@ def read(content: bytes) -> ParsedMarc:
     raised on halfway through a file; `classifications.bounded_headings` is
     where an unusable entry is dropped, one layer later, with the whole record
     in hand.
+
+    **`copies` answers every record's copy questions in one call**, so an
+    upload costs a query per vocabulary rather than one per subject field.
+    Without it no second indicator counts outside a Library of Congress record.
     """
     nodes = _record_nodes(_parsed(content))
+    # Built twice where a lookup is passed: `held` must exist before the
+    # records it confirms. Here rather than in a helper, since a function
+    # building `Fields` outside the carrier door is what
+    # `test_metadata.py::TestTheCarrierTestIsTheOnlyWayIn` refuses.
+    asked = {question for node in nodes for question in Fields(node).copy_questions()} if copies else set()
+    held = _held(copies, asked)
 
     records = []
     links = []
     skipped = 0
     for node in nodes:
-        fields = Fields(node)
+        fields = Fields(node, held)
         record = _record(fields)
         if record is None:
             skipped += 1
@@ -1025,6 +1044,12 @@ def read(content: bytes) -> ParsedMarc:
     if skipped:
         logger.info("Skipped %d MARC records with no title", skipped)
     return ParsedMarc(records=tuple(records), skipped=skipped, links=tuple(links))
+
+
+def _held(copies: CopyLookup | None, asked: set[CopyQuestion]) -> frozenset[CopyQuestion]:
+    """What `copies` confirms of `asked`, asking nothing where there is no
+    lookup or no question."""
+    return copies(asked) if copies and asked else frozenset()
 
 
 def _record_nodes(root: ElementTree.Element) -> list[ElementTree.Element]:

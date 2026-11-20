@@ -10,6 +10,9 @@ import BarcodeScanner from "./components/BarcodeScanner";
 import CarriedFields from "./components/CarriedFields";
 import FilePickPanel from "./components/FilePickPanel";
 import IsbnListPanel from "./components/IsbnListPanel";
+import CatalogueNarrowing, {
+  NarrowedTo,
+} from "./components/CatalogueNarrowing";
 import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import { useFolderSweep } from "../hooks";
@@ -135,13 +138,27 @@ function RapidPanel({
 function LookupFailure({
   scan,
 }: {
-  scan: Pick<UseScanFlowResult, "lookupError" | "retryLookup" | "enterByHand">;
+  scan: Pick<
+    UseScanFlowResult,
+    | "lookupError"
+    | "retryLookup"
+    | "enterByHand"
+    | "lookupAskedOnly"
+    | "lookupNarrowingRefused"
+  >;
 }) {
   const { t } = useTranslation();
   if (scan.lookupError == null) return null;
   return (
     <div className="mb-4 space-y-2">
-      <ErrorState error={scan.lookupError} onRetry={scan.retryLookup} />
+      {/* A refused narrowing offers no retry: it would send the same names
+          and be refused again. The boxes below are the roster asked afresh. */}
+      {scan.lookupNarrowingRefused ? (
+        <ErrorState error={t("search.narrow.refused")} />
+      ) : (
+        <ErrorState error={scan.lookupError} onRetry={scan.retryLookup} />
+      )}
+      <NarrowedTo asked={scan.lookupAskedOnly} />
       <Button variant="secondary" size="sm" onClick={scan.enterByHand}>
         {t("scan.addByHand")}
       </Button>
@@ -182,6 +199,7 @@ function Drafted({
   if (!draft) return null;
   return (
     <>
+      <NarrowedTo asked={scan.lookupAskedOnly} />
       <CarriedFields
         pending={scan.pending}
         onChange={scan.update}
@@ -514,6 +532,14 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             onError={setManualError}
             onLookup={scan.lookup}
           />
+          {/* Narrows the camera's next ISBN as well as a typed one: both
+              reach the same lookup. */}
+          <CatalogueNarrowing
+            catalogues={scan.lookupCatalogues}
+            chosen={scan.lookupOnly}
+            onChange={scan.setLookupOnly}
+            hint="search.narrow.lookupHint"
+          />
 
           {/* The third way in, for a book with no barcode, a damaged one, or
               one printed before ISBNs existed. Always available: it no longer
@@ -526,7 +552,11 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             matches={search.matches}
             isSearching={search.isSearching}
             isEmpty={search.isEmpty}
-            error={search.error}
+            error={
+              search.narrowingRefused
+                ? t("search.narrow.refused")
+                : search.error
+            }
             onQueryChange={search.setQuery}
             onSubmit={search.submit}
             onChoose={scan.chooseMatch}
@@ -536,6 +566,15 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             isSearchingHarder={search.isSearchingHarder}
             hasSearchedHarder={search.hasSearchedHarder}
             libraryMode={libraryMode}
+            narrowing={
+              <CatalogueNarrowing
+                catalogues={search.catalogues}
+                chosen={search.only}
+                onChange={search.setOnly}
+                hint="search.narrow.searchHint"
+              />
+            }
+            narrowedTo={<NarrowedTo asked={search.askedOnly} />}
           />
 
           {/* The fourth way in, and the only one that starts from something

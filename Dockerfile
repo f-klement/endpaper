@@ -268,13 +268,15 @@ RUN apk upgrade --no-cache
 # line, and an earlier version of this comment claimed there was "nothing else to
 # remember", which was wrong about the larger half.
 #
-# **What gnutls buys is transport encryption and NOT peer authentication.** Up to 5.37.3
-# YAZ performed no certificate verification at all; 5.38.0 added it as an opt in, the ZOOM
-# option `check_cert`, default 0, and nothing in this application sets it. So an `ssl:`
-# target is encrypted against a passive listener and not against anyone who can answer
-# for the address. The reasoning is in docs/decisions.md, "YAZ encrypts a TLS connection
-# and does not authenticate it".
-RUN apk add --no-cache libxml2 libxslt gnutls
+# **What gnutls buys is transport encryption AND peer authentication, the second only
+# because it is asked for.** YAZ verifies an `ssl:` target's certificate from 5.38.0, behind
+# the ZOOM option `check_cert`, default 0, which `_options()` in backend/z3950_yaz.py sets
+# on every connection. It verifies against the system trust, `ca-certificates`, named on
+# the line below although the base image carries it today: a base without it fails every
+# `ssl:` target closed, and that looks like each of them being down. gnutls reads it as the
+# unprivileged user. The reasoning is in docs/decisions.md, "YAZ checks a TLS target's
+# certificate".
+RUN apk add --no-cache libxml2 libxslt gnutls ca-certificates
 
 # ── And now make it actually link ──────────────────────────────────────────
 #

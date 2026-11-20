@@ -7,6 +7,7 @@ import { useFolderSweep } from "../../hooks";
 import SettingsSubPage from "../components/SettingsSubPage";
 import { useSettings } from "../hooks";
 import CalibreImport from "./components/CalibreImport";
+import ClassificationSchemesSection from "./components/ClassificationSchemesSection";
 import CoversSection from "./components/CoversSection";
 import CustomFieldsSection from "./components/CustomFieldsSection";
 import KoreaderHighlightImport from "./components/KoreaderHighlightImport";
@@ -14,8 +15,10 @@ import LibraryImport from "./components/LibraryImport";
 import MarcImport from "./components/MarcImport";
 import StoreIdentifiersSection from "./components/StoreIdentifiersSection";
 import StoreImport from "./components/StoreImport";
+import VocabulariesSection from "./components/VocabulariesSection";
 import {
   useCalibreImport,
+  useClassificationSchemes,
   useCoverBackfill,
   useCustomFields,
   useKoreaderHighlightImport,
@@ -23,6 +26,7 @@ import {
   useMarcImport,
   useStoreIdentifierBackfill,
   useStoreImport,
+  useVocabularies,
 } from "./hooks";
 
 /**
@@ -35,9 +39,10 @@ import {
  * member's own shelf they are repairing; and defining a custom field is
  * additive and changes no book, exactly as inventing a tag is.
  *
- * Only the field **delete** is admin only, which is why the settings record is
- * asked for at all here: `isAdmin` decides whether that one control is drawn,
- * so it appears where it would work rather than answering 403 when pressed.
+ * Only the field **delete**, the classification schemes card and the subject
+ * vocabularies card are admin only, which is why the settings record is asked
+ * for at all here: it decides whether those are drawn, so they appear where
+ * they would work rather than answering 403 when pressed.
  *
  * The covers card reads next to the import because it is what an import leaves
  * undone: a CSV carries no cover, so a library that arrived that way has none.
@@ -82,6 +87,8 @@ export default function LibrarySettingsPage() {
   // this page is refused to a member, so the record is read for that one fact
   // and the page renders the same either way.
   const { settings } = useSettings();
+  const schemes = useClassificationSchemes(settings !== undefined);
+  const vocabularies = useVocabularies(settings !== undefined);
 
   return (
     <SettingsSubPage icon="book" title={t("settings.library.title")}>
@@ -191,6 +198,31 @@ export default function LibrarySettingsPage() {
         onRename={customFields.rename}
         onRemove={customFields.remove}
       />
+
+      {/* Admin only, unlike the fields above: every write to a scheme is, and
+          a scheme's rule orders the whole library's shelves. */}
+      {settings !== undefined && (
+        <ClassificationSchemesSection
+          schemes={schemes.schemes}
+          isBusy={schemes.isBusy}
+          error={schemes.error}
+          onDefine={schemes.define}
+          onRename={schemes.rename}
+          onRemove={schemes.remove}
+        />
+      )}
+
+      {/* Admin only too: a download replaces the copy every member's subject
+          lookup reads. Beside the schemes, as the other half of what a
+          heading may quote. */}
+      {settings !== undefined && (
+        <VocabulariesSection
+          vocabularies={vocabularies.vocabularies}
+          isStarting={vocabularies.isStarting}
+          error={vocabularies.error}
+          onDownload={vocabularies.download}
+        />
+      )}
     </SettingsSubPage>
   );
 }

@@ -56,6 +56,7 @@ from schemas.book import (
     IdentifierBackfillOut,
     LocationOut,
     MergeRequest,
+    NarrowableCatalogue,
     OwnershipUpdate,
     PrivacyUpdate,
     PurgeResult,
@@ -67,6 +68,9 @@ from schemas.classification import (
     ClassificationFacets,
     ClassificationIn,
     ClassificationOut,
+    ClassificationSchemeCreate,
+    ClassificationSchemeOut,
+    ClassificationSchemeRename,
     DivisionFacetOut,
     HeadingFacetOut,
 )
@@ -130,6 +134,7 @@ from schemas.opds import (
     OpdsServerSummaryOut,
     OpdsSyncOut,
 )
+from schemas.patron import PatronCreate, PatronOut, PatronSearch, PatronUpdate
 from schemas.progress import ProgressCreate, ProgressOut
 from schemas.public import (
     PublicAvailability,
@@ -184,6 +189,7 @@ from schemas.user import (
     VerificationRedeem,
     VerificationRequest,
 )
+from schemas.vocabulary import VocabularyOut, VocabularyProgressOut
 
 # Resolve the BookColumns/BookOut <-> LoanOut forward references now that all
 # three are imported.
@@ -252,6 +258,9 @@ __all__ = [
     "ClassificationFacets",
     "ClassificationIn",
     "ClassificationOut",
+    "ClassificationSchemeCreate",
+    "ClassificationSchemeOut",
+    "ClassificationSchemeRename",
     "CollectionAssign",
     "CollectionCreate",
     "CollectionOut",
@@ -309,6 +318,7 @@ __all__ = [
     "MonthStat",
     "MyOverdueOut",
     "MySecurityOut",
+    "NarrowableCatalogue",
     "NoteCreate",
     "NoteOut",
     "OnlineLinkOut",
@@ -320,6 +330,10 @@ __all__ = [
     "OverdueNotifyResult",
     "OwnershipUpdate",
     "Page",
+    "PatronCreate",
+    "PatronOut",
+    "PatronSearch",
+    "PatronUpdate",
     "PerUserStat",
     "PrivacyUpdate",
     "ProgressCreate",
@@ -366,6 +380,8 @@ __all__ = [
     "VerificationRedeem",
     "VerificationRequest",
     "ViewerFields",
+    "VocabularyOut",
+    "VocabularyProgressOut",
     # The tag key rule as a function, the other half of `KnownTagKey` above.
     # Exported because a test exercises it directly.
     "known_key",

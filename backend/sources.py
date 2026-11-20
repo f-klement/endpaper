@@ -16,12 +16,16 @@ permutation of this roster reproduces today's search belief. The full argument i
 in `docs/decisions.md`.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Final
+from urllib.parse import urlsplit
 
+import decoders
 import isbn
 import targets
-from enums import Capability, CatalogueSource
+from enums import Capability, CatalogueSource, ClassificationScheme, CredentialKind, Transport
 
 
 @dataclass(frozen=True)
@@ -1152,6 +1156,106 @@ class Described:
     #: `asked_first` first, which is what `ProviderSection.statusOf` does and
     #: says.
     serves_groups: tuple[str, ...]
+    #: **How this catalogue is asked, for a policy to be written against.** A
+    #: compliance reader cannot tell from a name whether queries leave in clear
+    #: text or reach a commercial API, so the row says. Every value is read off
+    #: the source's `targets.Target` by `_how_asked` and none is stored; the
+    #: address itself is deliberately not among them, because it changes without
+    #: the policy changing.
+    protocol: Transport
+    #: The SRU version spoken, and empty on every other transport.
+    protocol_version: str
+    #: The `recordSchema` asked for over SRU, the record syntax over Z39.50, and
+    #: empty where none is named: the two JSON APIs, and the SRU targets whose
+    #: answer carries its own Dublin Core whatever is asked for.
+    record_schema: str
+    #: Whether the address is `https`. False for plain HTTP **and** for every
+    #: Z39.50 door, which has no transport security here at all.
+    encrypted: bool
+    credential: CredentialKind
+    #: The classification schemes this catalogue's reader can supply, in the
+    #: enum's order. `CLASSIFIES` decides it and says why it is keyed on
+    #: the reader; the screen reads it to warn before switching off the last
+    #: enabled supplier of one.
+    classification_schemes: tuple[ClassificationScheme, ...]
+
+
+#: Which classification schemes each catalogue reader can put into a record's
+#: `headings`, so a source's suppliers follow from `targets.Target.reader`.
+#:
+#: **Keyed on the reader, never on the source.** Which schemes a record can
+#: carry is decided by the parser: `MARC_GND` harvests the GND headings for
+#: every row whose reader it is, and Open Library supplies LCC beside the
+#: Library of Congress. A table per source would have
+#: named the DNB alone for GND and the Library of Congress alone for LCC, which
+#: is what the provider list's sole supplier warning must not believe.
+#:
+#: **Here rather than beside the readers**: `decoders.py` imports nothing of
+#: this application, and the implementations are `metadata.py`'s, which the
+#: settings screen should not have to import. This module is what the screen
+#: reads through `describe`.
+#:
+#: **A capability, not a promise about any one catalogue's records.** A reader
+#: that can produce a scheme counts as a supplier whether or not a particular
+#: library fills those fields, so the warning that reads this errs towards
+#: silence rather than towards a false alarm.
+#:
+#: `tests/test_decoders.py::TestEveryReaderDeclaresTheSchemesItProduces` holds
+#: each entry to the decoder it describes from both sides: every declared
+#: scheme is produced from a literal, and nothing drawn produces one undeclared.
+CLASSIFIES: Final[Mapping[decoders.Reader, frozenset[ClassificationScheme]]] = MappingProxyType(
+    {
+        decoders.Reader.MARC_GND: frozenset({ClassificationScheme.DDC, ClassificationScheme.GND}),
+        decoders.Reader.MARC_PLAIN: frozenset({ClassificationScheme.DDC}),
+        # Converted to MARC21 and read through the `MARC_PLAIN` arm: `676` is
+        # renamed `082`, and nothing else carries a scheme across.
+        decoders.Reader.UNIMARC: frozenset({ClassificationScheme.DDC}),
+        decoders.Reader.MODS: frozenset(
+            {ClassificationScheme.DDC, ClassificationScheme.LCC, ClassificationScheme.LCSH}
+        ),
+        decoders.Reader.OPEN_LIBRARY: frozenset({ClassificationScheme.DDC, ClassificationScheme.LCC}),
+        decoders.Reader.DUBLIN_CORE: frozenset(),
+        # Held by reading alone: the test's property arm draws from
+        # `metadata.READERS`, which holds neither. Neither builds `headings`
+        # today, and one that starts to errs towards a false alarm here.
+        decoders.Reader.DUBLIN_CORE_BARE: frozenset(),
+        decoders.Reader.GOOGLE_BOOKS: frozenset(),
+    }
+)
+
+# Refused at import rather than left to a test: a catalogue reader missing here
+# would raise a `KeyError` on the settings screen for every source it reads.
+if set(CLASSIFIES) != decoders.CATALOGUE_READERS:
+    _unplaced = set(CLASSIFIES) ^ decoders.CATALOGUE_READERS
+    raise RuntimeError(f"sources.CLASSIFIES must name every catalogue reader: {_unplaced}")
+
+
+def _how_asked(source: CatalogueSource) -> dict[str, Any]:
+    """The fields of `Described` that read the source's row, and nothing else."""
+    target = targets.SEEDED[source]
+    schemes = CLASSIFIES[target.reader]
+    return {
+        "protocol": target.transport,
+        "protocol_version": target.sru_version,
+        "record_schema": target.record_schema,
+        "encrypted": urlsplit(target.base_url).scheme == "https",
+        "credential": _credential_kind(target),
+        "classification_schemes": tuple(scheme for scheme in ClassificationScheme if scheme in schemes),
+    }
+
+
+def _credential_kind(target: targets.Target) -> CredentialKind:
+    """An API key where the row names a deployment secret, a login where it needs
+    any other credential. `targets.Secret` says why a secret names its owner.
+
+    Display only, and it cannot claim a login nobody sends: a row needing a
+    credential, naming no secret and going out of a door that carries no login
+    is refused at boot by `metadata.resolve`."""
+    if not target.needs_key:
+        return CredentialKind.NONE
+    if target.secret is targets.Secret.NONE:
+        return CredentialKind.LOGIN
+    return CredentialKind.API_KEY
 
 
 def in_force(plan: Plan, ready: frozenset[CatalogueSource]) -> Plan:
@@ -1240,6 +1344,7 @@ def describe(
             # make one field answer two questions and lose the ability to say
             # "regional, but promoted, so asked about everything".
             serves_groups=tuple(sorted(SERVES_GROUPS.get(entry.source, ()))),
+            **_how_asked(entry.source),
         )
         for entry in plan.preferences
     )

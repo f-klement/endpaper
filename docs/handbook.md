@@ -478,6 +478,16 @@ answering there. With any of the three off, `/sru` answers 404.
 [feature list](featurelist.md#deliberately-not-built) says why it is left out. Give another
 library the SRU address instead.
 
+**OAI-PMH** is how a union catalogue or an aggregator collects a catalogue rather than
+searching it. A published catalogue answers it at `/oai` on the same address, behind the same
+two switches and one of its own: **Let aggregators harvest this catalogue over OAI-PMH**, beside
+the SRU switch. It starts off on every installation, new or upgraded, and can be turned on only
+once the catalogue is published and a **Repository contact address** is saved below the switch.
+Every aggregator is shown that address, so use a role address rather than a person's. Give the aggregator the base URL, `https://` and your address
+followed by `/oai`; `?verb=Identify` on it shows what the aggregator will see first. Records are
+offered as `oai_dc` and `marc21`, and a record that leaves the published catalogue is reported
+as deleted, so the aggregator drops it too. With any of the three off, `/oai` answers 404.
+
 ### Seeing the library as a member
 
 An admin sees more than a member does. To check what an ordinary member sees, make a test

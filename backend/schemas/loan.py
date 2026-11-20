@@ -69,10 +69,11 @@ class LoanCreate(BaseModel):
 class LoanOut(BaseModel):
     id: int
     book_id: int
-    # Exactly one of these two is set, by `models.names_exactly_one_borrower`,
-    # which is the one place that rule is spelled. `loaned_to` is the member's
-    # full record and is None for an external borrower, whose name is all there
-    # is.
+    # At most one of these two is set: a loan to a patron, or one whose borrower
+    # was erased, sets neither, and carries no patron field here.
+    # `models.ONE_BORROWER_SQL` is the one place that rule is spelled.
+    # `loaned_to` is the member's full record and is None for an external
+    # borrower, whose name is all there is.
     loaned_to_user_id: int | None
     loaned_to_name: str | None = None
     loaned_by_user_id: int

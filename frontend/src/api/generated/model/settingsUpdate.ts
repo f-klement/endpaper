@@ -30,6 +30,8 @@ export interface SettingsUpdate {
   mail_use_ssl?: boolean | null;
   mail_use_tls?: boolean | null;
   mail_username?: string | null;
+  oai_admin_email?: string | null;
+  oai_provider_enabled?: boolean | null;
   overdue_in_app_enabled?: boolean | null;
   overdue_mail_enabled?: boolean | null;
   overdue_mail_to?: string | null;
@@ -44,4 +46,5 @@ export interface SettingsUpdate {
   sru_server_enabled?: boolean | null;
   telegram_bot_token?: string | null;
   telegram_chat_id?: string | null;
+  vocabulary_offer_dismissed?: boolean | null;
 }

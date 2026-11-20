@@ -5,6 +5,7 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { CatalogueSource } from "./catalogueSource.ts";
 import type { Locale } from "./locale.ts";
 
 export type SearchBooksParams = {
@@ -23,4 +24,6 @@ export type SearchBooksParams = {
   lang?: Locale | null;
   /** Also ask the catalogues too slow for the ordinary deadline. Ignored when there are none to ask. */
   harder?: boolean;
+  /** Library mode only. Ask only these catalogues, for this request and no other. Each must be one this Library asks for this kind of request, or the request is refused. */
+  only?: CatalogueSource[] | null;
 };

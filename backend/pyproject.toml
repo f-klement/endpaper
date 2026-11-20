@@ -82,6 +82,10 @@ dependencies = [
     "starlette>=1.9.0",
     "anyio>=4.15.1",
     "annotated-types>=0.8.0",
+    # `vocabularies.py` reads the subject vocabulary declaration, which is
+    # InvenioRDM's YAML format (ADR 0009). It arrives through
+    # uvicorn[standard] already; declared because the import is this project's.
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]

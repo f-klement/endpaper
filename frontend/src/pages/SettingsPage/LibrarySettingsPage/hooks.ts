@@ -2,7 +2,8 @@
  * Data access for the Your library route.
  *
  * Bringing books in, repairing the covers they arrived without, and the field
- * definitions this household adds on top. Nothing outside this file imports
+ * definitions, classification schemes and subject vocabularies this household
+ * adds on top. Nothing outside this file imports
  * from `api/generated`, so regenerating the client cannot ripple into the
  * components.
  *
@@ -35,8 +36,20 @@ import {
   usePreviewImport,
   usePreviewMarc,
 } from "../../../api/generated/endpoints/imports/imports";
+import {
+  getListClassificationSchemesQueryKey,
+  getListVocabulariesQueryKey,
+  useDefineClassificationScheme,
+  useDeleteClassificationScheme,
+  useDownloadVocabulary,
+  useListClassificationSchemes,
+  useListVocabularies,
+  useRenameClassificationScheme,
+} from "../../../api/generated/endpoints/settings/settings";
 import type {
   BookCreate,
+  ClassificationSchemeCreate,
+  ClassificationSchemeOut,
   CoverBackfillOut,
   IdentifierBackfillOut,
   CustomFieldKind,
@@ -47,6 +60,7 @@ import type {
   ImportResultOut,
   KoreaderHighlightIn,
   MarcPreviewOut,
+  VocabularyOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
 import type {
@@ -1594,4 +1608,139 @@ export function useKoreaderHighlightImport(): UseKoreaderHighlightImportResult {
       void run(files).finally(() => setRunning(false));
     },
   };
+}
+
+export interface UseClassificationSchemesResult {
+  schemes: ClassificationSchemeOut[];
+  /** `onDone` runs only on success, so the form survives a refused code. */
+  define: (scheme: ClassificationSchemeCreate, onDone: () => void) => void;
+  rename: (scheme: string, name: string, callbacks: RenameCallbacks) => void;
+  remove: (scheme: string) => void;
+  isBusy: boolean;
+  /**
+   * A refused define or delete. A delete's carries how many books the admin
+   * can see still quote the scheme, which the section words in the reader's
+   * language. A rename's is the row's own.
+   */
+  error: unknown;
+}
+
+/**
+ * The schemes a heading may quote, and the admin's three writes.
+ *
+ * Only `enabled` for an admin: nobody else may write one, and the list itself
+ * says nothing a member needs on this page.
+ *
+ * **A write drops the list and nothing else.** A heading carries the code, which
+ * no write here changes, and a chip draws a library's own scheme by its code,
+ * so no book's cached record names a scheme's name.
+ */
+export function useClassificationSchemes(
+  enabled: boolean,
+): UseClassificationSchemesResult {
+  const queryClient = useQueryClient();
+  const list = useListClassificationSchemes({ query: { enabled } });
+  const mutation = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: getListClassificationSchemesQueryKey(),
+      });
+    },
+  };
+  const define = useDefineClassificationScheme({ mutation });
+  const rename = useRenameClassificationScheme({ mutation });
+  const remove = useDeleteClassificationScheme({ mutation });
+
+  return {
+    schemes: list.data ?? [],
+    define: (scheme, onDone) =>
+      define.mutate({ data: scheme }, { onSuccess: () => onDone() }),
+    rename: (scheme, name, callbacks) =>
+      rename.mutate(
+        { scheme, data: { name } },
+        { onSuccess: () => callbacks.onSuccess(), onError: callbacks.onError },
+      ),
+    remove: (scheme) => remove.mutate({ scheme }),
+    isBusy: define.isPending || rename.isPending || remove.isPending,
+    error: list.error ?? define.error ?? remove.error,
+  };
+}
+
+/**
+ * How often the list is asked again while a vocabulary loads. A load runs for
+ * minutes, so a reader waiting on it sees the bar move without the page
+ * hammering the server.
+ */
+const VOCABULARY_POLL_MS = 2000;
+
+export interface UseVocabulariesResult {
+  vocabularies: VocabularyOut[];
+  /** Start, or repeat, the download of one vocabulary's local copy. */
+  download: (scheme: string) => void;
+  isStarting: boolean;
+  /** A list that would not load, or a refused start: the 409 says why. */
+  error: unknown;
+}
+
+/**
+ * Each subject vocabulary, what is loaded of it, and the admin's download.
+ *
+ * Only `enabled` for an admin, as `useClassificationSchemes`: both routes are
+ * admin only.
+ *
+ * **The list is polled while any load is under way, and only then.** The load
+ * runs on the server in the background and its progress lives nowhere but that
+ * list, so without the poll the bar would stand still until the page was left.
+ * A failed load is not under way: polling on it would never stop.
+ */
+export function useVocabularies(enabled: boolean): UseVocabulariesResult {
+  const queryClient = useQueryClient();
+  const list = useListVocabularies({
+    query: {
+      enabled,
+      refetchInterval: (query) =>
+        (query.state.data ?? []).some(isLoading) ? VOCABULARY_POLL_MS : false,
+    },
+  });
+  const start = useDownloadVocabulary({
+    mutation: {
+      // Returned rather than voided, so the start stays pending until the list
+      // answers with the load queued. Voided, the button came back for one
+      // round trip over the old list, and a second click there drew the
+      // server's 409. Settled rather than succeeded, so a refused start reads
+      // the list again too and shows the load the 409 is about.
+      onSettled: () =>
+        queryClient.invalidateQueries({
+          queryKey: getListVocabulariesQueryKey(),
+        }),
+    },
+  });
+  const vocabularies = list.data ?? [];
+
+  return {
+    vocabularies,
+    download: (scheme) => start.mutate({ scheme }),
+    isStarting: start.isPending,
+    error: list.error ?? standingRefusal(start, vocabularies),
+  };
+}
+
+/**
+ * A refused start, unless the list now shows that vocabulary loading. The
+ * refusal then says only what the bar already shows, and an alert standing
+ * above a load that runs fine reads as a load that failed.
+ */
+function standingRefusal(
+  start: { error: unknown; variables?: { scheme: string } },
+  vocabularies: VocabularyOut[],
+): unknown {
+  const scheme = start.variables?.scheme;
+  const running = vocabularies.some(
+    (vocabulary) => vocabulary.scheme === scheme && isLoading(vocabulary),
+  );
+  return running ? null : start.error;
+}
+
+function isLoading(vocabulary: VocabularyOut): boolean {
+  return vocabulary.progress != null && vocabulary.progress.phase !== "failed";
 }

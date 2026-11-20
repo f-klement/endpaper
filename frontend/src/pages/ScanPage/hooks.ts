@@ -24,6 +24,7 @@ import { ApiError } from "../../api/mutator";
 
 import {
   findFileHolders,
+  getListNarrowableCataloguesQueryKey,
   getLookupIsbnQueryKey,
   getSearchBooksQueryKey,
   listCopies,
@@ -34,6 +35,7 @@ import {
   useAddBookTagByName,
   useAlreadyHeld,
   useListLocations,
+  useListNarrowableCatalogues,
   useListTags,
   useLookupIsbn,
   useReportDigitalReference,
@@ -43,7 +45,7 @@ import {
 } from "../../api/generated/endpoints/books/books";
 import { useListCollections } from "../../api/generated/endpoints/collections/collections";
 import { BookFormat } from "../../api/generated/model";
-import { useGoogleBooksReady } from "../../app/hooks";
+import { useGoogleBooksReady, useLibraryMode } from "../../app/hooks";
 import type {
   AlreadyHeldOut,
   AlreadyHeldParams,
@@ -253,6 +255,22 @@ export interface UseScanFlowResult {
   tags: TagOut[];
 
   lookup: (isbn: string) => void;
+  /** The catalogues a lookup may be narrowed to; empty outside library mode. */
+  lookupCatalogues: CatalogueSource[];
+  /**
+   * The ticks for the next lookup, in library mode; empty asks every one.
+   * **Spent by `lookup`**, which carries them with that ISBN and clears them, so
+   * they narrow one lookup and no other, and a tick sends nothing by itself.
+   */
+  lookupOnly: CatalogueSource[];
+  setLookupOnly: (only: CatalogueSource[]) => void;
+  /**
+   * What the lookup on screen was narrowed to, for the line saying so; empty
+   * where it asked every catalogue, and where it was refused and asked none.
+   */
+  lookupAskedOnly: CatalogueSource[];
+  /** The lookup on screen was narrowed and refused: the roster had changed. */
+  lookupNarrowingRefused: boolean;
   isLookingUp: boolean;
   /**
    * Why the lookup could not be answered, where no catalogue was reached; null
@@ -325,6 +343,7 @@ export function useScanFlow(
   account: number,
 ): UseScanFlowResult {
   const [isbn, setIsbn] = useState<string | null>(null);
+  const narrowing = useNarrowing("lookup");
   // What the last book this account added left, read from storage once as the
   // initial value, so the first scan of a session starts where the last ended.
   // Kept beside the book rather than only inside it, because the privacy
@@ -360,7 +379,7 @@ export function useScanFlow(
 
   // Only runs once an ISBN has been scanned or typed.
   const lookupQuery = useLookupIsbn(
-    { isbn: isbn ?? "" },
+    { isbn: isbn ?? "", ...narrowedTo(narrowing.asked) },
     {
       query: {
         enabled: isbn !== null,
@@ -376,6 +395,13 @@ export function useScanFlow(
   if (settled) setPending(settled);
 
   const unanswered = unansweredLookup(isbn, pending.draft, lookupQuery);
+  // Read off the query's own error rather than `unanswered`, which clears once a
+  // hand entered draft replaces the failure: nothing was asked for that draft
+  // either, so it must not read as narrowed.
+  const narrowingRefused = useRefusedNarrowing(
+    narrowing.asked,
+    lookupQuery.error,
+  );
 
   const writes: ScanWrites = {
     account,
@@ -391,6 +417,7 @@ export function useScanFlow(
 
   function reset() {
     setIsbn(null);
+    narrowing.forget();
     setAddError(null);
     setEnteredByHand(false);
     // Everything except the shelf. It is the one field that is the same for
@@ -440,8 +467,20 @@ export function useScanFlow(
       update({ draft: null });
       setAddError(null);
       setEnteredByHand(false);
+      narrowing.spend();
       setIsbn(nextIsbn);
     },
+    lookupCatalogues: narrowing.catalogues,
+    lookupOnly: narrowing.only,
+    setLookupOnly: narrowing.setOnly,
+    // An ISBN on screen, because `chooseMatch` parks it at null and leaves the
+    // last narrowing behind, which says nothing about a search's candidate.
+    // Not above a draft entered by hand either, which no catalogue supplied.
+    lookupAskedOnly: shownNarrowing(
+      narrowing.asked,
+      isbn !== null && !narrowingRefused && !enteredByHand,
+    ),
+    lookupNarrowingRefused: narrowingRefused,
     isLookingUp: stillLookingUp(isbn, pending.draft, unanswered),
     lookupError: unanswered,
     // A refetch rather than `lookup` again: the ISBN is the same, so the key
@@ -754,6 +793,23 @@ export interface UseBookSearchResult {
   askedNothing: boolean;
   /** Ask again, including the catalogues `unasked` names. */
   searchHarder: () => void;
+  /** The catalogues a search may be narrowed to; empty outside library mode. */
+  catalogues: CatalogueSource[];
+  /**
+   * The ticks for the next search, in library mode; empty asks every one.
+   * **Spent by `submit`**, which carries them with that query and clears them, so
+   * they narrow one search and no other, and a tick sends nothing by itself.
+   */
+  only: CatalogueSource[];
+  setOnly: (only: CatalogueSource[]) => void;
+  /**
+   * The ticked catalogues the server says it asked for the search on screen,
+   * for the line saying so; empty where it asked every catalogue, where it was
+   * refused, where it asked nothing, and while no answer is in.
+   */
+  askedOnly: CatalogueSource[];
+  /** The search on screen was narrowed and refused: the roster had changed. */
+  narrowingRefused: boolean;
   /** True while that longer search is in flight, rather than the ordinary one. */
   isSearchingHarder: boolean;
   /** True once the longer search has answered for the query on screen. */
@@ -791,6 +847,7 @@ export function useBookSearch(): UseBookSearchResult {
   // harder is an answer to the question on screen; a new question has not been
   // asked harder yet, whatever the last one was.
   const [harder, setHarder] = useState(false);
+  const narrowing = useNarrowing("search");
   const { locale } = useTranslation();
 
   const isConfigured = useGoogleBooksReady();
@@ -803,7 +860,13 @@ export function useBookSearch(): UseBookSearchResult {
     // `harder` is part of the parameters and so part of the query key, which is
     // what holds both answers in the cache: going back to a phrase that was
     // already searched hard does not spend the longer wait again.
-    { q: submitted, limit: 10, lang: locale, harder },
+    {
+      q: submitted,
+      limit: 10,
+      lang: locale,
+      harder,
+      ...narrowedTo(narrowing.asked),
+    },
     {
       query: {
         enabled: submitted.length >= MIN_QUERY_LENGTH,
@@ -832,6 +895,7 @@ export function useBookSearch(): UseBookSearchResult {
   // hand is the previous query's, and offering a longer search off it would
   // name catalogues that have nothing to do with what is being typed.
   const answer = search.isFetching ? undefined : search.data;
+  const narrowingRefused = useRefusedNarrowing(narrowing.asked, search.error);
 
   return {
     isConfigured,
@@ -839,13 +903,20 @@ export function useBookSearch(): UseBookSearchResult {
     setQuery,
     submit: () => {
       setHarder(false);
+      narrowing.spend();
       setSubmitted(query.trim());
     },
     clear: () => {
       setHarder(false);
+      narrowing.forget();
       setQuery("");
       setSubmitted("");
     },
+    catalogues: narrowing.catalogues,
+    only: narrowing.only,
+    setOnly: narrowing.setOnly,
+    askedOnly: narrowingRefused ? [] : askedOf(narrowing.asked, answer),
+    narrowingRefused,
     matches: search.data?.matches ?? [],
     isSearching: search.isFetching,
     ...readTheAnswer(answer, submitted),
@@ -867,6 +938,124 @@ export function useBookSearch(): UseBookSearchResult {
     },
     ...harderStatus(harder, search.isFetching, answer),
   };
+}
+
+/**
+ * The `only` parameter, or nothing where no catalogue is ticked.
+ *
+ * **Absent rather than empty**, so an unnarrowed request keeps the query key it
+ * had before the narrowing existed. Empty would send nothing either way, and
+ * would only split the cache.
+ */
+function narrowedTo(only: CatalogueSource[]): { only?: CatalogueSource[] } {
+  return only.length > 0 ? { only } : {};
+}
+
+/**
+ * The catalogues a cataloguer may narrow a lookup and a search to, in this
+ * library's order. Asked in library mode only: the server refuses a household.
+ */
+export function useNarrowableCatalogues(libraryMode: boolean): {
+  lookup: CatalogueSource[];
+  search: CatalogueSource[];
+} {
+  const roster = useListNarrowableCatalogues({
+    // **Stale at once, so every visit to the page asks again.** The roster is
+    // the settings in force, and an admin who switches a catalogue off and comes
+    // here would otherwise be offered it and refused with a 409. Refetching on
+    // mount covers every settings page that writes in this tab. A write made
+    // while the page is open (another tab, another admin) is caught by the 409
+    // itself: `useRefusedNarrowing` asks again. Not on focus: the app turns
+    // that off for every query. Cheap: the route reaches no catalogue and
+    // charges no budget.
+    query: { enabled: libraryMode, staleTime: 0 },
+  });
+  const rows = libraryMode ? (roster.data ?? []) : [];
+  return {
+    lookup: rows.filter((row) => row.answers_lookup).map((row) => row.source),
+    search: rows.filter((row) => row.answers_search).map((row) => row.source),
+  };
+}
+
+/**
+ * One path's narrowing: the catalogues it may name, the pending ticks, and what
+ * the request on screen was narrowed to.
+ *
+ * **Two copies of the ticks: a draft and the spent one.** The query key reads
+ * `asked` alone, so a tick refires nothing; `spend` moves the draft there with
+ * the request it narrows, so the next request asks every catalogue.
+ */
+function useNarrowing(path: "lookup" | "search") {
+  const catalogues = useNarrowableCatalogues(useLibraryMode())[path];
+  const [ticked, setOnly] = useState<CatalogueSource[]>([]);
+  const [asked, setAsked] = useState<CatalogueSource[]>([]);
+  // **A tick the roster no longer offers is dropped.** It is no longer drawn,
+  // so nobody could untick it, and sending it would earn the 409.
+  const only = ticked.filter((source) => catalogues.includes(source));
+  return {
+    catalogues,
+    only,
+    setOnly,
+    asked,
+    spend: () => {
+      setAsked(only);
+      setOnly([]);
+    },
+    forget: () => {
+      setOnly([]);
+      setAsked([]);
+    },
+  };
+}
+
+/**
+ * Whether a narrowed request was refused with a 409, asking for the roster
+ * again when it was.
+ *
+ * **The 409 is the one sure sign the page's roster is out of date**: a
+ * narrowing naming only offered catalogues is refused only when the plan in
+ * force moved since the roster was read. Asking again is what takes the
+ * switched off catalogue off screen and drops its tick.
+ */
+function useRefusedNarrowing(
+  asked: CatalogueSource[],
+  error: unknown,
+): boolean {
+  const refused =
+    asked.length > 0 && error instanceof ApiError && error.status === 409;
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!refused) return;
+    void queryClient.invalidateQueries({
+      queryKey: getListNarrowableCataloguesQueryKey(),
+    });
+  }, [refused, queryClient]);
+  return refused;
+}
+
+/**
+ * The ticks the server says it asked, for the search on screen.
+ *
+ * **Read off the answer's `asked`, never off the ticks alone.** A narrowed
+ * search still leaves a slow catalogue to `harder` and may be refused its
+ * longer slot, so a ticked catalogue can go unasked, and naming it would sit
+ * "Asked only" above the line saying it was not asked. No answer, a refusal
+ * among them, names nothing.
+ */
+function askedOf(
+  ticked: CatalogueSource[],
+  answer: BookSearchOut | undefined,
+): CatalogueSource[] {
+  if (answer === undefined) return [];
+  return ticked.filter((source) => answer.asked.includes(source));
+}
+
+/** The narrowing to name beside an answer, or none where there is no answer. */
+function shownNarrowing(
+  asked: CatalogueSource[],
+  answered: boolean,
+): CatalogueSource[] {
+  return answered ? asked : [];
 }
 
 /**

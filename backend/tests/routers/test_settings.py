@@ -243,6 +243,8 @@ class TestUpdateSettings:
     @pytest.mark.parametrize("field", sorted(settings_router._STORED_BOOL))
     @pytest.mark.parametrize("value", [True, False])
     def test_a_stored_switch_is_written_as_it_was_sent(self, client, admin, db, field, value):
+        # The one switch with a precondition: it refuses on without an address.
+        settings_store.set_value(db, SettingKey.OAI_ADMIN_EMAIL, "catalogue@library.example")
         res = client.put("/api/settings", json={field: value}, headers=admin["headers"])
 
         assert res.status_code == 200, res.text
@@ -254,12 +256,64 @@ class TestUpdateSettings:
         assert res.status_code == 403
         assert settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED) is False
 
+    def test_a_member_cannot_switch_the_oai_provider_on(self, client, member, db):
+        res = client.put("/api/settings", json={"oai_provider_enabled": True}, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is False
+
+    def test_the_oai_provider_is_refused_without_a_contact_address(self, client, admin, db):
+        res = client.put("/api/settings", json={"oai_provider_enabled": True}, headers=admin["headers"])
+
+        assert res.status_code == 409
+        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is False
+
+    def test_the_oai_provider_turns_on_with_its_address_in_the_same_write(self, client, admin, db):
+        body = {"oai_provider_enabled": True, "oai_admin_email": "catalogue@library.example"}
+        res = client.put("/api/settings", json=body, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["oai_admin_email"] == "catalogue@library.example"
+        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is True
+
+    def test_the_address_cannot_be_cleared_while_the_provider_is_on(self, client, admin, db):
+        body = {"oai_provider_enabled": True, "oai_admin_email": "catalogue@library.example"}
+        client.put("/api/settings", json=body, headers=admin["headers"])
+        res = client.put("/api/settings", json={"oai_admin_email": ""}, headers=admin["headers"])
+
+        assert res.status_code == 409
+        db.expire_all()
+        assert settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL) == "catalogue@library.example"
+
+    def test_a_contact_address_that_is_not_one_is_refused(self, client, admin):
+        res = client.put("/api/settings", json={"oai_admin_email": "nobody here"}, headers=admin["headers"])
+
+        assert res.status_code == 422
+
     def test_a_member_cannot_switch_public_availability_on(self, client, member, db):
         body = {"public_availability_enabled": True}
         res = client.put("/api/settings", json=body, headers=member["headers"])
 
         assert res.status_code == 403
         assert settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED) is False
+
+    def test_the_vocabulary_offer_starts_undismissed(self, client, admin):
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+
+        assert body["vocabulary_offer_dismissed"] is False
+
+    def test_a_dismissed_vocabulary_offer_reads_back_dismissed(self, client, admin):
+        client.put("/api/settings", json={"vocabulary_offer_dismissed": True}, headers=admin["headers"])
+
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert body["vocabulary_offer_dismissed"] is True
+
+    def test_a_member_cannot_dismiss_the_vocabulary_offer(self, client, member, db):
+        body = {"vocabulary_offer_dismissed": True}
+        res = client.put("/api/settings", json=body, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED) is False
 
     def test_the_sru_switch_reads_back_as_stored_while_nothing_is_published(self, client, admin):
         """The admin's intent, not what is served: the route also needs the
@@ -1327,6 +1381,19 @@ class TestTheProviderList:
     def test_the_whole_roster_is_returned_in_order(self, client, admin):
         listed = [row["source"] for row in self._sources(client, admin)]
         assert listed == [source.value for source in sources.DEFAULT_ORDER]
+
+    def test_a_row_carries_how_its_catalogue_is_asked_and_never_its_address(self, client, admin):
+        """The four facts a compliance reader needs reach the wire, and the URL
+        does not: it changes without the policy changing."""
+        loc = next(row for row in self._sources(client, admin) if row["source"] == "loc")
+        assert {key: loc[key] for key in ("protocol", "record_schema", "encrypted", "credential")} == {
+            "protocol": "sru",
+            "record_schema": "mods",
+            "encrypted": False,
+            "credential": "none",
+        }
+        assert "lcc" in loc["classification_schemes"]
+        assert not any("loc.gov" in str(value) for value in loc.values())
 
     def test_a_switched_off_source_is_still_listed(self, client, admin):
         """Or "off" and "not in this build" would look the same on screen."""

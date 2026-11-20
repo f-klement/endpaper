@@ -410,6 +410,20 @@ protocol has its own switch, off on a new installation until an admin turns it o
 on after an upgrade where the catalogue was already published. With library mode,
 publishing or that switch off, the endpoint does not exist.
 
+**An OAI-PMH provider, on the same two switches and one of its own.** Searching is one
+question another institution asks; collecting is the other, and union catalogues and
+aggregators collect over OAI-PMH. `/oai` answers the six verbs with Dublin Core or MARCXML,
+pages a harvest with a resumption token, and stamps every record with the day it last changed,
+so an aggregator coming back asks only for what is new. A record that leaves the published
+catalogue, by the trash, by being made private, by a merge or by a restore, answers as
+deleted from then on, so an aggregator learns to drop it. It serves the same records the
+public catalogue does, through the same gate, the same rows and the same rate limit, with
+Dublin Core built from the same public record the JSON catalogue sends, **plus** the day each
+record last changed and which records have left. A record never edited carries the day its
+book was added, which the JSON catalogue does not show. Its switch is off on every
+installation, new or upgraded, until an admin gives a repository contact address and turns
+it on. With library mode, publishing or that switch off, the endpoint does not exist.
+
 ## Deliberately not built
 
 **No offline mode.** Everything on every screen comes from the API, so an

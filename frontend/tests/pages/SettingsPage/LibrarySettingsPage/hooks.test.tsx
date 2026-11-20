@@ -27,7 +27,15 @@
 import { act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import type {
   CustomFieldOut,
@@ -35,6 +43,7 @@ import type {
   ImportPreviewOut,
   ImportResultOut,
   MarcPreviewOut,
+  VocabularyOut,
 } from "../../../../src/api/generated/model";
 import { ApiError } from "../../../../src/api/mutator";
 import { useBookCustomFields } from "../../../../src/pages/BookDetail/hooks";
@@ -48,11 +57,17 @@ import {
   useLibraryImport,
   useMarcImport,
   useStoreImport,
+  useVocabularies,
   type UseTwoStepImportResult,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
 import { boundOf, propertiesOf } from "../../../committedSchema";
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
-import { mockApi, renderHookWithProviders, type MockApi } from "../../../utils";
+import {
+  heldOpen,
+  mockApi,
+  renderHookWithProviders,
+  type MockApi,
+} from "../../../utils";
 import { sourceText } from "../../../sourceModules";
 import {
   lazyImportsOf,
@@ -1845,5 +1860,173 @@ describe("importing KOReader highlights", () => {
     expect(
       api.calls.filter((call) => call.url.includes("/highlights/")),
     ).toEqual([]);
+  });
+});
+
+/**
+ * Let a state that must not change have its chance to. TanStack tells its
+ * observers on a timer rather than at once, so reading straight after the
+ * event would pass whatever the hook does next.
+ */
+function letObserversHear(): Promise<void> {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+}
+
+/** How many times the vocabularies list was asked for. */
+function listCalls(api: MockApi): number {
+  return api.calls.filter(
+    (call) =>
+      call.method === "GET" && call.url.endsWith("/api/settings/vocabularies"),
+  ).length;
+}
+
+describe("useVocabularies", () => {
+  const IDLE: VocabularyOut = {
+    scheme: "gnd",
+    name: "GND subjects",
+    licence: "CC0-1.0",
+    copyable: true,
+    entries: 5,
+    fetched_at: "2026-11-20T10:00:00",
+    released: "2026-11-01T00:00:00",
+    progress: null,
+  };
+  const LOADING: VocabularyOut = {
+    ...IDLE,
+    progress: { phase: "loading", done: 1, total: 4, error: null },
+  };
+
+  afterEach(() => vi.useRealTimers());
+
+  it("asks for the list again while a load runs, and stops once it ends", async () => {
+    // Only the interval the poll runs on; `vi.waitFor` keeps real timers.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const api = mockApi();
+    const lists = [LOADING, IDLE];
+    api.on(
+      "/api/settings/vocabularies",
+      () => ({ body: [lists.shift() ?? IDLE] }),
+      "GET",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await vi.waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress?.phase).toBe("loading"),
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    await vi.waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress).toBeNull(),
+    );
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+
+    expect(listCalls(api)).toBe(2);
+  });
+
+  it("starts a download and reads the list again to show it queued", async () => {
+    const api = mockApi();
+    let started = false;
+    api.on(
+      "/api/settings/vocabularies",
+      () => ({
+        body: [
+          started
+            ? {
+                ...IDLE,
+                progress: {
+                  phase: "queued",
+                  done: 0,
+                  total: null,
+                  error: null,
+                },
+              }
+            : IDLE,
+        ],
+      }),
+      "GET",
+    );
+    api.on(
+      "/api/settings/vocabularies/gnd/download",
+      () => {
+        started = true;
+        return { status: 202, body: IDLE };
+      },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await waitFor(() => expect(result.current.vocabularies).toHaveLength(1));
+
+    act(() => result.current.download("gnd"));
+
+    await waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress?.phase).toBe("queued"),
+    );
+  });
+
+  it("stays starting until the list answers with the load queued", async () => {
+    const api = mockApi();
+    const queued: VocabularyOut = {
+      ...IDLE,
+      progress: { phase: "queued", done: 0, total: null, error: null },
+    };
+    const held = heldOpen();
+    api.on(
+      "/api/settings/vocabularies",
+      () => (listCalls(api) === 1 ? { body: [IDLE] } : held.respond()),
+      "GET",
+    );
+    api.on(
+      "/api/settings/vocabularies/gnd/download",
+      { status: 202, body: queued },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await waitFor(() => expect(result.current.vocabularies).toHaveLength(1));
+
+    act(() => result.current.download("gnd"));
+    await waitFor(() => expect(listCalls(api)).toBe(2));
+    await letObserversHear();
+    expect(result.current.isStarting).toBe(true);
+
+    held.release({ body: [queued] });
+    await waitFor(() => expect(result.current.isStarting).toBe(false));
+    expect(result.current.vocabularies[0]?.progress?.phase).toBe("queued");
+  });
+
+  it("drops a refused start once the list shows that vocabulary loading", async () => {
+    const api = mockApi();
+    const lists = [IDLE, LOADING];
+    api.on(
+      "/api/settings/vocabularies",
+      () => ({ body: [lists.shift() ?? LOADING] }),
+      "GET",
+    );
+    api.on(
+      "/api/settings/vocabularies/gnd/download",
+      {
+        status: 409,
+        body: { detail: "gnd: a download is already under way" },
+      },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await waitFor(() => expect(result.current.vocabularies).toHaveLength(1));
+
+    act(() => result.current.download("gnd"));
+    await waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress?.phase).toBe("loading"),
+    );
+    await letObserversHear();
+
+    expect(result.current.error).toBeNull();
+  });
+
+  it("asks nothing of a member, for whom both routes are refused", () => {
+    const api = mockApi();
+    renderHookWithProviders(() => useVocabularies(false));
+    expect(listCalls(api)).toBe(0);
   });
 });

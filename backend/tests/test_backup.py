@@ -10,9 +10,11 @@ format: an entry may name any path it likes, including one outside the
 directory being written to.
 """
 
+import asyncio
 import json
 import logging
 import lzma
+import threading
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -20,10 +22,12 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any, Final, NamedTuple
 
+import httpx
 import pytest
+import respx
 from hypothesis import given
 from hypothesis import strategies as st
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
 import backup
@@ -31,11 +35,12 @@ import credentials
 import filing
 import settings_store
 import targets
+import vocabulary_copy
 from authors import author_key
 from backup import RestoreError
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from database import Base, SessionLocal
-from enums import CatalogueSource, ClassificationScheme, SettingKey
+from enums import CatalogueSource, ClassificationScheme, FilingRuleName, SettingKey, TagCategory
 from migrations.versions import (
     b7d4e6f01a95_a_catalogue_source_becomes_a_row as a_catalogue_source_becomes_a_row,
 )
@@ -46,12 +51,15 @@ from models import (
     Book,
     CatalogueCredential,
     Classification,
+    ClassificationSchemeRow,
     Loan,
     Note,
     OpdsServer,
     Quote,
     Tag,
     UserBook,
+    VocabularyCopy,
+    VocabularyLabel,
 )
 from tests.conftest import forget_any_encryption_key
 from tests.helpers import (
@@ -1986,7 +1994,7 @@ class TestReadingProgressSurvives:
 class TestRestoringTheShelfKey:
     """`classifications.sort_key` is derived, and a restore does not derive it.
 
-    `restore()` inserts through Core, so `Classification._file_the_number` never
+    `restore()` inserts through Core, so `models._file_the_numbers` never
     fires. `_parse_row` recomputes the value instead, which is the same reason
     the `name_folded` and `cover_url` blocks beside it exist.
 
@@ -2029,7 +2037,7 @@ class TestRestoringTheShelfKey:
 
         assert res.status_code == 200, res.text
         db.expire_all()
-        assert db.query(Classification).one().sort_key == filing.sort_key_for("lcc", self.NUMBER)
+        assert db.query(Classification).one().sort_key == filing.LIBRARY_OF_CONGRESS.sort_key(self.NUMBER)
 
     def test_a_key_that_disagrees_with_its_number_is_recomputed(self, client, admin, library, db):
         """No index can catch this one: any string is a valid key, and the row
@@ -2043,7 +2051,7 @@ class TestRestoringTheShelfKey:
         self._restore(client, admin, data, manifest)
 
         db.expire_all()
-        assert db.query(Classification).one().sort_key == filing.sort_key_for("lcc", self.NUMBER)
+        assert db.query(Classification).one().sort_key == filing.LIBRARY_OF_CONGRESS.sort_key(self.NUMBER)
 
     @pytest.mark.parametrize("scheme", ["lcc", "gnd"])
     def test_a_number_that_is_not_text_is_refused(self, client, admin, library, db, scheme):
@@ -2086,6 +2094,38 @@ class TestRestoringTheShelfKey:
         assert res.status_code == 200, res.text
         db.expire_all()
         assert db.query(Classification).one().sort_key == self.NUMBER
+
+    def test_a_library_s_own_scheme_restores_with_its_rule_and_its_key(self, client, admin, library, db):
+        """`rvk` filed like the Library of Congress, through export and restore:
+        the row keeps its name and rule, and its heading's key is recomputed
+        under that rule (`backup._insert_rows` threads it). The generic rule
+        would give another key, the silent misfiling `_file_classification`
+        warns about."""
+        db.add(
+            ClassificationSchemeRow(
+                code="rvk", name="Regensburger Verbundklassifikation", filing=FilingRuleName.LCC
+            )
+        )
+        db.flush()
+        book = Book(title="Filed", added_by_user_id=None)
+        db.add(book)
+        db.flush()
+        db.add(Classification(book_id=book.id, scheme="rvk", number=self.NUMBER))
+        db.commit()
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["classifications"]:
+            row["sort_key"] = "aaa"
+
+        res = self._restore(client, admin, data, manifest)
+
+        assert res.status_code == 200, res.text
+        db.expire_all()
+        restored = db.get(ClassificationSchemeRow, "rvk")
+        assert (restored.name, restored.filing) == ("Regensburger Verbundklassifikation", FilingRuleName.LCC)
+        key = filing.LIBRARY_OF_CONGRESS.sort_key(self.NUMBER)
+        assert key != filing.GENERIC.sort_key(self.NUMBER)
+        assert db.query(Classification).one().sort_key == key
 
 
 class TestTheArchiveCarriesACatalogueLoginAndNotItsPlaintext:
@@ -2954,3 +2994,272 @@ class TestTheAppsOwnSecretsTravelSealed:
         db.expire_all()
         assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.MAIL_PASSWORD))
         assert settings_store.in_force(db, SettingKey.MAIL_PASSWORD) == "hunter2"
+
+
+class TestARestoreKeepsTheHarvestHonest:
+    """A restore replaces every record a harvester reads, so it is settled as a
+    whole by `harvest.wholesale`: tombstones travel, and a public record the
+    archive does not hold answers as deleted afterwards."""
+
+    def test_a_tombstone_survives_a_round_trip(self, client, admin, library, db):
+        from models import OaiTombstone
+
+        db.add(OaiTombstone(book_id=9999, datestamp=datetime(2020, 1, 1)))
+        db.commit()
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        backup.restore(db, data)
+
+        assert {row.book_id for row in db.query(OaiTombstone)} == {9999}
+
+    def test_a_public_book_the_archive_lacks_is_tombstoned(self, client, admin, library, db, make_book):
+        from models import OaiTombstone
+
+        settings_store.record_oai_service(db)
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        vanished = make_book(admin["headers"], title="Added after the backup")
+        backup.restore(db, data)
+
+        assert {row.book_id for row in db.query(OaiTombstone)} == {vanished["id"]}
+
+    def test_the_first_service_here_outlives_an_archive_from_before_it(self, client, admin, library, db):
+        """Harvesters here saw what was public before the restore, so a later
+        departure is still theirs to be told about."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        settings_store.set_value(db, SettingKey.OAI_FIRST_SERVED, "2026-01-02T03:04:05")
+        backup.restore(db, data)
+
+        db.expire_all()
+        assert settings_store.get_raw(db, SettingKey.OAI_FIRST_SERVED) == "2026-01-02T03:04:05"
+
+    def test_no_book_created_after_a_restore_takes_a_tombstoned_id(
+        self, client, admin, library, db, make_book
+    ):
+        """On a fresh database the archive's Books set the id counter, and a
+        record purged at head before the backup sits above every one of them."""
+        from models import OaiTombstone
+
+        kept = make_book(admin["headers"], title="Kept")
+        purged = kept["id"] + 1
+        db.add(OaiTombstone(book_id=purged, datestamp=datetime(2020, 1, 1)))
+        db.commit()
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        _forget_the_book_id_counter(db)
+        backup.restore(db, data)
+        # Through the session: a restore ends every session issued before it.
+        created = Book(title="After the restore", added_by_user_id=admin["user"]["id"])
+        db.add(created)
+        db.commit()
+
+        assert created.id > purged
+        db.expire_all()
+        assert purged in {row.book_id for row in db.query(OaiTombstone)}
+
+
+class TestARestoreOntoAFreshDatabaseIssuesFreshIds:
+    """An archive brings every row with its id and no table's id counter, so on
+    a fresh Postgres database every sequence still stands below the restored
+    rows. SQLite issues above the highest row by itself."""
+
+    def test_a_tag_created_after_the_restore_takes_a_fresh_id(self, client, admin, library, db):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        _forget_every_id_counter(db)
+        backup.restore(db, data)
+        highest = max(row.id for row in db.query(Tag))
+        created = Tag(name="Added after the restore", category=TagCategory.CUSTOM)
+        db.add(created)
+        db.commit()
+
+        assert created.id > highest
+
+
+def _forget_every_id_counter(db) -> None:
+    """Every counter as a fresh installation has it."""
+    if db.get_bind().dialect.name == "sqlite":
+        db.execute(text("DELETE FROM sqlite_sequence"))
+    else:
+        for table in Base.metadata.sorted_tables:
+            if table.autoincrement_column is not None:
+                db.execute(
+                    text("SELECT setval(pg_get_serial_sequence(:table, :column), 1, false)"),
+                    {"table": table.name, "column": table.autoincrement_column.name},
+                )
+    db.commit()
+
+
+def _forget_the_book_id_counter(db) -> None:
+    """The counter as a fresh installation has it, which a restore never carries."""
+    if db.get_bind().dialect.name == "sqlite":
+        db.execute(text("DELETE FROM sqlite_sequence WHERE name = 'books'"))
+    else:
+        db.execute(text("SELECT setval(pg_get_serial_sequence('books', 'id'), 1, false)"))
+    db.commit()
+
+
+def _with_entry(data: bytes, name: str, body: bytes) -> bytes:
+    """The archive with entry `name` holding `body`, every other entry kept."""
+    source = zipfile.ZipFile(BytesIO(data))
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for entry in source.namelist():
+            archive.writestr(entry, body if entry == name else source.read(entry))
+    return buffer.getvalue()
+
+
+def _restore(client, admin, data: bytes):
+    return client.post(
+        "/api/backup/restore",
+        params={"confirm": True},
+        files={"file": ("backup.zip", data, "application/zip")},
+        headers=admin["headers"],
+    )
+
+
+LABELS_ENTRY = backup._LINES["vocabulary_labels"]
+
+
+@pytest.fixture
+def vocabulary(db):
+    """A loaded copy of three labels, the table `_LINES` exists for."""
+    db.add(VocabularyCopy(scheme="gnd", generation=1, entries=2, fetched_at=datetime(2026, 11, 20)))
+    db.add_all(
+        VocabularyLabel(scheme="gnd", generation=1, identifier=identifier, label=label, preferred=preferred)
+        for identifier, label, preferred in (
+            ("(DE-588)1", "Abfall", True),
+            ("(DE-588)1", "Müll", False),
+            ("(DE-588)2", "Bank <Möbel>", True),
+        )
+    )
+    db.commit()
+
+
+def _labels(db) -> list[tuple[str, str]]:
+    db.expire_all()
+    return sorted((row.identifier, row.label) for row in db.execute(select(VocabularyLabel)).scalars())
+
+
+class TestATableTooLargeToHoldWholeRidesAsLines:
+    """`vocabulary_labels` is an entry of JSON Lines that the manifest names,
+    so neither the backup nor the restore holds a million rows at once."""
+
+    def test_a_vocabulary_copy_comes_back_from_its_own_entry(self, client, admin, library, vocabulary, db):
+        before = _labels(db)
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        db.query(VocabularyLabel).delete()
+        db.commit()
+
+        assert read_manifest(data)["tables"]["vocabulary_labels"] == {"lines": LABELS_ENTRY}
+        assert _restore(client, admin, data).status_code == 200
+        assert _labels(db) == before
+
+    def test_a_manifest_naming_another_entry_is_refused_before_anything_is_deleted(
+        self, client, admin, library, vocabulary, db
+    ):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        manifest["tables"]["vocabulary_labels"] = {"lines": backup.MANIFEST_NAME}
+        before = _labels(db)
+
+        assert _restore(client, admin, rewrite(data, manifest)).status_code == 400
+        assert _labels(db) == before
+
+    def test_a_manifest_naming_an_entry_the_archive_lacks_is_refused_before_anything_is_deleted(
+        self, client, admin, library, vocabulary, db
+    ):
+        """The other arm, which checks the entry is there before the deletes."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        source = zipfile.ZipFile(BytesIO(data))
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for entry in source.namelist():
+                if entry != LABELS_ENTRY:
+                    archive.writestr(entry, source.read(entry))
+        before = _labels(db)
+
+        assert _restore(client, admin, buffer.getvalue()).status_code == 400
+        assert _labels(db) == before
+
+    @pytest.mark.parametrize(
+        "body", [b"[1]\n", b"{not json\n", b"\n"], ids=["not a row", "not json", "blank"]
+    )
+    def test_a_line_that_is_not_a_row_refuses_the_whole_restore(
+        self, client, admin, library, vocabulary, db, body
+    ):
+        """Refused part way through the inserts, so what stands is what was there."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        good = zipfile.ZipFile(BytesIO(data)).read(LABELS_ENTRY)
+        before = _labels(db)
+
+        assert _restore(client, admin, _with_entry(data, LABELS_ENTRY, good + body)).status_code == 400
+        assert _labels(db) == before
+
+    def test_a_line_past_the_longest_is_refused_rather_than_buffered(
+        self, client, admin, library, vocabulary, db, monkeypatch
+    ):
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        monkeypatch.setattr(backup, "_LINE_MAX", 40)
+
+        assert _restore(client, admin, data).status_code == 400
+
+
+class TestARestoreWaitsForNoVocabularyDownload:
+    def test_a_restore_while_a_download_runs_is_a_409_and_changes_nothing(
+        self, client, admin, library, vocabulary, db, tmp_path, monkeypatch
+    ):
+        """The restore empties the table the load is writing, and the load's
+        swap would then make current a generation the restore had cut."""
+        monkeypatch.setattr(vocabulary_copy, "_PROGRESS", {})
+        monkeypatch.setattr(vocabulary_copy, "_THREADS", {})
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        begun, held = threading.Event(), threading.Event()
+
+        def answer(_request: httpx.Request) -> httpx.Response:
+            begun.set()
+            held.wait(30)
+            return httpx.Response(503)
+
+        with respx.mock:
+            respx.get(vocabulary_copy.scheme("gnd").origin or "").mock(side_effect=answer)
+            load = vocabulary_copy.start("gnd", tmp_path)
+            try:
+                assert begun.wait(30)
+                res = _restore(client, admin, data)
+            finally:
+                held.set()
+                load.join(timeout=30)
+
+        assert res.status_code == 409
+        assert _restore(client, admin, data).status_code == 200
+
+    def test_a_restore_while_another_runs_is_a_409_naming_the_restore(self, client, admin, library):
+        """The second restore is refused by the same lock a download takes, and
+        must not be told that a download is running."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        with vocabulary_copy.no_load():
+            res = _restore(client, admin, data)
+
+        assert res.status_code == 409
+        assert res.json()["detail"] == "Not now: another restore is under way. Restore once it ends."
+
+
+class TestARestoreLeavesTheEventLoopFree:
+    def test_the_restore_runs_where_no_event_loop_is_running(self, client, admin, library, monkeypatch):
+        """With both vocabularies loaded a restore takes minutes at the pod's
+        CPU limit, and run on the loop it starves the liveness probe."""
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        where: list[str] = []
+        restore = backup.restore
+
+        def watched(db, archive):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                where.append("off the loop")
+            else:
+                where.append("on the loop")
+            return restore(db, archive)
+
+        monkeypatch.setattr(backup, "restore", watched)
+
+        assert _restore(client, admin, data).status_code == 200
+        assert where == ["off the loop"]

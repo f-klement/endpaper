@@ -32,6 +32,8 @@ export interface SettingsOut {
   mail_use_ssl?: boolean;
   mail_use_tls?: boolean;
   mail_username?: string;
+  oai_admin_email?: string;
+  oai_provider_enabled?: boolean;
   overdue_in_app_enabled?: boolean;
   overdue_mail_enabled?: boolean;
   overdue_mail_to?: string;
@@ -54,4 +56,5 @@ export interface SettingsOut {
   telegram_chat_id?: string;
   telegram_chat_id_from_env?: boolean;
   unreadable_secrets?: string[];
+  vocabulary_offer_dismissed?: boolean;
 }

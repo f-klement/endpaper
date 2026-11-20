@@ -24,7 +24,11 @@
  * writing, are now `useCatalogueScope` in `app/hooks.ts`.
  */
 
-import { keepPreviousData, type InfiniteData } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -45,7 +49,13 @@ import {
 } from "../../api/generated/endpoints/books/books";
 import { useListCollections } from "../../api/generated/endpoints/collections/collections";
 import { useMyOverdue as useMyOverdueQuery } from "../../api/generated/endpoints/loans/loans";
-import { useGetSenderHealth } from "../../api/generated/endpoints/settings/settings";
+import {
+  getGetSettingsQueryKey,
+  useGetSenderHealth,
+  useGetSettings,
+  useListVocabularies,
+  useUpdateSettings,
+} from "../../api/generated/endpoints/settings/settings";
 import {
   AVAILABLE_COLUMNS,
   DEFAULT_COLUMNS,
@@ -67,7 +77,9 @@ import {
   type OverdueSender,
   type PageBookOut,
   type SenderHealth,
+  type SettingsOut,
   type TagOut,
+  type VocabularyOut,
 } from "../../api/generated/model";
 import { useInvalidate } from "../../api/invalidate";
 import { readFilters, toParams } from "../../lib/bookFilters";
@@ -515,6 +527,87 @@ export function useBrokenSenders(): OverdueSender[] {
   return (query.data ?? [])
     .filter((entry: SenderHealth) => entry.broken)
     .map((entry: SenderHealth) => entry.sender);
+}
+
+/**
+ * What the library page says about a local vocabulary copy: `download` offers
+ * one, `loading` says one is being copied, `null` draws nothing.
+ */
+export type VocabularyOfferState = "download" | "loading" | null;
+
+/** The library page's offer of a local vocabulary copy, from `useVocabularyOffer`. */
+export interface VocabularyOffer {
+  offer: VocabularyOfferState;
+  /** Puts the offer away for the whole installation. */
+  dismiss: () => void;
+  isDismissing: boolean;
+}
+
+/**
+ * What to say to an admin about a local copy of a subject vocabulary.
+ *
+ * An offer stands while some vocabulary may be copied, none has been, and no
+ * admin has dismissed it, which is the owner's rule of 2026-11-20: there is no
+ * first run flow to offer it in, so the library says so until a copy is loaded
+ * or the offer is put away. **The dismissal is a settings row**, so it holds for
+ * the installation rather than for one browser.
+ *
+ * **Admin only, by the endpoints**, as `useBrokenSenders`: a member's 403 on the
+ * list leaves no offer. The settings record is asked only once the list would
+ * offer, so a member never asks for it and an installation with a copy never
+ * fetches the whole record for one flag. Until it answers there is no offer,
+ * so a dismissed notice never flashes on.
+ *
+ * **While a load runs the offer turns to `loading`**, which says so rather
+ * than offering a download that has already been started: offered, it read as
+ * if nothing had begun and invited a second start. A failed load is not
+ * running, so it brings the offer back.
+ *
+ * Held for five minutes like the sender health: a download from the settings
+ * section refreshes the list key itself, and a dismissal writes the settings
+ * key from its answer, so the offer goes at once either way.
+ */
+export function useVocabularyOffer(): VocabularyOffer {
+  const queryClient = useQueryClient();
+  const list = useListVocabularies({
+    query: { retry: false, staleTime: 300_000 },
+  });
+  const vocabularies = list.data ?? [];
+  const copyable =
+    vocabularies.some((vocabulary) => vocabulary.copyable) &&
+    vocabularies.every((vocabulary) => vocabulary.fetched_at == null);
+  const settings = useGetSettings({
+    query: { enabled: copyable, retry: false, staleTime: 300_000 },
+  });
+  const mutation = useUpdateSettings({
+    mutation: {
+      onSuccess: (updated: SettingsOut) => {
+        queryClient.setQueryData(getGetSettingsQueryKey(), updated);
+      },
+    },
+  });
+  const offered =
+    copyable && settings.data?.vocabulary_offer_dismissed === false;
+  return {
+    offer: offered ? offerState(vocabularies) : null,
+    // `mutate`, as `useSettings` saves: nothing awaits it, and a failed write
+    // leaves the offer standing, which is the state the admin can retry from.
+    dismiss: () =>
+      mutation.mutate({ data: { vocabulary_offer_dismissed: true } }),
+    isDismissing: mutation.isPending,
+  };
+}
+
+/**
+ * `loading` while some load is under way, which is a progress that has not
+ * failed, as `useVocabularies` in the library settings polls on.
+ */
+function offerState(vocabularies: VocabularyOut[]): VocabularyOfferState {
+  const running = vocabularies.some(
+    (vocabulary) =>
+      vocabulary.progress != null && vocabulary.progress.phase !== "failed",
+  );
+  return running ? "loading" : "download";
 }
 
 /**

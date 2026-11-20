@@ -29,10 +29,12 @@ import {
   ALREADY_HELD_SETTLE_MS,
   useAlreadyHeldWarning,
   useBookSearch,
+  useNarrowableCatalogues,
   usePrintedIsbnReader,
   useRapidIntake,
   useScanFlow,
 } from "../../../src/pages/ScanPage/hooks";
+import { createQueryClient } from "../../../src/api/query-client";
 import * as recogniser from "../../doubles/textRecognition";
 import {
   FALLBACK_INTERVAL_MS,
@@ -471,6 +473,256 @@ describe("useBookSearch", () => {
 
     await waitFor(() => expect(result.current.askedNothing).toBe(true));
     expect(result.current.isEmpty).toBe(false);
+  });
+});
+
+/** The query string of the last request to `path`. */
+function queryOf(path: string): URLSearchParams {
+  return new URL(api.lastCall(path)!.url, "http://localhost").searchParams;
+}
+
+/** How many title searches have reached the server so far. */
+function searchesSent(): number {
+  return api.calls.filter((call) => call.url.includes("/api/books/search"))
+    .length;
+}
+
+/** How many ISBN lookups have reached the server so far. */
+function lookupsSent(): number {
+  return api.calls.filter((call) => call.url.includes("/api/books/lookup?"))
+    .length;
+}
+
+/** The DNB and the BnF, both asked on either path. */
+const ROSTER = [
+  { source: "dnb", answers_lookup: true, answers_search: true },
+  { source: "bnf", answers_lookup: true, answers_search: true },
+];
+
+/** Library mode, offering `roster` as the catalogues a request may name. */
+function inLibraryMode(roster: typeof ROSTER = ROSTER) {
+  api.on("/api/settings/features", {
+    body: {
+      google_books_ready: true,
+      goodreads_lookup_enabled: false,
+      default_locale: "en",
+      library_mode: true,
+    },
+  });
+  api.on("/api/books/lookup/catalogues", { body: roster });
+}
+
+/** The search hook, once the roster it ticks from is in. */
+async function renderSearch() {
+  inLibraryMode();
+  const rendered = renderHookWithProviders(() => useBookSearch());
+  await waitFor(() =>
+    expect(rendered.result.current.catalogues).toEqual(["dnb", "bnf"]),
+  );
+  return rendered;
+}
+
+/** The scan flow, once the roster it ticks from is in. */
+async function renderLookup() {
+  inLibraryMode();
+  const rendered = renderHookWithProviders(() => useScanFlow(() => {}, ME));
+  await waitFor(() =>
+    expect(rendered.result.current.lookupCatalogues).toEqual(["dnb", "bnf"]),
+  );
+  return rendered;
+}
+
+describe("narrowing one request to some catalogues", () => {
+  it("narrows the submitted search and no later one", async () => {
+    const { result } = await renderSearch();
+    act(() => result.current.setOnly(["dnb", "bnf"]));
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/search")).toBeDefined(),
+    );
+    expect(queryOf("/api/books/search").getAll("only")).toEqual(["dnb", "bnf"]);
+
+    act(() => result.current.setQuery("hobbit"));
+    act(() => result.current.submit());
+    await waitFor(() =>
+      expect(queryOf("/api/books/search").get("q")).toBe("hobbit"),
+    );
+    expect(queryOf("/api/books/search").has("only")).toBe(false);
+  });
+
+  it("narrows the next ISBN looked up and no later one", async () => {
+    api.on("/api/books/lookup", {
+      body: { isbn: "9780441013593", title: "Dune", suggested_tag_ids: [] },
+    });
+    const { result } = await renderLookup();
+    act(() => result.current.setLookupOnly(["dnb"]));
+    act(() => result.current.lookup("9780441013593"));
+    await waitFor(() =>
+      expect(api.lastCall("/api/books/lookup?")).toBeDefined(),
+    );
+    expect(queryOf("/api/books/lookup?").getAll("only")).toEqual(["dnb"]);
+
+    act(() => result.current.lookup("9780547928227"));
+    await waitFor(() =>
+      expect(queryOf("/api/books/lookup?").get("isbn")).toBe("9780547928227"),
+    );
+    expect(queryOf("/api/books/lookup?").has("only")).toBe(false);
+  });
+
+  it("sends no request when a box is ticked under an answered search", async () => {
+    const { result } = await renderSearch();
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+    await waitFor(() => expect(result.current.matches).toHaveLength(1));
+    const before = searchesSent();
+
+    act(() => result.current.setOnly(["bnf"]));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(searchesSent()).toBe(before);
+  });
+
+  it("sends no request when a box is ticked under a failed lookup", async () => {
+    // A failed lookup puts the entry, and so the boxes, back on screen.
+    api.on("/api/books/lookup", {
+      status: 503,
+      body: { detail: "No catalogue answered." },
+    });
+    const { result } = await renderLookup();
+    act(() => result.current.lookup("9780441013593"));
+    await waitFor(() => expect(result.current.lookupError).not.toBeNull());
+    const before = lookupsSent();
+
+    act(() => result.current.setLookupOnly(["bnf"]));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(lookupsSent()).toBe(before);
+  });
+
+  it("drops a tick for a catalogue the roster no longer offers", async () => {
+    const { result, queryClient } = await renderSearch();
+    act(() => result.current.setOnly(["bnf"]));
+
+    // The admin switched the BnF off, and the roster was asked again.
+    api.on("/api/books/lookup/catalogues", { body: [ROSTER[0]] });
+    await act(() => queryClient.invalidateQueries());
+    await waitFor(() => expect(result.current.catalogues).toEqual(["dnb"]));
+    expect(result.current.only).toEqual([]);
+  });
+
+  it("asks for the roster again when a narrowed search is refused", async () => {
+    const { result } = await renderSearch();
+    // Switched off in another tab after this page read the roster.
+    api.on("/api/books/search", {
+      status: 409,
+      body: { detail: "Only catalogues this Library asks can be chosen." },
+    });
+    api.on("/api/books/lookup/catalogues", { body: [ROSTER[0]] });
+    act(() => result.current.setOnly(["bnf"]));
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.catalogues).toEqual(["dnb"]));
+    expect(result.current.narrowingRefused).toBe(true);
+    // Nothing was asked, so nothing is named as having been.
+    expect(result.current.askedOnly).toEqual([]);
+  });
+
+  it("names only the ticked catalogues the server says it asked", async () => {
+    const { result } = await renderSearch();
+    // The BnF was ticked but left to a harder search, as a slow one is.
+    api.on("/api/books/search", {
+      body: { matches: [match()], asked: ["dnb"], unasked: ["bnf"] },
+    });
+    act(() => result.current.setOnly(["dnb", "bnf"]));
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.matches).toHaveLength(1));
+    expect(result.current.askedOnly).toEqual(["dnb"]);
+  });
+
+  it("reads a 409 to a search that was not narrowed as no refused narrowing", async () => {
+    const { result } = await renderSearch();
+    api.on("/api/books/search", {
+      status: 409,
+      body: {
+        detail: "No catalogue this Library asks answers a title search.",
+      },
+    });
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.narrowingRefused).toBe(false);
+  });
+
+  it("reads a narrowed search that failed with a 503 as no refused narrowing", async () => {
+    const { result } = await renderSearch();
+    api.on("/api/books/search", {
+      status: 503,
+      body: { detail: "No catalogue answered." },
+    });
+    act(() => result.current.setOnly(["bnf"]));
+    act(() => result.current.setQuery("dune"));
+    act(() => result.current.submit());
+
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.narrowingRefused).toBe(false);
+  });
+
+  it("drops the search's ticks when the box is cleared", async () => {
+    const { result } = await renderSearch();
+    act(() => result.current.setOnly(["bnf"]));
+    expect(result.current.only).toEqual(["bnf"]);
+    act(() => result.current.clear());
+    expect(result.current.only).toEqual([]);
+  });
+
+  it("drops the lookup's ticks when the scan is cancelled", async () => {
+    const { result } = await renderLookup();
+    act(() => result.current.setLookupOnly(["bnf"]));
+    expect(result.current.lookupOnly).toEqual(["bnf"]);
+    act(() => result.current.reset());
+    expect(result.current.lookupOnly).toEqual([]);
+  });
+
+  it("names no narrowing above a draft entered by hand", async () => {
+    api.on("/api/books/lookup", {
+      status: 503,
+      body: { detail: "No catalogue answered." },
+    });
+    const { result } = await renderLookup();
+    act(() => result.current.setLookupOnly(["dnb"]));
+    act(() => result.current.lookup("9780441013593"));
+    await waitFor(() => expect(result.current.lookupError).not.toBeNull());
+    expect(result.current.lookupAskedOnly).toEqual(["dnb"]);
+
+    // The draft now comes from the reader, not from the DNB.
+    act(() => result.current.enterByHand());
+    expect(result.current.lookupAskedOnly).toEqual([]);
+  });
+
+  it("asks for the roster again on the next visit, after a settings write", async () => {
+    // The app's own client, whose cache outlives the page and whose default
+    // staleTime is not zero, so the hook's own staleTime is what decides.
+    const queryClient = createQueryClient();
+    inLibraryMode();
+    const first = renderHookWithProviders(() => useNarrowableCatalogues(true), {
+      queryClient,
+    });
+    await waitFor(() =>
+      expect(first.result.current.search).toEqual(["dnb", "bnf"]),
+    );
+    first.unmount();
+
+    // The admin switched the BnF off in Catalogue settings.
+    api.on("/api/books/lookup/catalogues", { body: [ROSTER[0]] });
+    const second = renderHookWithProviders(
+      () => useNarrowableCatalogues(true),
+      { queryClient },
+    );
+    await waitFor(() => expect(second.result.current.search).toEqual(["dnb"]));
+    queryClient.clear();
   });
 });
 

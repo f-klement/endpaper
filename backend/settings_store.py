@@ -27,7 +27,7 @@ import logging
 import secrets
 from typing import Any, Final
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import config
@@ -35,7 +35,7 @@ import credentials
 import sources
 import targets
 from enums import CatalogueSource, Locale, SettingKey
-from models import Setting
+from models import Setting, datestamp_now
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,15 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # published before the switch existed, since otherwise this default would
     # read there and withdraw it.
     SettingKey.SRU_SERVER_ENABLED: "false",
+    # Off everywhere, fresh and upgraded alike: unlike SRU there is no endpoint
+    # an upgrade could withdraw, since none answered before the switch did.
+    SettingKey.OAI_PROVIDER_ENABLED: "false",
+    # No contact address until an admin gives one, so the switch above stays
+    # off until then: `routers/settings.py` refuses it.
+    SettingKey.OAI_ADMIN_EMAIL: "",
+    # Never served. Not a preference: no field in `SettingsUpdate`, and written
+    # by `record_oai_service` alone.
+    SettingKey.OAI_FIRST_SERVED: "",
     # Off: a public record says nothing about loans until an admin says so
     # (owner's decision on issue #29). See `availability_is_shown`.
     SettingKey.PUBLIC_AVAILABILITY_ENABLED: "false",
@@ -129,6 +138,9 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # a new local account cannot sign in until its address is verified or an
     # admin says otherwise.
     SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS: "false",
+    # Not dismissed: an installation with no copy is offered one until an
+    # admin loads a copy or says no.
+    SettingKey.VOCABULARY_OFFER_DISMISSED: "false",
 }
 
 # Settings whose value must never be sent back to a browser in full, and which are
@@ -811,6 +823,42 @@ def sru_is_served(db: Session) -> bool:
     answer stays right for any caller that asks it alone.
     """
     return public_catalogue_is_published(db) and get_bool(db, SettingKey.SRU_SERVER_ENABLED)
+
+
+def oai_is_served(db: Session) -> bool:
+    """Whether the OAI-PMH provider answers: its own switch **and** the publish
+    state, for the reason `sru_is_served` gives, **and** a contact address.
+    Neither protocol's switch reads the other's, so turning one on cannot turn
+    the other on.
+
+    The address is refused empty at the write while the switch is on; it is
+    read here too because a restore or a hand edit can store the pair without
+    that write, and `Identify` must name an address."""
+    return (
+        public_catalogue_is_published(db)
+        and get_bool(db, SettingKey.OAI_PROVIDER_ENABLED)
+        and bool(get_raw(db, SettingKey.OAI_ADMIN_EMAIL).strip())
+    )
+
+
+def oai_has_served(db: Session) -> bool:
+    """Whether the OAI-PMH provider has ever answered a request."""
+    return bool(get_raw(db, SettingKey.OAI_FIRST_SERVED))
+
+
+def record_oai_service(db: Session) -> None:
+    """Note the first request the OAI-PMH provider answers, once.
+
+    Two first requests at once both find the row missing; the second insert
+    then fails on the key and is dropped, since the first has recorded a moment
+    a second earlier at most.
+    """
+    if oai_has_served(db):
+        return
+    try:
+        set_value(db, SettingKey.OAI_FIRST_SERVED, datestamp_now().isoformat())
+    except IntegrityError:
+        db.rollback()
 
 
 def availability_is_shown(db: Session) -> bool:

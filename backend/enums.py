@@ -337,30 +337,49 @@ class TagKey(StrEnum):
     ADULT = "adult"
 
 
+class FilingRuleName(StrEnum):
+    """Which filing rule a classification scheme's numbers sort under.
+
+    **Closed, and constrained by `ck_classification_schemes_filing`, where the
+    scheme beside it is open.** A rule is arithmetic in `filing.py`, so a row
+    naming a rule nothing implements would be a row that lies, which is the
+    argument `AuthorityScheme` makes about a reader. The names are Koha's.
+    """
+
+    #: No rule of its own: the number files as its own text and no shelf is
+    #: ordered by it. The column's default.
+    GENERIC = "generic"
+    DEWEY = "dewey"
+    LCC = "lcc"
+
+
 class ClassificationScheme(StrEnum):
-    """Published schemes a `classifications` row may quote.
+    """The schemes this application's own code reads or writes.
 
-    A closed set rather than free text, because the scheme is what makes the
-    number mean anything: `004` is computing in Dewey and nothing at all in
-    Library of Congress notation. A row whose scheme nobody recognises is a
-    number with no reading.
+    **A `classifications` row may quote any scheme in the
+    `classification_schemes` table, and these four are the rows that table is
+    seeded with.** A library on UDC adds a row rather than asking for a code
+    change: whether UDC exists is not this project's business. What makes
+    these four different is that code names them. A catalogue reader produces
+    them (`sources.CLASSIFIES`, held to the decoders by its test), `BookSort`
+    orders a shelf by two of them, and the MARC export writes a field for each.
+    So `classification_schemes.BUILT_IN` seeds them, and their rows can be
+    neither renamed nor deleted nor refiled: a row this code reads changing
+    under it would be the failure a closed enum used to make impossible.
 
-    All four are produced today. DDC comes from the DNB and K10plus (MARC
-    082) and from the Library of Congress (`classification authority="ddc"`);
-    LCC comes from the Library of Congress alone (`authority="lcc"`); GND comes
-    from the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from
-    the same Library of Congress record as the other two, `<subject
-    authority="lcsh">` beside the `<classification>` elements.
+    The scheme is still what makes the number mean anything: `004` is
+    computing in Dewey and nothing at all in Library of Congress notation. A
+    row is the place a library states that reading for a scheme of its own.
 
     **GND is an authority file rather than a shelf order, and it still belongs
     here.** What the column called `number` holds is the scheme's own identifier
     for a heading, which is the half that does not change while the caption
     does. For Dewey that was measured: `004` is Informatik in a German record
     and Computing in an English one. For GND it is a property of the identifier
-    rather than something this app will see, the DNB being its only supplier
-    here and German its only caption: `4203576-4` names one heading whatever a
-    record calls it. What differs is that a Dewey number also sorts, and a GND
-    number does not. That is now a visible difference rather than a latent one:
+    rather than something this app will see, German being its only caption:
+    `4203576-4` names one heading whatever a record calls it. What differs is
+    that a Dewey number also sorts, and a GND number does not. That is now a
+    visible difference rather than a latent one:
     `BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that
     place a book on one, each under its own rule in `filing.py`, and there is
     deliberately no counterpart for GND or LCSH because a subject vocabulary
@@ -375,7 +394,8 @@ class ClassificationScheme(StrEnum):
     honest and worth knowing: a heading the Library of Congress later revises
     (`Afro-Americans` became `African Americans`) changes this scheme's
     identifier, where a GND number or a Dewey notation survives its own
-    recaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.
+    recaptioning. That is why LCSH sorts last of these four in
+    `classifications.SCHEME_ORDER`.
 
     **A person's identifier is not one of these**, though the DNB writes it in
     the same `$0`: `100 $0` says who wrote the book, and every scheme here says
@@ -397,8 +417,8 @@ class ClassificationScheme(StrEnum):
     now: a book shows the headings it carries, and any of them can be filtered
     on. What DDC has that the others do not is a second reading, the division,
     which is what makes it browsable as well as filterable. **Sortable is no
-    longer one of the things it has alone**: every scheme names a filing rule
-    in `filing.py`, and LCC's orders a shelf too.
+    longer one of the things it has alone**: every scheme row names a filing
+    rule, and LCC's orders a shelf too.
     """
 
     DDC = "ddc"
@@ -829,6 +849,21 @@ class SettingKey(StrEnum):
     # export protocol gets a row of its own beside this one rather than a
     # shared one, because a shared row is where two switches become one.
     SRU_SERVER_ENABLED = "sru_server_enabled"
+    # Whether the OAI-PMH provider answers, the second export protocol's own
+    # switch beside SRU's and for the same reasons. `settings_store.oai_is_served`
+    # reads it with the publish state. No migration writes it on: nothing was
+    # ever harvested over OAI-PMH, so off is the default for a fresh deployment
+    # and an upgraded one alike.
+    OAI_PROVIDER_ENABLED = "oai_provider_enabled"
+    # The repository contact address `Identify` serves as `adminEmail`. Its own
+    # setting rather than a member's address, so nobody's personal address is
+    # published by accident; the switch above cannot be turned on while it is
+    # empty (owner's decision on issue #176).
+    OAI_ADMIN_EMAIL = "oai_admin_email"
+    # When the OAI-PMH provider first answered a request, in ISO form, or empty
+    # for never. Not a preference: `harvest.py` writes no tombstone before it,
+    # since no harvester could have seen a record that left earlier.
+    OAI_FIRST_SERVED = "oai_first_served"
     # Whether a public record says if the book is on the shelf or on loan.
     # Its own row, off by default: a loan is a member's activity, and showing
     # a stranger that one is open is a decision of its own rather than part of
@@ -877,6 +912,14 @@ class SettingKey(StrEnum):
     # above and for the same reason: an account policy turned on by mistake has
     # to be correctable without a redeploy.
     ACCOUNTS_OPEN_TO_OUTSIDERS = "accounts_open_to_outsiders"
+
+    # Whether an admin has put away the library page's offer of a local
+    # vocabulary copy. Per installation rather than per browser, by the owner's
+    # decision of 2026-11-20 on issue #139: one admin dismissing it answers for
+    # the library, and a browser preference would bring it back on every
+    # other device. Loading a copy ends the offer anyway; this row only ends
+    # it sooner.
+    VOCABULARY_OFFER_DISMISSED = "vocabulary_offer_dismissed"
 
 
 class OverdueSender(StrEnum):
@@ -1332,6 +1375,24 @@ class CredentialProvenance(StrEnum):
     SHIPPED = "shipped"
 
 
+class CredentialKind(StrEnum):
+    """What a catalogue wants before it answers, as a compliance reader names it.
+
+    **Two kinds and not one flag**, because a policy is written about them
+    separately: an API key is this deployment's own account at a commercial
+    service, sent in a query string; a login is the institution's account at
+    another library's server. `sources.describe` derives it from
+    `targets.Target.needs_key` and `targets.Target.secret`.
+    """
+
+    #: Answers anybody.
+    NONE = "none"
+    #: The deployment's own key at a metered commercial API. Google Books.
+    API_KEY = "api_key"
+    #: A username and password at the catalogue's own server.
+    LOGIN = "login"
+
+
 class HighlightSource(StrEnum):
     """Where a highlight came from, which is half of what names it there.
 
@@ -1459,3 +1520,23 @@ def member_or[E: StrEnum](
             default,
         )
         return default
+
+
+class VocabularyLoadPhase(StrEnum):
+    """Where a background load of a vocabulary's local copy stands.
+
+    Held in memory by `vocabulary_copy` and never stored: a load that finished
+    is a `vocabulary_copies` row, and one under way when the process stopped is
+    simply not running any more.
+    """
+
+    #: Waiting for another vocabulary's load to finish.
+    QUEUED = "queued"
+    #: Downloading the release from its source.
+    FETCHING = "fetching"
+    #: Turning the release into entries.
+    CONVERTING = "converting"
+    #: Writing the entries beside the copy in use.
+    LOADING = "loading"
+    #: Stopped. The copy in use, or none, still answers.
+    FAILED = "failed"

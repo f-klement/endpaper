@@ -80,7 +80,9 @@ ASKING_DOORS = DOORS_TAKING_AN_ACCESS | DOORS_TAKING_THEM_APART
 
 
 #: The named constructors, which are the one legitimate way to mention an asking type.
-CONSTRUCTORS = frozenset({"for_a_member_request", "for_a_batch_backfill"})
+CONSTRUCTORS = frozenset(
+    {"for_a_member_request", "for_a_narrowed_lookup", "for_a_narrowed_title_search", "for_a_batch_backfill"}
+)
 
 
 def _references_to(
@@ -398,6 +400,8 @@ class TestNeitherAskingTypeWidens:
     SURFACE = {
         "Enquiry": {
             "for_a_member_request",
+            "for_a_narrowed_lookup",
+            "for_a_narrowed_title_search",
             "refuse_if_nothing_is_asked",
             "lookup",
             "title_search",
@@ -682,6 +686,8 @@ class TestEachDoorChargesItsOwnLimiter:
         ("constructor", "limiter"),
         [
             ("Enquiry.for_a_member_request", "metadata_limiter"),
+            ("Enquiry.for_a_narrowed_lookup", "metadata_limiter"),
+            ("Enquiry.for_a_narrowed_title_search", "metadata_limiter"),
             ("GoogleVolumes.for_a_batch_backfill", "identifier_backfill_limiter"),
         ],
     )
@@ -794,7 +800,7 @@ class TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings:
 
     def test_every_handler_behind_the_door_is_covered_above(self):
         tree = ast.parse(application_sources()["routers/books.py"])
-        constructors = {"for_a_member_request", "for_a_batch_backfill"}
+        constructors = CONSTRUCTORS
         reaching = {
             node.name
             for node in ast.walk(tree)

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 import type { SettingsOut } from "../../../api/generated/model";
 import { Button, Modal } from "../../../components";
-import { useTranslation } from "../../../i18n";
+import { useTranslation, type MessageKey } from "../../../i18n";
 import { SettingsSection } from "../../components";
 import AdminSettings from "../components/AdminSettings";
 import SettingsSubPage from "../components/SettingsSubPage";
@@ -234,11 +234,16 @@ function AvailabilityField({
  *
  * **Under publishing, and disabled until the catalogue is live**, like the
  * indexing switch: the server serves SRU only when the catalogue is published
- * as well (`settings_store.sru_is_served`), so the control says so rather than
+ * as well (`settings_store.sru_is_served`, `oai_is_served`), so the control says so rather than
  * accepting a switch that does nothing yet. Each export protocol gets a toggle
- * of its own here, and no confirmation: a protocol serves exactly what the
+ * of its own here, and no confirmation: a protocol serves the records the
  * published catalogue already shows, which is what the publish confirmation
- * named.
+ * named. OAI-PMH adds the day each record changed and which have left.
+ *
+ * **OAI-PMH also needs a contact address**, which every harvester is shown, so
+ * its switch cannot be turned on while none is stored. The server refuses that
+ * write (`routers/settings._refuse_oai_without_an_address`); the hint here says
+ * why before anybody tries.
  */
 function ProtocolsSection({
   settings,
@@ -262,7 +267,83 @@ function ProtocolsSection({
         disabled={state.isSaving || !settings.public_catalogue_published}
         onChange={(checked) => state.save({ sru_server_enabled: checked })}
       />
+      <OaiField settings={settings} state={state} />
     </SettingsSection>
+  );
+}
+
+/** Why the OAI-PMH switch cannot be turned on yet, or its plain hint. */
+function oaiHint(settings: SettingsOut, hasAddress: boolean): MessageKey {
+  if (!settings.public_catalogue_published) {
+    return "settings.protocols.oaiNeedsPublishing";
+  }
+  if (!hasAddress && !settings.oai_provider_enabled) {
+    return "settings.protocols.oaiNeedsAddress";
+  }
+  return "settings.protocols.oaiHint";
+}
+
+/** The OAI-PMH switch, and the contact address it needs before it turns on. */
+function OaiField({
+  settings,
+  state,
+}: {
+  settings: SettingsOut;
+  state: UseSettingsResult;
+}) {
+  const { t } = useTranslation();
+  // A draft rather than a mirror of `settings`, like the mail fields: the
+  // address is saved by its own button, not on every keystroke.
+  const stored = settings.oai_admin_email ?? "";
+  const [address, setAddress] = useState(stored);
+  const enabled = settings.oai_provider_enabled ?? false;
+  const hasAddress = stored.trim() !== "";
+
+  return (
+    <>
+      <ToggleField
+        label={t("settings.protocols.oaiLabel")}
+        hint={t(oaiHint(settings, hasAddress))}
+        checked={enabled}
+        // Off is always allowed. On needs the catalogue live and an address.
+        disabled={
+          state.isSaving ||
+          !settings.public_catalogue_published ||
+          (!enabled && !hasAddress)
+        }
+        onChange={(checked) => state.save({ oai_provider_enabled: checked })}
+      />
+      <div className="mt-4 space-y-1.5">
+        <label
+          htmlFor="oai-admin-email"
+          className="block text-xs font-medium text-paper-600 dark:text-paper-300"
+        >
+          {t("settings.protocols.oaiAddressLabel")}
+        </label>
+        <input
+          id="oai-admin-email"
+          type="email"
+          autoComplete="off"
+          value={address}
+          onChange={(event) => setAddress(event.target.value)}
+          className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm dark:border-paper-700"
+        />
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("settings.protocols.oaiAddressHint")}
+        </p>
+        {address.trim() !== stored && (
+          <Button
+            size="sm"
+            // Clearing the address while the switch is on is refused by
+            // the server, so it is not offered here.
+            disabled={state.isSaving || (enabled && address.trim() === "")}
+            onClick={() => state.save({ oai_admin_email: address.trim() })}
+          >
+            {t("settings.protocols.oaiAddressSave")}
+          </Button>
+        )}
+      </div>
+    </>
   );
 }
 

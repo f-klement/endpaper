@@ -336,10 +336,10 @@ def _say_so_when_the_session_is_in_the_clear(connection: Any, _record: Any) -> N
 
 @event.listens_for(engine, "connect")
 def _sqlite_pragmas(connection: Any, _record: Any) -> None:
-    """The three settings SQLite does not give you by default.
+    """The settings SQLite does not give you by default.
 
-    Applied per connection, because that is the only scope SQLite has for two
-    of them.
+    Applied per connection, because that is the only scope SQLite has for all
+    but the journal mode.
 
     **`foreign_keys`** is off by default, which makes every `ForeignKey` in
     `models.py` and the `ON DELETE CASCADE` on `book_tags` decorative: they
@@ -356,6 +356,18 @@ def _sqlite_pragmas(connection: Any, _record: Any) -> None:
     rather than an immediate "database is locked" error. Five seconds is long
     enough for any write this app makes and short enough not to hide a
     deadlock.
+
+    **`secure_delete`** zeroes deleted content, so an erased patron's name
+    leaves the file at the next checkpoint rather than staying in free space
+    until the page is reused. Off, it stays, and a copy of the volume still
+    holds it after the erasure answered 204. The Alpine image's SQLite is
+    built with it on, so this changes nothing there; it is set so the erasure
+    does not rest on a compile flag, which the SQLite in uv's own Python
+    lacks. `ON` rather than `FAST`, which keeps the I/O but leaves traces on
+    free list pages: measured on SQLite 3.46, deleting 5000 books in one
+    transaction took 149 to 181 ms on, 42 to 52 ms fast and 13 to 33 ms off,
+    and the image already pays the first. What it leaves is in the data
+    model's patron section.
     """
     if "sqlite" not in DATABASE_URL:
         return
@@ -364,6 +376,7 @@ def _sqlite_pragmas(connection: Any, _record: Any) -> None:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA secure_delete=ON")
         cursor.execute(f"PRAGMA synchronous={_synchronous()}")
     finally:
         cursor.close()

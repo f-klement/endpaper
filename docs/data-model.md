@@ -260,6 +260,40 @@ sorts and a GND number does not. `sort=ddc` and `sort=lcc` are what read that di
 each orders a shelf under its own scheme's filing rule, and there is no equivalent for
 GND or LCSH, which are subject vocabularies with no order to offer.
 
+**`classification_schemes`.** One row per scheme a heading may quote, keyed on the code
+`classifications.scheme` carries (migration `8cfb39d1d900`), with a name and the filing rule
+its numbers file under: `dewey`, `lcc` or `generic`, the names Koha gives them.
+`fk_classifications_scheme` holds every heading to a row, so a library may catalogue under a
+scheme of its own, the Regensburger Verbundklassifikation say, without a release. A member's
+post naming a code with no row is refused with a 422, as it was while the scheme was an enum;
+a record's heading under one is dropped and logged.
+
+The four above are seeded and locked: no rename, no new rule, no delete, because readers
+produce them, `sort=ddc` and `sort=lcc` order by two of them and the MARC export writes
+fields for them. A library's own scheme may be renamed, and deleted only while no heading
+quotes it: the refusal names how many books still do, counted over the books the admin can
+see and their trash, and says it is that count. **Its rule is fixed when it is defined**, because every stored
+`sort_key` was computed under it; a different rule means deleting the unused scheme and
+defining it again. Authority schemes (`author_identifiers.scheme`) stay an enum: an identifier there
+is only ever written by a reader, so a scheme without one would be a row that lies.
+
+**`vocabulary_copies` and `vocabulary_labels`.** The local copy of each declared subject
+vocabulary, GND subjects and LCSH (migration `ae3dd7d65835`). `vocabulary_labels` holds a row
+per label: the scheme, the `generation` (which load wrote it), the entry's `identifier` in
+the form an import stores, the `label`, and whether it is the `preferred` one; the others
+are the entry's variants. `vocabulary_copies` holds a row per scheme naming its current
+generation, the entry count, when this application fetched it and the source's own release
+date.
+
+**Both are in the library's database rather than a file beside it**, so the copy rides the
+backup, the export and the restore with everything else, at the cost of making each of
+those larger by the vocabularies' size. **A load never edits the copy in use**: it writes
+the next generation beside it in short transactions, then one commit points
+`vocabulary_copies` at it and the old generation is deleted. Until that commit every lookup
+reads the previous copy, and a load that fails leaves it answering. A vocabulary whose
+licence permits no copy has no row in either. `backend/vocabulary_copy.py` is the only
+writer outside a restore, which refuses while a load runs, and an admin starts a load under `/api/settings/vocabularies`.
+
 **A heading also records what it was asserting** (migration `a1e7c93b60df`). `kind` holds
 `content` or `carrier`, read from the record's MARC `$2`, or nothing at all. The German national
 library writes a content type and a carrier type into the same subject fields as a subject,
@@ -282,8 +316,8 @@ in; the migration says why nothing can correct a stored row from stored data.
 
 **The shelf position is stored, not computed** (migration `f1c30ab27d84`).
 `classifications.sort_key` holds what the scheme's filing rule returned for that number,
-written by a `@validates` hook on the model in the way `collections.name_folded` is, and
-derived again in `backup.restore`, which inserts through Core and fires no hook. It is the
+written by `models._file_the_numbers` as the row is flushed, under the rule the scheme's row
+names, and derived again in `backup.restore`, which inserts through Core and fires no hook. It is the
 column a shelf order reads. Koha stores the same thing under the name `cn_sort`.
 
 The key is not the number: a Library of Congress key pads its three parts, so `Q1` files as
@@ -302,7 +336,9 @@ it goes in `number` and `label` stays empty, because putting the same words in b
 state one fact twice. What that costs is worth knowing: a heading the Library of Congress
 later revises (`Afro-Americans` became `African Americans`) changes this scheme's
 identifier, where a GND number survives its own recaptioning. That is also why LCSH sorts
-last at the ceiling.
+last at the ceiling. A MARC `650 $a` is stored without its closing full stop
+(`Subfields.heading_label`), the form a local copy's label and the MODS heading take, and
+migration `c2015421927e` put rows stored earlier into it.
 
 | Scheme | Comes from | Caption |
 |---|---|---|
@@ -462,8 +498,9 @@ once and forgets a book that is still out, or repeats the same list every hour.
 `loaned_to_name` holds a free-text name (120 characters) for somebody with no account: a
 neighbour, a colleague, a book club. The whole point of recording a loan is remembering
 who has the book, and the people most likely to keep one are exactly those who will never
-have a login here. **Exactly one of the two is set**, and that rule has one spelling in each
-language: `models.ONE_BORROWER_SQL`, which is the text the CHECK constraint
+have a login here. A **patron**, below, is the third kind: `loaned_to_patron_id`. **Exactly
+one of the three is set**, or none beside `borrower_anonymised_at`, and that rule has one
+spelling in each language: `models.ONE_BORROWER_SQL`, which is the text the CHECK constraint
 `ck_loans_one_borrower` is built from, and `models.names_exactly_one_borrower`, which is
 what `LoanCreate` applies. In the database rather than in the schema alone, for the same
 reason the open-loan rule is an index: a restore and an import both write rows without going
@@ -489,6 +526,28 @@ difference above.
 
 Lending **from** an external, a book the library has borrowed rather than lent, is
 deliberately not a loan. See [decisions.md](decisions.md).
+
+**`patrons`.** A registered borrower who is not a member: a card number (unique, indexed,
+stored upper cased so `a12` and `A12` are one card, the number a person reads off the card and
+never the primary key), a name, optional contact
+details (email, phone, street, house number, postcode, city), an optional `expires_on` and
+`enrolled_at`. **The most sensitive table here**, a real person's contact details under the
+GDPR, so three rules bind on it:
+
+| Rule | Where it is held |
+|---|---|
+| Only an admin reads or writes it | `routers/patrons.py` puts `require_admin` on the router, ahead of the lookup, so a member is a 403 for every id, existing or not. The search needs a term and returns at most 50 rows. It is a POST carrying the term in its body, so no request line a proxy or the server logs names a patron |
+| It never reaches the public catalogue, not a field and not a count | no public schema has a patron field and no public route joins the table; `tests/test_nothing_private_leaves.py` sweeps every unauthenticated answer with a patron on loan |
+| Deletion works whatever the loan history | `patrons.erase`, the one erasure for a single delete and any bulk one: it clears `loaned_to_patron_id` on each of the patron's loans, stamps `borrower_anonymised_at`, then deletes the row. The loan keeps its book and its dates |
+
+The foreign key from `loans` has no `ondelete`, so a delete that skipped `patrons.erase` is
+refused rather than leaving a loan pointing at nobody. The admin's backup archive carries the
+table like every other; an archive taken before an erasure brings the patron back if
+restored, which is the archive's nature rather than a path around the rule. On SQLite,
+`secure_delete` (set in `database.py`) zeroes the erased row in its page, so the database file
+loses the name at the next checkpoint; the WAL file keeps the old page until later writes
+overwrite it. On Postgres the row stays in a dead tuple until vacuum reclaims it. No guarantor:
+it would store a second person's data for a case nobody has asked for.
 
 **`notes`.** Free text, attached to a book and authored by a user. `is_private` says
 whether it is the author's alone: false, which is every note written through the app, means
@@ -678,6 +737,15 @@ A reference carries no member of its own and is visible to exactly whoever can s
 book, like a tag and unlike a note. It is not served on `BookOut`: like notes and quotes it
 has its own route, so a listing of 25 books does not load it to render something no listing
 shows.
+
+**`oai_tombstones`.** A Book that an OAI-PMH harvester could once see and no longer can:
+its `book_id` and the `datestamp` it left at, and nothing else, so a deleted header carries
+no more than an id that was once public. No foreign key, because the Book may be gone; ids
+are never issued twice, a restore included, so the id never comes to name another Book.
+Written only by `backend/harvest.py`, which also keeps `books.oai_datestamp`, the time a
+published record last changed, a child row included. A Book that was never public never
+gets a row, and neither does one that left before the provider first answered a request
+(the `oai_first_served` setting). See [security.md](security.md#oai-pmh).
 
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
 at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, the

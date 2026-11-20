@@ -2874,6 +2874,16 @@
             "title": "Asked First",
             "type": "boolean"
           },
+          "classification_schemes": {
+            "items": {
+              "$ref": "#/components/schemas/ClassificationScheme"
+            },
+            "title": "Classification Schemes",
+            "type": "array"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/CredentialKind"
+          },
           "credential_provenance": {
             "$ref": "#/components/schemas/CredentialProvenance",
             "default": "none"
@@ -2892,6 +2902,10 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "encrypted": {
+            "title": "Encrypted",
+            "type": "boolean"
+          },
           "has_key": {
             "title": "Has Key",
             "type": "boolean"
@@ -2900,9 +2914,20 @@
             "title": "Needs A Key",
             "type": "boolean"
           },
+          "protocol": {
+            "$ref": "#/components/schemas/Transport"
+          },
+          "protocol_version": {
+            "title": "Protocol Version",
+            "type": "string"
+          },
           "ready": {
             "title": "Ready",
             "type": "boolean"
+          },
+          "record_schema": {
+            "title": "Record Schema",
+            "type": "string"
           },
           "serves_groups": {
             "items": {
@@ -2929,7 +2954,13 @@
           "needs_a_key",
           "has_key",
           "ready",
-          "serves_groups"
+          "serves_groups",
+          "protocol",
+          "protocol_version",
+          "record_schema",
+          "encrypted",
+          "credential",
+          "classification_schemes"
         ],
         "title": "CatalogueSourceOut",
         "type": "object"
@@ -2978,7 +3009,7 @@
         "type": "object"
       },
       "ClassificationIn": {
-        "description": "One heading, as a client posts it back after a lookup.\n\nAccepted from the client rather than re-fetched, because the lookup that\nproduced it is the expensive part and the member may sit on the confirm\nscreen for a while. Nothing here is trusted beyond its own bounds: the\nscheme is a closed enum, and both strings are bounded and stripped.",
+        "description": "One heading, as a client posts it back after a lookup.\n\nAccepted from the client rather than re-fetched, because the lookup that\nproduced it is the expensive part and the member may sit on the confirm\nscreen for a while. Nothing here is trusted beyond its own bounds: the\nscheme is a bounded code, and both strings are bounded and stripped.\n\n**Whether the scheme has a row is not asked here**, because a model has no\nsession. The routes taking this from a client refuse one with a 422\n(`routers.books._refuse_unknown_schemes`), and `classifications.add_headings`\ndrops one from a record, before `fk_classifications_scheme` would refuse it.",
         "properties": {
           "kind": {
             "anyOf": [
@@ -3009,7 +3040,10 @@
             "type": "string"
           },
           "scheme": {
-            "$ref": "#/components/schemas/ClassificationScheme"
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Scheme",
+            "type": "string"
           }
         },
         "required": [
@@ -3047,7 +3081,8 @@
             "type": "string"
           },
           "scheme": {
-            "$ref": "#/components/schemas/ClassificationScheme"
+            "title": "Scheme",
+            "type": "string"
           }
         },
         "required": [
@@ -3058,7 +3093,7 @@
         "type": "object"
       },
       "ClassificationScheme": {
-        "description": "Published schemes a `classifications` row may quote.\n\nA closed set rather than free text, because the scheme is what makes the\nnumber mean anything: `004` is computing in Dewey and nothing at all in\nLibrary of Congress notation. A row whose scheme nobody recognises is a\nnumber with no reading.\n\nAll four are produced today. DDC comes from the DNB and K10plus (MARC\n082) and from the Library of Congress (`classification authority=\"ddc\"`);\nLCC comes from the Library of Congress alone (`authority=\"lcc\"`); GND comes\nfrom the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from\nthe same Library of Congress record as the other two, `<subject\nauthority=\"lcsh\">` beside the `<classification>` elements.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, the DNB being its only supplier\nhere and German its only caption: `4203576-4` names one heading whatever a\nrecord calls it. What differs is that a Dewey number also sorts, and a GND\nnumber does not. That is now a visible difference rather than a latent one:\n`BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that\nplace a book on one, each under its own rule in `filing.py`, and there is\ndeliberately no counterpart for GND or LCSH because a subject vocabulary\nhas no order to offer.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\n**`gnd-content` and `gnd-carrier` are not two more members**, though they\nare `$2` codes beside `gnd` and were nearly added here. They fail this\nenum's own test: a scheme is what gives a number a reading, and those codes\ngive `(DE-588)4113937-9` the same reading `gnd` does, in the same file, at\nthe same address. What they say is what the record was asserting with it,\nwhich is `HeadingKind` and a separate column. Storing them here would also\nchange the key `uq_classifications_book_scheme_number` is on, so the next\nenrichment of a book that already carries one would deposit the concept a\nsecond time rather than finding the row it has.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read\nnow: a book shows the headings it carries, and any of them can be filtered\non. What DDC has that the others do not is a second reading, the division,\nwhich is what makes it browsable as well as filterable. **Sortable is no\nlonger one of the things it has alone**: every scheme names a filing rule\nin `filing.py`, and LCC's orders a shelf too.",
+        "description": "The schemes this application's own code reads or writes.\n\n**A `classifications` row may quote any scheme in the\n`classification_schemes` table, and these four are the rows that table is\nseeded with.** A library on UDC adds a row rather than asking for a code\nchange: whether UDC exists is not this project's business. What makes\nthese four different is that code names them. A catalogue reader produces\nthem (`sources.CLASSIFIES`, held to the decoders by its test), `BookSort`\norders a shelf by two of them, and the MARC export writes a field for each.\nSo `classification_schemes.BUILT_IN` seeds them, and their rows can be\nneither renamed nor deleted nor refiled: a row this code reads changing\nunder it would be the failure a closed enum used to make impossible.\n\nThe scheme is still what makes the number mean anything: `004` is\ncomputing in Dewey and nothing at all in Library of Congress notation. A\nrow is the place a library states that reading for a scheme of its own.\n\n**GND is an authority file rather than a shelf order, and it still belongs\nhere.** What the column called `number` holds is the scheme's own identifier\nfor a heading, which is the half that does not change while the caption\ndoes. For Dewey that was measured: `004` is Informatik in a German record\nand Computing in an English one. For GND it is a property of the identifier\nrather than something this app will see, German being its only caption:\n`4203576-4` names one heading whatever a record calls it. What differs is\nthat a Dewey number also sorts, and a GND number does not. That is now a\nvisible difference rather than a latent one:\n`BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that\nplace a book on one, each under its own rule in `filing.py`, and there is\ndeliberately no counterpart for GND or LCSH because a subject vocabulary\nhas no order to offer.\n\n**LCSH is the one member with no identifier at all, and that is measured\nrather than assumed.** MODS from `lx2.loc.gov` carries no `valueURI` on a\nsingle `<subject>` element across 900 live records (2026-08-24), so the\nonly access point the record supplies is the authorised heading string.\n`number` holds that string and `label` is absent, because storing the same\nwords in both columns would state one fact twice. The consequence is\nhonest and worth knowing: a heading the Library of Congress later revises\n(`Afro-Americans` became `African Americans`) changes this scheme's\nidentifier, where a GND number or a Dewey notation survives its own\nrecaptioning. That is why LCSH sorts last of these four in\n`classifications.SCHEME_ORDER`.\n\n**A person's identifier is not one of these**, though the DNB writes it in\nthe same `$0`: `100 $0` says who wrote the book, and every scheme here says\nwhat the book is about. Those go to `AuthorityScheme` and the\n`author_identifiers` table, which is a different store keyed on a name\nrather than on a book.\n\n**`gnd-content` and `gnd-carrier` are not two more members**, though they\nare `$2` codes beside `gnd` and were nearly added here. They fail this\nenum's own test: a scheme is what gives a number a reading, and those codes\ngive `(DE-588)4113937-9` the same reading `gnd` does, in the same file, at\nthe same address. What they say is what the record was asserting with it,\nwhich is `HeadingKind` and a separate column. Storing them here would also\nchange the key `uq_classifications_book_scheme_number` is on, so the next\nenrichment of a book that already carries one would deposit the concept a\nsecond time rather than finding the row it has.\n\nOnly DDC is projected onto a tag: see `ddc.DIVISION_TAGS`. All four are read\nnow: a book shows the headings it carries, and any of them can be filtered\non. What DDC has that the others do not is a second reading, the division,\nwhich is what makes it browsable as well as filterable. **Sortable is no\nlonger one of the things it has alone**: every scheme row names a filing\nrule, and LCC's orders a shelf too.",
         "enum": [
           "ddc",
           "lcc",
@@ -3067,6 +3102,77 @@
         ],
         "title": "ClassificationScheme",
         "type": "string"
+      },
+      "ClassificationSchemeCreate": {
+        "description": "A scheme a library adds. Its code and its filing rule are fixed from here on.",
+        "properties": {
+          "filing": {
+            "$ref": "#/components/schemas/FilingRuleName",
+            "default": "generic"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scheme": {
+            "maxLength": 20,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$",
+            "title": "Scheme",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheme",
+          "name"
+        ],
+        "title": "ClassificationSchemeCreate",
+        "type": "object"
+      },
+      "ClassificationSchemeOut": {
+        "description": "One scheme a heading may quote.\n\n**`scheme` is the code a heading's own `scheme` carries**, and is named for\nthat field rather than for the column: a field named `code` reads as a one\ntime code to `TestAOneTimeCodeIsServedOnlyWhereItIsNamed`, and is one word\nfrom being one.",
+        "properties": {
+          "built_in": {
+            "title": "Built In",
+            "type": "boolean"
+          },
+          "filing": {
+            "$ref": "#/components/schemas/FilingRuleName"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheme",
+          "name",
+          "filing",
+          "built_in"
+        ],
+        "title": "ClassificationSchemeOut",
+        "type": "object"
+      },
+      "ClassificationSchemeRename": {
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ClassificationSchemeRename",
+        "type": "object"
       },
       "CollectionAssign": {
         "description": "Which collection a book belongs to, or `null` for none.\n\nIts own endpoint rather than a field on `BookDetailsUpdate`, so the picker\ncan save the moment somebody chooses. An explicit null is how a book is\ntaken out of a collection without being put in another one.",
@@ -3408,6 +3514,16 @@
         },
         "title": "CredentialKeyOut",
         "type": "object"
+      },
+      "CredentialKind": {
+        "description": "What a catalogue wants before it answers, as a compliance reader names it.\n\n**Two kinds and not one flag**, because a policy is written about them\nseparately: an API key is this deployment's own account at a commercial\nservice, sent in a query string; a login is the institution's account at\nanother library's server. `sources.describe` derives it from\n`targets.Target.needs_key` and `targets.Target.secret`.",
+        "enum": [
+          "none",
+          "api_key",
+          "login"
+        ],
+        "title": "CredentialKind",
+        "type": "string"
       },
       "CredentialProvenance": {
         "description": "Which of the four levels supplies a catalogue's login, if any.\n\n**One field rather than a booleans per level, because the levels are ordered\nand a set of booleans is not.** `credential_from_env` and `has_credential`\nwere two of the four answers spelled as two flags, which admits combinations\nthe ladder cannot produce and leaves a screen deciding which flag to believe.\n`credentials._resolve` walks the ladder once and this is what it answers.\n\n**Not a claim that the credential works.** `unreadable` beside it is that,\nand the two are separate axes: a level in force can be in force and broken,\nwhich is what a pinned variable set to nonsense and a stored login under a\nrotated key both are.",
@@ -3956,6 +4072,16 @@
         "title": "FeatureFlagsOut",
         "type": "object"
       },
+      "FilingRuleName": {
+        "description": "Which filing rule a classification scheme's numbers sort under.\n\n**Closed, and constrained by `ck_classification_schemes_filing`, where the\nscheme beside it is open.** A rule is arithmetic in `filing.py`, so a row\nnaming a rule nothing implements would be a row that lies, which is the\nargument `AuthorityScheme` makes about a reader. The names are Koha's.",
+        "enum": [
+          "generic",
+          "dewey",
+          "lcc"
+        ],
+        "title": "FilingRuleName",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -4002,7 +4128,8 @@
             "type": "string"
           },
           "scheme": {
-            "$ref": "#/components/schemas/ClassificationScheme"
+            "title": "Scheme",
+            "type": "string"
           }
         },
         "required": [
@@ -5510,6 +5637,29 @@
         "title": "MySecurityOut",
         "type": "object"
       },
+      "NarrowableCatalogue": {
+        "description": "One catalogue a cataloguer may narrow a lookup or a search to.\n\n**Only the catalogues this Library asks**, in its order, because a narrowing\nnaming any other is refused: offering one would be offering a 409.",
+        "properties": {
+          "answers_lookup": {
+            "title": "Answers Lookup",
+            "type": "boolean"
+          },
+          "answers_search": {
+            "title": "Answers Search",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CatalogueSource"
+          }
+        },
+        "required": [
+          "source",
+          "answers_lookup",
+          "answers_search"
+        ],
+        "title": "NarrowableCatalogue",
+        "type": "object"
+      },
       "NoteCreate": {
         "properties": {
           "content": {
@@ -6148,6 +6298,362 @@
         "title": "Page[QuoteWithBookOut]",
         "type": "object"
       },
+      "PatronCreate": {
+        "description": "A patron registered by an admin. A card number and a name; the rest optional.",
+        "properties": {
+          "card_number": {
+            "maxLength": 32,
+            "minLength": 1,
+            "pattern": "^[0-9A-Za-z]+(?:[./-][0-9A-Za-z]+)*$",
+            "title": "Card Number",
+            "type": "string"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "house_number": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "House Number"
+          },
+          "name": {
+            "maxLength": 120,
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "postcode": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postcode"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          }
+        },
+        "required": [
+          "card_number",
+          "name"
+        ],
+        "title": "PatronCreate",
+        "type": "object"
+      },
+      "PatronOut": {
+        "description": "A patron's whole record, as an admin reads it. Served by `routers/patrons.py` alone.",
+        "properties": {
+          "card_number": {
+            "title": "Card Number",
+            "type": "string"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "enrolled_at": {
+            "format": "date-time",
+            "title": "Enrolled At",
+            "type": "string"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "house_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "House Number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "postcode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postcode"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          }
+        },
+        "required": [
+          "id",
+          "card_number",
+          "name",
+          "enrolled_at"
+        ],
+        "title": "PatronOut",
+        "type": "object"
+      },
+      "PatronSearch": {
+        "description": "A search for a patron, sent as a body.\n\n**A body, never a query string**, because the term is a name, an email or a\ncard number, and a reverse proxy or a server logs a request line with its\nquery by default, where no erasure reaches it.",
+        "properties": {
+          "limit": {
+            "default": 20,
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "q": {
+            "description": "Matched against name, email and card number",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Q",
+            "type": "string"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "title": "PatronSearch",
+        "type": "object"
+      },
+      "PatronUpdate": {
+        "description": "The fields an admin changes. A field left out is left alone; null clears it.\n\nThe card number and the name may be changed and never cleared: a patron\nwith neither is nobody the desk can find.",
+        "properties": {
+          "card_number": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "pattern": "^[0-9A-Za-z]+(?:[./-][0-9A-Za-z]+)*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Card Number"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "expires_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires On"
+          },
+          "house_number": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "House Number"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "postcode": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postcode"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          }
+        },
+        "title": "PatronUpdate",
+        "type": "object"
+      },
       "PerUserStat": {
         "properties": {
           "count": {
@@ -6548,7 +7054,8 @@
             "type": "string"
           },
           "scheme": {
-            "$ref": "#/components/schemas/ClassificationScheme"
+            "title": "Scheme",
+            "type": "string"
           }
         },
         "required": [
@@ -7632,6 +8139,16 @@
             "title": "Mail Username",
             "type": "string"
           },
+          "oai_admin_email": {
+            "default": "",
+            "title": "Oai Admin Email",
+            "type": "string"
+          },
+          "oai_provider_enabled": {
+            "default": false,
+            "title": "Oai Provider Enabled",
+            "type": "boolean"
+          },
           "overdue_in_app_enabled": {
             "default": true,
             "title": "Overdue In App Enabled",
@@ -7725,6 +8242,11 @@
             },
             "title": "Unreadable Secrets",
             "type": "array"
+          },
+          "vocabulary_offer_dismissed": {
+            "default": false,
+            "title": "Vocabulary Offer Dismissed",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7903,6 +8425,29 @@
             ],
             "title": "Mail Username"
           },
+          "oai_admin_email": {
+            "anyOf": [
+              {
+                "maxLength": 320,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oai Admin Email"
+          },
+          "oai_provider_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oai Provider Enabled"
+          },
           "overdue_in_app_enabled": {
             "anyOf": [
               {
@@ -8063,6 +8608,17 @@
               }
             ],
             "title": "Telegram Chat Id"
+          },
+          "vocabulary_offer_dismissed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vocabulary Offer Dismissed"
           }
         },
         "title": "SettingsUpdate",
@@ -8554,6 +9110,16 @@
         "title": "Token",
         "type": "object"
       },
+      "Transport": {
+        "description": "Which door a catalogue target's request goes out of.\n\n**A field of the row, read by one dispatcher**: `metadata._DOORS` holds one\ndoor per member and refuses at import to hold fewer, so nothing above it\nasks which protocol answered. What a row on each transport must carry is\n`targets.Target`'s to refuse.\n\n**Here rather than in `targets.py`** because `models.py` derives\n`ck_catalogue_targets_transport` from it, and a foundation importing the\ncatalogue layer would point up the stack. `targets.Transport` is this\nclass, re-exported.",
+        "enum": [
+          "sru",
+          "z3950",
+          "bespoke"
+        ],
+        "title": "Transport",
+        "type": "string"
+      },
       "UserCreate": {
         "description": "Registration. The length floor is a policy for *new* passwords only.\n\n**The address is optional and stays optional**, which is the whole of the\ncompatibility story: an account with none must keep working, because that is\nevery account that existed before the column did. A client that sends no\n`email` creates exactly the account it created before.",
         "properties": {
@@ -8710,6 +9276,145 @@
         "title": "VerificationRequest",
         "type": "object"
       },
+      "VocabularyLoadPhase": {
+        "description": "Where a background load of a vocabulary's local copy stands.\n\nHeld in memory by `vocabulary_copy` and never stored: a load that finished\nis a `vocabulary_copies` row, and one under way when the process stopped is\nsimply not running any more.",
+        "enum": [
+          "queued",
+          "fetching",
+          "converting",
+          "loading",
+          "failed"
+        ],
+        "title": "VocabularyLoadPhase",
+        "type": "string"
+      },
+      "VocabularyOut": {
+        "description": "One declared subject vocabulary and what is loaded of it.",
+        "properties": {
+          "copyable": {
+            "title": "Copyable",
+            "type": "boolean"
+          },
+          "entries": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entries"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "licence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Licence"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VocabularyProgressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "released": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Released"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheme",
+          "name",
+          "licence",
+          "copyable",
+          "entries",
+          "fetched_at",
+          "released",
+          "progress"
+        ],
+        "title": "VocabularyOut",
+        "type": "object"
+      },
+      "VocabularyProgressOut": {
+        "description": "A load under way, or the one that failed last.\n\n`done` and `total` count bytes while `fetching` and entries while\n`loading`; `total` is null where the source did not say how many.",
+        "properties": {
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "phase": {
+            "$ref": "#/components/schemas/VocabularyLoadPhase"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "required": [
+          "phase",
+          "done",
+          "total",
+          "error"
+        ],
+        "title": "VocabularyProgressOut",
+        "type": "object"
+      },
       "WorkFact": {
         "description": "A column of `books` that describes the work. A file's value filling one a catalogue's record left empty files that record as changed here.",
         "enum": [
@@ -8803,7 +9508,7 @@
     },
     "/api/backup/restore": {
       "post": {
-        "description": "Replace the catalogue with the contents of a backup.\n\n`confirm` is a required opt-in rather than a body field, so the destructive\ncall cannot be made by accident by anything replaying a plain upload. This\nis the only endpoint in the app that destroys data it was not given the id\nof, and it destroys all of it.\n\nThe archive is validated in full before the first row is deleted. A restore\nthat fails halfway leaves a library that is neither the backup nor what was\nthere before, which is worse than either.",
+        "description": "Replace the catalogue with the contents of a backup.\n\n`confirm` is a required opt-in rather than a body field, so the destructive\ncall cannot be made by accident by anything replaying a plain upload. This\nis the only endpoint in the app that destroys data it was not given the id\nof, and it destroys all of it.\n\nThe manifest's shape is checked before the first row is deleted; its rows,\nand each line of a table the archive carries as lines, are read as they are\ninserted, after the deletes. Nothing commits until every table is in, so a\nrefusal at either point leaves what was there before. A restore that\nfailed halfway would leave a library that is neither the backup nor what\nwas there, which is worse than either, so a commit between tables would\nbreak this.",
         "operationId": "restore_backup",
         "parameters": [
           {
@@ -10881,6 +11586,28 @@
               "title": "Isbn",
               "type": "string"
             }
+          },
+          {
+            "description": "Library mode only. Ask only these catalogues, for this request and no other. Each must be one this Library asks for this kind of request, or the request is refused.",
+            "in": "query",
+            "name": "only",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogueSource"
+                  },
+                  "maxItems": 21,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Library mode only. Ask only these catalogues, for this request and no other. Each must be one this Library asks for this kind of request, or the request is refused.",
+              "title": "Only"
+            }
           }
         ],
         "responses": {
@@ -10903,6 +11630,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -10931,6 +11668,57 @@
           }
         ],
         "summary": "Lookup Isbn",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/lookup/catalogues": {
+      "get": {
+        "description": "The catalogues a cataloguer may narrow one lookup or search to.\n\n**Library mode only, refused with the narrowing's own 403**, because a\nhousehold is never offered the narrowing and this list exists to offer it.\nRead off the plan in force rather than the stored one, so a source with no\nkey is not offered: naming it would be refused.\n\nDeclared before `/{book_id}`, like `/export`.",
+        "operationId": "list_narrowable_catalogues",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/NarrowableCatalogue"
+                  },
+                  "title": "Response List Narrowable Catalogues",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Narrowable Catalogues",
         "tags": [
           "books"
         ]
@@ -11196,6 +11984,28 @@
               "title": "Harder",
               "type": "boolean"
             }
+          },
+          {
+            "description": "Library mode only. Ask only these catalogues, for this request and no other. Each must be one this Library asks for this kind of request, or the request is refused.",
+            "in": "query",
+            "name": "only",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogueSource"
+                  },
+                  "maxItems": 21,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Library mode only. Ask only these catalogues, for this request and no other. Each must be one this Library asks for this kind of request, or the request is refused.",
+              "title": "Only"
+            }
           }
         ],
         "responses": {
@@ -11218,6 +12028,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "422": {
             "content": {
@@ -17615,6 +18435,383 @@
         ]
       }
     },
+    "/api/patrons": {
+      "post": {
+        "description": "Register a patron. A card number another patron carries is a 409.",
+        "operationId": "create_patron",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatronCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatronOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Patron",
+        "tags": [
+          "patrons"
+        ]
+      }
+    },
+    "/api/patrons/search": {
+      "post": {
+        "description": "The patrons whose name, email or card number contains the term, by name.\n\nA required term and a capped page, so no single request lists the register.\nA term blank once stripped is refused rather than matching everybody.\n\n**A POST with the term in its body**, not a GET with it in the query: a\nreverse proxy and a server both log a request line with its query, and a\nlog keeps a name where `patrons.erase` cannot reach it.",
+        "operationId": "search_patrons",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatronSearch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PatronOut"
+                  },
+                  "title": "Response Search Patrons",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Search Patrons",
+        "tags": [
+          "patrons"
+        ]
+      }
+    },
+    "/api/patrons/{patron_id}": {
+      "delete": {
+        "description": "Erase a patron: their record goes, and every loan they had keeps its dates and loses their name.\n\n`patrons.erase`, the one erasure, so this and any bulk erasure cannot differ.",
+        "operationId": "delete_patron",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "patron_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Patron Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Patron",
+        "tags": [
+          "patrons"
+        ]
+      },
+      "get": {
+        "description": "One patron's whole record.",
+        "operationId": "get_patron",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "patron_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Patron Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatronOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Patron",
+        "tags": [
+          "patrons"
+        ]
+      },
+      "patch": {
+        "description": "Change the fields sent; null clears an optional one. A taken card number is a 409.",
+        "operationId": "update_patron",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "patron_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Patron Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatronUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatronOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Update Patron",
+        "tags": [
+          "patrons"
+        ]
+      }
+    },
     "/api/public/books": {
       "get": {
         "description": "One page of the published catalogue.\n\n**The filters here are a subset of the signed in listing's, and the ones\nleft out are left out by construction rather than by omission.** `status`,\n`unrated` and `discuss`, and `ownership` and `lending`, are all facts about\na member or about the household's relationship to the object. The first\nthree would raise on this shelf anyway, because it has no viewer to read\nthem against; the last two are columns this payload does not carry, and a\nfilter over a column nobody can see is a way to read that column one query\nat a time.\n\n`collection_id` is **not** accepted, although it was in the first draft on\nthe argument that a library wants to link to one shelf. It was cut: the ids\nare consecutive, so the filter is enumerable, and what it enumerates is the\nhousehold's own grouping of its shelves, which `PublicBookOut` withholds. A\npublic way to link to one shelf wants a published name to link by.\n\n**`sort` is `PublicBookSort`, a subset**, for the same reason the filters\nare a subset: `BookSort.NEWEST` orders by `added_at`, which is withheld, and\na sort over a withheld column hands back the whole ordering of that column\nin one request. See `schemas/public.py`.",
@@ -18312,6 +19509,269 @@
         ]
       }
     },
+    "/api/settings/classification-schemes": {
+      "get": {
+        "description": "Every scheme a heading may quote: the built in four, then the library's own.\n\n**Any member**, because a book page names each heading's scheme from this\nlist. It says nothing about a book: no count, and no scheme is hidden for\nbeing quoted only by somebody's private one.",
+        "operationId": "list_classification_schemes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClassificationSchemeOut"
+                  },
+                  "title": "Response List Classification Schemes",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Classification Schemes",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "description": "Add a scheme. A code already taken is a 409.\n\n**Admin only**, unlike defining a custom field: a scheme's filing rule is\nfixed once defined, and what it files under orders a library's shelves.",
+        "operationId": "define_classification_scheme",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassificationSchemeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationSchemeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Define Classification Scheme",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/classification-schemes/{scheme}": {
+      "delete": {
+        "description": "Delete a scheme no heading quotes.\n\n**A 409 naming how many books still quote it**, the owner's rule: no soft\ndelete and no reassignment. Its `detail` carries `code` `scheme_in_use` and\nthe `count` apart from the English sentence, for a client to word;\n`classification_schemes.remove` says what the count covers. A built in\nscheme is a 409 too, with a sentence only.",
+        "operationId": "delete_classification_scheme",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scheme",
+            "required": true,
+            "schema": {
+              "title": "Scheme",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Delete Classification Scheme",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Rename a library's own scheme. A built in one is a 409.",
+        "operationId": "rename_classification_scheme",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scheme",
+            "required": true,
+            "schema": {
+              "title": "Scheme",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassificationSchemeRename"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationSchemeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Rename Classification Scheme",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/settings/credential-key": {
       "delete": {
         "description": "Drop the key this machine holds, so a new one can be made.\n\n**The way back from closing the tab without writing the words down.**\nWithout this, `POST` refuses because a key exists, `PUT` wants a phrase\nnobody has, and the deployment is stuck behind a key protecting nothing.\n\n**It strands whatever the key was opening, and the response says which**\nrather than this route hiding it: `unreadable_sources` and\n`unreadable_settings` on the way out name the stored catalogue logins and\nsettings secrets that now have to be typed again. A\nmember's own Readwise token is not in that count: its member is told on\ntheir account page and saves it again. Removing those\nlogins first is the way to reach a clean state, and `DELETE` on a source's\ncredential needs no key for exactly that reason.\n\n409 when a store holding the key cannot be cleared from here, naming it:\nthe environment, because a process cannot unset a variable for its own next\nstart; a key file this process cannot remove; or a keychain that kept the\nkey.",
@@ -18678,6 +20138,135 @@
           }
         ],
         "summary": "Get Sender Health",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/vocabularies": {
+      "get": {
+        "description": "Every declared subject vocabulary: its licence, what is loaded of it and\nwhen, and any download under way. **Admin only**, beside the download it\nis read to start.",
+        "operationId": "list_vocabularies",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VocabularyOut"
+                  },
+                  "title": "Response List Vocabularies",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Vocabularies",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/vocabularies/{scheme}/download": {
+      "post": {
+        "description": "Fetch the vocabulary's release and load it in the background, replacing\nthe copy in use only once the new one is complete. The first download and\nevery refresh are this one request.\n\nA 404 for a vocabulary nobody declared. A 409 where its licence permits no\nlocal copy, or a download of it is already under way.",
+        "operationId": "download_vocabulary",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "scheme",
+            "required": true,
+            "schema": {
+              "title": "Scheme",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VocabularyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Download Vocabulary",
         "tags": [
           "settings"
         ]

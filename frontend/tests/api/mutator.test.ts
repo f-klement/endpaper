@@ -266,6 +266,29 @@ describe("errors", () => {
     });
   });
 
+  it("keeps the count an object detail carries beside its code", async () => {
+    mockApi().on("/api/books", {
+      status: 409,
+      body: { detail: { message: "In use.", code: "scheme_in_use", count: 2 } },
+    });
+    await expect(customFetch("/api/books")).rejects.toMatchObject({
+      code: "scheme_in_use",
+      count: 2,
+    });
+  });
+
+  it("drops a count that is not a whole number", async () => {
+    mockApi().on("/api/books", {
+      status: 409,
+      body: {
+        detail: { message: "In use.", code: "scheme_in_use", count: "2" },
+      },
+    });
+    await expect(customFetch("/api/books")).rejects.toMatchObject({
+      count: undefined,
+    });
+  });
+
   it("falls back to status text when the body is not JSON", async () => {
     // What a reverse proxy's own error page looks like from here.
     vi.stubGlobal(

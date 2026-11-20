@@ -1352,6 +1352,20 @@ class BookSearchOut(BaseModel):
     unasked: list[CatalogueSource]
 
 
+class NarrowableCatalogue(BaseModel):
+    """One catalogue a cataloguer may narrow a lookup or a search to.
+
+    **Only the catalogues this Library asks**, in its order, because a narrowing
+    naming any other is refused: offering one would be offering a 409.
+    """
+
+    source: CatalogueSource
+    #: Whether a narrowed ISBN lookup may name it.
+    answers_lookup: bool
+    #: Whether a narrowed title search may name it.
+    answers_search: bool
+
+
 class BookStatusUpdate(BaseModel):
     status: ReadStatus
 

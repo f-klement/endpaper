@@ -3,11 +3,15 @@ import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CatalogueSource,
   CatalogueSourceOut,
+  ClassificationScheme,
+  CredentialKind,
   SettingsOut,
   SettingsUpdate,
+  Transport,
 } from "../../../../api/generated/model";
 import { Button, Icon } from "../../../../components";
 import { useTranslation } from "../../../../i18n";
+import type { MessageKey } from "../../../../i18n/en";
 import { catalogueName } from "../../../../lib/catalogueName";
 import { statusOf } from "../../../../lib/providerStatus";
 import { SettingsSection } from "../../../components";
@@ -39,6 +43,14 @@ interface ProviderSectionProps {
  * a table of numbers that cannot be compared with each other is worse than no
  * table.
  *
+ * **Switching a source off can cost more than that source**, so two cases ask
+ * first. Turning off the last catalogue switched on means every lookup finds
+ * nothing: cataloguing by hand is a legitimate choice, and it should be chosen
+ * rather than arrived at. Turning off the only enabled supplier of a
+ * classification scheme silently empties that field on every book looked up
+ * afterwards. Which schemes a row supplies is served, derived from the reader
+ * in the backend's `sources.CLASSIFIES`; this only compares the rows.
+ *
  * **Two buttons, not drag and drop.** A drag target is unreachable by keyboard
  * and awkward on a phone, and this list is seven rows that move one step at a
  * time. Each button names the source and the direction, the ends are disabled
@@ -58,6 +70,11 @@ export default function ProviderSection({
   // branch here. Rebuilt only when the language changes.
   const groups = useMemo(
     () => new Intl.ListFormat(locale, { type: "disjunction" }),
+    [locale],
+  );
+  // "and" rather than "or": a row supplies every scheme it lists.
+  const together = useMemo(
+    () => new Intl.ListFormat(locale, { type: "conjunction" }),
     [locale],
   );
   // **A module level constant, not a fresh `[]`.** `catalogue_sources` is
@@ -86,6 +103,15 @@ export default function ProviderSection({
   };
 
   const setEnabled = (index: number, enabled: boolean) => {
+    const question = enabled ? null : switchOffQuestion(rows, index);
+    if (question !== null) {
+      const { key, name, schemes } = question;
+      const asked = t(key, {
+        name: t(catalogueName(name)),
+        schemes: together.format(schemes.map((scheme) => t(SCHEME[scheme]))),
+      });
+      if (!window.confirm(asked)) return;
+    }
     const next = rows.map((row, at) =>
       at === index ? { ...row, enabled } : row,
     );
@@ -119,6 +145,7 @@ export default function ProviderSection({
             key={row.source}
             row={row}
             groups={groups}
+            together={together}
             isFirst={index === 0}
             isLast={index === rows.length - 1}
             buttons={buttons}
@@ -148,6 +175,7 @@ export default function ProviderSection({
 function ProviderRow({
   row,
   groups,
+  together,
   isFirst,
   isLast,
   buttons,
@@ -156,6 +184,7 @@ function ProviderRow({
 }: {
   row: CatalogueSourceOut;
   groups: Intl.ListFormat;
+  together: Intl.ListFormat;
   isFirst: boolean;
   isLast: boolean;
   buttons: RefocusTargets;
@@ -191,6 +220,7 @@ function ProviderRow({
             {t("providers.slow")}
           </p>
         )}
+        <HowAsked row={row} together={together} />
       </div>
       <div className="flex shrink-0 gap-1">
         {/* **Not disabled while a save is in flight.** The local list is
@@ -226,6 +256,132 @@ function ProviderRow({
     </li>
   );
 }
+
+/**
+ * How a catalogue is asked: protocol, record schema, whether the connection is
+ * encrypted, what it wants before it answers, and which schemes it supplies.
+ *
+ * **What a policy is written about, and not the address**, which changes
+ * without the policy changing and would turn this screen into a place people
+ * edit endpoints. Every value is derived on the server from the catalogue's
+ * own row, so it cannot drift from what a request does.
+ *
+ * Shown whether the row is on or off: the point is to read it before deciding.
+ */
+function HowAsked({
+  row,
+  together,
+}: {
+  row: CatalogueSourceOut;
+  together: Intl.ListFormat;
+}) {
+  const { t } = useTranslation();
+  const credential = CREDENTIAL[row.credential];
+  const schemes = row.classification_schemes.map((scheme) => t(SCHEME[scheme]));
+  const before = [
+    t(PROTOCOL[row.protocol], { version: row.protocol_version }).trim(),
+    row.record_schema
+      ? t("providers.how.schema", { schema: row.record_schema })
+      : t("providers.how.noSchema"),
+  ].join(" · ");
+  const after = [
+    ...(credential === null ? [] : [t(credential)]),
+    ...(schemes.length === 0
+      ? []
+      : [t("providers.how.supplies", { schemes: together.format(schemes) })]),
+  ];
+  return (
+    <p className="mt-1 text-xs text-paper-600 dark:text-paper-400">
+      {before}
+      {" · "}
+      {/* **Set apart when it is not, because that is the one a network policy
+          forbids.** Queries to this catalogue cross the network in clear text,
+          and the Library of Congress row is the reason the line exists. */}
+      {row.encrypted ? (
+        t("providers.how.encrypted")
+      ) : (
+        <span className="font-medium text-amber-800 dark:text-amber-300">
+          {t("providers.how.unencrypted")}
+        </span>
+      )}
+      {after.map((part) => ` · ${part}`).join("")}
+    </p>
+  );
+}
+
+/** Why switching this row off needs asking first, or null where it does not. */
+interface SwitchOffQuestion {
+  key: MessageKey;
+  name: CatalogueSource;
+  schemes: ClassificationScheme[];
+}
+
+/**
+ * The question to ask before switching `rows[index]` off.
+ *
+ * **Every catalogue off comes first**, because it is the larger consequence
+ * and implies the other: nothing supplies any scheme once nothing is asked.
+ * Otherwise the schemes this row supplies that no other row in force does.
+ * A row not in force asks nothing, so pressing a toggle twice does not ask
+ * twice, and a row that could not answer loses nothing by going.
+ */
+function switchOffQuestion(
+  rows: CatalogueSourceOut[],
+  index: number,
+): SwitchOffQuestion | null {
+  const leaving = rows[index];
+  if (leaving === undefined || !inForce(leaving)) return null;
+  const staying = rows.filter((row, at) => at !== index && inForce(row));
+  if (staying.length === 0) {
+    return {
+      key: "providers.confirm.allOff",
+      name: leaving.source,
+      schemes: [],
+    };
+  }
+  const kept = new Set(staying.flatMap((row) => row.classification_schemes));
+  const lost = leaving.classification_schemes.filter(
+    (scheme) => !kept.has(scheme),
+  );
+  if (lost.length === 0) return null;
+  return {
+    key: "providers.confirm.lastSupplier",
+    name: leaving.source,
+    schemes: lost,
+  };
+}
+
+/**
+ * Whether lookups ask this row: switched on **and** able to answer, the
+ * server's `sources.in_force`. Counting `enabled` alone took a row without its
+ * key for a supplier, so switching the last answering catalogue off asked
+ * nothing.
+ */
+function inForce(row: CatalogueSourceOut): boolean {
+  return row.enabled && row.ready;
+}
+
+/** Each protocol's label, typed so a new transport cannot go unnamed. */
+const PROTOCOL: Record<Transport, MessageKey> = {
+  sru: "providers.how.sru",
+  z3950: "providers.how.z3950",
+  bespoke: "providers.how.bespoke",
+};
+
+/** What a catalogue wants before it answers, and nothing where it wants nothing. */
+const CREDENTIAL: Record<CredentialKind, MessageKey | null> = {
+  none: null,
+  api_key: "providers.how.apiKey",
+  login: "providers.how.login",
+};
+
+/** Each scheme's name, typed so a new scheme cannot go unnamed. */
+const SCHEME: Record<ClassificationScheme, MessageKey> = {
+  ddc: "providers.scheme.ddc",
+  lcc: "providers.scheme.lcc",
+  gnd: "providers.scheme.gnd",
+  lcsh: "providers.scheme.lcsh",
+};
 
 /** A row moved one step: the new list, the row that moved, and where to. */
 interface Swap {

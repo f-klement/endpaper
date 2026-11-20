@@ -15,6 +15,7 @@ import sys
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -22,12 +23,14 @@ from typing import Any, Final
 import pytest
 from alembic.script import ScriptDirectory
 from pydantic import BaseModel
-from sqlalchemy import CheckConstraint, String, create_engine, inspect, text
+from sqlalchemy import CheckConstraint, DateTime, String, create_engine, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
+import classification_schemes
 import credentials
 import filing
+import marc_fields
 import models  # registers the tables on Base.metadata
 import schema
 import settings_store
@@ -54,6 +57,9 @@ from migrations.versions import (
     c7b0a3e5d281_what_a_store_calls_a_book as what_a_store_calls_a_book,
 )
 from migrations.versions import (
+    c2015421927e_an_lcsh_heading_drops_its_closing_full_stop as drops_its_closing_full_stop,
+)
+from migrations.versions import (
     f1c30ab27d84_store_the_shelf_key_beside_the_number as revision,
 )
 from migrations.versions import (
@@ -62,6 +68,7 @@ from migrations.versions import (
 from migrations.versions import (
     f73ebc9f0436_a_published_catalogue_keeps_its_sru_server as keeps_its_sru_server,
 )
+from routers.oai import OAI_PREFIX
 from routers.sru import SRU_PREFIX
 from schemas.opds import OpdsServerIn
 from tests import sqlite_only
@@ -73,6 +80,11 @@ from tests.test_filing import CORPUS
 TREE_GUARDS = {
     "TestTheBoundsThisRevisionPutOnBytes": ("application_modules",),
 }
+
+
+def _built_in_key(scheme: str, number: str) -> str:
+    """The key a built in scheme's row stores, under the rule its seed row names."""
+    return filing.sort_key_under(classification_schemes.BUILT_IN[ClassificationScheme(scheme)].filing, number)
 
 
 def drop_everything() -> None:
@@ -1048,7 +1060,7 @@ class TestWideningTheClassificationNumber:
         with engine.connect() as connection:
             # `sort_key` by hand, because this is raw SQL rather than the ORM:
             # `f1c30ab27d84` made the column NOT NULL and
-            # `Classification._file_the_number` is what fills it everywhere else.
+            # `models._file_the_numbers` is what fills it everywhere else.
             connection.execute(
                 text(
                     "INSERT INTO classifications "
@@ -1057,7 +1069,7 @@ class TestWideningTheClassificationNumber:
                 ),
                 {
                     "number": self.HEADING,
-                    "sort_key": filing.sort_key_for("lcsh", self.HEADING),
+                    "sort_key": _built_in_key("lcsh", self.HEADING),
                 },
             )
             connection.commit()
@@ -1097,7 +1109,7 @@ class TestWideningTheClassificationNumber:
         with engine.connect() as connection:
             # `sort_key` by hand, because this is raw SQL rather than the ORM:
             # `f1c30ab27d84` made the column NOT NULL and
-            # `Classification._file_the_number` is what fills it everywhere else.
+            # `models._file_the_numbers` is what fills it everywhere else.
             connection.execute(
                 text(
                     "INSERT INTO classifications "
@@ -1106,7 +1118,7 @@ class TestWideningTheClassificationNumber:
                 ),
                 {
                     "number": self.HEADING,
-                    "sort_key": filing.sort_key_for("lcsh", self.HEADING),
+                    "sort_key": _built_in_key("lcsh", self.HEADING),
                 },
             )
             connection.commit()
@@ -3024,6 +3036,178 @@ class TestAPublishedCatalogueKeepsItsSruServer:
         assert keeps_its_sru_server._TRUE_VALUES == settings_store._TRUE_VALUES
 
 
+class TestAHarvestedRecordHasADatestamp:
+    """Revision `205abd150aeb`: every existing Book gets the one datestamp of the
+    upgrade, never its `added_at`, and the OAI-PMH switch is written by nobody, so a
+    published deployment upgrading serves no OAI-PMH until an admin says so.
+
+    In the pipeline's Postgres selection: the one test that upgrades this
+    revision over existing rows on that engine."""
+
+    PREVIOUS = "f73ebc9f0436"
+    REVISION = "205abd150aeb"
+
+    def test_no_existing_book_is_stamped_with_when_it_was_added(self) -> None:
+        """`added_at` is withheld from the public catalogue, and a header would
+        publish it."""
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            for title, added in (("Solaris", "2003-04-05 06:07:08"), ("Ubik", "1999-09-09 09:09:09")):
+                connection.execute(
+                    text("INSERT INTO books (title, added_at) VALUES (:title, :added)"),
+                    {"title": title, "added": added},
+                )
+            connection.commit()
+        schema.upgrade_to(self.REVISION)
+        with engine.connect() as connection:
+            stamped = {
+                str(value) for value in connection.execute(text("SELECT oai_datestamp FROM books")).scalars()
+            }
+
+        assert len(stamped) == 1
+        assert not any(value.startswith(("2003-04-05", "1999-09-09")) for value in stamped)
+
+    def test_a_published_deployment_upgrading_serves_no_oai(self, client) -> None:
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            for key in ("library_mode", "public_catalogue_enabled"):
+                connection.execute(
+                    text("INSERT INTO settings (key, value) VALUES (:key, 'true')"), {"key": key}
+                )
+            connection.commit()
+        schema.upgrade_to(self.REVISION)
+
+        assert client.get(f"{OAI_PREFIX}?verb=Identify").status_code == 404
+
+    def test_the_downgrade_removes_the_column_and_the_table(self) -> None:
+        from alembic import command
+
+        at_revision(self.PREVIOUS)
+        schema.upgrade_to(self.REVISION)
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+        inspector = inspect(engine)
+
+        assert "oai_datestamp" not in {column["name"] for column in inspector.get_columns("books")}
+        assert "oai_tombstones" not in inspector.get_table_names()
+
+
+class TestClassificationSchemesBecomeRows:
+    """Revision 8cfb39d1d900, which adds `classification_schemes` and points
+    `classifications.scheme` at it."""
+
+    PREVIOUS = "205abd150aeb"
+    REVISION = "8cfb39d1d900"
+
+    def test_the_seeded_rows_are_the_built_in_table(self) -> None:
+        """The revision's frozen copy against `classification_schemes.BUILT_IN`."""
+        at_revision(self.PREVIOUS)
+        schema.upgrade_to(self.REVISION)
+        with engine.connect() as connection:
+            seeded = set(connection.execute(text("SELECT code, name, filing FROM classification_schemes")))
+
+        assert seeded == {
+            (row["code"], row["name"], row["filing"]) for row in classification_schemes.seed_rows()
+        }
+
+    def test_a_code_already_stored_gets_a_row_of_its_own(self) -> None:
+        """Without it the foreign key would refuse the upgrade over a heading
+        `backup.restore` let in."""
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(text("INSERT INTO books (title) VALUES ('Docker')"))
+            connection.execute(
+                text(
+                    "INSERT INTO classifications (book_id, scheme, number, sort_key) "
+                    "VALUES (1, 'udc', '004', '004')"
+                )
+            )
+            connection.commit()
+        schema.upgrade_to(self.REVISION)
+        with engine.connect() as connection:
+            row = connection.execute(
+                text("SELECT name, filing FROM classification_schemes WHERE code = 'udc'")
+            ).one()
+
+        assert tuple(row) == ("udc", "generic")
+
+
+class TestAPatronIsAThirdKindOfBorrower:
+    """Revision f009f139047c, which adds `patrons` and rewrites `ck_loans_one_borrower`."""
+
+    PREVIOUS = "c2015421927e"
+    REVISION = "f009f139047c"
+
+    _COLUMNS = (
+        "id, book_id, loaned_to_user_id, loaned_to_name, loaned_by_user_id, "
+        "loaned_at, returned_at, due_at, notified_at"
+    )
+
+    def _with_two_loans(self) -> None:
+        """A returned loan to a member and an open one to a typed name, every date set."""
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim', 'x', TRUE)")
+            )
+            connection.execute(text("INSERT INTO books (title) VALUES ('Dune'), ('Emma')"))
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_user_id, loaned_by_user_id, loaned_at, "
+                    "returned_at, due_at, notified_at) VALUES (1, 1, 1, '2026-01-02 03:04:05', "
+                    "'2026-02-03 04:05:06', '2026-01-30 00:00:00', '2026-01-31 08:00:00')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, loaned_at, due_at) "
+                    "VALUES (2, 'the neighbour', 1, '2026-03-04 05:06:07', '2026-04-01 00:00:00')"
+                )
+            )
+            connection.commit()
+
+    def _loans(self) -> list[tuple]:
+        with engine.connect() as connection:
+            return [
+                tuple(row)
+                for row in connection.execute(text(f"SELECT {self._COLUMNS} FROM loans ORDER BY id"))
+            ]
+
+    def test_existing_loans_survive_unchanged(self) -> None:
+        self._with_two_loans()
+        before = self._loans()
+
+        schema.upgrade_to(self.REVISION)
+
+        assert self._loans() == before
+        with engine.connect() as connection:
+            added = connection.execute(
+                text("SELECT loaned_to_patron_id, borrower_anonymised_at FROM loans")
+            ).all()
+        assert [tuple(row) for row in added] == [(None, None), (None, None)]
+
+    def test_the_downgrade_drops_the_loans_it_cannot_represent(self) -> None:
+        from alembic import command
+
+        self._with_two_loans()
+        schema.upgrade_to(self.REVISION)
+        with engine.connect() as connection:
+            connection.execute(text("INSERT INTO patrons (card_number, name) VALUES ('C1', 'Pat')"))
+            connection.execute(text("UPDATE loans SET returned_at = '2026-03-05 00:00:00' WHERE id = 2"))
+            connection.execute(
+                text(
+                    "INSERT INTO loans (book_id, loaned_to_patron_id, loaned_by_user_id, loaned_at) "
+                    "VALUES (2, 1, 1, '2026-04-04 00:00:00')"
+                )
+            )
+            connection.commit()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        with engine.connect() as connection:
+            remaining = connection.execute(text("SELECT id FROM loans ORDER BY id")).scalars().all()
+        assert remaining == [1, 2]
+
+
 class TestTheStoredShelfKey:
     """Revision f1c30ab27d84, which adds `classifications.sort_key` and fills it.
 
@@ -3091,7 +3275,7 @@ class TestTheStoredShelfKey:
         schema.upgrade_to_head()
 
         assert self.stored() == [
-            (scheme, number, filing.sort_key_for(scheme, number)) for scheme, number in self.FILED
+            (scheme, number, _built_in_key(scheme, number)) for scheme, number in self.FILED
         ]
 
     def test_the_column_refuses_a_row_with_no_key(self):
@@ -3152,9 +3336,9 @@ class TestTheStoredShelfKey:
         would notice if that stopped being right.
         """
         mismatches = [
-            (number, revision._sort_key(scheme, number), filing.sort_key_for(scheme, number))
+            (number, revision._sort_key(scheme, number), _built_in_key(scheme, number))
             for number in CORPUS
-            if revision._sort_key(scheme, number) != filing.sort_key_for(scheme, number)
+            if revision._sort_key(scheme, number) != _built_in_key(scheme, number)
         ]
 
         assert mismatches == []
@@ -3174,7 +3358,136 @@ class TestTheStoredShelfKey:
         ]
 
         mismatches = [
-            value for value in values if revision._sort_key("lcc", value) != filing.sort_key_for("lcc", value)
+            value for value in values if revision._sort_key("lcc", value) != _built_in_key("lcc", value)
+        ]
+
+        assert mismatches == []
+
+
+class TestAnLcshHeadingDropsItsClosingFullStop:
+    """Revision c2015421927e, which rewrites every stored LCSH number into
+    `Subfields.heading_label`'s form and merges the twins that makes."""
+
+    PREVIOUS = "ae3dd7d65835"
+    REVISION = "c2015421927e"
+    STAMPED = datetime(2001, 2, 3, 4, 5, 6)
+
+    @staticmethod
+    def _store(*rows: tuple[int, str, str, str | None, str | None]) -> None:
+        """Two books stamped `STAMPED`, then each `(book_id, scheme, number,
+        label, kind)` in order."""
+        at_revision(TestAnLcshHeadingDropsItsClosingFullStop.PREVIOUS)
+        with engine.connect() as connection:
+            for title in ("Docker", "Stoner"):
+                connection.execute(
+                    text(
+                        "INSERT INTO books (title, is_private, added_at, ownership, oai_datestamp) "
+                        "VALUES (:title, FALSE, CURRENT_TIMESTAMP, 'owned', :stamped)"
+                    ).bindparams(stamped=TestAnLcshHeadingDropsItsClosingFullStop.STAMPED),
+                    {"title": title},
+                )
+            for book_id, scheme, number, label, kind in rows:
+                connection.execute(
+                    text(
+                        "INSERT INTO classifications (book_id, scheme, number, label, kind, sort_key) "
+                        "VALUES (:book_id, :scheme, :number, :label, :kind, :number)"
+                    ),
+                    {"book_id": book_id, "scheme": scheme, "number": number, "label": label, "kind": kind},
+                )
+            connection.commit()
+        schema.upgrade_to(TestAnLcshHeadingDropsItsClosingFullStop.REVISION)
+
+    @staticmethod
+    def _stored() -> list[tuple[Any, ...]]:
+        with engine.connect() as connection:
+            return [
+                tuple(row)
+                for row in connection.execute(
+                    text(
+                        "SELECT id, book_id, scheme, number, label, kind, sort_key "
+                        "FROM classifications ORDER BY id"
+                    )
+                )
+            ]
+
+    @staticmethod
+    def _stamps() -> list[datetime]:
+        with engine.connect() as connection:
+            return list(
+                connection.execute(
+                    text("SELECT oai_datestamp FROM books ORDER BY id").columns(oai_datestamp=DateTime)
+                ).scalars()
+            )
+
+    @pytest.mark.parametrize(
+        "first",
+        [
+            pytest.param([(1, "lcsh", "Toxicology.", None, None)], id="rewritten"),
+            pytest.param(
+                [(1, "lcsh", "Toxicology", None, None), (1, "lcsh", "Toxicology.", None, None)], id="merged"
+            ),
+        ],
+    )
+    def test_a_book_whose_headings_changed_is_restamped_and_one_left_alone_is_not(
+        self, first: list[tuple[int, str, str, str | None, str | None]]
+    ) -> None:
+        """A harvester asking `from` reads the new headings only if the stamp
+        moves, and a stamp moved for nothing tells it something changed. The
+        second book's own `Toxicology` is already in the form."""
+        before = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+        self._store(*first, (2, "lcsh", "Toxicology", None, None))
+        after = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+
+        restamped, kept = self._stamps()
+
+        assert before <= restamped <= after
+        assert kept == self.STAMPED
+
+    def test_a_heading_stored_with_its_full_stop_loses_it_and_files_by_the_new_number(self) -> None:
+        self._store((1, "lcsh", "Psychology, Industrial.", None, None))
+
+        heading = "Psychology, Industrial"
+
+        assert self._stored() == [(1, 1, "lcsh", heading, None, None, _built_in_key("lcsh", heading))]
+
+    def test_two_forms_of_one_heading_on_one_book_become_the_first_row_with_what_the_second_filled_in(
+        self,
+    ) -> None:
+        """Without the merge the update meets the unique index; without the
+        absorb the caption and the kind go with the deleted row."""
+        self._store(
+            (1, "lcsh", "Psychology, Industrial.", None, None),
+            (1, "lcsh", "Psychology, Industrial", "Industrial psychology", "content"),
+        )
+
+        heading = "Psychology, Industrial"
+
+        assert self._stored() == [(1, 1, "lcsh", heading, "Industrial psychology", "content", heading)]
+
+    def test_one_heading_on_two_books_stays_one_row_each(self) -> None:
+        self._store((1, "lcsh", "Toxicology.", None, None), (2, "lcsh", "Toxicology", None, None))
+
+        assert [(row[1], row[3]) for row in self._stored()] == [(1, "Toxicology"), (2, "Toxicology")]
+
+    def test_another_scheme_and_a_heading_the_transform_would_empty_are_left_alone(self) -> None:
+        self._store((1, "gnd", "Toxikologie.", None, None), (1, "lcsh", ".", None, None))
+
+        assert [row[3] for row in self._stored()] == ["Toxikologie.", "."]
+
+    def test_the_frozen_transform_is_heading_label_today(self) -> None:
+        """The revision's copy against `Subfields.heading_label`, over values
+        built from the characters the expression strips and some it keeps."""
+        generator = random.Random(1964)
+        alphabet = "Aa .,;:/=-()"
+        values = [
+            "".join(generator.choice(alphabet) for _ in range(generator.randint(0, 12))) for _ in range(400)
+        ]
+
+        mismatches = [
+            value
+            for value in values
+            if drops_its_closing_full_stop.heading_label(value)
+            != marc_fields.Subfields([("a", value)]).heading_label()
         ]
 
         assert mismatches == []
@@ -3608,6 +3921,18 @@ _TEXT_CEILINGS: tuple[tuple[str, str, dict[str, object]], ...] = (
     ),
     ("readwise_books", "title", {"user_id": 1, "user_book_id": 1}),
     ("online_links", "label", {"book_id": 1, "url": "https://a.example/"}),
+    # Both columns of the one constraint: a vocabulary label and its entry's
+    # identifier each carry a byte arm.
+    (
+        "vocabulary_labels",
+        "label",
+        {"scheme": "gnd", "generation": 1, "identifier": "(DE-588)1", "preferred": True},
+    ),
+    (
+        "vocabulary_labels",
+        "identifier",
+        {"scheme": "gnd", "generation": 1, "label": "Abfall", "preferred": True},
+    ),
     (
         "member_logins",
         "resume_cursor",
@@ -3631,6 +3956,8 @@ _CEILING_CONSTRAINTS: dict[tuple[str, str], str] = {
     ("readwise_books", "title"): "ck_readwise_books_bounds",
     ("online_links", "label"): "ck_online_links_bounds",
     ("member_logins", "resume_cursor"): "ck_member_logins_resume_cursor",
+    ("vocabulary_labels", "label"): "ck_vocabulary_labels_bounds",
+    ("vocabulary_labels", "identifier"): "ck_vocabulary_labels_bounds",
 }
 
 
@@ -6598,6 +6925,8 @@ class TestADeletedBooksIdIsNeverReused:
         self.build_database_with_three_books()
         before = self.books_shape()
 
-        schema.upgrade_to_head()
+        # To the rebuild and no further: a later revision adding an index to
+        # `books` is a change of shape this test is not about.
+        schema.upgrade_to("0850786d1753")
 
         assert self.books_shape() == before

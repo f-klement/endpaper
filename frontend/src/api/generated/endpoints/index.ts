@@ -7,6 +7,7 @@ export * from "./imports/imports.ts";
 export * from "./kosync/kosync.ts";
 export * from "./loans/loans.ts";
 export * from "./opds/opds.ts";
+export * from "./patrons/patrons.ts";
 export * from "./public/public.ts";
 export * from "./readwise/readwise.ts";
 export * from "./settings/settings.ts";

@@ -2192,7 +2192,7 @@ class TestTheRecordCarriesNoClassificationColumnThePublicPayloadWithholds:
         )
         book.classifications.append(heading)
         # **Set after the constructor and after the append, both deliberately.**
-        # `Classification._file_the_number` derives `sort_key` on every ORM write
+        # `models._file_the_numbers` derives `sort_key` on every ORM write
         # of `scheme` or `number`, so a sentinel passed to the constructor is
         # overwritten by the derivation and the arm would assert nothing about
         # that column. A transient row, never added to a session, so no type
@@ -2354,7 +2354,7 @@ class TestARecordSaysWhatEachHeadingWasAsserting:
         """One public book whose GND row the record marked as a carrier.
 
         A real `Classification` rather than a stand-in, because the kind reaches
-        the writer off a stored row and `Classification._file_the_number`
+        the writer off a stored row and `models._file_the_numbers`
         derives the sort key that the column's NOT NULL demands.
         """
         book = Book(isbn="9780000000004", added_by_user_id=admin["user"]["id"], **SHARED)

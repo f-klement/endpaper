@@ -6,11 +6,14 @@ and every member's private books, and a restore replaces the lot.
 
 from typing import Annotated
 
+import anyio.to_thread
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 import backup as backup_service
 import downloads
+import vocabulary_copy
 from auth import require_admin
 from dependencies import DbSession
 from models import User
@@ -113,9 +116,13 @@ async def restore_backup(
     is the only endpoint in the app that destroys data it was not given the id
     of, and it destroys all of it.
 
-    The archive is validated in full before the first row is deleted. A restore
-    that fails halfway leaves a library that is neither the backup nor what was
-    there before, which is worse than either.
+    The manifest's shape is checked before the first row is deleted; its rows,
+    and each line of a table the archive carries as lines, are read as they are
+    inserted, after the deletes. Nothing commits until every table is in, so a
+    refusal at either point leaves what was there before. A restore that
+    failed halfway would leave a library that is neither the backup nor what
+    was there, which is worse than either, so a commit between tables would
+    break this.
     """
     if not confirm:
         raise HTTPException(
@@ -134,7 +141,14 @@ async def restore_backup(
         )
 
     try:
-        restored = backup_service.restore(db, data)
+        # **Off the event loop**: with a vocabulary loaded a restore takes over
+        # a minute at the pod's CPU limit, and on the loop the process answers
+        # nothing meanwhile, `/api/healthz` included, so a liveness probe may
+        # restart the pod and roll the uncommitted restore back. Measured in
+        # `_restore_unless_loading`'s docstring.
+        restored = await anyio.to_thread.run_sync(_restore_unless_loading, db, data)
+    except vocabulary_copy.Refused as refusal:
+        raise HTTPException(status_code=409, detail=f"Not now: {refusal}. Restore once it ends.") from refusal
     except backup_service.RestoreError as error:
         # 400, not 500: the archive is the caller's, and every one of these
         # says exactly what is wrong with it.
@@ -149,3 +163,19 @@ async def restore_backup(
     # fields are named after those tables; a field with no matching key reads 0,
     # which is what the enumeration did anyway.
     return RestoreResult(**{name: restored.get(name, 0) for name in RestoreResult.model_fields})
+
+
+def _restore_unless_loading(db: Session, data: bytes) -> dict[str, int]:
+    """`backup.restore`, refused with `vocabulary_copy.Refused` while a
+    vocabulary download runs, since the restore replaces the table that load
+    is writing: `vocabulary_copy.no_load`. One function so the lock is taken
+    and released on the thread that does the restore.
+
+    Run off the loop because, measured 2026-11-20 in a pod limited to 500m
+    over a million `vocabulary_labels` rows, the route stalled its event loop
+    for 68.7 s in one piece with the restore on the loop, and for no more than
+    0.1 s with it here (62.0 s in all). A liveness probe at Kubernetes'
+    default threshold restarts the pod after three failed checks.
+    """
+    with vocabulary_copy.no_load():
+        return backup_service.restore(db, data)

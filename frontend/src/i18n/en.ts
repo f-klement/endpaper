@@ -18,6 +18,7 @@ export const en = {
   "nav.loans": "Loans",
   "nav.stats": "Stats",
   "nav.settings": "Settings",
+  "nav.patrons": "Patrons",
   "nav.menu": "Menu",
   // The trigger names the signed-in member, so the top bar says who you are
   // without opening anything.
@@ -92,6 +93,13 @@ export const en = {
   "library.channelBroken":
     "Overdue reminders are not getting through on {channels}.",
   "library.channelBrokenAction": "Check the settings",
+  "library.vocabularyOffer":
+    "No subject vocabulary is copied here yet, so every subject lookup asks its source. A copy can be downloaded in the settings, under Subject vocabularies.",
+  "library.vocabularyOfferAction": "Open the settings",
+  "library.vocabularyOfferDismiss": "Dismiss",
+  "library.vocabularyLoading":
+    "A subject vocabulary is being copied here. Its progress is shown in the settings, under Subject vocabularies.",
+  "library.vocabularyLoadingAction": "Show the progress",
 
   // ── Library ─────────────────────────────────────────────────────────────
   "library.title": "Library",
@@ -392,6 +400,17 @@ export const en = {
   // Library mode only: which catalogues produced a candidate, by the names the
   // settings list shows. A merged row names every catalogue that answered.
   "search.source.from": "Source: {names}",
+  // Library mode only: a cataloguer narrows one lookup or one search to some of
+  // the catalogues this library asks. Never stored, so the hint says so.
+  "search.narrow.title": "Ask only some catalogues",
+  "search.narrow.chosen": "Asking only {names}",
+  "search.narrow.lookupHint":
+    "For the next ISBN scanned or typed. Nothing ticked asks every catalogue.",
+  "search.narrow.searchHint":
+    "For the next search only. Nothing ticked asks every catalogue.",
+  "search.narrow.asked": "Asked only {names}.",
+  "search.narrow.refused":
+    "The catalogues this library asks have changed, so nothing was asked. The choices offered are now up to date.",
 
   // ── Loans ───────────────────────────────────────────────────────────────
   "loans.title": "Loans",
@@ -467,6 +486,55 @@ export const en = {
   "customFields.valuePlaceholder": "Leave empty to clear",
   // The link opens away from this app, so it says so before it is pressed.
   "customFields.opensElsewhere": "Opens in a new tab",
+
+  // ── Classification schemes ──────────────────────────────────────────────
+  // The four built in schemes and a library's own. A rule is how a scheme's
+  // numbers sort on a shelf, chosen once because every stored key used it.
+  "schemes.title": "Classification schemes",
+  "schemes.explain":
+    "The schemes a book's classification may come from. Add your own to catalogue under a scheme Endpaper does not know; how its numbers sort is chosen once.",
+  "schemes.codeLabel": "Code",
+  "schemes.nameLabel": "Name",
+  "schemes.ruleLabel": "Sorts like",
+  "schemes.ruleGeneric": "Plain text",
+  "schemes.ruleDewey": "Dewey",
+  "schemes.ruleLcc": "Library of Congress",
+  "schemes.addButton": "Add scheme",
+  "schemes.renameLabel": "New name for {name}",
+  "schemes.deleteConfirm": "Delete {name}? This cannot be undone.",
+  // The count is of the books the reader can see, and says so: another
+  // member's private book blocks the delete too and is not counted. A whole
+  // phrase for one, as `public.resultCountOne`: no plural engine here.
+  "schemes.inUse":
+    "{count} books you can see still use this scheme, so it cannot be deleted.",
+  "schemes.inUseOne":
+    "1 book you can see still uses this scheme, so it cannot be deleted.",
+  "schemes.inUseUnseen":
+    "Books you cannot see still use this scheme, so it cannot be deleted.",
+
+  // ── Subject vocabularies ────────────────────────────────────────────────
+  // GND subjects and LCSH, each kept as a local copy where its licence allows.
+  // A lookup never waits on a copy: until one loads it asks the source live.
+  "vocabularies.title": "Subject vocabularies",
+  "vocabularies.explain":
+    "A local copy of a vocabulary answers subject lookups without asking its source each time. Until a copy is downloaded, and while it downloads, lookups ask the source live.",
+  "vocabularies.download": "Download",
+  "vocabularies.refresh": "Refresh",
+  "vocabularies.licence": "Licence: {licence}",
+  "vocabularies.licenceNone": "No licence declared",
+  "vocabularies.notCopyable":
+    "Its licence does not permit a local copy, so lookups always ask the source live.",
+  "vocabularies.notLoaded": "Not downloaded yet. Lookups ask the source live.",
+  "vocabularies.fetched": "Fetched {date}, {count} entries.",
+  "vocabularies.released": "Released by the source {date}.",
+  "vocabularies.releasedUnknown": "The source gave no release date.",
+  "vocabularies.phaseQueued": "Waiting to start",
+  "vocabularies.phaseFetching": "Downloading",
+  "vocabularies.phaseConverting": "Converting",
+  "vocabularies.phaseLoading": "Loading",
+  "vocabularies.phaseFailed": "The last download failed.",
+  "vocabularies.phasePercent": "{phase}: {percent}%",
+  "vocabularies.failedBecause": "The last download failed: {error}",
 
   // ── Quotes ──────────────────────────────────────────────────────────────
   "quotes.title": "Quotes",
@@ -688,6 +756,18 @@ export const en = {
     "Another library's software can search the published catalogue at /sru and read its records as MARCXML. It sees exactly what a visitor sees.",
   "settings.protocols.sruNeedsPublishing":
     "Publish the catalogue first. SRU serves only a published catalogue.",
+  "settings.protocols.oaiLabel":
+    "Let aggregators harvest this catalogue over OAI-PMH",
+  "settings.protocols.oaiHint":
+    "A union catalogue or aggregator can collect the published records at /oai. It sees the same records a visitor sees, plus the day each one last changed and which have left the catalogue.",
+  "settings.protocols.oaiNeedsPublishing":
+    "Publish the catalogue first. OAI-PMH serves only a published catalogue.",
+  "settings.protocols.oaiNeedsAddress":
+    "Enter a repository contact address below first. OAI-PMH shows it to every aggregator.",
+  "settings.protocols.oaiAddressLabel": "Repository contact address",
+  "settings.protocols.oaiAddressHint":
+    "Every aggregator is shown this address. Use a role address rather than a person's.",
+  "settings.protocols.oaiAddressSave": "Save address",
   "settings.availability.label":
     "Show whether a book is on the shelf or on loan",
   "settings.availability.hint":
@@ -1274,6 +1354,49 @@ export const en = {
   "collections.browse": "Show these books",
   "collections.couldNotLoad": "Could not load the collections.",
   "collections.saving": "Filing...",
+
+  // ── Patrons ─────────────────────────────────────────────────────────────
+  // A library's word for the people who borrow from it. Never "customer" or
+  // "user": a reader in a library would notice.
+  "patrons.title": "Patrons",
+  "patrons.explain":
+    "The people who borrow from this library without an account in it. Only an admin sees this page.",
+  "patrons.search": "Search patrons",
+  "patrons.searchPlaceholder": "Name, email or card number",
+  "patrons.searchHint":
+    "Search by name, email or card number to find a patron.",
+  "patrons.noMatch": "No patron matches that search.",
+  "patrons.capped":
+    "Showing the first {count}. A narrower search finds the rest.",
+  "patrons.couldNotLoad": "Could not search the patrons.",
+  "patrons.couldNotSave": "Could not save the patron.",
+  "patrons.couldNotDelete": "Could not delete the patron.",
+  "patrons.new": "New patron",
+  "patrons.newTitle": "Register a patron",
+  "patrons.editTitle": "Edit {name}",
+  "patrons.register": "Register",
+  "patrons.registering": "Registering...",
+  "patrons.name": "Name",
+  "patrons.cardNumber": "Card number",
+  "patrons.cardNumberHint":
+    "Letters and digits, joined by at most a full stop, a slash or a hyphen. Letters are saved as capitals.",
+  "patrons.contact": "Contact",
+  "patrons.email": "Email",
+  "patrons.phone": "Phone",
+  "patrons.address": "Address",
+  "patrons.street": "Street",
+  "patrons.houseNumber": "House number",
+  "patrons.postcode": "Postcode",
+  "patrons.city": "City",
+  "patrons.expiresOn": "Registered until",
+  "patrons.card": "Card {number}",
+  "patrons.expiredOn": "Registration expired on {date}",
+  "patrons.validUntil": "Registered until {date}",
+  "patrons.noExpiry": "No expiry date",
+  // Says it cannot be undone, what survives (the loan dates) and what a desk
+  // loses that it may not expect: who holds a book still out with them.
+  "patrons.deleteConfirm":
+    "Delete {name}? Their record is erased, and that cannot be undone. Their loans keep the dates each book went out and came back, and no longer name them. A book still out with them stays recorded as out, with no borrower.",
 
   // ── Authors ─────────────────────────────────────────────────────────────
   "authors.title": "Authors",
@@ -2267,6 +2390,27 @@ export const en = {
   // not given a paragraph about something it does not have.
   "providers.slowLegend":
     "A catalogue marked slow cannot answer a title search inside the deadline the quick search allows, so it is left out of that one and asked only when somebody asks for it. It answers a scan exactly as the others do.",
+  // How each catalogue is asked, for a policy about which catalogues may
+  // receive readers' queries. Protocol and schema names are technical terms and
+  // stay as they are in both catalogues.
+  "providers.how.sru": "SRU {version}",
+  "providers.how.z3950": "Z39.50",
+  "providers.how.bespoke": "Its own JSON API",
+  "providers.how.schema": "Record schema: {schema}",
+  "providers.how.noSchema": "No record schema named",
+  "providers.how.encrypted": "Encrypted",
+  "providers.how.unencrypted": "Not encrypted",
+  "providers.how.apiKey": "Needs an API key",
+  "providers.how.login": "Needs a login",
+  "providers.how.supplies": "Supplies {schemes}",
+  "providers.scheme.ddc": "Dewey",
+  "providers.scheme.lcc": "Library of Congress Classification",
+  "providers.scheme.gnd": "GND",
+  "providers.scheme.lcsh": "Library of Congress Subject Headings",
+  "providers.confirm.lastSupplier":
+    "Of the catalogues that can answer, only {name} supplies {schemes}. Books looked up from now on will not get them. Switch it off?",
+  "providers.confirm.allOff":
+    "After this, no catalogue that can answer is left switched on, so looking up a book will find nothing and every book is catalogued by hand. Switch it off?",
   // ── Highlights: marked on a reading device, imported from KOReader ──────
   "highlights.title": "Highlights",
   "highlights.private": "Only visible to me",

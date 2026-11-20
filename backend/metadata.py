@@ -3857,10 +3857,10 @@ def _mods_search(root: ElementTree.Element, decoding: decoders.Decoding) -> list
 #: Which decoder reads a lookup response, by `decoders.Reader`.
 #:
 #: **Keyed on the reader and not on the source**, which is the whole change:
-#: four sources share `MARC_GND` and a fifth would add no entry here. A reader
-#: absent from this table is a target that answers a lookup with nothing able to
-#: parse the answer, and `resolve` is what turns that into a failure at load
-#: rather than a `KeyError` on the path that adds a book.
+#: every row whose reader is `MARC_GND` shares its entry, and another would add
+#: none. A reader absent from this table is a target that answers a lookup with
+#: nothing able to parse the answer, and `resolve` is what turns that into a
+#: failure at load rather than a `KeyError` on the path that adds a book.
 #:
 #: **The value type is the seam, and it is enforced by the type rather than by a
 #: comment.** A decoder takes a parsed record and a `decoders.Decoding`; a
@@ -5084,12 +5084,12 @@ async def _take_a_harder_slot(harder: bool, plan: sources.Plan) -> bool:
 #: `_METERED_SEARCHES` below holds it.
 #:
 #: **Keyed on the reader and not on the source**, which is what makes the
-#: sharing possible: three sources name `MARC_GND` and a fourth would add no
-#: entry anywhere. What that costs is the guard: `set(this) | set(that) ==
-#: sources.SEARCH_SOURCES` cannot be restated against a reader keyed table, and
-#: `resolve` is the replacement. It asks the question the old one was really
-#: asking, one row at a time: this row says it answers a search, is there
-#: anything here that can read the answer.
+#: sharing possible: every row whose reader is `MARC_GND` shares one entry, and
+#: another would add none anywhere. What that costs is the guard:
+#: `set(this) | set(that) == sources.SEARCH_SOURCES` cannot be restated against a
+#: reader keyed table, and `resolve` is the replacement. It asks the question
+#: the old one was really asking, one row at a time: this row says it answers a
+#: search, is there anything here that can read the answer.
 #:
 #: **Module level and introspectable on purpose.** The guard that keeps this in
 #: step with the roster used to read the fan out with `ast`, as a list literal
@@ -5764,39 +5764,48 @@ _MISS_TTL_SECONDS: Final = 5 * 60
 #: Bounded so a long scanning session cannot grow it without limit.
 _MAX_ENTRIES: Final = 2_000
 
-_cache: dict[str, tuple[float, Lookup]] = {}
+#: An ISBN and the chain that answered it.
+#:
+#: **The chain is in the key because a narrowed lookup asks a different one.** Keyed on
+#: the ISBN alone, a cataloguer asking only the DNB would be handed the record the full
+#: chain cached, built from catalogues they had just excluded, and a DNB only record would
+#: be served to every later full lookup with the other catalogues' fields missing.
+#: Neither contacts anything it should not, so a transport assertion passes both; the
+#: answer is still from the wrong catalogues.
+type _CacheKey = tuple[str, tuple[CatalogueSource, ...]]
+
+_cache: dict[_CacheKey, tuple[float, Lookup]] = {}
 _cache_lock = asyncio.Lock()
 
 
-def _cached(isbn: str) -> Lookup | None:
-    entry = _cache.get(isbn)
+def _cached(key: _CacheKey) -> Lookup | None:
+    entry = _cache.get(key)
     if entry is None:
         return None
     expires_at, result = entry
     if expires_at < time.monotonic():
-        del _cache[isbn]
+        del _cache[key]
         return None
     return result
 
 
-def _remember(isbn: str, result: Lookup) -> None:
+def _remember(key: _CacheKey, result: Lookup) -> None:
     ttl = _HIT_TTL_SECONDS if result.found else _MISS_TTL_SECONDS
     if len(_cache) >= _MAX_ENTRIES:
         # Oldest first. Insertion order is good enough for a bound this size
         # and costs nothing to maintain.
-        for key in list(_cache)[: _MAX_ENTRIES // 4]:
-            del _cache[key]
-    _cache[isbn] = (time.monotonic() + ttl, result)
+        for oldest in list(_cache)[: _MAX_ENTRIES // 4]:
+            del _cache[oldest]
+    _cache[key] = (time.monotonic() + ttl, result)
 
 
 def clear_cache() -> None:
     """Drop every entry.
 
-    **Called whenever a setting changes which catalogues are asked**, because
-    this cache is keyed on the ISBN alone: a record a source supplied before it
-    was switched off would otherwise keep being served for the rest of its 24
-    hours, and "off means not asked" would be true on the wire and false on the
-    screen.
+    **Called whenever a setting changes which catalogues are asked.** The chain
+    in the key already keeps an entry made under the old list from being served
+    under the new one; clearing is what frees it, rather than leaving it to age
+    out of its 24 hours.
 
     That is three writes, not one, and the docstring used to name the wrong one:
     it said "for an admin who has just set a key", which was inverted by the
@@ -5851,8 +5860,9 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
     if isbn is None:
         return Lookup(Outcome.NOT_FOUND, source="")
 
+    key = (isbn, access.plan.lookup_chain)
     async with _cache_lock:
-        hit = _cached(isbn)
+        hit = _cached(key)
     if hit is not None:
         logger.debug("Cached lookup for %s from %s", isbn, hit.source)
         return hit
@@ -5889,7 +5899,7 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
     outcome = Outcome.NO_SOURCES if not access.plan.lookup_chain else _worst(attempts)
     missed = Lookup(outcome, source="", attempts=attempts)
     async with _cache_lock:
-        _remember(isbn, missed)
+        _remember(key, missed)
     logger.info(
         "No record for %s: %s",
         isbn,
@@ -5935,7 +5945,7 @@ async def _lookup_together(isbn: str, access: Access, attempts: list[tuple[str, 
     # the search path builds and the one the cache and the log carry.
     found = Lookup(Outcome.FOUND, record=merged, source=merged.source, attempts=attempts)
     async with _cache_lock:
-        _remember(isbn, found)
+        _remember((isbn, access.plan.lookup_chain), found)
     logger.info("Resolved %s from %s", isbn, merged.source)
     return found
 
@@ -5968,7 +5978,7 @@ async def _lookup_in_turn(isbn: str, access: Access, attempts: list[tuple[str, O
             record = result.record.with_cover(await covers.resolve(isbn, result.record.cover_url))
             found = Lookup(Outcome.FOUND, record=record, source=name, attempts=attempts)
             async with _cache_lock:
-                _remember(isbn, found)
+                _remember((isbn, access.plan.lookup_chain), found)
             logger.info("Resolved %s from %s", isbn, name)
             return found
     return None

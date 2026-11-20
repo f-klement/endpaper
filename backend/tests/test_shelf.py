@@ -292,6 +292,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager
 
+import classification_schemes
 import ddc
 import filing
 import models
@@ -402,7 +403,7 @@ INDIRECT_READERS = {"backup.py"}
 #: red and no record. An inclusion list is one of the four tells this repository
 #: names; `_parameterised_reads` states the rule and this states the classification.
 #:
-#: Five, and they are five different things, which is why a person says which:
+#: Six, and they are six different things, which is why a person says which:
 #:
 #: * `backup.py` reads every row of every table through `select(*columns)`,
 #:   on purpose: it is the archive, `INDIRECT_READERS` says why it is
@@ -422,6 +423,12 @@ INDIRECT_READERS = {"backup.py"}
 #:   `aliased(ReadingProgress, ...)` bound two lines above. The table is fixed
 #:   at import; only the spelling is indirect, and `reading_progress` carries a
 #:   member of its own so it is outside `BOOK_OWNED_TABLES` anyway.
+#: * `harvest.py` reads the Book ids a bulk statement on a harvested table
+#:   touches, through the column of that table naming a Book, to move their
+#:   OAI-PMH datestamps, private Books included, since a datestamp is never
+#:   served for a Book the Shelf does not show. It returns no row to any caller,
+#:   and which ids get a tombstone, the one thing it publishes, it asks
+#:   `Shelf.seen_by_the_public` before and after the write.
 #: * `targets.py` calls `z3950.query(...)`, which is a Z39.50 client and not a
 #:   `Session`. `_builds_a_query` matches `query` on any receiver on purpose,
 #:   and its docstring says why, so a naming coincidence lands here rather than
@@ -434,7 +441,9 @@ INDIRECT_READERS = {"backup.py"}
 #:
 #: `test_a_parameterised_reader_is_genuinely_invisible_to_this_pass` is what
 #: stops an entry outliving the gap it describes.
-PARAMETERISED_READERS = frozenset({"backup.py", "folding.py", "serialisation.py", "shelf.py", "targets.py"})
+PARAMETERISED_READERS = frozenset(
+    {"backup.py", "folding.py", "harvest.py", "serialisation.py", "shelf.py", "targets.py"}
+)
 
 #: The entity the first three passes guard.
 _BOOK = frozenset({"Book"})
@@ -591,7 +600,11 @@ ARCHIVE_TABLES_DECLARATION: Final = (
     'written in. ("custom_fields", CustomField), # Before books, which carry a foreign key into it. '
     "Absent from # `_REQUIRED_TABLES` on purpose: an archive taken before collections # existed restores "
     'with none, which is exactly the state it was # written in. ("collections", Collection), ("books", '
-    "Book), # Straight after the books they hang off, and deliberately absent from # `_REQUIRED_TABLES`: "
+    "Book), # Before the headings, which carry a foreign key into it. Absent from # `_REQUIRED_TABLES`, "
+    "and an archive taken before it existed still # restores its headings: "
+    "`classification_schemes.restorable` supplies # the rows they quote. "
+    '("classification_schemes", ClassificationSchemeRow), # Straight after the books they hang off, '
+    "and deliberately absent from # `_REQUIRED_TABLES`: "
     "an archive taken before classifications existed # restores with none, which is the state it was "
     'written in. ("classifications", Classification), # After both parents, `books` above and '
     "`custom_fields` further up. The # values are the half of the feature a member typed by hand, so an "
@@ -605,7 +618,10 @@ ARCHIVE_TABLES_DECLARATION: Final = (
     "Absent from # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. "
     '("kosync_documents", KosyncDocument), # Which Book each of a member\'s Readwise books is, after both '
     "parents. # Absent from `_REQUIRED_TABLES`, like every table added after # `FORMAT_VERSION` 1. "
-    '("readwise_books", ReadwiseBook), ("loans", Loan), # After the loans it replaces for a digital '
+    '("readwise_books", ReadwiseBook), # Before the loans, which carry a foreign key into it. The '
+    "archive is # the one place a patron's record leaves the database, and it is admin # only like the "
+    "patron routes. Absent from `_REQUIRED_TABLES`: an # archive taken before patrons existed restores "
+    'with none. ("patrons", Patron), ("loans", Loan), # After the loans it replaces for a digital '
     "copy. Both parents are # inserted by here. Absent from `_REQUIRED_TABLES` for the reason # `quotes` "
     'is: an older archive restores with no requests. ("access_requests", AccessRequest), ("notes", '
     "Note), # After notes, which it is shaped after and has no relationship with. # Deliberately absent "
@@ -717,7 +733,22 @@ ARCHIVE_TABLES_DECLARATION: Final = (
     "and never the key, so a restore # onto a machine without that key brings each token back "
     "unreadable, # and its member enters it again on their account page. Absent from # "
     '`_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. ("member_logins", '
-    'MemberLogin), ("settings", Setting), ) )'
+    "MemberLogin), # The records a harvester was told have gone. No foreign key, by design: # a "
+    "tombstone outlives its Book. Carried so a restore keeps telling a # harvester what it told it "
+    "before, and `harvest.wholesale` adds one for # every record the restore itself takes away. Absent "
+    'from # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. ("oai_tombstones", '
+    "OaiTombstone), "
+    "# The local copy of each subject vocabulary, which could be fetched # again and is carried "
+    "anyway (owner, 2026-11-20): a restore onto a # machine with no route to the DNB or id.loc.gov "
+    "still answers every # lookup, and the copy is the release the library catalogued against # "
+    "rather than whatever the source publishes on the day of the restore. # # **What it costs is "
+    "size**: both vocabularies loaded are of the order # of a million label rows, so "
+    "`vocabulary_labels` is in `_LINES` and is # never held whole. Rows of a load in progress ride "
+    "too, and the next # load of that vocabulary removes them. No foreign key either way, so # the "
+    "position is free. Absent from `_REQUIRED_TABLES`, like every table # added after "
+    '`FORMAT_VERSION` 1. ("vocabulary_copies", '
+    'VocabularyCopy), ("vocabulary_labels", VocabularyLabel), '
+    '("settings", Setting), ) )'
 )
 
 # ── The allowlist, and how to add to it ──────────────────────────────────────
@@ -889,6 +920,12 @@ BOOK_OWNED_READERS = {
             "db.execute(delete(book_tags))",
             "a write: a restore empties the association table before it inserts the archive's rows. It "
             "publishes nothing, and `restore` is admin only.",
+        ),
+        (
+            'rows = classification_schemes.restorable(rows, tables.get("classifications") or [])',
+            "a lookup in the uploaded archive, not the database: the restore hands the archive's headings "
+            "to `restorable`, which reads only the scheme code each quotes, to add a row for a code no "
+            "scheme row carries. Nothing is returned to a caller, and `restore` is admin only.",
         ),
         (
             'associations = tables.get("book_tags") or []',
@@ -1082,7 +1119,7 @@ BOOK_OWNED_READERS = {
             "them "
             "and a # merge silently drops the provenance of the row that lost. _Transfer( "
             "_table(Classification.__tablename__), _deduplicated( Classification, held=lambda book: "
-            "book.classifications, key=lambda row: (ClassificationScheme(row.scheme).value, row.number), "
+            "book.classifications, key=lambda row: (str(row.scheme), row.number), "
             "ceiling=MAX_CLASSIFICATIONS_PER_BOOK, absorb=_absorb_heading, ), ), # Notes carry their own "
             "history. A merge repoints every one of them whatever # its author or its visibility: a rule "
             "that "
@@ -1179,6 +1216,15 @@ BOOK_OWNED_READERS = {
             "the mapping that tells the ORM `Book.tags` runs through the association table. A declaration "
             "and not a query; a load through it starts from a `Book` somebody already resolved, which is "
             "the relationship attribute blind spot the module docstring names.",
+        ),
+        (
+            'event.listen(Classification, "before_insert", _file_the_numbers)',
+            "registers the hook that files a heading as it is flushed, run once at import. It reads no "
+            "Book: the hook reads the one row being written and the scheme table's codes and rules.",
+        ),
+        (
+            'event.listen(Classification, "before_update", _file_the_numbers)',
+            "the same hook for an update of a heading's scheme or number, registered once at import.",
         ),
     ],
     "recognition.py": [
@@ -1327,6 +1373,27 @@ BOOK_OWNED_READERS = {
 #: came from. Keyed on the qualified name of the enclosing scope and the call,
 #: in line order; `_whole_book_calls` says why the qualified name is needed.
 WHOLE_BOOK_READERS: Final = {
+    "harvest.py": [
+        (
+            ": cast(Table, Book.__table__)",
+            "the `books` table object, for the harvest's own UPDATE of the datestamp column. Schema, not "
+            "rows: no statement is issued.",
+        ),
+        (
+            "watched: inspect(Book)",
+            "the mapper, for the names of the columns and relationships `PublicBookOut` reads. No "
+            "statement is issued.",
+        ),
+        (
+            "_stamp: identity_key(Book, book_id)",
+            "an identity map lookup for a Book this session already holds, to move its datestamp on the "
+            "object. It issues no SQL and hands the Book to nobody.",
+        ),
+        (
+            "_settle: identity_key(Book, book_id)",
+            "the same lookup, to expire the datestamp of a Book back on the public shelf. No SQL.",
+        ),
+    ],
     "importing.py": [
         (
             "Import._apply_one: self._db.get_one(Book, book_id)",
@@ -1364,6 +1431,22 @@ WHOLE_BOOK_READERS: Final = {
 #: is the shape these rules exist for. Keyed on the whole statement, in line
 #: order, as `BOOK_OWNED_READERS` is; `_raw_sql_naming` says which strings count.
 BOOKS_SQL_READERS: Final = {
+    "harvest.py": [
+        (
+            "_SQLITE_COUNTER_ROW: Final = ( \"INSERT INTO sqlite_sequence (name, seq) SELECT 'books', 0 \" "
+            "\"WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'books')\" )",
+            "the row SQLite keeps the Book id counter in, added after a restore where missing. It reads "
+            "no Book.",
+        ),
+        (
+            '_RAISE_THE_COUNTER: Final = { "sqlite": "UPDATE sqlite_sequence SET seq = MAX(seq, :highest) '
+            "WHERE name = 'books'\", \"postgresql\": ( \"SELECT setval(pg_get_serial_sequence('books', "
+            '\'id\'), GREATEST(:highest, " "(SELECT COALESCE(MAX(id), 0) FROM books), " '
+            "\"COALESCE(pg_sequence_last_value(pg_get_serial_sequence('books', 'id')::regclass), 0)))\" ), }",
+            "raises the Book id counter past every tombstone after a restore; on Postgres it reads the "
+            "highest Book id, a number and no row's data.",
+        ),
+    ],
     "database.py": [
         (
             'statement = "SELECT id FROM books WHERE id = :book"',
@@ -5391,13 +5474,13 @@ class TestEverySortHasAnOrdering:
 
         Two vocabularies that cannot derive each other: `BookSort` is the API's
         and a scheme is the catalogue's. Without this assertion
-        `filing.SHELF_SCHEMES` and `orders_a_shelf` were read by nothing in
+        `classification_schemes.SHELF_SCHEMES` and `orders_a_shelf` were read by nothing in
         production, three documents said they were the mechanism, and both
         critic seats found that independently on 2026-09-03. A scheme whose
         rule starts ordering a shelf is now a failing test rather than an order
         no client can ask for.
         """
-        assert set(_SHELF_SORTS.values()) == set(filing.SHELF_SCHEMES)
+        assert set(_SHELF_SORTS.values()) == set(classification_schemes.SHELF_SCHEMES)
 
     def test_a_scheme_that_files_no_shelf_cannot_be_given_a_sort(self):
         """The other half, and the one that is enforced rather than compared.
@@ -5531,9 +5614,9 @@ class TestTheStoredKeyIsTheRulesKey:
 
     @pytest.mark.parametrize("scheme", list(ClassificationScheme))
     def test_across_every_scheme_and_the_whole_corpus(self, db, user, scheme):
-        """Parametrised over the enum, so a fifth scheme is covered the day it
-        is added rather than the day somebody remembers this file."""
-        rule = filing.rule_for(scheme)
+        """Parametrised over the enum, so a fifth built in scheme is covered the
+        day it is added rather than the day somebody remembers this file."""
+        rule = filing.FILING_RULES[classification_schemes.BUILT_IN[scheme].filing]
         # Postgres text cannot hold a NUL, so the values carrying one are a
         # question for SQLite alone; `ClassificationIn` refuses them at the door.
         storable = [value for value in CORPUS if "\x00" not in value or db.bind.dialect.name == "sqlite"]
@@ -5581,19 +5664,19 @@ class TestTheStoredKeyIsTheRulesKey:
         assert row.sort_key == "005.133"
 
     def test_the_two_columns_may_be_given_in_either_order(self, db, user):
-        """The trap `Tag._drop_the_key_on_a_rename` records: SQLAlchemy assigns
-        constructor kwargs in the order given, so a hook reading a sibling
-        attribute depends on which was assigned first. Whichever of the two is
-        set second recomputes the key with the first already there.
-        """
+        """The trap `Tag._drop_the_key_on_a_rename` records: a hook reading a
+        sibling attribute depends on which constructor kwarg was assigned
+        first. The key is derived at the flush, with both columns set."""
         book = Book(title="Either way", added_by_user_id=user.id)
         db.add(book)
         db.flush()
         scheme_first = Classification(book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75")
-        number_first = Classification(number="BF75", scheme=ClassificationScheme.LCC, book_id=book.id)
+        number_first = Classification(number="BF75 .A1", scheme=ClassificationScheme.LCC, book_id=book.id)
+        db.add_all([scheme_first, number_first])
+        db.flush()
 
-        assert scheme_first.sort_key == number_first.sort_key
         assert scheme_first.sort_key == filing.LIBRARY_OF_CONGRESS.sort_key("BF75")
+        assert number_first.sort_key == filing.LIBRARY_OF_CONGRESS.sort_key("BF75 .A1")
 
     def test_a_writer_that_skips_the_hook_is_refused_rather_than_filed_last(self, db, user):
         """The enforcement, and the reason the column is NOT NULL with no default.
@@ -6463,6 +6546,9 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
             "the two published catalogue routes, which is also where the publish switch is read"
         ),
         "sru.py: asks a shelf for one": ("the SRU searchRetrieve response, gated by the same switch"),
+        "oai.py: asks a shelf for one": (
+            "the OAI-PMH GetRecord and ListRecords responses, gated by the same switch and its own"
+        ),
     }
 
     @staticmethod

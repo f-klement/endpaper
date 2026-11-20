@@ -23,6 +23,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import func, nullslast, or_
@@ -62,7 +63,7 @@ from authorship import (
     RecordedAssertions,
 )
 from categories import join_categories
-from classifications import add_headings, bounded_headings
+from classifications import add_headings, bounded_headings, unknown_schemes
 from database import hold_book_ceilings, on_commit, on_rollback
 from dependencies import (
     BookForOwner,
@@ -88,6 +89,7 @@ from enums import (
     BookIdentifierScheme,
     BookSort,
     BulkAction,
+    CatalogueSource,
     ExportFormat,
     LendingWillingness,
     Locale,
@@ -170,6 +172,7 @@ from schemas import (
     BulkRequest,
     BulkResult,
     ClassificationFacets,
+    ClassificationIn,
     CollectionAssign,
     ConfirmedIdentifierOut,
     CopyCreate,
@@ -197,6 +200,7 @@ from schemas import (
     LocationOut,
     MergeRequest,
     MissingDigitalReferenceOut,
+    NarrowableCatalogue,
     NoteCreate,
     NoteOut,
     OwnershipUpdate,
@@ -690,12 +694,58 @@ def delete_custom_field(
     logger.info("Deleted custom field %r and %d value(s) under it", name, removed)
 
 
+#: The per request narrowing, as the lookup and the search take it.
+#:
+#: **Bounded by the roster's size**, so a query string repeating one name cannot
+#: grow the set the server builds from it. Absent asks the standing plan, and
+#: there is no empty value to send: the narrowed constructors refuse an empty set.
+_Only = Annotated[
+    list[CatalogueSource] | None,
+    Query(
+        max_length=len(CatalogueSource),
+        description=(
+            "Library mode only. Ask only these catalogues, for this request and no other. "
+            "Each must be one this Library asks for this kind of request, or the request is refused."
+        ),
+    ),
+]
+
+
+@router.get("/lookup/catalogues", response_model=list[NarrowableCatalogue])
+@refuses(403)
+def list_narrowable_catalogues(db: DbSession, current_user: CurrentUser) -> list[NarrowableCatalogue]:
+    """The catalogues a cataloguer may narrow one lookup or search to.
+
+    **Library mode only, refused with the narrowing's own 403**, because a
+    household is never offered the narrowing and this list exists to offer it.
+    Read off the plan in force rather than the stored one, so a source with no
+    key is not offered: naming it would be refused.
+
+    Declared before `/{book_id}`, like `/export`.
+    """
+    if not settings_store.library_mode(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=catalogue_access.NARROWING_NEEDS_LIBRARY_MODE,
+        )
+    plan = settings_store.catalogue_sources(db)
+    lookups = frozenset(plan.lookup_chain)
+    searches = frozenset(plan.searched_harder)
+    return [
+        NarrowableCatalogue(
+            source=source, answers_lookup=source in lookups, answers_search=source in searches
+        )
+        for source in plan.asked
+    ]
+
+
 @router.get("/lookup", response_model=BookLookup)
-@refuses(404)
+@refuses(403, 404)
 async def lookup_isbn(
     db: DbSession,
     current_user: CurrentUser,
     isbn: Annotated[str, Query(min_length=10, max_length=ISBN_MAX)],
+    only: _Only = None,
 ) -> BookLookup:
     # Validated before either upstream is called: a misread barcode would
     # otherwise cost two network round trips to learn nothing.
@@ -711,7 +761,13 @@ async def lookup_isbn(
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    enquiry = catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
+    # Narrowed only when asked, and the narrowed door refuses a name outside the
+    # plan in force rather than dropping it: see `catalogue_access._narrowed_access`.
+    enquiry = (
+        catalogue_access.Enquiry.for_a_narrowed_lookup(db, member=current_user.username, only=frozenset(only))
+        if only
+        else catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
+    )
     result = await enquiry.lookup(canonical)
     if not result.found:
         raise _lookup_failure(result)
@@ -841,6 +897,7 @@ def already_held(
 
 
 @router.get("/search", response_model=BookSearchOut)
+@refuses(403)
 async def search_books(
     db: DbSession,
     current_user: CurrentUser,
@@ -859,6 +916,7 @@ async def search_books(
             )
         ),
     ] = False,
+    only: _Only = None,
 ) -> BookSearchOut:
     """Free-text search, for adding a book nobody can scan.
 
@@ -888,9 +946,16 @@ async def search_books(
     # `lang` is the reader's own language, so a German library searching a
     # German title gets the German printing first. It breaks ties only: an
     # English title still returns the English book.
-    found = await catalogue_access.Enquiry.for_a_member_request(
-        db, member=current_user.username
-    ).title_search(q, limit=limit, prefer_language=lang, harder=harder)
+    #
+    # `only` narrows this search alone, as on the lookup above.
+    enquiry = (
+        catalogue_access.Enquiry.for_a_narrowed_title_search(
+            db, member=current_user.username, only=frozenset(only)
+        )
+        if only
+        else catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
+    )
+    found = await enquiry.title_search(q, limit=limit, prefer_language=lang, harder=harder)
 
     # Both read off what the fan out did rather than off `harder`, which is only
     # what the reader wanted: a harder search runs the ordinary one when the two
@@ -1840,7 +1905,35 @@ def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) 
     return collection_id
 
 
+def _refuse_unknown_schemes(headings: list[ClassificationIn], db: Session) -> None:
+    """A 422 naming each posted heading whose scheme has no row.
+
+    **Refused rather than dropped**, unlike a heading in a record
+    (`classifications._quoting_a_scheme`): a member named this scheme, and a
+    typo or a wrong case (`DDC`) is the ordinary way to name one that does not
+    exist. A drop answered 201 with the heading silently gone. The neighbouring
+    Dewey check in `ClassificationIn` refuses with 422 for the same reason.
+    Shaped like the validation error it would have been while the scheme was
+    a closed enum, so a client reads it the same way.
+    """
+    unknown = unknown_schemes(headings, db)
+    if unknown:
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("body", "classifications", index, "scheme"),
+                    "msg": f"Value error, no classification scheme has the code {headings[index].scheme!r}.",
+                    "input": headings[index].scheme,
+                }
+                for index in unknown
+            ]
+        )
+
+
 def _create_book(payload: BookCreate, current_user: User, db: Session, conflict: str) -> BookOut:
+    # First, while nothing has been flushed: see the function.
+    _refuse_unknown_schemes(payload.classifications, db)
     # Before the ISBN question below, which purges trashed rows to free the
     # number, so a bad collection id is refused before any purge is flushed. The
     # other order would lose nothing: the purge is flushed and not committed, so
@@ -6674,6 +6767,7 @@ def apply_enrichment(
     that confirmation, so they write none of them, but for the volume id a
     lookup by the book's own id found and that carries it.
     """
+    _refuse_unknown_schemes(payload.classifications, db)
     # The body goes in whole. `evidence.confirm` reads the twelve names it
     # writes off the `BookMatch`, so `source` and `suggested_tag_ids` are
     # excluded by it never naming them, and a field added to the schema cannot

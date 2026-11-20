@@ -136,7 +136,7 @@ def suggested_tag_ids(
     `subjects` too).
     """
     matched = list(match_subjects_to_tags(subjects, tags))
-    numbers = [entry.number for entry in classifications if entry.scheme is ClassificationScheme.DDC]
+    numbers = [entry.number for entry in classifications if entry.scheme == ClassificationScheme.DDC]
     wanted = {name.lower() for name in ddc.tag_names(numbers)}
     if wanted:
         seen = set(matched)

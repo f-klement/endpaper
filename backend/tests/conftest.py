@@ -325,6 +325,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import event, text  # noqa: E402
 
 import accounts  # noqa: E402
+import classification_schemes  # noqa: E402
 import covers  # noqa: E402
 import main  # noqa: E402
 import metadata  # noqa: E402
@@ -921,6 +922,11 @@ def _empty_and_reseed() -> None:
                 {"key": key, "name": name, "category": category, "is_predefined": True}
                 for key, name, category in main.PREDEFINED_TAGS
             ],
+        )
+        # The built in schemes, which a migration seeded and nothing may
+        # delete: every heading a test writes quotes one of them.
+        connection.execute(
+            Base.metadata.tables["classification_schemes"].insert(), classification_schemes.seed_rows()
         )
 
 

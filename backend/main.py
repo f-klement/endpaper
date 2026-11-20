@@ -63,7 +63,9 @@ from routers import (
     imports,
     kosync,
     loans,
+    oai,
     opds,
+    patrons,
     public,
     readwise,
     settings,
@@ -475,6 +477,7 @@ app.include_router(kosync.device)
 app.add_exception_handler(kosync_protocol.Refused, kosync.refused_answer)
 app.include_router(loans.router)
 app.include_router(opds.router)
+app.include_router(patrons.router)
 # Before the SPA mount, like every router, and that matters more here than
 # elsewhere: this one owns `/robots.txt`, which a build emitting one would
 # otherwise be answered from disk. It is also the one router whose routes
@@ -487,6 +490,9 @@ app.include_router(readwise.router)
 # the SPA mount for the reason `/robots.txt` is, since `/sru` is likewise a path
 # outside `/api` that a build emitting a file of that name would otherwise claim.
 app.include_router(sru.router)
+# The third, OAI-PMH, behind the same gate and its own switch, before the SPA
+# mount for `/sru`'s reason: see `routers/oai.py`.
+app.include_router(oai.router)
 app.include_router(settings.router)
 app.include_router(stats.router)
 app.include_router(users.router)

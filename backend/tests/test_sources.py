@@ -17,7 +17,7 @@ import pytest
 
 import sources
 import targets
-from enums import CatalogueSource
+from enums import CatalogueSource, ClassificationScheme, CredentialKind, Transport
 from isbn import registration_group
 
 #: The survey `sources.MEASURED` and `sources.TIER_UNION` were read off.
@@ -1927,3 +1927,52 @@ class TestEverySeededTargetAnswersSomething:
         assert sources.LOOKUP_SOURCES
         assert sources.SEARCH_SOURCES
         assert targets.SEEDED
+
+
+class TestARowSaysHowItsCatalogueIsAsked:
+    """What a compliance reader needs from each row, read off its target.
+
+    **The rows a policy is most likely written about are pinned by name**: the
+    Library of Congress is reached in clear text and Google Books is a keyed
+    commercial API. The rest are held to `targets.SEEDED` and
+    `sources.CLASSIFIES`, which is where every value comes from."""
+
+    @staticmethod
+    def _described() -> dict[CatalogueSource, sources.Described]:
+        plan = sources.parse(
+            {"sources": [{"source": s.value, "enabled": True} for s in sources.DEFAULT_ORDER]}
+        )
+        return {
+            row.source: row
+            for row in sources.describe(plan, ready=frozenset(CatalogueSource), credentials=frozenset())
+        }
+
+    def test_the_library_of_congress_is_shown_as_unencrypted_sru_asking_for_mods(self):
+        row = self._described()[CatalogueSource.LOC]
+        assert (row.protocol, row.record_schema, row.encrypted) == (Transport.SRU, "mods", False)
+
+    def test_google_books_is_shown_as_its_own_api_wanting_an_api_key(self):
+        row = self._described()[CatalogueSource.GOOGLE_BOOKS]
+        assert (row.protocol, row.encrypted, row.credential) == (
+            Transport.BESPOKE,
+            True,
+            CredentialKind.API_KEY,
+        )
+
+    def test_a_catalogue_wanting_a_login_says_login_rather_than_key(self):
+        row = self._described()[CatalogueSource.BNA]
+        assert row.credential is CredentialKind.LOGIN
+
+    def test_a_z3950_door_is_never_shown_as_encrypted(self):
+        z3950 = [row for row in self._described().values() if row.protocol is Transport.Z3950]
+        assert z3950
+        assert not any(row.encrypted for row in z3950)
+
+    def test_every_row_supplies_the_schemes_its_reader_declares(self):
+        for source, row in self._described().items():
+            assert set(row.classification_schemes) == sources.CLASSIFIES[targets.SEEDED[source].reader], (
+                source
+            )
+
+    def test_the_dnb_supplies_gnd(self):
+        assert ClassificationScheme.GND in self._described()[CatalogueSource.DNB].classification_schemes
