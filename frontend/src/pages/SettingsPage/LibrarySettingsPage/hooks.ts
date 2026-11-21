@@ -12,7 +12,7 @@
  * module, so two unrelated changes to two unrelated sections collided in it.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 
 import {
@@ -393,6 +393,23 @@ export interface UseCustomFieldsResult {
 const BOOK_CUSTOM_FIELDS = /^\/api\/books\/\d+\/custom-fields$/;
 
 /**
+ * Any one book's headings a harvest suggested, by path, as `BOOK_CUSTOM_FIELDS`
+ * is: a harvest raises them on books it does not name to this tab, and like
+ * the values they are outside `catalogue()`.
+ */
+const BOOK_PENDING_HEADINGS = /^\/api\/books\/\d+\/pending-headings$/;
+
+/** Drop one child list of every book, matched by its path. */
+function dropOnEveryBook(queryClient: QueryClient, path: RegExp) {
+  void queryClient.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey[0];
+      return typeof key === "string" && path.test(key);
+    },
+  });
+}
+
+/**
  * The library's own field definitions.
  *
  * Every write drops the list and every book's values with it: a renamed field
@@ -408,12 +425,7 @@ export function useCustomFields(): UseCustomFieldsResult {
       void queryClient.invalidateQueries({
         queryKey: getListCustomFieldsQueryKey(),
       });
-      void queryClient.invalidateQueries({
-        predicate: (query) => {
-          const path = query.queryKey[0];
-          return typeof path === "string" && BOOK_CUSTOM_FIELDS.test(path);
-        },
-      });
+      dropOnEveryBook(queryClient, BOOK_CUSTOM_FIELDS);
     },
   };
 
@@ -590,9 +602,11 @@ export function useHarvestImport(
       onSuccess: (data: HarvestResultOut) => {
         setResult(data);
         setHeld(spent);
-        // A harvest writes Books and authors, and no heading, no reading
-        // record and no setting.
+        // A harvest writes Books and authors, no reading record and no
+        // setting. Its headings wait as suggestions, which no catalogue
+        // write moves, so every book's list of them is dropped here.
         invalidate.catalogue();
+        dropOnEveryBook(queryClient, BOOK_PENDING_HEADINGS);
       },
       onError: (error: unknown) => {
         if (!isRepositoryChanged(error)) return;

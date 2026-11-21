@@ -58,6 +58,7 @@ import type {
   BulkRequest,
   BulkResult,
   ClassificationFacets,
+  ClassificationOut,
   CollectionAssign,
   ConfirmedIdentifierOut,
   CopyCreate,
@@ -12880,6 +12881,418 @@ export const useSetOwnership = <
   TContext
 > => {
   return useMutation(getSetOwnershipMutationOptions(options), queryClient);
+};
+export const getListPendingHeadingsUrl = (bookId: number) => {
+  return `/api/books/${bookId}/pending-headings`;
+};
+
+/**
+ * The headings a harvest raised on this Book and nobody has settled.
+ *
+ * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
+ * 403 for a member. Empty for a Book no harvest raised any on, and for one
+ * whose set was confirmed or discarded. `models.PendingHeading` says why a
+ * harvest suggests rather than writes.
+ * @summary List Pending Headings
+ */
+export const listPendingHeadings = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ClassificationOut[]> => {
+  return customFetch<ClassificationOut[]>(getListPendingHeadingsUrl(bookId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListPendingHeadingsQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/pending-headings`] as const;
+};
+
+export const getListPendingHeadingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPendingHeadings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListPendingHeadingsQueryKey(bookId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listPendingHeadings>>
+  > = ({ signal }) =>
+    listPendingHeadings(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPendingHeadings>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListPendingHeadingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPendingHeadings>>
+>;
+export type ListPendingHeadingsQueryError = Refusal | HTTPValidationError;
+
+/**
+ * The headings a harvest raised on this Book and nobody has settled.
+ *
+ * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
+ * 403 for a member. Empty for a Book no harvest raised any on, and for one
+ * whose set was confirmed or discarded. `models.PendingHeading` says why a
+ * harvest suggests rather than writes.
+ * @summary List Pending Headings
+ */
+export function useListPendingHeadings<
+  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPendingHeadings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPendingHeadings>>,
+          TError,
+          Awaited<ReturnType<typeof listPendingHeadings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The headings a harvest raised on this Book and nobody has settled.
+ *
+ * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
+ * 403 for a member. Empty for a Book no harvest raised any on, and for one
+ * whose set was confirmed or discarded. `models.PendingHeading` says why a
+ * harvest suggests rather than writes.
+ * @summary List Pending Headings
+ */
+export function useListPendingHeadings<
+  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPendingHeadings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPendingHeadings>>,
+          TError,
+          Awaited<ReturnType<typeof listPendingHeadings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The headings a harvest raised on this Book and nobody has settled.
+ *
+ * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
+ * 403 for a member. Empty for a Book no harvest raised any on, and for one
+ * whose set was confirmed or discarded. `models.PendingHeading` says why a
+ * harvest suggests rather than writes.
+ * @summary List Pending Headings
+ */
+export function useListPendingHeadings<
+  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPendingHeadings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The headings a harvest raised on this Book and nobody has settled.
+ *
+ * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
+ * 403 for a member. Empty for a Book no harvest raised any on, and for one
+ * whose set was confirmed or discarded. `models.PendingHeading` says why a
+ * harvest suggests rather than writes.
+ * @summary List Pending Headings
+ */
+export function useListPendingHeadings<
+  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listPendingHeadings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListPendingHeadingsQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getConfirmPendingHeadingsUrl = (bookId: number) => {
+  return `/api/books/${bookId}/pending-headings/confirm`;
+};
+
+/**
+ * Write the Book's whole pending set as its headings, and answer the Book.
+ *
+ * The whole set, as selecting a picker row confirms a whole record (ADR
+ * 0006). A heading past the ceiling, or under a scheme deleted since, is
+ * dropped as a catalogue's is. Confirming an empty set changes nothing.
+ * @summary Confirm Pending Headings
+ */
+export const confirmPendingHeadings = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getConfirmPendingHeadingsUrl(bookId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getConfirmPendingHeadingsMutationKey = () =>
+  ["confirmPendingHeadings"] as const;
+
+export const getConfirmPendingHeadingsMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmPendingHeadings>>,
+    TError,
+    ConfirmPendingHeadingsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmPendingHeadings>>,
+  TError,
+  ConfirmPendingHeadingsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getConfirmPendingHeadingsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmPendingHeadings>>,
+    ConfirmPendingHeadingsMutationVariables
+  > = (props) => {
+    const { bookId } = props ?? {};
+
+    return confirmPendingHeadings(bookId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmPendingHeadingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmPendingHeadings>>
+>;
+
+export type ConfirmPendingHeadingsMutationError = Refusal | HTTPValidationError;
+export type ConfirmPendingHeadingsMutationVariables = { bookId: number };
+
+/**
+ * Write the Book's whole pending set as its headings, and answer the Book.
+ *
+ * The whole set, as selecting a picker row confirms a whole record (ADR
+ * 0006). A heading past the ceiling, or under a scheme deleted since, is
+ * dropped as a catalogue's is. Confirming an empty set changes nothing.
+ * @summary Confirm Pending Headings
+ */
+export const useConfirmPendingHeadings = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof confirmPendingHeadings>>,
+      TError,
+      ConfirmPendingHeadingsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof confirmPendingHeadings>>,
+  TError,
+  ConfirmPendingHeadingsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getConfirmPendingHeadingsMutationOptions(options),
+    queryClient,
+  );
+};
+export const getDiscardPendingHeadingsUrl = (bookId: number) => {
+  return `/api/books/${bookId}/pending-headings/discard`;
+};
+
+/**
+ * Drop the Book's whole pending set without writing it.
+ *
+ * Remembered: a later harvest of the same record does not raise these
+ * headings again, while one the record newly carries is raised.
+ * @summary Discard Pending Headings
+ */
+export const discardPendingHeadings = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDiscardPendingHeadingsUrl(bookId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getDiscardPendingHeadingsMutationKey = () =>
+  ["discardPendingHeadings"] as const;
+
+export const getDiscardPendingHeadingsMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof discardPendingHeadings>>,
+    TError,
+    DiscardPendingHeadingsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof discardPendingHeadings>>,
+  TError,
+  DiscardPendingHeadingsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDiscardPendingHeadingsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof discardPendingHeadings>>,
+    DiscardPendingHeadingsMutationVariables
+  > = (props) => {
+    const { bookId } = props ?? {};
+
+    return discardPendingHeadings(bookId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DiscardPendingHeadingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof discardPendingHeadings>>
+>;
+
+export type DiscardPendingHeadingsMutationError = Refusal | HTTPValidationError;
+export type DiscardPendingHeadingsMutationVariables = { bookId: number };
+
+/**
+ * Drop the Book's whole pending set without writing it.
+ *
+ * Remembered: a later harvest of the same record does not raise these
+ * headings again, while one the record newly carries is raised.
+ * @summary Discard Pending Headings
+ */
+export const useDiscardPendingHeadings = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof discardPendingHeadings>>,
+      TError,
+      DiscardPendingHeadingsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof discardPendingHeadings>>,
+  TError,
+  DiscardPendingHeadingsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDiscardPendingHeadingsMutationOptions(options),
+    queryClient,
+  );
 };
 export const getPurgeBookUrl = (bookId: number) => {
   return `/api/books/${bookId}/permanent`;

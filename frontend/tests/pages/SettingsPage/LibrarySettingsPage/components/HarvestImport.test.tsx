@@ -41,7 +41,7 @@ function outcome(overrides: Partial<HarvestResultOut> = {}): HarvestResultOut {
     created: 6,
     deleted: 0,
     harvest_id: 1,
-    headings_unconfirmed: 0,
+    headings_pending: 0,
     matched: 4,
     metadata_prefix: "marc21",
     pages_read: 1,
@@ -202,14 +202,20 @@ describe("HarvestImport", () => {
     ).toBeInTheDocument();
   });
 
-  it("counts the headings the harvest did not write", () => {
-    renderHarvest({ result: outcome({ headings_unconfirmed: 7 }) });
+  it("counts the headings the harvest left waiting for an admin", () => {
+    renderHarvest({ result: outcome({ headings_pending: 7 }) });
 
     expect(
       screen.getByText(
-        "Headings and shelf notations counted and not yet written: 7.",
+        "Headings and shelf notations suggested, waiting on their books for an admin to confirm or discard: 7.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("says nothing of headings when the harvest raised none", () => {
+    renderHarvest({ result: outcome({ headings_pending: 0 }) });
+
+    expect(screen.queryByText(/Headings and shelf notations/)).toBeNull();
   });
 
   it("says a harvest cut short kept what it read and starts over next time", () => {

@@ -254,8 +254,9 @@ class HarvestPreviewOut(MarcPreviewOut, _HarvestRun):
 
     `MarcPreviewOut`'s counts over the harvested records, asked through the same
     index the apply asks, plus what the run itself read. `rows` carries each
-    record's headings, which is where a harvest's headings are offered: the
-    apply writes none (owner, 2026-11-20).
+    record's headings. The apply writes none (owner, 2026-11-20): it raises
+    them as suggestions on a Book the record is, which an admin confirms or
+    discards on the Book.
     """
 
     repository_name: str | None = Field(description="The name the repository gives itself, if it gives one")
@@ -265,10 +266,11 @@ class HarvestResultOut(ImportResultOut, _HarvestRun):
     """What a harvest did, and the run it recorded."""
 
     harvest_id: int = Field(description="The run recorded in `harvests`, which every Book it added points at")
-    headings_unconfirmed: int = Field(
+    headings_pending: int = Field(
         ge=0,
         description=(
-            "Headings the harvested records carried, skipped records included: a "
-            "harvest confirms no record, so its headings are counted and not written"
+            "Headings this run raised as suggestions on the Books its records are, "
+            "waiting for an admin to confirm or discard them on each Book: a harvest "
+            "confirms no record, so it writes none"
         ),
     )

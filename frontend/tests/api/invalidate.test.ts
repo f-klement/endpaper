@@ -104,6 +104,11 @@ const KEYS: Record<string, readonly unknown[]> = {
   // invalidates this key itself. Shelving one rewrites the book's cover, and
   // that hook drops the book too. A merge calls `everything()`.
   listCoverImages: books.getListCoverImagesQueryKey(7),
+  // The headings a harvest suggested for a book, a child of `/api/books/{id}`
+  // classified with notes and quotes: `useBookPendingHeadings` settles them
+  // and invalidates this key, and a harvest drops every book's from its own
+  // hook. A merge calls `everything()`.
+  listPendingHeadings: books.getListPendingHeadingsQueryKey(7),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -333,7 +338,10 @@ describe("the inventory is complete", () => {
     //
     // 71 on 2026-11-20, counted with that same command: the admin's patron
     // register, five routes, two of them reads (the search and one record).
-    expect(Object.keys(KEYS).length).toBe(71);
+    //
+    // 72 on 2026-11-21, counted with that same command: a book's headings a
+    // harvest suggested, three routes, one of them a read.
+    expect(Object.keys(KEYS).length).toBe(72);
   });
 });
 
@@ -452,6 +460,7 @@ describe("the catalogue is everything derived from the books table", () => {
       "listAccessRequests",
       "getHighlights",
       "listCoverImages",
+      "listPendingHeadings",
       "listKosyncDocuments",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);

@@ -254,6 +254,7 @@ listed.
 | Domain | [`koreader_highlights.py`](../backend/koreader_highlights.py) | A KOReader sidecar's highlights as the ledger's marks: how each is keyed. |
 | Domain | [`lending.py`](../backend/lending.py) | The lending desk: which Loans a reader may see, when one closes, and what a Loan is at a given moment. |
 | Domain | [`patrons.py`](../backend/patrons.py) | Patrons: finding one, and erasing one so that no loan keeps their name. |
+| Domain | [`pending_headings.py`](../backend/pending_headings.py) | A harvest's headings, held on the Book until an admin confirms or discards them. |
 | Domain | [`reading.py`](../backend/reading.py) | One Member's reading of the Books in this Library, and the only place a `user_books` row is read or written. |
 | Domain | [`recognition.py`](../backend/recognition.py) | Which existing Book a record is, as one Member sees it. |
 | Domain | [`shelf.py`](../backend/shelf.py) | Every query that returns or counts many Books, and the only place the privacy predicate is applied. |
@@ -316,7 +317,7 @@ flowchart TB
   identity["Identity, 3 modules"]
   protocols["Protocols and notifications, 8 modules"]
   files["Imports and files, 6 modules"]
-  domain["Domain, 23 modules"]
+  domain["Domain, 24 modules"]
   settings["Settings, 2 modules"]
   catalogue["Catalogue, 17 modules"]
   contracts["Contracts, 1 module"]
@@ -565,7 +566,9 @@ rather than a file. `opds.py` says why at length.
 **The OAI-PMH harvester fetches on the server too**, from the one repository an admin names,
 and reads each page's MARC records through `marc.read`, so a harvested record is read exactly
 as a file's. `importing.MarcImport.for_harvest` applies them as Books nobody added, public,
-pointing at the run recorded in `harvests`. `harvester.py` holds its bounds.
+pointing at the run recorded in `harvests`. A record's headings are not written: on a Book the
+record created, or one keyed by its identifier, `pending_headings.raise_on` keeps them as
+suggestions an admin confirms or discards on the Book. `harvester.py` holds its bounds.
 
 ## Identity and sessions
 

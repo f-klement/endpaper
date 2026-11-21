@@ -675,6 +675,18 @@ cover stays `books.cover_url`, and choosing an image for the shelf swaps the two
 behind the book's read rule and nowhere else: not on a listing, the OPDS feed, the export
 or the published catalogue. A row carries no member, so it is in `BOOK_OWNED_TABLES`.
 
+**`pending_headings`.** A heading a harvested record carries, waiting on an admin: the
+`harvest_id` of the run that raised it, then `scheme`, `number`, `label` and `kind` as a
+`classifications` row has them, and `settled_at`, null while it waits. A harvest raises them
+only on a Book the record is, one it created or one keyed by `harvested_identifier`; a Book
+matched by ISBN or by author and title gets none. An admin confirms or discards a Book's whole
+set (`/api/books/{id}/pending-headings`), and either sets `settled_at` rather than deleting the
+row, so the next harvest of the record raises only a heading it newly carries. At most eight
+wait on a book. `scheme` has no foreign key, so a suggestion never blocks deleting a scheme;
+the confirm drops one whose scheme has gone. A merge leaves a loser's to the cascade, and the
+archive holds them. A row carries no member, so it is in `BOOK_OWNED_TABLES`; it is served to
+an admin only, and never on a listing, the export or the published catalogue.
+
 **`digital_references`.** Where a member says one of their book files is: a `root_label`,
 a `relative_path` beneath it, and a fingerprint. **Never the file.** Endpaper takes no
 custody of a member's book file, so no bytes reach the server on this path and nothing in

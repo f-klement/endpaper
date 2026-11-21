@@ -39,7 +39,9 @@
 - A staff page for patrons: search, register, edit and erase.
 - An admin can lend a book to a registered patron from the loan form, finding them with one search field or registering them there and then.
 - An admin sees which patron holds a lent book, by name and card number, and a patron's record lists the books they have out.
-- In library mode an admin can harvest another library system's catalogue over OAI-PMH from the library page: the repository, or one set of it, is read first and what a harvest would add and fill in is counted before anything is written; harvested books belong to nobody and are public, and their subject headings are counted and not yet written.
+- In library mode an admin can harvest another library system's catalogue over OAI-PMH from the library page: the repository, or one set of it, is read first and what a harvest would add and fill in is counted before anything is written; harvested books belong to nobody and are public.
+- An OAI-PMH harvest keeps each record's subject headings as suggestions on the Book it created, which an admin confirms or discards on the Book.
+- An admin confirms or discards the subject headings a harvest suggests, on each book's page.
 
 ## v0.22.0
 

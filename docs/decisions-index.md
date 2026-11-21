@@ -579,10 +579,11 @@ repeat the argument.
 |  | [An excluded row is counted in the open, where a blocked row is not](decisions.md#an-excluded-row-is-counted-in-the-open-where-a-blocked-row-is-not) | 68 |
 |  | [A source carries a remit, so a catalogue is asked about books it might hold](decisions.md#a-source-carries-a-remit-so-a-catalogue-is-asked-about-books-it-might-hold) | 185 |
 |  | [Provenance is published, because a catalogue that hides its sources is not a catalogue](decisions.md#provenance-is-published-because-a-catalogue-that-hides-its-sources-is-not-a-catalogue) | 127 |
-|  | [Harvesting an OAI-PMH repository (owner, 2026-11-20)](decisions.md#harvesting-an-oai-pmh-repository-owner-2026-11-20) | 839 |
+|  | [Harvesting an OAI-PMH repository (owner, 2026-11-20)](decisions.md#harvesting-an-oai-pmh-repository-owner-2026-11-20) | 1,079 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvested Book has no owner, points at its harvest run, and is never private](decisions.md#a-harvested-book-has-no-owner-points-at-its-harvest-run-and-is-never-private) | 175 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [The repository may be a household address, over http or https](decisions.md#the-repository-may-be-a-household-address-over-http-or-https) | 153 |
-| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest reads MARCXML only, and writes no heading yet](decisions.md#a-harvest-reads-marcxml-only-and-writes-no-heading-yet) | 144 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest reads MARCXML only](decisions.md#a-harvest-reads-marcxml-only) | 62 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest's headings wait as suggestions](decisions.md#a-harvests-headings-wait-as-suggestions) | 320 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [How a harvested record is matched](decisions.md#how-a-harvested-record-is-matched) | 82 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A run is cut short rather than failed, and does not resume](decisions.md#a-run-is-cut-short-rather-than-failed-and-does-not-resume) | 226 |
 |  | [The competitor register's reference counts get a stated command and no guard](decisions.md#the-competitor-registers-reference-counts-get-a-stated-command-and-no-guard) | 248 |

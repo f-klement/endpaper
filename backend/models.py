@@ -1487,6 +1487,14 @@ class Book(Base):
         cascade="all, delete-orphan",
         order_by="Classification.id",
     )
+    # Cascaded like the headings: a purged book's suggestions describe
+    # nothing. Ordered by id, the order the record listed them. No
+    # `back_populates`: `PendingHeading` says why it has no `book`.
+    pending_headings: Mapped[list[PendingHeading]] = relationship(
+        "PendingHeading",
+        cascade="all, delete-orphan",
+        order_by="PendingHeading.id",
+    )
     # Cascaded like the notes and the quotes, and ordered by the definition
     # rather than by this row: a Book reads its fields in the order the Library
     # defined them, so two Books list the same fields the same way.
@@ -3091,6 +3099,63 @@ class Classification(Base):
     sort_key: Mapped[str] = mapped_column(String(CLASSIFICATION_SORT_KEY_MAX), nullable=False)
 
     book: Mapped[Book] = relationship("Book", back_populates="classifications")
+
+
+class PendingHeading(Base):
+    """A heading a harvested record carries that nobody has confirmed yet.
+
+    **Not a `Classification`**, because ADR 0006 has a heading reach a Book only
+    through a door a Member's choice opened, and naming a repository once
+    confirms no record. So a harvest raises its record's headings here, and an
+    admin confirms or discards a Book's whole set (`pending_headings.py`).
+
+    **A settled row stays, with `settled_at` set, whether it was confirmed or
+    discarded**, so the next harvest of the same record does not raise it
+    again; a heading the record newly carries is raised. Kept after a confirm
+    too, so a heading a Member later removed, or one the ceiling dropped at
+    the confirm, is not offered again on every run.
+
+    **Raised only on a Book the record is**: one the harvest created, or one
+    it matched by the record's identifier. A Book matched by ISBN or by author
+    and title gets none, as before.
+
+    **`scheme` has no foreign key**, unlike `classifications.scheme`: a
+    suggestion must not block deleting a scheme. `add_headings` drops one whose
+    scheme has gone, at the confirm.
+
+    **No `book` relationship**: Book owned with no Member of its own, read only
+    off `Book.pending_headings`, so its visibility is the Book's entirely.
+    Named in `BOOK_OWNED_TABLES` in `tests/test_shelf.py`.
+    """
+
+    __tablename__ = "pending_headings"
+
+    __table_args__ = (
+        # One suggestion per heading per Book, whatever its state, which is
+        # what lets a discard be remembered. Leads with `book_id`, so that
+        # column needs no index of its own.
+        Index("uq_pending_headings_book_scheme_number", "book_id", "scheme", "number", unique=True),
+        # `ck_classifications_kind`'s rule, for its reason: `backup.restore`
+        # writes through Core, and a confirm hands the value to the schema.
+        CheckConstraint(
+            _enum_check("kind", HeadingKind, nullable=True, excluding=(HeadingKind.SUBJECT,)),
+            name="ck_pending_headings_kind",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    # The run that raised it: provenance, never read to decide anything.
+    harvest_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("harvests.id", name="fk_pending_headings_harvest_id"), nullable=False
+    )
+    scheme: Mapped[str] = mapped_column(String(CLASSIFICATION_SCHEME_CODE_MAX), nullable=False)
+    number: Mapped[str] = mapped_column(String(CLASSIFICATION_NUMBER_MAX), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(CLASSIFICATION_LABEL_MAX), nullable=True)
+    kind: Mapped[HeadingKind | None] = mapped_column(String(20), nullable=True)
+    # Null while pending. Set by a confirm or a discard and never cleared,
+    # which is what remembers a settled heading: see the class docstring.
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 #: Where `_file_the_numbers` keeps a session's filing rules, in `Session.info`.

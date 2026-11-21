@@ -114,9 +114,9 @@ class Loading(Enum):
 
     **The stronger sentence is false**, and it was the one written here until it
     was measured: "everything fetched with `SERIALISED` is serialised by
-    `books_to_out`" is falsified by **36 of the 54 routes** reaching
-    `book_for_read` or `book_in_trash`. **24** serialise a sub-resource and never
-    the book, **11** answer 204 and serialise nothing at all, and `add_copy`
+    `books_to_out`" is falsified by **38 of the 57 routes** reaching
+    `book_for_read` or `book_in_trash`. **25** serialise a sub-resource and never
+    the book, **12** answer 204 and serialise nothing at all, and `add_copy`
     serialises the copy rather than the book it read.
 
     **Those numbers are recomputed from the routers** by

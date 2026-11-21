@@ -34,10 +34,10 @@ export interface HarvestResultOut {
   /** The run recorded in `harvests`, which every Book it added points at */
   harvest_id: number;
   /**
-   * Headings the harvested records carried, skipped records included: a harvest confirms no record, so its headings are counted and not written
+   * Headings this run raised as suggestions on the Books its records are, waiting for an admin to confirm or discard them on each Book: a harvest confirms no record, so it writes none
    * @minimum 0
    */
-  headings_unconfirmed: number;
+  headings_pending: number;
   /**
    * Rows whose ISBN only books in the caller's trash hold. Nothing is written for them: restore the book, or empty it from the trash, and import again
    * @minimum 0

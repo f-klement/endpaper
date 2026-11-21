@@ -4096,7 +4096,7 @@
         "type": "object"
       },
       "HarvestPreviewOut": {
-        "description": "What a harvest would read and do, before anything is written.\n\n`MarcPreviewOut`'s counts over the harvested records, asked through the same\nindex the apply asks, plus what the run itself read. `rows` carries each\nrecord's headings, which is where a harvest's headings are offered: the\napply writes none (owner, 2026-11-20).",
+        "description": "What a harvest would read and do, before anything is written.\n\n`MarcPreviewOut`'s counts over the harvested records, asked through the same\nindex the apply asks, plus what the run itself read. `rows` carries each\nrecord's headings. The apply writes none (owner, 2026-11-20): it raises\nthem as suggestions on a Book the record is, which an admin confirms or\ndiscards on the Book.",
         "properties": {
           "already_held": {
             "description": "Records matching a book this member can already see",
@@ -4249,10 +4249,10 @@
             "title": "Harvest Id",
             "type": "integer"
           },
-          "headings_unconfirmed": {
-            "description": "Headings the harvested records carried, skipped records included: a harvest confirms no record, so its headings are counted and not written",
+          "headings_pending": {
+            "description": "Headings this run raised as suggestions on the Books its records are, waiting for an admin to confirm or discard them on each Book: a harvest confirms no record, so it writes none",
             "minimum": 0.0,
-            "title": "Headings Unconfirmed",
+            "title": "Headings Pending",
             "type": "integer"
           },
           "in_trash": {
@@ -4344,7 +4344,7 @@
           "statuses_updated",
           "skipped",
           "harvest_id",
-          "headings_unconfirmed"
+          "headings_pending"
         ],
         "title": "HarvestResultOut",
         "type": "object"
@@ -15544,6 +15544,243 @@
         ]
       }
     },
+    "/api/books/{book_id}/pending-headings": {
+      "get": {
+        "description": "The headings a harvest raised on this Book and nobody has settled.\n\nAdmin only, as the harvest is: 404 for a Book the caller cannot see, then\n403 for a member. Empty for a Book no harvest raised any on, and for one\nwhose set was confirmed or discarded. `models.PendingHeading` says why a\nharvest suggests rather than writes.",
+        "operationId": "list_pending_headings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClassificationOut"
+                  },
+                  "title": "Response List Pending Headings",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Pending Headings",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/pending-headings/confirm": {
+      "post": {
+        "description": "Write the Book's whole pending set as its headings, and answer the Book.\n\nThe whole set, as selecting a picker row confirms a whole record (ADR\n0006). A heading past the ceiling, or under a scheme deleted since, is\ndropped as a catalogue's is. Confirming an empty set changes nothing.",
+        "operationId": "confirm_pending_headings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Confirm Pending Headings",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/pending-headings/discard": {
+      "post": {
+        "description": "Drop the Book's whole pending set without writing it.\n\nRemembered: a later harvest of the same record does not raise these\nheadings again, while one the record newly carries is raised.",
+        "operationId": "discard_pending_headings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Discard Pending Headings",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/{book_id}/permanent": {
       "delete": {
         "description": "Delete one trashed book for good, if `_purgeable_by` lets the caller.\n\nA Book it refuses is in the caller's trash view, so it answers 409 rather\nthan 404, as the add door answers the same Book, and stays in the trash,\nwhere it can still be put back. Not `book_for_owner`'s 403, whose admin\nexception this rule does not have.",
@@ -17186,7 +17423,7 @@
     },
     "/api/imports/harvest": {
       "post": {
-        "description": "Harvest the configured repository into the catalogue.\n\nMatching asks first for the Book an earlier harvest of this repository\ncreated from the same record, by its OAI identifier, so a Book corrected\nhere since that run is still found. Then it is `import_marc`'s, as this admin sees\nthe shelf: ISBN, then author and title together, so a record crediting\nsomebody never matches on its title alone, while a record crediting nobody\nmatches a Book crediting nobody by its title. A matched Book has its gaps\nfilled and nothing overwritten. **A created Book is nobody's, public, keeps\nits record's identifier and points at the run** this records in `harvests`.\n**No heading is written**, matched Book or created one: a harvest confirms\nno record (owner, 2026-11-20), so the headings the records carried are\ncounted in `headings_unconfirmed` and not kept. A deleted record is counted\nand deletes nothing. A 409 while another harvest is running, and one when\n`repository` is not the address stored now: the client held another when it\nread the preview, whether the stored one was saved before that read or after\nit, so the preview it showed was labelled with an address this would not\nharvest.",
+        "description": "Harvest the configured repository into the catalogue.\n\nMatching asks first for the Book an earlier harvest of this repository\ncreated from the same record, by its OAI identifier, so a Book corrected\nhere since that run is still found. Then it is `import_marc`'s, as this admin sees\nthe shelf: ISBN, then author and title together, so a record crediting\nsomebody never matches on its title alone, while a record crediting nobody\nmatches a Book crediting nobody by its title. A matched Book has its gaps\nfilled and nothing overwritten. **A created Book is nobody's, public, keeps\nits record's identifier and points at the run** this records in `harvests`.\n**No heading is written**: a harvest confirms no record (owner, 2026-11-20),\nso a created Book's headings, and those of a Book keyed by the same\nidentifier, wait as suggestions an admin confirms or discards on the Book,\ncounted in `headings_pending`. A Book matched by ISBN or by author and\ntitle gets none. A deleted record is counted\nand deletes nothing. A 409 while another harvest is running, and one when\n`repository` is not the address stored now: the client held another when it\nread the preview, whether the stored one was saved before that read or after\nit, so the preview it showed was labelled with an address this would not\nharvest.",
         "operationId": "apply_harvest",
         "parameters": [
           {

@@ -176,6 +176,16 @@ export const de: Messages = {
   "classification.scheme.lcsh": "Schlagwort",
   "classification.kind.content": "Inhaltstyp",
   "classification.kind.carrier": "Datenträgertyp",
+  "pendingHeadings.section": "Von einer Übernahme vorgeschlagen",
+  "pendingHeadings.explain":
+    "Ein übernommener Datensatz schlägt diese vor. Keiner davon gehört zum Buch, bevor er bestätigt ist.",
+  "pendingHeadings.confirm": "Alle {count} bestätigen",
+  "pendingHeadings.confirmOne": "Bestätigen",
+  "pendingHeadings.discard": "Verwerfen",
+  "pendingHeadings.discardConfirm":
+    "Diese Vorschläge verwerfen? Eine spätere Übernahme desselben Datensatzes schlägt sie nicht noch einmal vor.",
+  "pendingHeadings.discardConfirmOne":
+    "Diesen Vorschlag verwerfen? Eine spätere Übernahme desselben Datensatzes schlägt ihn nicht noch einmal vor.",
   "onlineLinks.section": "Verweise im Netz",
   "onlineLinks.relation.resource": "Die Ressource selbst",
   "onlineLinks.relation.version": "Eine Fassung davon",
@@ -2184,13 +2194,13 @@ export const de: Messages = {
   "harvestRun.deleted":
     "{count} Datensätze sind im Repository als gelöscht markiert. Für sie wird kein Buch entfernt.",
   "harvestRun.headingsPreview":
-    "Schlagwörter und Notationen in den unten aufgeführten Datensätzen: {count}. Eine Übernahme zählt sie und schreibt noch keine davon: sie bestätigt keinen Datensatz.",
+    "Schlagwörter und Notationen in den unten aufgeführten Datensätzen: {count}. Eine Übernahme schreibt keine davon: sie schlägt sie nur an einem Buch vor, das eine Übernahme desselben Datensatzes angelegt hat, und ein Admin bestätigt oder verwirft sie dort. Ein Buch, das über die ISBN oder über Autor und Titel erkannt wurde, bekommt keine.",
   "harvestRun.truncatedPreview":
     "Der Lauf hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war, diese Zahlen umfassen also nur einen Teil davon. Jede Übernahme beginnt wieder von vorn; eine Teilmenge grenzt sie ein.",
   "harvestRun.confirm": "{count} Datensätze übernehmen",
   "harvestRun.importing": "Wird übernommen...",
   "harvestRun.resultHeadings":
-    "Gezählte und noch nicht geschriebene Schlagwörter und Notationen: {count}.",
+    "Vorgeschlagene Schlagwörter und Notationen, die an den Büchern darauf warten, dass ein Admin sie bestätigt oder verwirft: {count}.",
   "harvestRun.truncatedResult":
     "Die Übernahme hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war. Was gelesen wurde, bleibt erhalten. Ein neuer Lauf beginnt wieder von vorn; eine Teilmenge grenzt ihn ein.",
   "harvestRun.off":

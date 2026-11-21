@@ -54,6 +54,7 @@ from models import (
     Loan,
     Note,
     OnlineLink,
+    PendingHeading,
     Quote,
     ReadingProgress,
     ReadwiseBook,
@@ -308,6 +309,18 @@ def _carry_custom_field_values(fold: _Fold) -> None:
     custom_fields.resolve_merge(fold.db, fold.keeper.id, fold.loser_ids)
 
 
+def _left_to_the_cascade(_fold: _Fold) -> None:
+    """Nothing moves: a losing Book's rows go with it when it is deleted.
+
+    **For the pending headings, and a decision rather than an omission.** A
+    loser's suggestions were raised by its own harvested record, and the
+    keeper is not that record: the merge keeps the keeper's identifier, so no
+    later harvest of the loser's record finds the survivor to raise them again
+    or to remember they were settled. Carried over, they would offer an admin
+    another record's headings for a Book that record no longer names.
+    """
+
+
 # ── One policy per child of `books` ───────────────────────────────────────────
 
 #: What a merge does to every table that points at `books`.
@@ -421,6 +434,9 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # own book id, which a merge does not touch.
     _Transfer(_table(ReadwiseBook.__tablename__), _moves_wholesale(ReadwiseBook)),
     _Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values),
+    # A harvest's suggestions stay with the Book its record is: see
+    # `_left_to_the_cascade`.
+    _Transfer(_table(PendingHeading.__tablename__), _left_to_the_cascade),
 )
 
 

@@ -63,9 +63,10 @@ import book_columns
 import csv_import
 import evidence
 import marc
+import pending_headings
 import recognition
 import tags
-from catalogue import Link, Record
+from catalogue import Heading, Link, Record
 from database import hold_book_ceilings
 from enums import OwnershipStatus, ReadStatus, RecordOrigin
 from errors import MetAnotherChange
@@ -1088,12 +1089,18 @@ class MarcImport:
     `_Creating`, the same Member for a file and nobody for a harvest.
     """
 
-    __slots__ = ("_creating", "_db", "_viewer_id")
+    __slots__ = ("_creating", "_db", "_raised", "_viewer_id")
 
     def __init__(self, db: Session, viewer_id: int, creating: _Creating) -> None:
         self._db = db
         self._viewer_id = viewer_id
         self._creating = creating
+        self._raised = 0
+
+    @property
+    def headings_raised(self) -> int:
+        """How many pending headings a harvest's `apply` raised; none for a file."""
+        return self._raised
 
     @classmethod
     def for_member(cls, db: Session, member_id: int) -> MarcImport:
@@ -1107,7 +1114,8 @@ class MarcImport:
         `ck_books_harvested_is_nobodys_and_public` holds in the database.
         **Its headings are not confirmed** (`docs/decisions.md`, *Harvesting an
         OAI-PMH repository*): naming a repository once confirms no record, so
-        `_apply_one` writes none.
+        `_apply_one` raises them as suggestions on a Book the record is, and on
+        no other (`_keep_headings`).
         `run` is filled in with what was added and when it finished, in the
         import's one commit.
         """
@@ -1186,8 +1194,10 @@ class MarcImport:
         # the same strings or a truncated record cannot match itself. See
         # `stored_record`.
         stored = stored_record(record)
+        by_identifier = keyed.keys.answer(keyed.identifier)
+        created_before = tally.created
         book = _settle_one(
-            keyed.keys.answer(keyed.identifier) or recognise_stored(index, stored),
+            by_identifier or recognise_stored(index, stored),
             tally,
             load=lambda book_id: self._db.get_one(Book, book_id),
             # A title the caller supplied in their own file, so reporting it
@@ -1224,11 +1234,25 @@ class MarcImport:
             return
 
         # After the create and after the gap fill, so a matched Book gains the
-        # headings it lacked as well as a new one getting all of them. Never for
-        # a harvest: see `for_harvest`.
-        if self._creating.harvest is None:
-            evidence.confirm_file_headings(book, record.headings, self._db)
+        # headings it lacked as well as a new one getting all of them.
+        self._keep_headings(
+            book, record.headings, the_records_own=by_identifier is not None or tally.created > created_before
+        )
         _keep_links(book, links, self._db)
+
+    def _keep_headings(self, book: Book, headings: Sequence[Heading], *, the_records_own: bool) -> None:
+        """A file's headings written, or a harvest's raised as suggestions.
+
+        **A harvest raises them only on a Book the record is**: one it created,
+        or one keyed by the record's identifier. A Book the ladder matched by
+        ISBN or by author and title is some other record's, whose headings this
+        record has no say over, so it gets none: gaps and links only.
+        """
+        run = self._creating.harvest
+        if run is None:
+            evidence.confirm_file_headings(book, headings, self._db)
+        elif the_records_own:
+            self._raised += pending_headings.raise_on(book, headings, run)
 
     def _finish_the_run(self, tally: _Tally) -> None:
         """Record on a harvest's run what it added, inside the import's commit."""

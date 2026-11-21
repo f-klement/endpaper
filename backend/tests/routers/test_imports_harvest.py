@@ -14,7 +14,7 @@ from sqlalchemy import select
 import harvester
 import settings_store
 from enums import OwnershipStatus, RecordOrigin, SettingKey
-from models import Book, Classification, Harvest
+from models import Book, Classification, Harvest, PendingHeading
 from routers.imports import HARVEST_RUNNING, REPOSITORY_CHANGED
 from tests.corpus import REPO
 from tests.test_harvester import BASE, MARC, list_records, oai_record, response
@@ -52,10 +52,22 @@ def a_repository(*records: str) -> None:
     )
 
 
-def with_a_heading(title: str) -> str:
-    """A record carrying one Dewey heading, which a file import would confirm."""
-    dewey = '<datafield tag="082" ind1="0" ind2="4"><subfield code="a">004</subfield></datafield>'
-    return oai_record(title).replace("</record></metadata>", f"{dewey}</record></metadata>")
+def with_a_heading(title: str, *numbers: str, isbn: str | None = None) -> str:
+    """A record carrying Dewey headings, `004` alone by default, which a file import would confirm."""
+    dewey = "".join(
+        f'<datafield tag="082" ind1="0" ind2="4"><subfield code="a">{number}</subfield></datafield>'
+        for number in numbers or ("004",)
+    )
+    return oai_record(title, isbn=isbn).replace("</record></metadata>", f"{dewey}</record></metadata>")
+
+
+def pending(db, book_id: int) -> list[tuple[str, bool]]:
+    """A Book's raised headings by number, and whether each is settled, re-read."""
+    db.expire_all()
+    rows = db.scalars(
+        select(PendingHeading).where(PendingHeading.book_id == book_id).order_by(PendingHeading.id)
+    )
+    return [(row.number, row.settled_at is not None) for row in rows]
 
 
 @pytest.fixture
@@ -249,13 +261,44 @@ class TestTheApply:
         assert (body["matched"], body["created"]) == (0, 1)
 
     @respx.mock
-    def test_headings_land_unconfirmed(self, client, admin, harvesting, db):
+    def test_a_created_books_headings_wait_as_suggestions(self, client, admin, harvesting, db):
         a_repository(with_a_heading("Computing"))
 
         body = client.post(APPLY, headers=admin["headers"]).json()
 
+        book = db.scalars(select(Book)).one()
         assert db.scalar(select(Classification.id)) is None
-        assert body["headings_unconfirmed"] == 1
+        assert pending(db, book.id) == [("004", False)]
+        assert body["headings_pending"] == 1
+
+    @respx.mock
+    def test_a_book_matched_by_isbn_gets_no_heading_and_no_suggestion(
+        self, client, admin, harvesting, make_book, db
+    ):
+        """The record is some other Book's, whose headings it has no say over."""
+        held = make_book(admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441172719")
+        a_repository(with_a_heading("Dune", isbn="9780441172719"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["headings_pending"]) == (1, 0)
+        assert db.scalar(select(Classification.id)) is None
+        assert pending(db, held["id"]) == []
+
+    @respx.mock
+    def test_a_book_matched_by_author_and_title_gets_no_heading_and_no_suggestion(
+        self, client, admin, harvesting, make_book, db
+    ):
+        """The ladder's second rung is another record's Book as much as the first."""
+        held = make_book(admin["headers"], title="Dune", author="Frank Herbert")
+        credited = "</datafield>" + _author("Frank Herbert")
+        a_repository(with_a_heading("Dune").replace("</datafield>", credited, 1))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["created"], body["headings_pending"]) == (1, 0, 0)
+        assert db.scalar(select(Classification.id)) is None
+        assert pending(db, held["id"]) == []
 
     @respx.mock
     def test_a_member_private_book_is_neither_matched_nor_named(self, client, admin, member, harvesting, db):
@@ -305,6 +348,44 @@ class TestARerunMatchesByRecordIdentifier:
         assert (again["matched"], again["created"]) == (1, 0)
         assert db.scalars(select(Book.id)).all() == [book.id]
         assert (book.harvested_identifier, book.title) == ("oai:x:One", "One, corrected")
+
+    @respx.mock
+    def test_a_second_run_raises_only_the_headings_the_record_newly_carries(
+        self, client, admin, harvesting, db
+    ):
+        a_repository(with_a_heading("One", "004"))
+        book = self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+        a_repository(with_a_heading("One", "004", "510"))
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert again["headings_pending"] == 1
+        assert pending(db, book.id) == [("004", False), ("510", False)]
+
+    @respx.mock
+    def test_a_discarded_set_is_not_raised_again(self, client, admin, harvesting, db):
+        a_repository(with_a_heading("One", "004"))
+        book = self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+        discarded = client.post(f"/api/books/{book.id}/pending-headings/discard", headers=admin["headers"])
+        assert discarded.status_code == 204
+        a_repository(with_a_heading("One", "004", "510"))
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert again["headings_pending"] == 1
+        assert pending(db, book.id) == [("004", True), ("510", False)]
+
+    @respx.mock
+    def test_a_confirmed_heading_is_not_raised_again(self, client, admin, harvesting, db):
+        a_repository(with_a_heading("One", "004"))
+        book = self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+        confirmed = client.post(f"/api/books/{book.id}/pending-headings/confirm", headers=admin["headers"])
+        assert confirmed.status_code == 200, confirmed.text
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert again["headings_pending"] == 0
+        assert pending(db, book.id) == [("004", True)]
 
     @respx.mock
     def test_the_preview_of_a_second_run_counts_it_held(self, client, admin, harvesting, db):

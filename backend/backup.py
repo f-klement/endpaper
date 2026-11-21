@@ -92,6 +92,7 @@ from models import (
     OpdsServer,
     PasswordResetRequest,
     Patron,
+    PendingHeading,
     Quote,
     ReadingProgress,
     ReadwiseBook,
@@ -250,6 +251,10 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # Absent from `_REQUIRED_TABLES` for the links' reason: an archive taken
         # before this table existed restores with none.
         ("cover_images", CoverImage),
+        # A harvest's suggestions, settled ones included, since those are what
+        # stops the next run raising them again. After both parents, `books`
+        # and `harvests`. Absent from `_REQUIRED_TABLES` for the links' reason.
+        ("pending_headings", PendingHeading),
         # The author merge decisions. Its only foreign key is `users`, which is
         # first in this tuple, so it could sit anywhere after that; it is here
         # beside the other tables that hold what members decided rather than

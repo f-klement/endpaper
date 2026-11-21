@@ -51,6 +51,7 @@ import koreader_highlights
 import lending
 import marc
 import metadata
+import pending_headings
 import recognition
 import settings_store
 from auth import require_admin
@@ -66,6 +67,7 @@ from categories import join_categories
 from classifications import add_headings, bounded_headings, unknown_schemes
 from database import hold_book_ceilings, on_commit, on_rollback
 from dependencies import (
+    BookForAdmin,
     BookForOwner,
     BookForRead,
     BookForWrite,
@@ -174,6 +176,7 @@ from schemas import (
     BulkResult,
     ClassificationFacets,
     ClassificationIn,
+    ClassificationOut,
     CollectionAssign,
     ConfirmedIdentifierOut,
     CopyCreate,
@@ -5758,6 +5761,43 @@ def _demote_the_shelf_cover(db: Session, book: Book) -> None:
 
 
 # ── Metadata refresh ──────────────────────────────────────────────────────────
+
+
+@router.get("/{book_id}/pending-headings", response_model=list[ClassificationOut])
+def list_pending_headings(book: BookForAdmin) -> list[ClassificationOut]:
+    """The headings a harvest raised on this Book and nobody has settled.
+
+    Admin only, as the harvest is: 404 for a Book the caller cannot see, then
+    403 for a member. Empty for a Book no harvest raised any on, and for one
+    whose set was confirmed or discarded. `models.PendingHeading` says why a
+    harvest suggests rather than writes.
+    """
+    return [ClassificationOut.model_validate(row) for row in pending_headings.pending_on(book)]
+
+
+@router.post("/{book_id}/pending-headings/confirm", response_model=BookOut)
+def confirm_pending_headings(book: BookForAdmin, db: DbSession, current_user: CurrentUser) -> BookOut:
+    """Write the Book's whole pending set as its headings, and answer the Book.
+
+    The whole set, as selecting a picker row confirms a whole record (ADR
+    0006). A heading past the ceiling, or under a scheme deleted since, is
+    dropped as a catalogue's is. Confirming an empty set changes nothing.
+    """
+    pending_headings.confirm(book, db)
+    db.commit()
+    db.refresh(book)
+    return book_to_out(book, current_user, db)
+
+
+@router.post("/{book_id}/pending-headings/discard", status_code=status.HTTP_204_NO_CONTENT)
+def discard_pending_headings(book: BookForAdmin, db: DbSession) -> None:
+    """Drop the Book's whole pending set without writing it.
+
+    Remembered: a later harvest of the same record does not raise these
+    headings again, while one the record newly carries is raised.
+    """
+    pending_headings.discard(book)
+    db.commit()
 
 
 @router.put("/{book_id}/refresh", response_model=BookOut)

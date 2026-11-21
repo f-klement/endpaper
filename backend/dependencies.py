@@ -310,8 +310,8 @@ def book_for_read(
 
     Eager-loads `added_by`, so resolving the book does not cost a query for the
     member who added it. The collections are not loaded here, and what happens
-    to them next depends on the route rather than on this dependency: **34 of
-    the 52** routes fed from here serialise no Book at all, nearly two in
+    to them next depends on the route rather than on this dependency: **36 of
+    the 55** routes fed from here serialise no Book at all, nearly two in
     three, and those that do get their tags from `books_to_out`, which re-reads and
     loads them itself.
     `shelf.Loading` carries the measurement, including the one arm of one route
@@ -409,6 +409,22 @@ def book_for_owner(
     return book
 
 
+@refuses(403)
+def book_for_admin(
+    book: Annotated[Book, Depends(book_for_read)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> Book:
+    """The book at `book_id`, if the caller is an admin.
+
+    Resolved through `book_for_read` first, as `book_for_owner` is, so a Book
+    the caller cannot see is 404 before the role is asked: a 403 would confirm
+    the id exists.
+    """
+    if not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin can do that")
+    return book
+
+
 #: Past any real library, and small enough that `page * page_size` stays far
 #: inside SQLite's INTEGER range.
 MAX_PAGE_NUMBER = 1_000_000
@@ -449,6 +465,7 @@ BookInTrash = Annotated[Book, Depends(book_in_trash)]
 BookForCover = Annotated[Book, Depends(book_for_cover)]
 BookForWrite = Annotated[Book, Depends(book_for_write)]
 BookForOwner = Annotated[Book, Depends(book_for_owner)]
+BookForAdmin = Annotated[Book, Depends(book_for_admin)]
 Paging = Annotated[PageParams, Depends()]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 DbSession = Annotated[Session, Depends(get_db)]

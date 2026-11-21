@@ -15,9 +15,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BookFormat,
   BookIdentifierScheme,
+  ClassificationScheme,
   Locale,
   OwnershipStatus,
   ReadStatus,
+  type ClassificationOut,
   type CustomFieldOut,
   type DigitalReferenceOut,
   type HighlightOut,
@@ -42,7 +44,12 @@ import {
   resetIds,
 } from "../../factories";
 import { whileStorageRefuses } from "../../storageRefusal";
-import { mockApi, renderWithProviders, type MockApi } from "../../utils";
+import {
+  heldOpen,
+  mockApi,
+  renderWithProviders,
+  type MockApi,
+} from "../../utils";
 import { answersOf } from "../../lib/schemaArbitrary";
 import { holds, PROFILE, PROPERTY, witness } from "../../property";
 import { forget, overSchema, scripted } from "../../schemaPage";
@@ -91,6 +98,8 @@ function stubLoad({
   highlights = [] as HighlightOut[],
   kosyncLinked = [] as KosyncDocumentOut[],
   kosyncWaiting = [] as KosyncDocumentOut[],
+  // Read by an admin's page alone: a member's never asks.
+  pendingHeadings = [] as ClassificationOut[],
   customFieldValues = [] as {
     field_id: number;
     name: string;
@@ -113,6 +122,7 @@ function stubLoad({
   api.on("/api/books/1/copies", { body: [book] });
   api.on("/api/books/1/digital-references", { body: references });
   api.on("/api/books/1/cover-images", { body: [] });
+  api.on("/api/books/1/pending-headings", { body: pendingHeadings }, "GET");
   api.on("/api/kosync/books/1/documents", { body: kosyncLinked });
   api.on("/api/kosync/inbox", { body: kosyncWaiting });
   api.on("/api/books/tags", { body: tags });
@@ -1509,6 +1519,139 @@ const CANDIDATE = {
   ],
   suggested_tag_ids: [],
 };
+
+describe("BookDetail pending headings", () => {
+  const SUGGESTED: ClassificationOut = {
+    scheme: ClassificationScheme.ddc,
+    number: "155.9042",
+    label: null,
+  };
+
+  it("shows an admin what a harvest suggested", async () => {
+    stubLoad({ pendingHeadings: [SUGGESTED], users: [ADMIN, OWNER] });
+    renderDetail(ADMIN);
+
+    expect(
+      await screen.findByText("Suggested by a harvest"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("155.9042")).toBeInTheDocument();
+  });
+
+  it("never asks for a member, nor shows the section", async () => {
+    stubLoad({ pendingHeadings: [SUGGESTED] });
+    renderDetail(OWNER);
+
+    await screen.findByRole("heading", { name: "Dune" });
+    expect(api.lastCall("/pending-headings", "GET")).toBeUndefined();
+    expect(screen.queryByText("Suggested by a harvest")).toBeNull();
+  });
+
+  it("confirms the whole set and reads the book again", async () => {
+    const book = stubLoad({
+      pendingHeadings: [SUGGESTED],
+      users: [ADMIN, OWNER],
+    });
+    api.on("/api/books/1/pending-headings/confirm", { body: book }, "POST");
+    renderDetail(ADMIN);
+    const reads = (path: RegExp) =>
+      api.calls.filter((call) => call.method === "GET" && path.test(call.url))
+        .length;
+    const button = await screen.findByRole("button", { name: "Confirm" });
+    const bookBefore = reads(/\/api\/books\/1$/);
+    const pendingBefore = reads(/\/pending-headings$/);
+
+    await userEvent.setup().click(button);
+
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/1/pending-headings/confirm", "POST"),
+      ).toBeDefined(),
+    );
+    // The book carries the confirmed headings, and the list it came from
+    // answers empty now: both are read again rather than patched.
+    await waitFor(() =>
+      expect(reads(/\/api\/books\/1$/)).toBeGreaterThan(bookBefore),
+    );
+    await waitFor(() =>
+      expect(reads(/\/pending-headings$/)).toBeGreaterThan(pendingBefore),
+    );
+  });
+
+  it("offers nothing over a set already confirmed while the list is read again", async () => {
+    const book = stubLoad({
+      pendingHeadings: [SUGGESTED],
+      users: [ADMIN, OWNER],
+    });
+    api.on("/api/books/1/pending-headings/confirm", { body: book }, "POST");
+    renderDetail(ADMIN);
+    const button = await screen.findByRole("button", { name: "Confirm" });
+    // The re-read still answers the old set and is held open, so only the
+    // hook's own emptying can take the buttons away.
+    const reread = heldOpen();
+    api.on("/api/books/1/pending-headings", reread.respond, "GET");
+
+    await userEvent.setup().click(button);
+
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/1/pending-headings/confirm", "POST"),
+      ).toBeDefined(),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Suggested by a harvest")).toBeNull(),
+    );
+    reread.release({ body: [] });
+  });
+
+  it("discards the set only once the admin agrees", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    stubLoad({ pendingHeadings: [SUGGESTED], users: [ADMIN, OWNER] });
+    api.on("/api/books/1/pending-headings/discard", { status: 204 }, "POST");
+    renderDetail(ADMIN);
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Discard" }));
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("Discard this suggestion?"),
+    );
+    await waitFor(() =>
+      expect(
+        api.lastCall("/api/books/1/pending-headings/discard", "POST"),
+      ).toBeDefined(),
+    );
+  });
+
+  it("asks about several suggestions in the plural", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    stubLoad({
+      pendingHeadings: [SUGGESTED, { ...SUGGESTED, number: "510" }],
+      users: [ADMIN, OWNER],
+    });
+    renderDetail(ADMIN);
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Discard" }));
+
+    expect(window.confirm).toHaveBeenCalledWith(
+      expect.stringContaining("Discard these suggestions?"),
+    );
+  });
+
+  it("discards nothing when the admin declines", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    stubLoad({ pendingHeadings: [SUGGESTED], users: [ADMIN, OWNER] });
+    renderDetail(ADMIN);
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole("button", { name: "Discard" }));
+
+    expect(api.lastCall("/pending-headings/discard", "POST")).toBeUndefined();
+  });
+});
 
 describe("BookDetail enrichment", () => {
   it("is offered even with no Google Books key", async () => {

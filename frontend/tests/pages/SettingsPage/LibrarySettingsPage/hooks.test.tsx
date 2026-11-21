@@ -48,7 +48,10 @@ import type {
   VocabularyOut,
 } from "../../../../src/api/generated/model";
 import { ApiError } from "../../../../src/api/mutator";
-import { useBookCustomFields } from "../../../../src/pages/BookDetail/hooks";
+import {
+  useBookCustomFields,
+  useBookPendingHeadings,
+} from "../../../../src/pages/BookDetail/hooks";
 import { useSettings } from "../../../../src/pages/SettingsPage/hooks";
 import {
   useCalibreImport,
@@ -2056,7 +2059,7 @@ describe("which set a harvest asks the repository for", () => {
     created: 2,
     deleted: 0,
     harvest_id: 1,
-    headings_unconfirmed: 0,
+    headings_pending: 0,
     matched: 0,
     metadata_prefix: "marc21",
     pages_read: 1,
@@ -2094,6 +2097,28 @@ describe("which set a harvest asks the repository for", () => {
       repository: REPOSITORY,
       set_spec: "theses",
     });
+  });
+
+  it("reads every book's suggested headings again once the harvest lands", async () => {
+    // A harvest raises suggestions on books it does not name to this tab, and
+    // no catalogue write moves them, so a book page an admin saw within the
+    // cache's half minute would otherwise still say it had none.
+    const api = stubHarvest();
+    api.on("/api/books/7/pending-headings", { body: [] }, "GET");
+    const pendingReads = () =>
+      api.calls.filter((call) => call.url.endsWith("/pending-headings")).length;
+    const { result } = renderHookWithProviders(() => ({
+      harvest: useHarvestImport(REPOSITORY),
+      book: useBookPendingHeadings(7, true),
+    }));
+    await waitFor(() => expect(pendingReads()).toBe(1));
+
+    await act(async () => result.current.harvest.read(""));
+    await waitFor(() => expect(result.current.harvest.preview).not.toBeNull());
+    await act(async () => result.current.harvest.confirm());
+    await waitFor(() => expect(result.current.harvest.result).not.toBeNull());
+
+    await waitFor(() => expect(pendingReads()).toBe(2));
   });
 
   it("sends no set at all when the field is blank", async () => {

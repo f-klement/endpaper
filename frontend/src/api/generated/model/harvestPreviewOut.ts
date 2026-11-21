@@ -12,8 +12,9 @@ import type { MarcPreviewRow } from "./marcPreviewRow.ts";
  *
  * `MarcPreviewOut`'s counts over the harvested records, asked through the same
  * index the apply asks, plus what the run itself read. `rows` carries each
- * record's headings, which is where a harvest's headings are offered: the
- * apply writes none (owner, 2026-11-20).
+ * record's headings. The apply writes none (owner, 2026-11-20): it raises
+ * them as suggestions on a Book the record is, which an admin confirms or
+ * discards on the Book.
  */
 export interface HarvestPreviewOut {
   /**

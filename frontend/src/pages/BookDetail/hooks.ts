@@ -24,6 +24,7 @@ import {
 import {
   getGetCustomFieldsQueryKey,
   getListAccessRequestsQueryKey,
+  getListPendingHeadingsQueryKey,
   getListCustomFieldsQueryKey,
   getGetHighlightsQueryKey,
   getGetNotesQueryKey,
@@ -48,6 +49,9 @@ import {
   getRemoveBookTagMutationOptions,
   useAddBookTag,
   useAddCopy,
+  useConfirmPendingHeadings,
+  useDiscardPendingHeadings,
+  useListPendingHeadings,
   useDecideAccess,
   useListAccessRequests,
   useListDigitalReferences,
@@ -113,6 +117,7 @@ import type {
   BookMatch,
   BookDetailsUpdate,
   BookIdentifierOut,
+  ClassificationOut,
   OnlineLinkOut,
   CollectionOut,
   CoverImageOut,
@@ -746,6 +751,75 @@ export function useBookAccess(
       answer.mutate({ bookId, requestId, data: { granted } }),
     isBusy: ask.isPending || answer.isPending,
     error: requests.error ?? ask.error ?? answer.error,
+  };
+}
+
+export interface UseBookPendingHeadingsResult {
+  /** The headings a harvest suggested and nobody has settled. Empty for a member. */
+  headings: ClassificationOut[];
+  /** Write the whole set as this book's headings. */
+  confirm: () => void;
+  /** Drop the whole set, after asking: the server remembers a discard. */
+  discard: () => void;
+  isBusy: boolean;
+  error: unknown;
+}
+
+/**
+ * A harvest's suggested headings on this book, which an admin settles.
+ *
+ * **Read only for an admin**, since the route answers anybody else 403 and a
+ * member is shown nothing. The whole set at once, as the server takes it.
+ *
+ * Confirming writes classifications, so it drops the catalogue: the book's own
+ * record and the classification facets both move. Discarding writes nothing a
+ * reader sees, so it drops this list alone.
+ */
+export function useBookPendingHeadings(
+  bookId: number,
+  isAdmin: boolean,
+): UseBookPendingHeadingsResult {
+  const { t } = useTranslation();
+  const invalidate = useInvalidate();
+  const queryClient = useQueryClient();
+  const pending = useListPendingHeadings(bookId, {
+    query: { enabled: isAdmin },
+  });
+  // **Emptied before it is read again**, because the server's list is empty
+  // once either write lands. Invalidating alone leaves the settled set on screen
+  // for the refetch's round trip, with both buttons live again over headings
+  // already written or discarded.
+  const dropPending = () => {
+    const queryKey = getListPendingHeadingsQueryKey(bookId);
+    queryClient.setQueryData(queryKey, []);
+    void queryClient.invalidateQueries({ queryKey });
+  };
+  const accept = useConfirmPendingHeadings({
+    mutation: {
+      onSuccess: () => {
+        dropPending();
+        invalidate.catalogue();
+      },
+    },
+  });
+  const reject = useDiscardPendingHeadings({
+    mutation: { onSuccess: dropPending },
+  });
+
+  const headings = pending.data ?? [];
+
+  return {
+    headings,
+    confirm: () => accept.mutate({ bookId }),
+    discard: () => {
+      const question =
+        headings.length === 1
+          ? t("pendingHeadings.discardConfirmOne")
+          : t("pendingHeadings.discardConfirm");
+      if (window.confirm(question)) reject.mutate({ bookId });
+    },
+    isBusy: accept.isPending || reject.isPending,
+    error: pending.error ?? accept.error ?? reject.error,
   };
 }
 

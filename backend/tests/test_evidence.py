@@ -665,9 +665,14 @@ HEADING_WRITES: Final[dict[str, dict[str, dict[str, int]]]] = {
         # The owner's ruling on the MARC importer: choosing the file is the
         # confirmation.
         "confirm_file_headings": {"classifications.add_headings": 1},
+        # A harvested Book's pending set, which an admin confirmed.
+        "confirm_harvested_headings": {"classifications.add_headings": 1},
     },
-    # A MARC file a Member chose to import, through its door.
-    "importing.py": {"MarcImport._apply_one": {"evidence.confirm_file_headings": 1}},
+    # A MARC file a Member chose to import, through its door. A harvest's
+    # headings take the other branch, to `pending_headings.raise_on`.
+    "importing.py": {"MarcImport._keep_headings": {"evidence.confirm_file_headings": 1}},
+    # `POST /{book_id}/pending-headings/confirm`, through its door.
+    "pending_headings.py": {"confirm": {"evidence.confirm_harvested_headings": 1}},
     "routers/books.py": {
         # For `_create_book` alone, the one function here that calls it.
         "<module>": {"classifications.add_headings": 1},
@@ -688,6 +693,7 @@ _NAMED: Final[tuple[tuple[object, str], ...]] = (
     (classifications.add_headings, "classifications.add_headings"),
     (evidence.confirm, "evidence.confirm"),
     (evidence.confirm_file_headings, "evidence.confirm_file_headings"),
+    (evidence.confirm_harvested_headings, "evidence.confirm_harvested_headings"),
 )
 #: Called, because most names of the model are reads: a query's entity, a
 #: column, the restore's table list.

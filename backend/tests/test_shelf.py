@@ -483,6 +483,7 @@ BOOK_CHILDREN = frozenset(
         "loans",
         "notes",
         "online_links",
+        "pending_headings",
         "quotes",
         "reading_progress",
         "readwise_books",
@@ -533,6 +534,8 @@ BOOK_CHILDREN = frozenset(
 #: `online_links` is the sixth, for the same reason: what a catalogue said is
 #: online, carrying no member (`models.OnlineLink`). `cover_images` is the
 #: seventh: an image of the object, carrying no member (`models.CoverImage`).
+#: `pending_headings` is the eighth: a harvested record's headings waiting on
+#: an admin, carrying no member (`models.PendingHeading`).
 BOOK_OWNED_TABLES = frozenset(
     {
         "book_identifiers",
@@ -542,6 +545,7 @@ BOOK_OWNED_TABLES = frozenset(
         "custom_field_values",
         "digital_references",
         "online_links",
+        "pending_headings",
     }
 )
 
@@ -661,7 +665,11 @@ ARCHIVE_TABLES_DECLARATION: Final = (
     "in the # archive's covers beside the shelf covers (`cover_store.files` lists # both), so a restore "
     "writes each back under the name its row gives. # Absent from `_REQUIRED_TABLES` for the links' "
     'reason: an archive taken # before this table existed restores with none. ("cover_images", '
-    "CoverImage), # The author merge decisions. Its only foreign key is `users`, which is # first in "
+    "CoverImage), # A harvest's suggestions, settled ones included, since those are what # stops the "
+    "next run raising them again. After both parents, `books` # and `harvests`. Absent from "
+    "`_REQUIRED_TABLES` for the links' reason. "
+    '("pending_headings", PendingHeading), # The author merge decisions. Its only foreign key is '
+    "`users`, which is # first in "
     "this tuple, so it could sit anywhere after that; it is here # beside the other tables that hold "
     "what members decided rather than # what the catalogue says. # # **It was missing until "
     "2026-08-26**, and the symptom was silent: a # restore produced a library where every merged author "
@@ -1200,7 +1208,9 @@ BOOK_OWNED_READERS = {
             "reason: the "
             "key is the member and Readwise's # own book id, which a merge does not touch. "
             "_Transfer(_table(ReadwiseBook.__tablename__), _moves_wholesale(ReadwiseBook)), "
-            "_Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values), )",
+            "_Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values), # A harvest's "
+            "suggestions stay with the Book its record is: see # `_left_to_the_cascade`. "
+            "_Transfer(_table(PendingHeading.__tablename__), _left_to_the_cascade), )",
             "a declaration, run once at import: the merge policy per child table. It reads no row. Every "
             "read a policy makes is bounded to the Books being folded, which "
             "`tests/test_folding.py::TestEveryReadIsBoundedToTheBooksBeingFolded` checks by shape.",
@@ -3856,6 +3866,7 @@ class TestTheShelfIsTheOnlyWayIn:
             "CustomFieldValue",
             "DigitalReference",
             "OnlineLink",
+            "PendingHeading",
             "book_tags",
         }, (
             "The guarded entities no longer match BOOK_OWNED_TABLES. If a table "
@@ -6126,7 +6137,7 @@ class TestTheRoutesThisDocstringCounts:
         assert self._bucket("copy") == ["add_copy"]
 
     def test_the_aliases_are_derived_from_the_fetch_not_from_a_list(self):
-        """The four aliases, and that `BookForCover` is excluded for a reason.
+        """The five aliases, and that `BookForCover` is excluded for a reason.
 
         `book_for_cover` reads the same book by the same rule and fetches with
         no `load=`, so it is the discriminator this derivation turns on. If it
@@ -6141,6 +6152,7 @@ class TestTheRoutesThisDocstringCounts:
             "BookInTrash": "book_in_trash",
             "BookForWrite": "book_for_read",
             "BookForOwner": "book_for_read",
+            "BookForAdmin": "book_for_read",
         }
 
     def test_a_new_alias_would_be_counted_without_editing_this_file(self):

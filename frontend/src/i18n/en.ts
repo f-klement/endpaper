@@ -142,6 +142,17 @@ export const en = {
   "classification.scheme.lcsh": "Subject heading",
   "classification.kind.content": "Content type",
   "classification.kind.carrier": "Carrier type",
+  "pendingHeadings.section": "Suggested by a harvest",
+  "pendingHeadings.explain":
+    "A harvested record suggests these. None is on the book until it is confirmed.",
+  // A whole phrase for one, as `public.resultCountOne`: no plural engine here.
+  "pendingHeadings.confirm": "Confirm all {count}",
+  "pendingHeadings.confirmOne": "Confirm",
+  "pendingHeadings.discard": "Discard",
+  "pendingHeadings.discardConfirm":
+    "Discard these suggestions? A later harvest of the same record will not suggest them again.",
+  "pendingHeadings.discardConfirmOne":
+    "Discard this suggestion? A later harvest of the same record will not suggest it again.",
   "onlineLinks.section": "Online links",
   "onlineLinks.relation.resource": "The resource itself",
   "onlineLinks.relation.version": "A version of it",
@@ -2484,13 +2495,13 @@ export const en = {
   "harvestRun.deleted":
     "{count} records are marked deleted by the repository. No book is removed for them.",
   "harvestRun.headingsPreview":
-    "Headings and shelf notations in the records listed below: {count}. A harvest counts them and writes none yet: it confirms no record.",
+    "Headings and shelf notations in the records listed below: {count}. A harvest writes none of them: it suggests them only on a book a harvest of their record created, for an admin to confirm or discard there. A book matched by ISBN, or by author and title, gets none.",
   "harvestRun.truncatedPreview":
     "The run stopped before the end of the repository, at a limit or because the repository was busy, so these counts cover only part of it. Every harvest starts over from the beginning; naming a set narrows it.",
   "harvestRun.confirm": "Harvest {count} records",
   "harvestRun.importing": "Harvesting...",
   "harvestRun.resultHeadings":
-    "Headings and shelf notations counted and not yet written: {count}.",
+    "Headings and shelf notations suggested, waiting on their books for an admin to confirm or discard: {count}.",
   "harvestRun.truncatedResult":
     "The harvest stopped before the end of the repository, at a limit or because the repository was busy. What was read is kept. A re-run starts over from the beginning; naming a set narrows it.",
   "harvestRun.off":

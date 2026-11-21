@@ -241,10 +241,10 @@ function HarvestResult({ result }: { result: HarvestResultOut }) {
           {t("harvestRun.deleted", { count: result.deleted })}
         </p>
       )}
-      {result.headings_unconfirmed > 0 && (
+      {result.headings_pending > 0 && (
         <p className="text-xs text-paper-600 dark:text-paper-400">
           {t("harvestRun.resultHeadings", {
-            count: result.headings_unconfirmed,
+            count: result.headings_pending,
           })}
         </p>
       )}

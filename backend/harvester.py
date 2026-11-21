@@ -379,7 +379,8 @@ def _read_marc(nodes: list[ElementTree.Element]) -> marc.ParsedMarc:
 
     **No local vocabulary copy is asked**, so a second indicator counts only on
     a Library of Congress record. It reaches headings alone, and a harvest
-    writes none: `docs/decisions.md`, *Harvesting an OAI-PMH repository*.
+    writes none, only suggestions: `docs/decisions.md`, *Harvesting an OAI-PMH
+    repository*.
     """
     collection = ElementTree.Element(f"{{{marc_fields.NAMESPACE}}}collection")
     collection.extend(nodes)

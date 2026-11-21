@@ -13493,19 +13493,39 @@ reason under it. `settings_store.harvest_repository` reads library mode, the swi
 blank address again at every harvest, and `harvester.configured_repository` applies
 `is_harvestable` to it, since a restore stores the rows without passing the route.
 
-### A harvest reads MARCXML only, and writes no heading yet
+### A harvest reads MARCXML only
 
 The harvester picks the format whose namespace is MARC21 slim, whatever the repository calls
 it, and reads each record through `marc.read`, as a file's records are read. A MARC record
 holding another, or a `<metadata>` holding two side by side, is unreadable, so each OAI record
 is at most one Book. A record a repository marks deleted is counted and deletes nothing.
 
-**Harvested subject headings land unconfirmed, as suggestions.** ADR 0006 lets a chosen MARC
-file's headings cross as confirmed because choosing the file is the confirmation; naming a
-repository once and pulling thousands of records confirms no record. The owner chose a pending
-suggestion store: one table and a confirm or discard action on the Book, built as a later phase
-keyed on the record's OAI identifier. Until it lands the headings are shown in the preview,
-counted in `headings_unconfirmed` and not kept.
+### A harvest's headings wait as suggestions
+
+**Naming a repository once confirms no record, so a harvest writes no Classification.** ADR
+0006 lets a chosen MARC file's headings cross as confirmed because choosing the file is the
+confirmation; pulling thousands of records is not. A harvest raises each record's headings as
+`pending_headings` rows, but only on a Book the record is: one the run created, or one an
+earlier run of the same repository created from the same identifier. A Book the ladder matched
+by ISBN or by author and title is another record's and gets gaps and links only.
+
+**An admin confirms or discards a Book's whole set**, as selecting a picker row confirms a whole
+record (ADR 0006, amended). Both keep the rows, marked `settled_at`: a re-harvest then raises
+only a heading the record newly carries, never a discarded one, nor a confirmed one a member
+later removed or the ceiling dropped.
+
+**A run raises only what the ceiling leaves room for**: eight less the headings the Book carries
+and those already waiting, a heading in both counted once, so every suggestion fits at the
+confirm. One left out is not remembered, and a later run raises it once there is room. A
+confirm meets the ceiling only when the Book gained headings between the raise and the confirm,
+from a member or a merge; it then drops the suggestions that no longer fit and settles them,
+and the Book it answers shows what landed.
+
+`scheme` carries no foreign key, so a suggestion never blocks deleting a scheme and the confirm
+drops one whose scheme has gone. A merge leaves the loser's to the cascade, since the keeper
+keeps its own identifier and the loser's record will never find it. The routes are admin only,
+and a Book the caller cannot see is 404 before any 403, pinned for a member. The result reports
+`headings_pending`, the count this run raised; the preview has no count.
 
 ### How a harvested record is matched
 

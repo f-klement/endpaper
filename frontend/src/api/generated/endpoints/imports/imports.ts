@@ -246,9 +246,11 @@ export const getApplyHarvestUrl = (params: ApplyHarvestParams) => {
  * matches a Book crediting nobody by its title. A matched Book has its gaps
  * filled and nothing overwritten. **A created Book is nobody's, public, keeps
  * its record's identifier and points at the run** this records in `harvests`.
- * **No heading is written**, matched Book or created one: a harvest confirms
- * no record (owner, 2026-11-20), so the headings the records carried are
- * counted in `headings_unconfirmed` and not kept. A deleted record is counted
+ * **No heading is written**: a harvest confirms no record (owner, 2026-11-20),
+ * so a created Book's headings, and those of a Book keyed by the same
+ * identifier, wait as suggestions an admin confirms or discards on the Book,
+ * counted in `headings_pending`. A Book matched by ISBN or by author and
+ * title gets none. A deleted record is counted
  * and deletes nothing. A 409 while another harvest is running, and one when
  * `repository` is not the address stored now: the client held another when it
  * read the preview, whether the stored one was saved before that read or after
@@ -324,9 +326,11 @@ export type ApplyHarvestMutationVariables = { params: ApplyHarvestParams };
  * matches a Book crediting nobody by its title. A matched Book has its gaps
  * filled and nothing overwritten. **A created Book is nobody's, public, keeps
  * its record's identifier and points at the run** this records in `harvests`.
- * **No heading is written**, matched Book or created one: a harvest confirms
- * no record (owner, 2026-11-20), so the headings the records carried are
- * counted in `headings_unconfirmed` and not kept. A deleted record is counted
+ * **No heading is written**: a harvest confirms no record (owner, 2026-11-20),
+ * so a created Book's headings, and those of a Book keyed by the same
+ * identifier, wait as suggestions an admin confirms or discards on the Book,
+ * counted in `headings_pending`. A Book matched by ISBN or by author and
+ * title gets none. A deleted record is counted
  * and deletes nothing. A 409 while another harvest is running, and one when
  * `repository` is not the address stored now: the client held another when it
  * read the preview, whether the stored one was saved before that read or after
