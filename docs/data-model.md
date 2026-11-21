@@ -122,6 +122,19 @@ which is what lets a library own two paperbacks of one title while a re-scan of 
 already on the shelf is still refused. See *Copies* below. `added_by_user_id` is nullable so
 deleting an account does not cascade away its books.
 
+**A harvested Book has no owner.** `harvest_id` names the `harvests` run that created it,
+and `ck_books_harvested_is_nobodys_and_public` lets a row name one only while
+`added_by_user_id` is null and `is_private` is false. So a harvested Book is on every
+member's shelf and on the public one, and `PATCH /api/books/{id}/privacy` answers **409**
+to making it private: an ownerless private row would be seen by nobody. Every other write
+sets an adder and no route deletes an account, so a Book with neither an adder nor a harvest
+is a row written outside the application; an admin may purge it. `harvest_id` stays with the row
+it was written on; a copy made from it is somebody's, and does not inherit it.
+`harvested_identifier` is the OAI identifier of the record the harvest created the row from,
+and a later harvest of the same repository matches it before the ISBN, so a Book whose title
+or author was corrected since is still found rather than created again. It stays with its row
+as `harvest_id` does.
+
 Every ISBN is canonicalised to **ISBN-13 on the way in** (`backend/isbn.py`), so the same
 book cannot be added twice under its ISBN-10 and ISBN-13 spellings. An ISBN that fails its
 check digit is rejected rather than stored: a misread barcode produces an entry that can
@@ -532,11 +545,12 @@ stored upper cased so `a12` and `A12` are one card, the number a person reads of
 never the primary key), a name, optional contact
 details (email, phone, street, house number, postcode, city), an optional `expires_on` and
 `enrolled_at`. **The most sensitive table here**, a real person's contact details under the
-GDPR, so three rules bind on it:
+GDPR, so four rules bind on it:
 
 | Rule | Where it is held |
 |---|---|
 | Only an admin reads or writes it | `routers/patrons.py` puts `require_admin` on the router, ahead of the lookup, so a member is a 403 for every id, existing or not. The search needs a term and returns at most 50 rows. It is a POST carrying the term in its body, so no request line a proxy or the server logs names a patron |
+| A loan names its patron to an admin alone | `POST /api/loans` with `loaned_to_patron_id` is a 403 to anybody but an admin, checked before the lookup, so a missing id and a real one answer alike. Every loan says `to_patron`, a flag and never the id. An admin's loan also carries `patron`, the name and card number and no contact detail, on the book's loan badge, the loans and overdue pages and a lend or return; every other reader gets null there. `patrons.named_on_loans` is the one lookup, and it reads nothing for a non admin. The overdue digest a channel receives has no reader and names no patron. The admin's patron record lists the patron's open loans, read through the admin's own `Loans.seen_by` |
 | It never reaches the public catalogue, not a field and not a count | no public schema has a patron field and no public route joins the table; `tests/test_nothing_private_leaves.py` sweeps every unauthenticated answer with a patron on loan |
 | Deletion works whatever the loan history | `patrons.erase`, the one erasure for a single delete and any bulk one: it clears `loaned_to_patron_id` on each of the patron's loans, stamps `borrower_anonymised_at`, then deletes the row. The loan keeps its book and its dates |
 
@@ -746,6 +760,17 @@ Written only by `backend/harvest.py`, which also keeps `books.oai_datestamp`, th
 published record last changed, a child row included. A Book that was never public never
 gets a row, and neither does one that left before the provider first answered a request
 (the `oai_first_served` setting). See [security.md](security.md#oai-pmh).
+
+**`harvests`.** One row per run of the OAI-PMH harvester, the import that reads another
+repository: its `base_url`, `set_spec` and `metadata_prefix`, the admin who started it
+(`run_by_user_id`, nullable like every adder), `started_at`, `finished_at` (null while it
+runs) and two counts, `records_seen` and `records_added`. It stands where an owner would on
+each Book it created (`books.harvest_id`), because an account standing there would be
+adopted, with its Books, by any proxy or LDAP identity of the same name. Not the
+`oai_tombstones` above, which belong to this server's own provider. The repository is a
+setting, `oai_harvest_base_url`, beside its switch `oai_harvest_enabled`: refused on
+without an address (**409**), and admitted at a household address over http or https,
+so it is the one setting that makes the server connect where a person typed.
 
 **`settings`.** A small key/value store for things an admin changes at runtime rather than
 at deploy time: the Google Books toggle and API key, the Goodreads lookup toggle, the

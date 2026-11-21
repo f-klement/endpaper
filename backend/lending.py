@@ -336,6 +336,25 @@ class Loans:
         """
         return self._query.filter(Loan.id == loan_id).first()
 
+    def to_patrons(self, patron_ids: Collection[int]) -> dict[int, list[Loan]]:
+        """The loans in this scope that went to each of these patrons, oldest first.
+
+        **For an admin's patron record**, which lists what a patron still holds
+        (owner, 2026-11-20). One statement for a whole page of patrons, and
+        every patron asked about has an entry, empty when they hold nothing.
+        No Book is loaded: the caller asks the Shelf for the titles, since
+        `Loan.book` and a Book column added here both reach a Book past it.
+        """
+        rows = (
+            self._query.filter(Loan.loaned_to_patron_id.in_(patron_ids))
+            .order_by(Loan.loaned_at, Loan.id)
+            .all()
+        )
+        return {
+            patron_id: [row for row in rows if row.loaned_to_patron_id == patron_id]
+            for patron_id in patron_ids
+        }
+
     def page(self, offset: int, limit: int, *order: UnaryExpression[Any]) -> tuple[list[Loan], int]:
         """One page of this scope, and how many loans it was cut from.
 

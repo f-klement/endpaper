@@ -1,7 +1,9 @@
-import type { PatronOut } from "../../../api/generated/model";
+import { Link } from "react-router-dom";
+
+import type { PatronLoanOut, PatronOut } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
 import { numericDate } from "../../../lib/date";
-import { hasExpired } from "../types";
+import { hasExpired } from "../../types";
 
 interface PatronRowProps {
   patron: PatronOut;
@@ -18,6 +20,10 @@ interface PatronRowProps {
  *
  * **A lapsed registration says so in words**, not by colour alone, so the
  * state survives a reader who cannot tell the two hues apart.
+ *
+ * **The books the patron has out are listed** (owner, 2026-11-20), so the
+ * desk can see what to chase. The server sends them on the admin's record
+ * alone, through the admin's own view of the shelf.
  *
  * The delete confirmation says what the erasure does to the loan history,
  * because "delete this person" reads as though their loans go too, and what
@@ -74,6 +80,8 @@ export default function PatronRow({
             })}
       </p>
 
+      <OpenLoans loans={patron.open_loans ?? []} />
+
       <div className="flex flex-wrap gap-3 mt-3 text-xs">
         <button
           type="button"
@@ -97,5 +105,35 @@ export default function PatronRow({
         </button>
       </div>
     </li>
+  );
+}
+
+/** The books this patron has out, each linked, or nothing when there are none. */
+function OpenLoans({ loans }: { loans: PatronLoanOut[] }) {
+  const { t, locale } = useTranslation();
+  if (loans.length === 0) return null;
+  return (
+    <section className="mt-2">
+      <h3 className="text-xs font-medium text-paper-700 dark:text-paper-300">
+        {t("patrons.openLoans")}
+      </h3>
+      <ul className="text-sm mt-0.5">
+        {loans.map((loan) => (
+          <li key={loan.id}>
+            <Link
+              to={`/book/${loan.book_id}`}
+              className="text-paper-900 hover:underline dark:text-paper-100"
+            >
+              {loan.title}
+            </Link>{" "}
+            <span className="text-xs text-paper-600 dark:text-paper-400">
+              {t("patrons.outSince", {
+                date: numericDate(loan.loaned_at, locale),
+              })}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

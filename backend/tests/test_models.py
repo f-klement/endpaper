@@ -34,6 +34,7 @@ from models import (
     AUTHORITY_IDENTIFIER_MAX,
     CLASSIFICATION_NUMBER_MAX,
     CLASSIFICATION_SORT_KEY_MAX,
+    HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL,
     ONE_BORROWER_SQL,
     OPDS_CREDENTIAL_PREFIX,
     AuthorIdentifier,
@@ -46,6 +47,7 @@ from models import (
     Tag,
     User,
     UserBook,
+    harvested_is_nobodys_and_public,
     is_switch_target,
     names_exactly_one_borrower,
     new_opds_credential_key,
@@ -800,6 +802,40 @@ class TestThreeKindsOfBorrower:
             stored = False
         predicate = names_exactly_one_borrower(user_id, name, patron_id=patron_id, anonymised=erased)
         assert (stored, predicate) == (self._expected(member, patron, named, erased),) * 2
+
+
+class TestAHarvestedRowHasOneSpelling:
+    """`HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL` and its Python reading agree on every
+    row the three columns can make, against a table built from the constant
+    through `sqlite3`, for `TestTheBorrowerRuleHasOneSpelling`'s reason."""
+
+    def test_the_two_spellings_agree_on_every_row(self):
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            "CREATE TABLE probe (harvest_id INTEGER, added_by_user_id INTEGER, "
+            f"is_private BOOLEAN NOT NULL, CHECK ({HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL}))"
+        )
+
+        def accepted(row: tuple[int | None, int | None, bool]) -> bool:
+            try:
+                connection.execute("INSERT INTO probe VALUES (?, ?, ?)", row)
+            except sqlite3.IntegrityError:
+                return False
+            connection.execute("DELETE FROM probe")
+            return True
+
+        rows = list(itertools.product((None, 1), (None, 5), (False, True)))
+        verdicts = {row: accepted(row) for row in rows}
+
+        assert [row for row in rows if verdicts[row] != harvested_is_nobodys_and_public(*row)] == []
+        # Anti vacuity: the constraint refuses the three harvested rows with an
+        # adder or private, and stores the rest.
+        # A set, because sorting tuples that mix None and int raises TypeError.
+        assert {row for row in rows if not verdicts[row]} == {
+            (1, None, True),
+            (1, 5, False),
+            (1, 5, True),
+        }
 
 
 class TestTheBorrowerRuleHasOneSpelling:

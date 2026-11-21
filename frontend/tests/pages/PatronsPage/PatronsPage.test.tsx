@@ -1,6 +1,12 @@
 /** Tests for src/pages/PatronsPage: the staff page over the patron register. */
 
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +14,7 @@ import { Locale, type PatronOut } from "../../../src/api/generated/model";
 import PatronsPage from "../../../src/pages/PatronsPage";
 import { DEBOUNCE_MS } from "../../../src/pages/components/SearchBar";
 import {
+  createTestQueryClient,
   expectRequest,
   mockApi,
   renderWithProviders,
@@ -88,6 +95,26 @@ describe("PatronsPage", () => {
     });
   });
 
+  it("lists the books a patron has out, each linked to its book", async () => {
+    const loan = {
+      id: 3,
+      book_id: 42,
+      title: "Dune",
+      loaned_at: "2026-03-01T10:00:00Z",
+      due_at: null,
+    };
+    api.on(SEARCH, { body: [makePatron({ open_loans: [loan] })] }, "POST");
+    renderWithProviders(<PatronsPage />);
+
+    searchFor("ada");
+
+    expect(await screen.findByRole("link", { name: "Dune" })).toHaveAttribute(
+      "href",
+      "/book/42",
+    );
+    expect(screen.getByText(/^Out since /)).toBeInTheDocument();
+  });
+
   it("puts the term in no URL, where a request log would keep it", async () => {
     api.on(SEARCH, { body: [makePatron()] }, "POST");
     renderWithProviders(<PatronsPage />);
@@ -133,41 +160,6 @@ describe("PatronsPage", () => {
     ).toBeInTheDocument();
     expect(within(current).queryByText(/expired/)).toBeNull();
     expect(within(current).getByText(/^Registered until/)).toBeInTheDocument();
-  });
-
-  it("registers a patron with every value trimmed and every empty box sent as nothing", async () => {
-    api.on("/api/patrons", { status: 201, body: makePatron() }, "POST");
-    renderWithProviders(<PatronsPage />);
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("button", { name: "New patron" }));
-    await user.type(screen.getByLabelText("Name"), "  Ada Lovelace ");
-    await user.type(screen.getByLabelText(/^Card number/), "A-1001");
-    await user.type(screen.getByLabelText("Phone"), "   ");
-    await user.click(screen.getByRole("button", { name: "Register" }));
-
-    expect(expectRequest(api, "/api/patrons", "POST").body).toEqual({
-      name: "Ada Lovelace",
-      card_number: "A-1001",
-      email: null,
-      phone: null,
-      street: null,
-      house_number: null,
-      postcode: null,
-      city: null,
-      expires_on: null,
-    });
-  });
-
-  it("holds the register button while the name is only spaces", async () => {
-    renderWithProviders(<PatronsPage />);
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("button", { name: "New patron" }));
-    await user.type(screen.getByLabelText("Name"), "   ");
-    await user.type(screen.getByLabelText(/^Card number/), "A-1001");
-
-    expect(screen.getByRole("button", { name: "Register" })).toBeDisabled();
   });
 
   it("shows the server's refusal in the form and keeps it open", async () => {
@@ -252,6 +244,38 @@ describe("PatronsPage", () => {
       await screen.findByText("No patron matches that search."),
     ).toBeInTheDocument();
     expect(screen.queryByText("Ada Lovelace")).toBeNull();
+  });
+
+  it("forgets the cached loans that named an erased patron", async () => {
+    const loan = {
+      id: 3,
+      book_id: 42,
+      title: "Dune",
+      loaned_at: "2026-03-01T10:00:00Z",
+      due_at: null,
+    };
+    api.on(SEARCH, { body: [makePatron({ open_loans: [loan] })] }, "POST");
+    api.on("/api/patrons/7", { status: 204 }, "DELETE");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const queryClient = createTestQueryClient();
+    // Kept with no observer, which the test client would otherwise collect.
+    for (const key of [["/api/books/42"], ["/api/loans"]]) {
+      queryClient.setQueryDefaults(key, { gcTime: Infinity });
+      queryClient.setQueryData(key, {});
+    }
+    renderWithProviders(<PatronsPage />, { queryClient });
+    const user = userEvent.setup();
+    searchFor("ada");
+
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(
+        [["/api/books/42"], ["/api/loans"]].map(
+          (key) => queryClient.getQueryState(key)?.isInvalidated,
+        ),
+      ).toEqual([true, true]);
+    });
   });
 
   it("sends no delete when the confirmation is declined", async () => {

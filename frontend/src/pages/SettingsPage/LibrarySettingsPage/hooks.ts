@@ -31,13 +31,16 @@ import {
   useScanAdd,
 } from "../../../api/generated/endpoints/books/books";
 import {
+  useApplyHarvest,
   useImportCsv,
   useImportMarc,
+  usePreviewHarvest,
   usePreviewImport,
   usePreviewMarc,
 } from "../../../api/generated/endpoints/imports/imports";
 import {
   getListClassificationSchemesQueryKey,
+  getGetSettingsQueryKey,
   getListVocabulariesQueryKey,
   useDefineClassificationScheme,
   useDeleteClassificationScheme,
@@ -55,6 +58,8 @@ import type {
   CustomFieldKind,
   CustomFieldOut,
   DigitalReferenceIn,
+  HarvestPreviewOut,
+  HarvestResultOut,
   HighlightImportOut,
   ImportPreviewOut,
   ImportResultOut,
@@ -63,6 +68,7 @@ import type {
   VocabularyOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
+import { ApiError } from "../../../api/mutator";
 import type {
   CalibreBook,
   CalibreFailure,
@@ -508,6 +514,185 @@ export function useMarcImport(): UseMarcImportResult {
       importing.reset();
     },
   };
+}
+
+/** What the harvest card is offered: `UseTwoStepImportResult`'s shape over a repository. */
+export interface UseHarvestImportResult {
+  /** What a run over the repository read. Null until the preview lands. */
+  preview: HarvestPreviewOut | null;
+  /** What the harvest wrote. Null until it finishes. */
+  result: HarvestResultOut | null;
+  /** Read the repository, or only the named set of it. Writes nothing. */
+  read: (setSpec: string) => void;
+  /** Harvest the set the preview read. Does nothing before a preview. */
+  confirm: () => void;
+  isPreviewing: boolean;
+  isImporting: boolean;
+  /**
+   * What the read was refused with, apart from the apply's refusal: the two
+   * steps answer 409 for different reasons, and the card words them apart.
+   */
+  readError: unknown;
+  harvestError: unknown;
+  /** Forget the preview, the result and the set. */
+  reset: () => void;
+}
+
+/** One read of the repository: the address and set it asked, and its answer. */
+interface HarvestRead {
+  repository: string | null;
+  setSpec: string | undefined;
+  preview: HarvestPreviewOut | null;
+}
+
+/**
+ * Harvesting the configured OAI-PMH repository into the catalogue.
+ *
+ * The MARC import's two steps over a repository rather than a file. **The
+ * apply harvests the set the preview read**, held here, and not whatever the
+ * field holds by then: a set typed after the preview would write records
+ * nobody saw counted. The apply reads the repository again, so its counts may
+ * differ from the preview's when the repository changed in between.
+ *
+ * **A preview answers for the repository it read, and for no other.**
+ * `repository` is the stored address as this tab's settings hold it, null
+ * while the switch is off: any change to it discards the read and the
+ * result, and a preview that lands after the change is dropped. An address
+ * saved in another tab never reaches this tab's settings, and the preview
+ * route does not say which address it read, so the apply names the address
+ * this tab held when it read and the server refuses it with
+ * `repository_changed` when another is stored, whether that one was saved
+ * before the read or after it; that refusal drops the read and asks the
+ * settings again.
+ */
+export function useHarvestImport(
+  repository: string | null,
+): UseHarvestImportResult {
+  const invalidate = useInvalidate();
+  const queryClient = useQueryClient();
+  const [held, setHeld] = useState<HarvestRead | null>(null);
+  const [result, setResult] = useState<HarvestResultOut | null>(null);
+  const [seen, setSeen] = useState(repository);
+
+  // Adjusted while rendering, as React's "storing information from previous
+  // renders" does, so no render ever offers the old read under a new address.
+  // Keyed on the address and not on the read, so a result that landed after
+  // one change is cleared by the next.
+  if (seen !== repository) {
+    setSeen(repository);
+    setHeld(null);
+    setResult(null);
+  }
+
+  const previewing = usePreviewHarvest();
+  const harvesting = useApplyHarvest({
+    mutation: {
+      onSuccess: (data: HarvestResultOut) => {
+        setResult(data);
+        setHeld(spent);
+        // A harvest writes Books and authors, and no heading, no reading
+        // record and no setting.
+        invalidate.catalogue();
+      },
+      onError: (error: unknown) => {
+        if (!isRepositoryChanged(error)) return;
+        setHeld(null);
+        void queryClient.invalidateQueries({
+          queryKey: getGetSettingsQueryKey(),
+        });
+      },
+    },
+  });
+
+  return {
+    preview: previewOf(held),
+    result,
+
+    read: (typed: string) => {
+      const asked = readOf(repository, typed);
+      setHeld(asked);
+      setResult(null);
+      harvesting.reset();
+      previewing.mutate(
+        { params: paramsFor(asked.setSpec) },
+        {
+          // Kept only while this read is still the one held: a reset or a
+          // changed address since has replaced it.
+          onSuccess: (data: HarvestPreviewOut) =>
+            setHeld((now) => landed(now, asked, data)),
+        },
+      );
+    },
+
+    confirm: () => {
+      const params = applyParamsOf(held);
+      if (params !== undefined) harvesting.mutate({ params });
+    },
+
+    isPreviewing: previewing.isPending,
+    isImporting: harvesting.isPending,
+    readError: held === null ? null : previewing.error,
+    // Not gated on the read: an apply refused after the address changed
+    // still harvested nothing, and saying so is true under any address.
+    harvestError: harvesting.error,
+
+    reset: () => {
+      setHeld(null);
+      setResult(null);
+      previewing.reset();
+      harvesting.reset();
+    },
+  };
+}
+
+/** The read of `typed` under `repository`, a blank set being no set. */
+function readOf(repository: string | null, typed: string): HarvestRead {
+  const trimmed = typed.trim();
+  return {
+    repository,
+    setSpec: trimmed === "" ? undefined : trimmed,
+    preview: null,
+  };
+}
+
+/** `asked` with its answer, unless another read has replaced it since. */
+function landed(
+  now: HarvestRead | null,
+  asked: HarvestRead,
+  data: HarvestPreviewOut,
+): HarvestRead | null {
+  return now === asked ? { ...asked, preview: data } : now;
+}
+
+/** The read after its harvest: the preview is spent, the set kept. */
+function spent(now: HarvestRead | null): HarvestRead | null {
+  return now && { ...now, preview: null };
+}
+
+function previewOf(held: HarvestRead | null): HarvestPreviewOut | null {
+  return held?.preview ?? null;
+}
+
+/**
+ * What the apply asks for, or nothing before a preview: the address this tab
+ * held when it read and the set it read, so the server can refuse a harvest
+ * of another address.
+ */
+function applyParamsOf(
+  held: HarvestRead | null,
+): { repository: string; set_spec?: string } | undefined {
+  if (held?.preview == null || held.repository === null) return undefined;
+  return { repository: held.repository, ...paramsFor(held.setSpec) };
+}
+
+/** The apply's refusal for an address stored since this tab read it. */
+function isRepositoryChanged(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "repository_changed";
+}
+
+/** No `set_spec` at all for the whole repository, rather than an empty one. */
+function paramsFor(setSpec: string | undefined): { set_spec?: string } {
+  return setSpec === undefined ? {} : { set_spec: setSpec };
 }
 
 /**

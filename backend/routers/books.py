@@ -128,6 +128,7 @@ from models import (
     User,
     book_tags,
     copy_group_token,
+    harvested_is_nobodys_and_public,
     highlight_visible_to,
     note_visible_to,
 )
@@ -5128,6 +5129,13 @@ def set_collection(
     return book_to_out(book, current_user, db)
 
 
+#: Why a harvested Book stays public: the 409 `set_privacy` answers.
+_HARVESTED_STAYS_PUBLIC: Final = (
+    "A harvested book belongs to nobody, so it cannot be made private: nobody could see it. "
+    "Move it to the trash instead if it should not be shown."
+)
+
+
 @router.patch("/{book_id}/privacy", response_model=BookOut)
 def set_privacy(
     payload: PrivacyUpdate,
@@ -5135,6 +5143,17 @@ def set_privacy(
     db: DbSession,
     current_user: CurrentUser,
 ) -> BookOut:
+    """Make a Book private or public.
+
+    **A harvested Book cannot be made private, and the refusal is a 409 here
+    rather than the database's.** It has no adder, so private it would be seen
+    by nobody, the admin who pressed the switch included, and
+    `ck_books_harvested_is_nobodys_and_public` refuses the row: without this
+    check that refusal surfaces as a 500. Only an admin reaches a harvested Book
+    through `BookForOwner`, so the refusal says what to do instead.
+    """
+    if not harvested_is_nobodys_and_public(book.harvest_id, book.added_by_user_id, payload.is_private):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_HARVESTED_STAYS_PUBLIC)
     book.is_private = payload.is_private
     db.commit()
     db.refresh(book)

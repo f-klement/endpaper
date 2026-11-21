@@ -1236,6 +1236,20 @@ export const de: Messages = {
   "patrons.deleteConfirm":
     "{name} löschen? Der Eintrag wird gelöscht, und das lässt sich nicht rückgängig machen. Die Ausleihen behalten, wann jedes Buch ausgeliehen und zurückgegeben wurde, nennen die Person aber nicht mehr. Ein Buch, das diese Person noch ausgeliehen hat, bleibt als ausgeliehen verzeichnet, dann ohne Entleiher:in.",
 
+  // ── Ausleihe an angemeldete Personen ────────────────────────────────────
+  "loans.borrowerPatron": "Eine angemeldete Person",
+  "loans.patronExisting": "Bereits angemeldet",
+  "loans.patronNew": "Neuanmeldung",
+  "loans.patronFindTitle": "Angemeldete Person suchen",
+  "loans.patronChange": "Andere Person wählen",
+  "loans.badgePatron": "Verliehen an eine angemeldete Person",
+  "loans.loanedToPatronBy": "Verliehen an eine angemeldete Person von {by}",
+  "loans.badgeNamedPatron": "Verliehen an {name}, Ausweis {card}",
+  "loans.loanedToNamedPatronBy":
+    "Verliehen an {name}, Ausweis {card}, von {by}",
+  "patrons.openLoans": "Ausgeliehene Bücher",
+  "patrons.outSince": "Ausgeliehen seit {date}",
+
   // ── Autorinnen und Autoren ──────────────────────────────────────────────
   "authors.title": "Autorinnen und Autoren",
   "authors.label": "Autor",
@@ -2143,4 +2157,48 @@ export const de: Messages = {
     "Die Datei enthält keinen Fingerabdruck des Buchs und kann daher nicht zugeordnet werden.",
   "highlights.outcomeEmpty": "Die Datei enthält keine Markierungen.",
   "highlights.outcomeFailed": "Der Import dieser Datei ist fehlgeschlagen.",
+  "harvest.title": "Einen anderen Katalog übernehmen",
+  "harvest.explain":
+    "Liest die Datensätze eines anderen Bibliothekssystems über OAI-PMH in diesen Katalog. Ein übernommenes Buch gehört niemandem und ist immer öffentlich; seine Schlagwörter kommen unbestätigt an, als Vorschläge.",
+  "harvest.switchLabel": "Aus dem Repository unten übernehmen",
+  "harvest.switchHint":
+    "Ausschalten verhindert die nächste Übernahme. Bereits übernommene Bücher bleiben.",
+  "harvest.needsAddress": "Zuerst unten die Adresse des Repositorys eingeben.",
+  "harvest.addressLabel": "Adresse des Repositorys",
+  "harvest.addressHint":
+    "Dies ist die einzige Einstellung, mit der sich der Server mit einer eingetippten Adresse verbindet. Die Adresse darf im eigenen Netz liegen, über http oder https, ohne Benutzernamen, Passwort, Abfrage oder Fragment.",
+  "harvest.addressSave": "Adresse speichern",
+  "origin.oai_harvest": "OAI-PMH-Abruf",
+  "harvestRun.title": "Jetzt übernehmen",
+  "harvestRun.explain":
+    "Liest das oben genannte Repository und zeigt, was eine Übernahme anlegen und ergänzen würde. Geschrieben wird erst nach der Bestätigung.",
+  "harvestRun.setLabel": "Teilmenge (optional)",
+  "harvestRun.setHint":
+    "Nur diese Teilmenge übernehmen, so geschrieben, wie das Repository sie nennt. Leer lassen für das ganze Repository.",
+  "harvestRun.read": "Repository lesen",
+  "harvestRun.reading": "Repository wird gelesen...",
+  "harvestRun.repository": "Repository: {name}",
+  "harvestRun.previewTitle":
+    "{seen} Datensätze gelesen, {readable} davon kann diese App speichern.",
+  "harvestRun.wouldAdd": "{count} davon sind hier neu und werden angelegt.",
+  "harvestRun.deleted":
+    "{count} Datensätze sind im Repository als gelöscht markiert. Für sie wird kein Buch entfernt.",
+  "harvestRun.headingsPreview":
+    "Schlagwörter und Notationen in den unten aufgeführten Datensätzen: {count}. Eine Übernahme zählt sie und schreibt noch keine davon: sie bestätigt keinen Datensatz.",
+  "harvestRun.truncatedPreview":
+    "Der Lauf hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war, diese Zahlen umfassen also nur einen Teil davon. Jede Übernahme beginnt wieder von vorn; eine Teilmenge grenzt sie ein.",
+  "harvestRun.confirm": "{count} Datensätze übernehmen",
+  "harvestRun.importing": "Wird übernommen...",
+  "harvestRun.resultHeadings":
+    "Gezählte und noch nicht geschriebene Schlagwörter und Notationen: {count}.",
+  "harvestRun.truncatedResult":
+    "Die Übernahme hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war. Was gelesen wurde, bleibt erhalten. Ein neuer Lauf beginnt wieder von vorn; eine Teilmenge grenzt ihn ein.",
+  "harvestRun.off":
+    "Die Übernahme ist ausgeschaltet, oder es ist keine Adresse eines Repositorys gespeichert. Bitte oben einschalten und die Adresse speichern.",
+  "harvestRun.running":
+    "Es läuft bereits eine Übernahme. Bitte warten, bis sie abgeschlossen ist, und es dann erneut versuchen.",
+  "harvestRun.lostRace":
+    "Eine andere Änderung an denselben Büchern kam dieser Übernahme dazwischen, und es wurde nichts übernommen. Bitte erneut übernehmen.",
+  "harvestRun.repositoryChanged":
+    "Das gespeicherte Repository ist nicht das, das diese Seite gelesen hat, und es wurde nichts übernommen. Bitte das Repository erneut lesen.",
 };

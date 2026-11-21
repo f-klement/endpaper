@@ -51,6 +51,7 @@ from models import (
     Book,
     Classification,
     Collection,
+    Harvest,
     Tag,
     User,
     UserBook,
@@ -662,6 +663,36 @@ class TestPrivacy:
             f"/api/books/{book['id']}/privacy", json={"is_private": True}, headers=admin["headers"]
         )
         assert res.status_code == 200
+
+    def _a_harvested_book(self, db) -> int:
+        run = Harvest(base_url="http://10.0.0.10/oai", metadata_prefix="marcxml")
+        db.add(run)
+        db.flush()
+        book = Book(title="Harvested", harvest_id=run.id, added_by_user_id=None, is_private=False)
+        db.add(book)
+        db.commit()
+        return book.id
+
+    def test_a_harvested_book_cannot_be_made_private(self, client, admin, db):
+        """Ownerless and private, it would be a record nobody can see."""
+        book_id = self._a_harvested_book(db)
+        res = client.patch(
+            f"/api/books/{book_id}/privacy", json={"is_private": True}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 409
+        db.expire_all()
+        assert db.get(Book, book_id).is_private is False
+
+    def test_a_harvested_book_may_be_kept_public(self, client, admin, db):
+        """The refusal is of privacy, not of the route: the anti vacuity arm."""
+        book_id = self._a_harvested_book(db)
+        res = client.patch(
+            f"/api/books/{book_id}/privacy", json={"is_private": False}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
+        assert res.json()["is_private"] is False
 
     def test_private_books_are_excluded_from_search(self, client, admin, member, make_book):
         make_book(admin["headers"], title="Secret Dune", is_private=True)

@@ -9,6 +9,7 @@ import config
 import cover_store
 import covers
 import credentials
+import harvester
 import metadata
 import notifications
 import settings_store
@@ -95,6 +96,10 @@ _STORED_BOOL: Final[dict[str, SettingKey]] = {
     # The OAI-PMH provider's switch, stored the same way and read by
     # `settings_store.oai_is_served` with the publish state.
     "oai_provider_enabled": SettingKey.OAI_PROVIDER_ENABLED,
+    # The OAI-PMH harvester's switch. Refused on without a repository by
+    # `_refuse_harvest_without_a_repository`, and read by
+    # `settings_store.harvest_repository` with library mode.
+    "oai_harvest_enabled": SettingKey.OAI_HARVEST_ENABLED,
     # Whether a public record shows on the shelf or on loan. Stored whatever
     # the publish state: `settings_store.availability_is_shown` reads both.
     "public_availability_enabled": SettingKey.PUBLIC_AVAILABILITY_ENABLED,
@@ -302,6 +307,8 @@ def _read_settings(db: DbSession) -> SettingsOut:
         sru_server_enabled=settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED),
         oai_provider_enabled=settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED),
         oai_admin_email=settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL),
+        oai_harvest_enabled=settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED),
+        oai_harvest_base_url=settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL),
         public_availability_enabled=settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED),
         accounts_open_to_outsiders=settings_store.accounts_are_open_to_outsiders(db),
         vocabulary_offer_dismissed=settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED),
@@ -489,6 +496,59 @@ def _refuse_oai_without_an_address(db: DbSession, payload: SettingsUpdate) -> No
         raise HTTPException(status_code=409, detail=_OAI_NEEDS_AN_ADDRESS)
 
 
+#: Why the harvester's switch was refused. Named in the UI's hint as well.
+_HARVEST_NEEDS_A_REPOSITORY: Final = (
+    "The OAI-PMH harvester needs a repository address before it can be turned on. Enter it first."
+)
+
+
+def _refuse_harvest_without_a_repository(db: DbSession, payload: SettingsUpdate) -> None:
+    """409 for a write that would leave the harvester on with no repository.
+
+    The import half of issue #178: a switch with no endpoint turns on nothing,
+    so it is refused where it is set rather than found broken at the harvest.
+    The shape of `_refuse_oai_without_an_address`, for its reasons: checked
+    before any field is written, and only for a write naming either field.
+    """
+    if payload.oai_harvest_enabled is None and payload.oai_harvest_base_url is None:
+        return
+    switched_on = (
+        payload.oai_harvest_enabled
+        if payload.oai_harvest_enabled is not None
+        else settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED)
+    )
+    address = (
+        payload.oai_harvest_base_url
+        if payload.oai_harvest_base_url is not None
+        else settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL).strip()
+    )
+    if switched_on and not address:
+        raise HTTPException(status_code=409, detail=_HARVEST_NEEDS_A_REPOSITORY)
+
+
+#: Why a repository address was refused. **A constant sentence**: the 400 never
+#: echoes what was typed.
+_REPOSITORY_NOT_HARVESTABLE: Final = (
+    "The repository address must be an http or https address with no username, password, query or fragment."
+)
+
+
+def _refuse_an_unharvestable_repository(payload: SettingsUpdate) -> None:
+    """400 for a repository address `harvester.is_harvestable` refuses.
+
+    Here rather than in `SettingsUpdate`, which only trims it: the rule reaches
+    `fetch`, and a schema sits below it. The same rule
+    `harvester.configured_repository` reads the stored row with, so a row this
+    write accepts is never one the harvester then refuses. Checked before any
+    field is written. 400 rather than 422: the schema types a 422's `detail`
+    as a list of validation entries, and this one is a sentence
+    (`tests/test_errors.py`).
+    """
+    address = payload.oai_harvest_base_url
+    if address and not harvester.is_harvestable(address):
+        raise HTTPException(status_code=400, detail=_REPOSITORY_NOT_HARVESTABLE)
+
+
 def _write_catalogue_sources(db: DbSession, wire: list[CatalogueSourcePreference]) -> None:
     """Merged against what is stored rather than taken whole: a payload that
     names one source must not be read as switching the other eight on. See
@@ -540,6 +600,8 @@ def update_settings(
     sending the field back would blank it.
     """
     _refuse_oai_without_an_address(db, payload)
+    _refuse_an_unharvestable_repository(payload)
+    _refuse_harvest_without_a_repository(db, payload)
     _write_lookup_settings(db, payload)
     _write_reminder_settings(db, payload)
     # An empty string is a deliberate clear, like the Google key and the
@@ -552,6 +614,10 @@ def update_settings(
     if payload.oai_admin_email is not None:
         # Already checked as an address, or "", by `SettingsUpdate`.
         _store(db, SettingKey.OAI_ADMIN_EMAIL, payload.oai_admin_email)
+    if payload.oai_harvest_base_url is not None:
+        # Trimmed by `SettingsUpdate`, checked by `harvester.is_harvestable`
+        # above unless "", and refused empty while the switch is on.
+        _store(db, SettingKey.OAI_HARVEST_BASE_URL, payload.oai_harvest_base_url)
     _write_table(db, payload, _STORED_BOOL, _flag, refuse_pinned=False)
     _write_table(db, payload, _SENDER_BOOL, _flag, refuse_pinned=True)
 

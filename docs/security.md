@@ -1569,12 +1569,13 @@ generated from: the browser policy would be widened to pay for a fetch policy.
 
 ### An address a person typed is resolved once and connected to at that address
 
-**The argument above holds for a module constant and for nothing else**, and two doors'
-addresses are typed by an admin: the household OPDS server, and the webhook URL, whose own
-section is above. `fetch.pinned_client` is what the first of them goes through; the webhook
-is not wired to it, and that section says why the decision is open rather than made.
+**The argument above holds for a module constant and for nothing else**, and three doors'
+addresses are typed by an admin: the household OPDS server, the OAI-PMH repository the
+harvester reads, and the webhook URL, whose own section is above. `fetch.pinned_client` is
+what the first two go through; the webhook is not wired to it, and that section says why the
+decision is open rather than made.
 
-**What the OPDS door's client does.** `fetch.pinned_client` resolves the name, classifies
+**What the OPDS and harvester doors' client does.** `fetch.pinned_client` resolves the name, classifies
 **every** address the resolver answered with, refuses the ones its policy does not admit, and
 then makes the request to the literal address that passed, carrying the name in the `Host`
 header and as the TLS server name. That last step is the one that matters: a check on its own
@@ -1599,7 +1600,7 @@ so does a name that resolves to any of them. **One range changed.** What limits 
 unchanged and is in Known limits below. A name at a public address that proxies inward is
 refused by nothing here, and no address policy anywhere can see it.
 
-**Three of the five outbound doors are not wired to it**, and the count is worth reading
+**Three of the six outbound doors are not wired to it**, and the count is worth reading
 against the list rather than past it. The seventeen seeded catalogues are not, because their
 hosts are module constants. The webhook is not, because which policy fits it is undecided
 rather than known. Z39.50 cannot be, because pinning is done by rewriting an HTTP request and
@@ -2164,6 +2165,19 @@ Worth knowing before exposing this beyond a private network:
   no other setting on their list gives them. No bytes of the response are echoed, though
   its status code is, and so are the titles and authors parsed out of it, which makes the
   door a small oracle rather than a blind one.
+- **The OAI-PMH repository an admin names is fetched by this server, with no host
+  allowlist**, under the OPDS door's household policy and for its reason: migrating off
+  another system on the same network is the case the harvester exists for. So the same
+  reach follows, loopback, every ClusterIP and the router included; link local is refused
+  after resolution, and a link local literal at the write too. Unlike the OPDS door, **only
+  an admin can start a run**, one at a time. Each response is bounded by the catalogue door's
+  byte cap and timeout, a run by its page, record and wall clock caps; `backend/harvester.py`
+  holds them. What the repository sends reaches the admin and the catalogue only as the name
+  it gives itself, shown in the preview, and as the records read out of it, which become
+  public Books nobody added. Nothing else of a response is echoed but its status code and
+  an OAI-PMH error code when it is one of the protocol's own, so only a response that
+  parses as OAI-PMH and MARCXML yields its text, and against any other address the door is
+  a small oracle rather than a blind one.
 - **A login stored for a household OPDS server can travel in the clear.** http is admitted
   and https is not required, because these servers rarely carry a certificate, so a login
   stored for an `http` feed travels as `Authorization: Basic` in the clear on the

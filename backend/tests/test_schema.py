@@ -3208,6 +3208,173 @@ class TestAPatronIsAThirdKindOfBorrower:
         assert remaining == [1, 2]
 
 
+class TestAHarvestedBookIsNobodysAndPublic:
+    """Revision 4121a6f9c8d7, which adds `harvests` and `books.harvest_id` under
+    `ck_books_harvested_is_nobodys_and_public`.
+
+    Engine neutral, so the gate runs it under `backend-pg` as well: the CHECK
+    is one spelling, and these arms are where it is seen holding on each engine.
+    """
+
+    PREVIOUS = "f009f139047c"
+    REVISION = "4121a6f9c8d7"
+
+    _COLUMNS = "id, title, added_by_user_id, is_private"
+
+    def _with_three_books(self) -> None:
+        """A member's private Book, a member's public one and an ownerless one."""
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim', 'x', TRUE)")
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, added_by_user_id, is_private) VALUES "
+                    "('Dune', 1, TRUE), ('Emma', 1, FALSE), ('Kim', NULL, FALSE)"
+                )
+            )
+            connection.commit()
+
+    def _books(self) -> list[tuple]:
+        with engine.connect() as connection:
+            return [
+                tuple(row)
+                for row in connection.execute(text(f"SELECT {self._COLUMNS} FROM books ORDER BY id"))
+            ]
+
+    def _a_harvest(self) -> None:
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO harvests (base_url, metadata_prefix) "
+                    "VALUES ('http://10.0.0.10/oai', 'marc21')"
+                )
+            )
+            connection.commit()
+
+    def _insert_harvested(self, owner: str, private: str) -> None:
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO books (title, added_by_user_id, is_private, harvest_id) "
+                    f"VALUES ('Harvested', {owner}, {private}, 1)"
+                )
+            )
+            connection.commit()
+
+    def test_existing_books_survive_unchanged(self) -> None:
+        self._with_three_books()
+        before = self._books()
+
+        schema.upgrade_to(self.REVISION)
+
+        assert self._books() == before
+        with engine.connect() as connection:
+            added = connection.execute(text("SELECT harvest_id FROM books")).scalars().all()
+        assert added == [None, None, None]
+
+    def test_an_ownerless_public_book_may_name_its_harvest(self) -> None:
+        """The anti vacuity arm: the refusals below are the CHECK, not a
+        harvested row being refused whatever it holds."""
+        self._with_three_books()
+        schema.upgrade_to(self.REVISION)
+        self._a_harvest()
+
+        self._insert_harvested("NULL", "FALSE")
+
+        with engine.connect() as connection:
+            harvested = connection.execute(text("SELECT harvest_id FROM books WHERE id = 4")).scalar_one()
+        assert harvested == 1
+
+    @pytest.mark.parametrize(
+        ("owner", "private"),
+        [("NULL", "TRUE"), ("1", "FALSE"), ("1", "TRUE")],
+        ids=["private", "owned", "owned-and-private"],
+    )
+    def test_the_check_refuses_a_harvested_book_with_an_owner_or_privacy(self, owner, private) -> None:
+        self._with_three_books()
+        schema.upgrade_to(self.REVISION)
+        self._a_harvest()
+
+        with pytest.raises(IntegrityError, match=r"ck_books_harvested_is_nobodys_and_public"):
+            self._insert_harvested(owner, private)
+
+    def test_the_downgrade_keeps_a_harvested_book_as_an_ownerless_public_one(self) -> None:
+        from alembic import command
+
+        self._with_three_books()
+        schema.upgrade_to(self.REVISION)
+        self._a_harvest()
+        self._insert_harvested("NULL", "FALSE")
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        assert self._books()[-1] == (4, "Harvested", None, False)
+        tables = inspect(engine).get_table_names()
+        assert "harvests" not in tables
+        assert "harvest_id" not in {column["name"] for column in inspect(engine).get_columns("books")}
+
+
+class TestAHarvestedBookKeepsItsRecordIdentifier:
+    """Revision 6dac941f868b, which adds `books.harvested_identifier`.
+
+    Engine neutral, so the gate runs it under `backend-pg` as well.
+    """
+
+    PREVIOUS = "4121a6f9c8d7"
+    REVISION = "6dac941f868b"
+
+    def _with_a_harvested_book(self) -> None:
+        at_revision(self.PREVIOUS)
+        with engine.connect() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO harvests (base_url, metadata_prefix) "
+                    "VALUES ('http://10.0.0.10/oai', 'marc21')"
+                )
+            )
+            connection.execute(
+                text("INSERT INTO books (title, is_private, harvest_id) VALUES ('Kim', FALSE, 1)")
+            )
+            connection.commit()
+
+    def _rows(self) -> list[tuple]:
+        with engine.connect() as connection:
+            return [tuple(row) for row in connection.execute(text("SELECT id, title, harvest_id FROM books"))]
+
+    def test_an_existing_book_survives_with_no_identifier(self) -> None:
+        self._with_a_harvested_book()
+        before = self._rows()
+
+        schema.upgrade_to(self.REVISION)
+
+        assert self._rows() == before
+        with engine.connect() as connection:
+            kept = connection.execute(text("SELECT harvested_identifier FROM books")).scalars().all()
+        assert kept == [None]
+        assert "ix_books_harvested_identifier" in {
+            index["name"] for index in inspect(engine).get_indexes("books")
+        }
+
+    def test_the_downgrade_drops_the_identifier_and_keeps_the_book(self) -> None:
+        from alembic import command
+
+        self._with_a_harvested_book()
+        schema.upgrade_to(self.REVISION)
+        with engine.connect() as connection:
+            connection.execute(text("UPDATE books SET harvested_identifier = 'oai:x:1'"))
+            connection.commit()
+        before = self._rows()
+
+        command.downgrade(schema._alembic_config(), self.PREVIOUS)
+
+        assert self._rows() == before
+        assert "harvested_identifier" not in {
+            column["name"] for column in inspect(engine).get_columns("books")
+        }
+
+
 class TestTheStoredShelfKey:
     """Revision f1c30ab27d84, which adds `classifications.sort_key` and fills it.
 

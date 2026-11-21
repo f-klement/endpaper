@@ -1003,7 +1003,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **160** models under `schemas/`, **57** of
+    Measured on the tree as it stands: **165** models under `schemas/`, **57** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -7132,6 +7132,11 @@ class TestOneInstanceIssuesALoan:
             "than the loan: it says nothing about who has the book or when it "
             "is due, and it is stamped only after a send that succeeded"
         ),
+        "routers/patrons.py: builds a row shaped like a loan": (
+            "not a write at all: `PatronLoanOut`, one loan on a patron's record, "
+            "which shares the loan's column names. Reported rather than exempted, "
+            "for the reason the `serialisation.py` entry gives"
+        ),
         "patrons.py: builds a row shaped like a loan": (
             "`patrons.erase`, the one erasure: it takes a patron off their loans "
             "and stamps the marker, keeping the dates. It issues no loan"
@@ -8657,6 +8662,9 @@ class TestOneDoorParsesAResponseBody:
         row's own bound, and fetches and parses nothing. **`vocabulary_copy.py`
         is here for `fetch.download`**, which writes a release to disk; the file
         is parsed by `vocabulary_dumps.py`, never as a response body.
+        **`credentials.py` is here for `fetch.HOUSEHOLD_ADDRESSES`**, which its
+        `household_admits` applies to an address an admin typed; it fetches and
+        parses nothing.
         """
         fetchers = {
             path.name for path in application_modules() if _imports_fetch(ast.parse(path.read_text()))
@@ -8666,11 +8674,13 @@ class TestOneDoorParsesAResponseBody:
             "metadata.py",
             "authority.py",
             "google_books.py",
+            "harvester.py",
             "opds.py",
             "covers.py",
             "readwise.py",
             "targets.py",
             "vocabulary_copy.py",
+            "credentials.py",
         }
 
 
@@ -9602,7 +9612,7 @@ _PARSERS_THE_LINTER_SEES = frozenset({"fromstring", "parse", "iterparse", "XMLPa
 #: The modules allowed to turn outside XML into a tree, each refusing a document
 #: type declaration first and capped on the bytes it reads. Every one says why in
 #: its own docstring.
-_MODULES_THAT_PARSE_XML = ("authority.py", "marc.py", "metadata.py", "opds.py")
+_MODULES_THAT_PARSE_XML = ("authority.py", "harvester.py", "marc.py", "metadata.py", "opds.py")
 
 
 #: The module whose parse entry points this rule is about.
@@ -9916,6 +9926,7 @@ def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
 _BYTE_DOORS: Final[dict[str, str]] = {
     "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
     "metadata.py::_parsed": ("tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"),
+    "harvester.py::_parsed": "tests/test_harvester.py::TestAResponseIsReadOrRefusedByName",
     # The NAF's and the BNP's one parse; the BNP's path has its own property,
     # `tests/test_authority.py::TestABnpAnswerIsReadOrRefusedByName`.
     "authority.py::_tree": "tests/test_authority.py::TestANafAnswerIsReadOrRefusedByName",

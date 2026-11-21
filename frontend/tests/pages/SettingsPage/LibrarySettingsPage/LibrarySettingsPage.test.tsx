@@ -125,6 +125,148 @@ describe("LibrarySettingsPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers the harvester to an admin in library mode", async () => {
+    stubLibraryMode(true);
+    render();
+
+    expect(
+      await screen.findByRole("heading", { name: "Harvest another catalogue" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer the harvester to a household", async () => {
+    // The anti vacuity arm: the settings record answers here too, so the card
+    // is withheld by library mode and not by the record.
+    stubLibraryMode(false);
+    render();
+
+    await screen.findByRole("heading", { name: "Bring a library across" });
+    await waitFor(() =>
+      expect(api.lastCall(/\/api\/settings$/, "GET")).toBeDefined(),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Harvest another catalogue" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers a harvest once the harvester is switched on", async () => {
+    stubLibraryMode(true);
+    api.on(/\/api\/settings$/, {
+      body: {
+        ...SETTINGS,
+        oai_harvest_enabled: true,
+        oai_harvest_base_url: "http://catalogue.lan/oai",
+      },
+    });
+    render();
+
+    expect(
+      await screen.findByRole("heading", { name: "Harvest now" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer a harvest to a household with the harvester on", async () => {
+    stubLibraryMode(false);
+    api.on(/\/api\/settings$/, {
+      body: {
+        ...SETTINGS,
+        oai_harvest_enabled: true,
+        oai_harvest_base_url: "http://catalogue.lan/oai",
+      },
+    });
+    render();
+
+    // Drawn from the settings answer, so the card has had its chance to appear.
+    await screen.findByRole("heading", { name: "Classification schemes" });
+    expect(
+      screen.queryByRole("heading", { name: "Harvest now" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not offer a harvest to a member in library mode", async () => {
+    stubLibraryMode(true);
+    api.on(
+      /\/api\/settings$/,
+      { status: 403, body: { detail: "Admins only" } },
+      "GET",
+    );
+    render();
+
+    await screen.findByRole("heading", { name: "Take a catalogue across" });
+    await waitFor(() =>
+      expect(api.lastCall(/\/api\/settings$/, "GET")).toBeDefined(),
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Harvest now" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("withdraws a preview once another repository address is saved", async () => {
+    // The apply harvests whatever address is stored when it runs, so a
+    // preview of the old one confirmed a harvest nobody previewed.
+    stubLibraryMode(true);
+    const harvesting = {
+      ...SETTINGS,
+      oai_harvest_enabled: true,
+      oai_harvest_base_url: "http://catalogue.lan/oai",
+    };
+    api.on(/\/api\/settings$/, { body: harvesting }, "GET");
+    api.on(
+      /\/api\/settings$/,
+      { body: { ...harvesting, oai_harvest_base_url: "http://other.lan/oai" } },
+      "PUT",
+    );
+    api.on(
+      "/api/imports/harvest/preview",
+      {
+        body: {
+          already_held: 0,
+          deleted: 0,
+          metadata_prefix: "marc21",
+          pages_read: 1,
+          readable: 2,
+          records_seen: 2,
+          repository_name: null,
+          skipped: 0,
+          total_records: 2,
+          truncated: false,
+        },
+      },
+      "POST",
+    );
+    render();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Read the repository" }),
+    );
+    await screen.findByRole("button", { name: "Harvest 2 records" });
+
+    fireEvent.change(screen.getByLabelText("Repository address"), {
+      target: { value: "http://other.lan/oai" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save address" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Harvest 2 records" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "Read the repository" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer a harvest while the harvester is off", async () => {
+    // The anti vacuity arm: library mode and an admin, so only the switch
+    // withholds the card.
+    stubLibraryMode(true);
+    render();
+
+    await screen.findByRole("heading", { name: "Harvest another catalogue" });
+    expect(
+      screen.queryByRole("heading", { name: "Harvest now" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps the CSV import in library mode too", async () => {
     // An archive still has people who arrive from Goodreads. The MARC card is
     // an addition rather than a replacement.

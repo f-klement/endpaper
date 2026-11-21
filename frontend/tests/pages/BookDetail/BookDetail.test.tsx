@@ -1,6 +1,12 @@
 /** Tests for src/pages/BookDetail. */
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import fc from "fast-check";
@@ -21,12 +27,14 @@ import {
 import { de, en } from "../../../src/i18n";
 import BookDetail from "../../../src/pages/BookDetail";
 import { BOOK_SECTIONS } from "../../../src/pages/BookDetail/hooks";
+import { DEBOUNCE_MS } from "../../../src/pages/components/SearchBar";
 import { writeSectionChoice } from "../../../src/lib/sectionState";
 import {
   makeBook,
   makeHighlight,
   makeLoan,
   makeNote,
+  makePatron,
   makeQuote,
   makeProgress,
   makeTag,
@@ -294,6 +302,18 @@ describe("BookDetail", () => {
     it("hides the toggle from everyone else", async () => {
       stubLoad({ book: makeBook({ id: 1, added_by: OWNER }) });
       renderDetail(OTHER);
+
+      await screen.findByRole("heading", { name: "Dune" });
+      expect(
+        screen.queryByRole("checkbox", { name: /Private/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("offers no toggle on a book nobody added, an admin included", async () => {
+      // A harvested Book has no adder and the server refuses to make it
+      // private with a 409, so the switch must not be drawn for anyone.
+      stubLoad({ book: makeBook({ id: 1, added_by: null }) });
+      renderDetail(ADMIN);
 
       await screen.findByRole("heading", { name: "Dune" });
       expect(
@@ -617,6 +637,7 @@ describe("BookDetail", () => {
             loaned_to_user_id: OTHER.id,
             // Exactly one borrower: the API rejects both or neither with a 422.
             loaned_to_name: null,
+            loaned_to_patron_id: null,
             // Explicitly null rather than absent: a loan with no deadline is the
             // common case, and the field is always sent.
             due_at: null,
@@ -655,6 +676,7 @@ describe("BookDetail", () => {
             // Exactly one of the two. Both is a 422.
             loaned_to_user_id: null,
             loaned_to_name: "the neighbour",
+            loaned_to_patron_id: null,
             due_at: null,
             acknowledge_not_lendable: false,
           }),
@@ -686,6 +708,106 @@ describe("BookDetail", () => {
       });
 
       expect(screen.getByRole("button", { name: "Loan" })).toBeDisabled();
+    });
+
+    it("says a registered patron has the book, and never which one", async () => {
+      stubLoad({
+        book: makeBook({
+          id: 1,
+          added_by: OWNER,
+          active_loan: makeLoan({
+            id: 9,
+            loaned_to: null,
+            loaned_to_user_id: null,
+            to_patron: true,
+          }),
+        }),
+      });
+      renderDetail();
+      await openSection("Lending this copy");
+
+      expect(
+        await screen.findByText("Loaned to a registered patron"),
+      ).toBeInTheDocument();
+    });
+
+    it("names the patron and the card where the server sent them, as it does to an admin", async () => {
+      stubLoad({
+        book: makeBook({
+          id: 1,
+          added_by: OWNER,
+          active_loan: makeLoan({
+            id: 9,
+            loaned_to: null,
+            loaned_to_user_id: null,
+            to_patron: true,
+            patron: { name: "Kim Ode", card_number: "K-41" },
+          }),
+        }),
+      });
+      renderDetail(ADMIN);
+      await openSection("Lending this copy");
+
+      expect(
+        await screen.findByText("Loaned to Kim Ode, card K-41"),
+      ).toBeInTheDocument();
+    });
+
+    // The server refuses a member's patron search and loan, so a member offered
+    // the doors could only ever be answered with a 403.
+    it("offers a member no patron to lend to", async () => {
+      stubLoad();
+      renderDetail(OWNER);
+      await openSection("Lending this copy");
+
+      expect(await screen.findByLabelText("Someone else")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("radio", { name: "A registered patron" }),
+      ).toBeNull();
+    });
+
+    it("lends to the patron an admin found, by id", async () => {
+      stubLoad({ users: [ADMIN, OTHER] });
+      api.on(
+        "/api/patrons/search",
+        { body: [makePatron({ id: 41, name: "Kim Ode" })] },
+        "POST",
+      );
+      api.on(/\/api\/loans$/, { body: makeLoan() });
+      renderDetail(ADMIN);
+      await openSection("Lending this copy");
+      const user = userEvent.setup();
+      await user.click(
+        await screen.findByRole("radio", { name: "A registered patron" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Existing patron" }));
+
+      // `fireEvent` on a clock of its own: the field is debounced, and
+      // `user-event` deadlocks against fake timers.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        fireEvent.change(
+          screen.getByRole("searchbox", { name: "Search patrons" }),
+          { target: { value: "kim" } },
+        );
+        act(() => {
+          vi.advanceTimersByTime(DEBOUNCE_MS);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      await user.click(await screen.findByRole("button", { name: /Kim Ode/ }));
+      await user.click(screen.getByRole("button", { name: "Loan" }));
+
+      await waitFor(
+        () =>
+          expect(api.lastCall(/\/api\/loans$/, "POST")?.body).toMatchObject({
+            loaned_to_user_id: null,
+            loaned_to_name: null,
+            loaned_to_patron_id: 41,
+          }),
+        { timeout: 5000 },
+      );
     });
 
     it("names an external borrower on the badge", async () => {

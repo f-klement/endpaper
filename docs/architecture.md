@@ -149,7 +149,7 @@ which. The layers group them:
 | Routers | one module per area of the API. A router declares routes and their refusals, resolves the caller and the book, and calls down. It holds no query over many Books |
 | Request support | `dependencies.py` (who is asking, which book, pagination) and `serialisation.py` (rows to payloads) |
 | Identity | accounts, sessions and the three sign in backends |
-| Protocols and notifications | what speaks a protocol other than this API: the SRU server, KOReader sync, the OPDS and Readwise readers, the overdue digest and mail |
+| Protocols and notifications | what speaks a protocol other than this API: the SRU server, KOReader sync, the OPDS and Readwise readers, the OAI-PMH harvester, the overdue digest and mail |
 | Imports and files | applying a parsed export, reading one service's export, backup and restore, and the covers directory |
 | Domain | the rules about Books, Members and their records: the Shelf, reading status, lending, merging two Books, tags, categories, classifications, custom fields, highlights |
 | Settings | runtime settings and sealed catalogue logins |
@@ -223,6 +223,7 @@ listed.
 | Identity | [`accounts.py`](../backend/accounts.py) | The account lifecycle: proving an address, and getting back in. |
 | Identity | [`auth.py`](../backend/auth.py) | Passwords and tokens: hashing, the session and cover tokens, and the dependencies that resolve the signed in member. |
 | Identity | [`auth_backends.py`](../backend/auth_backends.py) | Where "who is this?" gets answered. |
+| Protocols and notifications | [`harvester.py`](../backend/harvester.py) | The OAI-PMH harvester: another repository's records, read in as a bulk import. |
 | Protocols and notifications | [`kosync.py`](../backend/kosync.py) | KOReader's progress sync, served from this library. |
 | Protocols and notifications | [`mailer.py`](../backend/mailer.py) | Sending one mail, over SMTP, with the refusals that belong to that transport. |
 | Protocols and notifications | [`notifications.py`](../backend/notifications.py) | Chasing overdue loans, by sending one digest on every channel that is on. |
@@ -313,9 +314,9 @@ flowchart TB
   routers["Routers, 17 modules"]
   request["Request support, 2 modules"]
   identity["Identity, 3 modules"]
-  protocols["Protocols and notifications, 7 modules"]
+  protocols["Protocols and notifications, 8 modules"]
   files["Imports and files, 6 modules"]
-  domain["Domain, 22 modules"]
+  domain["Domain, 23 modules"]
   settings["Settings, 2 modules"]
   catalogue["Catalogue, 17 modules"]
   contracts["Contracts, 1 module"]
@@ -337,6 +338,7 @@ flowchart TB
   catalogue -.->|"1"| domain
   contracts -.->|"1"| protocols
   contracts -.->|"1"| files
+  contracts -.->|"1"| domain
   contracts -.->|"2"| catalogue
   foundations -.->|"1"| domain
   foundations -.->|"1"| catalogue
@@ -358,6 +360,7 @@ flowchart TB
 | `schemas/` | `covers.py` |
 | `schemas/` | `import_readers.py` |
 | `schemas/` | `mailer.py` |
+| `schemas/` | `patrons.py` |
 <!-- layers: end -->
 
 **Two of those pairs are the OAI-PMH provider's.** `models.py` imports `harvest.py` at its foot
@@ -534,8 +537,9 @@ flowchart LR
   end
   subgraph server ["Server"]
     books["routers/books.py: add a Book, or a file's reference"]
-    exports["routers/imports.py: an export file"]
+    exports["routers/imports.py: an export file or a harvest"]
     importreaders["import_readers.py and csv_import.py: a reader per service"]
+    harvester["harvester.py: an OAI-PMH repository, in library mode"]
     marc["marc.py: a MARC file, in library mode"]
     recognition["recognition.Index: which Book is this"]
     importing["importing.py: write the rows"]
@@ -544,6 +548,7 @@ flowchart LR
   readers -->|"metadata and a fingerprint"| books --> recognition
   exports --> importreaders --> recognition
   exports --> marc --> recognition
+  exports --> harvester --> marc
   recognition --> importing
 ```
 
@@ -553,9 +558,14 @@ it per source kind with its own key ladder, and is built once per import, so a f
 thousands of rows costs no query per row. The Readwise pull uses the same index, and adding
 one Book asks `recognition.recognise_one` instead.
 
-**The OPDS reader is the one parser that runs on the server**, because a self hosted OPDS
+**The OPDS reader reads a feed on the server rather than in the browser**, because a self hosted OPDS
 server rarely sends the headers a browser needs to read it, and an OPDS feed is a catalogue
 rather than a file. `opds.py` says why at length.
+
+**The OAI-PMH harvester fetches on the server too**, from the one repository an admin names,
+and reads each page's MARC records through `marc.read`, so a harvested record is read exactly
+as a file's. `importing.MarcImport.for_harvest` applies them as Books nobody added, public,
+pointing at the run recorded in `harvests`. `harvester.py` holds its bounds.
 
 ## Identity and sessions
 

@@ -4095,6 +4095,260 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HarvestPreviewOut": {
+        "description": "What a harvest would read and do, before anything is written.\n\n`MarcPreviewOut`'s counts over the harvested records, asked through the same\nindex the apply asks, plus what the run itself read. `rows` carries each\nrecord's headings, which is where a harvest's headings are offered: the\napply writes none (owner, 2026-11-20).",
+        "properties": {
+          "already_held": {
+            "description": "Records matching a book this member can already see",
+            "minimum": 0.0,
+            "title": "Already Held",
+            "type": "integer"
+          },
+          "ambiguous": {
+            "default": 0,
+            "description": "Records two or more books on this shelf answer, which the import leaves alone rather than guessing between",
+            "minimum": 0.0,
+            "title": "Ambiguous",
+            "type": "integer"
+          },
+          "blocked": {
+            "default": 0,
+            "description": "Records the import will refuse: their ISBN belongs to a book this member cannot see",
+            "minimum": 0.0,
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "deleted": {
+            "description": "Records the repository marks deleted. Counted and acted on nowhere: a repository withdrawing a record does not withdraw a book here",
+            "minimum": 0.0,
+            "title": "Deleted",
+            "type": "integer"
+          },
+          "in_trash": {
+            "default": 0,
+            "description": "Records whose ISBN only books in this member's trash hold",
+            "minimum": 0.0,
+            "title": "In Trash",
+            "type": "integer"
+          },
+          "metadata_prefix": {
+            "description": "The repository's name for the MARCXML format this run asked for",
+            "title": "Metadata Prefix",
+            "type": "string"
+          },
+          "pages_read": {
+            "description": "Pages the repository answered",
+            "minimum": 0.0,
+            "title": "Pages Read",
+            "type": "integer"
+          },
+          "readable": {
+            "description": "Records with a title this app can store",
+            "minimum": 0.0,
+            "title": "Readable",
+            "type": "integer"
+          },
+          "records_seen": {
+            "description": "Record headers read, deleted ones included",
+            "minimum": 0.0,
+            "title": "Records Seen",
+            "type": "integer"
+          },
+          "repository_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The name the repository gives itself, if it gives one",
+            "title": "Repository Name"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MarcPreviewRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "skipped": {
+            "description": "Records with no title",
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "total_records": {
+            "description": "Records in the file",
+            "minimum": 0.0,
+            "title": "Total Records",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "Whether the record cap, the page cap, the deadline or a busy repository stopped the run before the repository ran out; what was read is kept",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "metadata_prefix",
+          "pages_read",
+          "records_seen",
+          "deleted",
+          "truncated",
+          "total_records",
+          "readable",
+          "skipped",
+          "already_held",
+          "repository_name"
+        ],
+        "title": "HarvestPreviewOut",
+        "type": "object"
+      },
+      "HarvestResultOut": {
+        "description": "What a harvest did, and the run it recorded.",
+        "properties": {
+          "ambiguous": {
+            "default": 0,
+            "description": "Rows two or more books on the caller's shelf answer, which are not copies of one book. Nothing is written for them rather than guessing between the books",
+            "minimum": 0.0,
+            "title": "Ambiguous",
+            "type": "integer"
+          },
+          "ambiguous_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Ambiguous Titles",
+            "type": "array"
+          },
+          "created": {
+            "description": "Books added from the file",
+            "minimum": 0.0,
+            "title": "Created",
+            "type": "integer"
+          },
+          "deleted": {
+            "description": "Records the repository marks deleted. Counted and acted on nowhere: a repository withdrawing a record does not withdraw a book here",
+            "minimum": 0.0,
+            "title": "Deleted",
+            "type": "integer"
+          },
+          "excluded": {
+            "default": 0,
+            "description": "Rows the file itself marked as not wanted, such as a title deleted at the source",
+            "minimum": 0.0,
+            "title": "Excluded",
+            "type": "integer"
+          },
+          "harvest_id": {
+            "description": "The run recorded in `harvests`, which every Book it added points at",
+            "title": "Harvest Id",
+            "type": "integer"
+          },
+          "headings_unconfirmed": {
+            "description": "Headings the harvested records carried, skipped records included: a harvest confirms no record, so its headings are counted and not written",
+            "minimum": 0.0,
+            "title": "Headings Unconfirmed",
+            "type": "integer"
+          },
+          "in_trash": {
+            "default": 0,
+            "description": "Rows whose ISBN only books in the caller's trash hold. Nothing is written for them: restore the book, or empty it from the trash, and import again",
+            "minimum": 0.0,
+            "title": "In Trash",
+            "type": "integer"
+          },
+          "in_trash_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "In Trash Titles",
+            "type": "array"
+          },
+          "matched": {
+            "description": "Rows matched to a book already here",
+            "minimum": 0.0,
+            "title": "Matched",
+            "type": "integer"
+          },
+          "metadata_prefix": {
+            "description": "The repository's name for the MARCXML format this run asked for",
+            "title": "Metadata Prefix",
+            "type": "string"
+          },
+          "pages_read": {
+            "description": "Pages the repository answered",
+            "minimum": 0.0,
+            "title": "Pages Read",
+            "type": "integer"
+          },
+          "records_seen": {
+            "description": "Record headers read, deleted ones included",
+            "minimum": 0.0,
+            "title": "Records Seen",
+            "type": "integer"
+          },
+          "rows_read": {
+            "description": "Rows this import acted on",
+            "minimum": 0.0,
+            "title": "Rows Read",
+            "type": "integer"
+          },
+          "skipped": {
+            "description": "Rows this import could not act on: no title, or an ISBN held by a book the caller cannot see",
+            "minimum": 0.0,
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "statuses_updated": {
+            "description": "Statuses actually changed",
+            "minimum": 0.0,
+            "title": "Statuses Updated",
+            "type": "integer"
+          },
+          "tags_dropped": {
+            "default": 0,
+            "description": "Tag names this run tried to put on a book and did not: the name was empty, the book was already full, the run had invented all the tags it may, or the name is not one this member may use. Not a count of what the source held: a reader caps how many tag names it takes from one record, and a record acted on in no other way is not reached at all, so both lose names upstream of this number",
+            "minimum": 0.0,
+            "title": "Tags Dropped",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "Whether the record cap, the page cap, the deadline or a busy repository stopped the run before the repository ran out; what was read is kept",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "unmatched_titles": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmatched Titles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "metadata_prefix",
+          "pages_read",
+          "records_seen",
+          "deleted",
+          "truncated",
+          "rows_read",
+          "matched",
+          "created",
+          "statuses_updated",
+          "skipped",
+          "harvest_id",
+          "headings_unconfirmed"
+        ],
+        "title": "HarvestResultOut",
+        "type": "object"
+      },
       "HeadingFacetOut": {
         "description": "One distinct heading in the library, with how many Books carry it.\n\nThe facet a reader picks from, and the same shape a Book's own heading has\nplus the count, so a client can render both with one component.",
         "properties": {
@@ -4961,6 +5215,19 @@
             ],
             "title": "Loaned To Name"
           },
+          "loaned_to_patron_id": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loaned To Patron Id"
+          },
           "loaned_to_user_id": {
             "anyOf": [
               {
@@ -5081,6 +5348,16 @@
             ],
             "title": "Loaned To User Id"
           },
+          "patron": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LoanPatronOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "returned_at": {
             "anyOf": [
               {
@@ -5092,17 +5369,52 @@
               }
             ],
             "title": "Returned At"
+          },
+          "to_patron": {
+            "default": false,
+            "description": "Whether the borrower is a registered patron. A flag and not the id, so a member learns that a patron has the book and never which one. Without it a patron's loan and an erased borrower's would read alike, both naming nobody.",
+            "title": "To Patron",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "book_id",
           "loaned_to_user_id",
+          "loaned_to_name",
+          "to_patron",
+          "patron",
           "loaned_by_user_id",
           "loaned_at",
-          "returned_at"
+          "returned_at",
+          "due_at",
+          "is_overdue",
+          "days_overdue",
+          "days_out",
+          "book",
+          "loaned_to",
+          "loaned_by"
         ],
         "title": "LoanOut",
+        "type": "object"
+      },
+      "LoanPatronOut": {
+        "description": "Who holds a lent book, as an admin reads it on the loan.\n\n**The name and the card, and no address**, because this answers \"who has\nit\" and \"whom to chase\", and the record one click away has the rest. It\nalso keeps the address rule in `tests/test_house_rules.py` from having a\nloan schema to allow.",
+        "properties": {
+          "card_number": {
+            "title": "Card Number",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "card_number"
+        ],
+        "title": "LoanPatronOut",
         "type": "object"
       },
       "Locale": {
@@ -6405,6 +6717,48 @@
         "title": "PatronCreate",
         "type": "object"
       },
+      "PatronLoanOut": {
+        "description": "One loan a patron still holds, as their record lists it.",
+        "properties": {
+          "book_id": {
+            "title": "Book Id",
+            "type": "integer"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "loaned_at": {
+            "format": "date-time",
+            "title": "Loaned At",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "book_id",
+          "title",
+          "loaned_at"
+        ],
+        "title": "PatronLoanOut",
+        "type": "object"
+      },
       "PatronOut": {
         "description": "A patron's whole record, as an admin reads it. Served by `routers/patrons.py` alone.",
         "properties": {
@@ -6469,6 +6823,14 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "open_loans": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PatronLoanOut"
+            },
+            "title": "Open Loans",
+            "type": "array"
           },
           "phone": {
             "anyOf": [
@@ -7567,7 +7929,8 @@
           "marc_import",
           "opds_import",
           "calibre_import",
-          "store_import"
+          "store_import",
+          "oai_harvest"
         ],
         "title": "RecordOrigin",
         "type": "string"
@@ -8144,6 +8507,16 @@
             "title": "Oai Admin Email",
             "type": "string"
           },
+          "oai_harvest_base_url": {
+            "default": "",
+            "title": "Oai Harvest Base Url",
+            "type": "string"
+          },
+          "oai_harvest_enabled": {
+            "default": false,
+            "title": "Oai Harvest Enabled",
+            "type": "boolean"
+          },
           "oai_provider_enabled": {
             "default": false,
             "title": "Oai Provider Enabled",
@@ -8436,6 +8809,29 @@
               }
             ],
             "title": "Oai Admin Email"
+          },
+          "oai_harvest_base_url": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oai Harvest Base Url"
+          },
+          "oai_harvest_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oai Harvest Enabled"
           },
           "oai_provider_enabled": {
             "anyOf": [
@@ -15213,6 +15609,7 @@
     },
     "/api/books/{book_id}/privacy": {
       "patch": {
+        "description": "Make a Book private or public.\n\n**A harvested Book cannot be made private, and the refusal is a 409 here\nrather than the database's.** It has no adder, so private it would be seen\nby nobody, the admin who pressed the switch included, and\n`ck_books_harvested_is_nobodys_and_public` refuses the row: without this\ncheck that refusal surfaces as a 500. Only an admin reaches a harvested Book\nthrough `BookForOwner`, so the refusal says what to do instead.",
         "operationId": "set_privacy",
         "parameters": [
           {
@@ -16787,6 +17184,194 @@
         ]
       }
     },
+    "/api/imports/harvest": {
+      "post": {
+        "description": "Harvest the configured repository into the catalogue.\n\nMatching asks first for the Book an earlier harvest of this repository\ncreated from the same record, by its OAI identifier, so a Book corrected\nhere since that run is still found. Then it is `import_marc`'s, as this admin sees\nthe shelf: ISBN, then author and title together, so a record crediting\nsomebody never matches on its title alone, while a record crediting nobody\nmatches a Book crediting nobody by its title. A matched Book has its gaps\nfilled and nothing overwritten. **A created Book is nobody's, public, keeps\nits record's identifier and points at the run** this records in `harvests`.\n**No heading is written**, matched Book or created one: a harvest confirms\nno record (owner, 2026-11-20), so the headings the records carried are\ncounted in `headings_unconfirmed` and not kept. A deleted record is counted\nand deletes nothing. A 409 while another harvest is running, and one when\n`repository` is not the address stored now: the client held another when it\nread the preview, whether the stored one was saved before that read or after\nit, so the preview it showed was labelled with an address this would not\nharvest.",
+        "operationId": "apply_harvest",
+        "parameters": [
+          {
+            "description": "The address held when the preview was read; refused unless it is the one stored",
+            "in": "query",
+            "name": "repository",
+            "required": true,
+            "schema": {
+              "description": "The address held when the preview was read; refused unless it is the one stored",
+              "maxLength": 255,
+              "title": "Repository",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Harvest only this set of the repository",
+            "in": "query",
+            "name": "set_spec",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Harvest only this set of the repository",
+              "title": "Set Spec"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HarvestResultOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Apply Harvest",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/imports/harvest/preview": {
+      "post": {
+        "description": "Harvest the configured repository and report what an apply would do, writing nothing.\n\nAdmin only, library mode and the harvester's switch required. The counts are\n`preview_marc`'s, over the harvested records, with a record an earlier\nharvest of this repository created counted as already held, as the apply\nmatches it; `deleted` and `truncated` are the run's own. Rate limited with\nthe imports, and a 409 while another harvest, preview or apply, is running.\n\n**`async`, unlike the file routes**, because the wait is the network: the\nfetch runs on the event loop through `fetch.py`, and the counting, which\nblocks on the database, runs in a thread, as `routers/opds.py::sync` does.",
+        "operationId": "preview_harvest",
+        "parameters": [
+          {
+            "description": "Harvest only this set of the repository",
+            "in": "query",
+            "name": "set_spec",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Harvest only this set of the repository",
+              "title": "Set Spec"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HarvestPreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Preview Harvest",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
     "/api/imports/marc": {
       "post": {
         "description": "Apply a MARC21 file another library exported.\n\nMARCXML only. `enums.ExportFormat` says why the binary serialisation is not\nread, and it is the same reason it is not written.\n\n**Declared `def`, not `async def`, for `import_csv`'s reason**, which is\nload bearing rather than stylistic: everything below blocks, and an `async`\nhandler runs on the event loop, so a running import stops the whole\napplication answering. Measured on a 3000 row file, `GET /api/books` went\nfrom 7ms to 14.4 seconds.\n\n**Nothing personal is written.** A catalogue record carries no reading\nstatus, no rating and no review, so this touches no `user_books` row and\nchanges nothing about what anybody has read. `statuses_updated` comes back\nzero for that reason rather than because nothing needed changing.\n\n**`create_missing` defaults to true, where the CSV importer defaults it to\nfalse.** A reading history is mostly books the household does not own, so\ncreating them by default would fill the shelf; a catalogue transfer that\nadds no records has transferred nothing.\n\nRecords added this way arrive `ownership=unknown`: another institution's\nrecord says that institution holds the book. They are confirmed together\nfrom the library view, which is what the bulk ownership endpoint is for.",
@@ -17603,6 +18188,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -18646,7 +19241,7 @@
         ]
       },
       "get": {
-        "description": "One patron's whole record.",
+        "description": "One patron's whole record, with the books they have out.",
         "operationId": "get_patron",
         "parameters": [
           {

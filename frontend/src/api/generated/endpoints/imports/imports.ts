@@ -14,16 +14,20 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ApplyHarvestParams,
   BodyImportCsv,
   BodyImportMarc,
   BodyPreviewImport,
   BodyPreviewMarc,
   HTTPValidationError,
+  HarvestPreviewOut,
+  HarvestResultOut,
   ImportCsvParams,
   ImportMarcParams,
   ImportPreviewOut,
   ImportResultOut,
   MarcPreviewOut,
+  PreviewHarvestParams,
   PreviewImportParams,
   Refusal,
 } from "../../model";
@@ -214,6 +218,266 @@ export const useImportCsv = <
   TContext
 > => {
   return useMutation(getImportCsvMutationOptions(options), queryClient);
+};
+export const getApplyHarvestUrl = (params: ApplyHarvestParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/imports/harvest?${stringifiedParams}`
+    : `/api/imports/harvest`;
+};
+
+/**
+ * Harvest the configured repository into the catalogue.
+ *
+ * Matching asks first for the Book an earlier harvest of this repository
+ * created from the same record, by its OAI identifier, so a Book corrected
+ * here since that run is still found. Then it is `import_marc`'s, as this admin sees
+ * the shelf: ISBN, then author and title together, so a record crediting
+ * somebody never matches on its title alone, while a record crediting nobody
+ * matches a Book crediting nobody by its title. A matched Book has its gaps
+ * filled and nothing overwritten. **A created Book is nobody's, public, keeps
+ * its record's identifier and points at the run** this records in `harvests`.
+ * **No heading is written**, matched Book or created one: a harvest confirms
+ * no record (owner, 2026-11-20), so the headings the records carried are
+ * counted in `headings_unconfirmed` and not kept. A deleted record is counted
+ * and deletes nothing. A 409 while another harvest is running, and one when
+ * `repository` is not the address stored now: the client held another when it
+ * read the preview, whether the stored one was saved before that read or after
+ * it, so the preview it showed was labelled with an address this would not
+ * harvest.
+ * @summary Apply Harvest
+ */
+export const applyHarvest = async (
+  params: ApplyHarvestParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<HarvestResultOut> => {
+  return customFetch<HarvestResultOut>(getApplyHarvestUrl(params), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getApplyHarvestMutationKey = () => ["applyHarvest"] as const;
+
+export const getApplyHarvestMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof applyHarvest>>,
+    TError,
+    ApplyHarvestMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof applyHarvest>>,
+  TError,
+  ApplyHarvestMutationVariables,
+  TContext
+> => {
+  const mutationKey = getApplyHarvestMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof applyHarvest>>,
+    ApplyHarvestMutationVariables
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return applyHarvest(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ApplyHarvestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof applyHarvest>>
+>;
+
+export type ApplyHarvestMutationError = Refusal | HTTPValidationError;
+export type ApplyHarvestMutationVariables = { params: ApplyHarvestParams };
+
+/**
+ * Harvest the configured repository into the catalogue.
+ *
+ * Matching asks first for the Book an earlier harvest of this repository
+ * created from the same record, by its OAI identifier, so a Book corrected
+ * here since that run is still found. Then it is `import_marc`'s, as this admin sees
+ * the shelf: ISBN, then author and title together, so a record crediting
+ * somebody never matches on its title alone, while a record crediting nobody
+ * matches a Book crediting nobody by its title. A matched Book has its gaps
+ * filled and nothing overwritten. **A created Book is nobody's, public, keeps
+ * its record's identifier and points at the run** this records in `harvests`.
+ * **No heading is written**, matched Book or created one: a harvest confirms
+ * no record (owner, 2026-11-20), so the headings the records carried are
+ * counted in `headings_unconfirmed` and not kept. A deleted record is counted
+ * and deletes nothing. A 409 while another harvest is running, and one when
+ * `repository` is not the address stored now: the client held another when it
+ * read the preview, whether the stored one was saved before that read or after
+ * it, so the preview it showed was labelled with an address this would not
+ * harvest.
+ * @summary Apply Harvest
+ */
+export const useApplyHarvest = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof applyHarvest>>,
+      TError,
+      ApplyHarvestMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof applyHarvest>>,
+  TError,
+  ApplyHarvestMutationVariables,
+  TContext
+> => {
+  return useMutation(getApplyHarvestMutationOptions(options), queryClient);
+};
+export const getPreviewHarvestUrl = (params?: PreviewHarvestParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/imports/harvest/preview?${stringifiedParams}`
+    : `/api/imports/harvest/preview`;
+};
+
+/**
+ * Harvest the configured repository and report what an apply would do, writing nothing.
+ *
+ * Admin only, library mode and the harvester's switch required. The counts are
+ * `preview_marc`'s, over the harvested records, with a record an earlier
+ * harvest of this repository created counted as already held, as the apply
+ * matches it; `deleted` and `truncated` are the run's own. Rate limited with
+ * the imports, and a 409 while another harvest, preview or apply, is running.
+ *
+ * **`async`, unlike the file routes**, because the wait is the network: the
+ * fetch runs on the event loop through `fetch.py`, and the counting, which
+ * blocks on the database, runs in a thread, as `routers/opds.py::sync` does.
+ * @summary Preview Harvest
+ */
+export const previewHarvest = async (
+  params?: PreviewHarvestParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<HarvestPreviewOut> => {
+  return customFetch<HarvestPreviewOut>(getPreviewHarvestUrl(params), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getPreviewHarvestMutationKey = () => ["previewHarvest"] as const;
+
+export const getPreviewHarvestMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewHarvest>>,
+    TError,
+    PreviewHarvestMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewHarvest>>,
+  TError,
+  PreviewHarvestMutationVariables,
+  TContext
+> => {
+  const mutationKey = getPreviewHarvestMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewHarvest>>,
+    PreviewHarvestMutationVariables
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return previewHarvest(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewHarvestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewHarvest>>
+>;
+
+export type PreviewHarvestMutationError = Refusal | HTTPValidationError;
+export type PreviewHarvestMutationVariables = { params?: PreviewHarvestParams };
+
+/**
+ * Harvest the configured repository and report what an apply would do, writing nothing.
+ *
+ * Admin only, library mode and the harvester's switch required. The counts are
+ * `preview_marc`'s, over the harvested records, with a record an earlier
+ * harvest of this repository created counted as already held, as the apply
+ * matches it; `deleted` and `truncated` are the run's own. Rate limited with
+ * the imports, and a 409 while another harvest, preview or apply, is running.
+ *
+ * **`async`, unlike the file routes**, because the wait is the network: the
+ * fetch runs on the event loop through `fetch.py`, and the counting, which
+ * blocks on the database, runs in a thread, as `routers/opds.py::sync` does.
+ * @summary Preview Harvest
+ */
+export const usePreviewHarvest = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof previewHarvest>>,
+      TError,
+      PreviewHarvestMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof previewHarvest>>,
+  TError,
+  PreviewHarvestMutationVariables,
+  TContext
+> => {
+  return useMutation(getPreviewHarvestMutationOptions(options), queryClient);
 };
 export const getImportMarcUrl = (params?: ImportMarcParams) => {
   const normalizedParams = new URLSearchParams();

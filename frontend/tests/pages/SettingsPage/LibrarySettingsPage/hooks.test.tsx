@@ -40,6 +40,8 @@ import {
 import type {
   CustomFieldOut,
   CustomFieldValueOut,
+  HarvestPreviewOut,
+  HarvestResultOut,
   ImportPreviewOut,
   ImportResultOut,
   MarcPreviewOut,
@@ -47,9 +49,11 @@ import type {
 } from "../../../../src/api/generated/model";
 import { ApiError } from "../../../../src/api/mutator";
 import { useBookCustomFields } from "../../../../src/pages/BookDetail/hooks";
+import { useSettings } from "../../../../src/pages/SettingsPage/hooks";
 import {
   useCalibreImport,
   useCustomFields,
+  useHarvestImport,
   BYTES_PER_REQUEST,
   HIGHLIGHTS_PER_REQUEST,
   requestChunks,
@@ -2028,5 +2032,170 @@ describe("useVocabularies", () => {
     const api = mockApi();
     renderHookWithProviders(() => useVocabularies(false));
     expect(listCalls(api)).toBe(0);
+  });
+});
+
+/**
+ * `useHarvestImport`'s one rule a card test cannot see: the apply harvests the
+ * set the preview read, and a blank set is no set at all.
+ */
+describe("which set a harvest asks the repository for", () => {
+  const HARVEST_PREVIEW: HarvestPreviewOut = {
+    already_held: 0,
+    deleted: 0,
+    metadata_prefix: "marc21",
+    pages_read: 1,
+    readable: 2,
+    records_seen: 2,
+    repository_name: null,
+    skipped: 0,
+    total_records: 2,
+    truncated: false,
+  };
+  const HARVESTED: HarvestResultOut = {
+    created: 2,
+    deleted: 0,
+    harvest_id: 1,
+    headings_unconfirmed: 0,
+    matched: 0,
+    metadata_prefix: "marc21",
+    pages_read: 1,
+    records_seen: 2,
+    rows_read: 2,
+    skipped: 0,
+    statuses_updated: 0,
+    truncated: false,
+  };
+
+  const REPOSITORY = "https://repository.example/oai";
+
+  function stubHarvest(): MockApi {
+    const api = mockApi();
+    api.on("/api/imports/harvest", { body: HARVESTED }, "POST");
+    api.on("/api/imports/harvest/preview", { body: HARVEST_PREVIEW }, "POST");
+    return api;
+  }
+
+  it("asks for the typed set, trimmed, in the preview and the apply", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.read("  theses "));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest/preview")).toEqual({
+      set_spec: "theses",
+    });
+    expect(queryOf(api, "/api/imports/harvest")).toEqual({
+      repository: REPOSITORY,
+      set_spec: "theses",
+    });
+  });
+
+  it("sends no set at all when the field is blank", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.read("   "));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest/preview")).toEqual({});
+  });
+
+  it("harvests nothing before a preview", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.confirm());
+
+    expect(lastTo(api, "/api/imports/harvest")).toBeUndefined();
+  });
+
+  it("discards a preview when the stored address changes, and harvests nothing", async () => {
+    const api = stubHarvest();
+    let repository: string | null = REPOSITORY;
+    const { result, rerender } = renderHookWithProviders(() =>
+      useHarvestImport(repository),
+    );
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    repository = "https://another.example/oai";
+    rerender();
+    await act(async () => result.current.confirm());
+
+    expect(result.current.preview).toBeNull();
+    expect(lastTo(api, "/api/imports/harvest")).toBeUndefined();
+  });
+
+  it("names the address the preview was read under in the apply", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest")).toEqual({
+      repository: REPOSITORY,
+    });
+  });
+
+  it("drops the preview and asks the settings again when another repository is stored", async () => {
+    const api = stubHarvest();
+    api.on("/api/settings", { body: {} }, "GET");
+    api.on(
+      /\/api\/imports\/harvest(\?|$)/,
+      {
+        status: 409,
+        body: { detail: { message: "changed", code: "repository_changed" } },
+      },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => {
+      useSettings();
+      return useHarvestImport(REPOSITORY);
+    });
+    const settingsReads = () =>
+      api.calls.filter(
+        (call) => call.method === "GET" && call.url.endsWith("/api/settings"),
+      ).length;
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    const before = settingsReads();
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.harvestError).not.toBeNull());
+
+    expect(result.current.preview).toBeNull();
+    await waitFor(() => expect(settingsReads()).toBeGreaterThan(before));
+  });
+
+  it("discards a preview when the switch is turned off and on again", async () => {
+    stubHarvest();
+    let repository: string | null = REPOSITORY;
+    const { result, rerender } = renderHookWithProviders(() =>
+      useHarvestImport(repository),
+    );
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    repository = null;
+    rerender();
+    repository = REPOSITORY;
+    rerender();
+
+    expect(result.current.preview).toBeNull();
   });
 });

@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
 
-import type { PatronCreate } from "../../../api/generated/model";
-import { Button, ErrorState, Modal } from "../../../components";
-import { useTranslation, type MessageKey } from "../../../i18n";
+import type { PatronCreate } from "../../api/generated/model";
+import { Button, ErrorState, Modal } from "../../components";
+import { useTranslation, type MessageKey } from "../../i18n";
 import { isSendable, patronBody, type PatronDraft } from "../types";
 
 interface PatronFormProps {
@@ -78,7 +78,9 @@ const ADDRESS: Field[] = [
 ];
 
 /**
- * The patron record as a form, for registering and for editing alike.
+ * The patron record as a form, for registering and for editing alike. Two
+ * pages hold it: the patron register, and the loan form, which registers the
+ * person taking the book without leaving the loan.
  *
  * `autoComplete="off"` on every box: the staff member typing is not the
  * person being registered, and a browser offering the admin's own address

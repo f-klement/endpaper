@@ -307,6 +307,7 @@ from models import (
     Book,
     Classification,
     Collection,
+    Harvest,
     Tag,
     User,
     UserBook,
@@ -599,8 +600,11 @@ ARCHIVE_TABLES_DECLARATION: Final = (
     "an archive taken before custom fields # existed restores with none, which is the state it was "
     'written in. ("custom_fields", CustomField), # Before books, which carry a foreign key into it. '
     "Absent from # `_REQUIRED_TABLES` on purpose: an archive taken before collections # existed restores "
-    'with none, which is exactly the state it was # written in. ("collections", Collection), ("books", '
-    "Book), # Before the headings, which carry a foreign key into it. Absent from # `_REQUIRED_TABLES`, "
+    'with none, which is exactly the state it was # written in. ("collections", Collection), # Before '
+    "books, which carry a foreign key into it, and after users, # whom a run names. Absent from "
+    "`_REQUIRED_TABLES`: an archive taken # before harvests existed restores with none. "
+    '("harvests", Harvest), ("books", Book), # Before the headings, which carry a foreign key into it. '
+    "Absent from # `_REQUIRED_TABLES`, "
     "and an archive taken before it existed still # restores its headings: "
     "`classification_schemes.restorable` supplies # the rows they quote. "
     '("classification_schemes", ClassificationSchemeRow), # Straight after the books they hang off, '
@@ -4347,6 +4351,58 @@ class TestWhoSeesWhat:
         db.commit()
 
         assert Shelf.trashed_by(db, other.id).count() == 1
+
+
+def _harvested(db, **fields) -> Book:
+    """A Book a harvest run created: no adder, public, pointing at the run."""
+    run = Harvest(base_url="http://catalogue.home.example/oai", metadata_prefix="marcxml")
+    db.add(run)
+    db.flush()
+    return Book(harvest_id=run.id, added_by_user_id=None, is_private=False, **fields)
+
+
+class TestAHarvestedBookIsEverybodys:
+    """A harvested Book has no adder and is never private, so every shelf holds
+    it. Hidden from anybody, it would be a record nobody can reach, the admin
+    who ran the harvest included."""
+
+    def test_a_harvested_book_is_on_every_members_shelf(self, db, user, other):
+        db.add(_harvested(db, title="Harvested"))
+        db.commit()
+
+        assert (Shelf.seen_by(db, user.id).count(), Shelf.seen_by(db, other.id).count()) == (1, 1)
+
+    def test_a_harvested_book_is_on_the_public_shelf(self, db, user):
+        db.add(_harvested(db, title="Harvested"))
+        db.commit()
+
+        assert Shelf.seen_by_the_public(db).count() == 1
+
+    def test_a_trashed_harvested_book_is_in_every_members_trash(self, db, user, other):
+        harvested = _harvested(db, title="Gone")
+        harvested.deleted_at = datetime.now(UTC).replace(tzinfo=None)
+        db.add(harvested)
+        db.commit()
+
+        assert (Shelf.trashed_by(db, user.id).count(), Shelf.trashed_by(db, other.id).count()) == (1, 1)
+
+    def test_a_private_book_beside_a_harvest_stays_its_owners_alone(self, db, user, other):
+        """The reverse direction: a harvest in the library widens nothing that
+        is not harvested."""
+        db.add(_harvested(db, title="Harvested"))
+        db.add(Book(title="Private", added_by_user_id=user.id, is_private=True))
+        db.commit()
+
+        assert [book.title for book in Shelf.seen_by(db, other.id).all()] == ["Harvested"]
+        assert [book.title for book in Shelf.seen_by_the_public(db).all()] == ["Harvested"]
+
+    def test_a_harvested_book_cannot_be_stored_private(self, db, user):
+        harvested = _harvested(db, title="Harvested")
+        harvested.is_private = True
+        db.add(harvested)
+
+        with pytest.raises(IntegrityError, match="ck_books_harvested_is_nobodys_and_public"):
+            db.commit()
 
 
 class TestNarrowing:

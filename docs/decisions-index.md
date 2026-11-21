@@ -579,7 +579,12 @@ repeat the argument.
 |  | [An excluded row is counted in the open, where a blocked row is not](decisions.md#an-excluded-row-is-counted-in-the-open-where-a-blocked-row-is-not) | 68 |
 |  | [A source carries a remit, so a catalogue is asked about books it might hold](decisions.md#a-source-carries-a-remit-so-a-catalogue-is-asked-about-books-it-might-hold) | 185 |
 |  | [Provenance is published, because a catalogue that hides its sources is not a catalogue](decisions.md#provenance-is-published-because-a-catalogue-that-hides-its-sources-is-not-a-catalogue) | 127 |
-|  | [A harvested Book is owned by the harvest, not by the admin who ran it](decisions.md#a-harvested-book-is-owned-by-the-harvest-not-by-the-admin-who-ran-it) | 180 |
+|  | [Harvesting an OAI-PMH repository (owner, 2026-11-20)](decisions.md#harvesting-an-oai-pmh-repository-owner-2026-11-20) | 839 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvested Book has no owner, points at its harvest run, and is never private](decisions.md#a-harvested-book-has-no-owner-points-at-its-harvest-run-and-is-never-private) | 175 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [The repository may be a household address, over http or https](decisions.md#the-repository-may-be-a-household-address-over-http-or-https) | 153 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest reads MARCXML only, and writes no heading yet](decisions.md#a-harvest-reads-marcxml-only-and-writes-no-heading-yet) | 144 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [How a harvested record is matched](decisions.md#how-a-harvested-record-is-matched) | 82 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A run is cut short rather than failed, and does not resume](decisions.md#a-run-is-cut-short-rather-than-failed-and-does-not-resume) | 226 |
 |  | [The competitor register's reference counts get a stated command and no guard](decisions.md#the-competitor-registers-reference-counts-get-a-stated-command-and-no-guard) | 248 |
 |  | [A household's own OPDS server is its own table, not a row in `catalogue_targets`](decisions.md#a-households-own-opds-server-is-its-own-table-not-a-row-in-catalogue_targets) | 170 |
 |  | [An OPDS server is refused link local after resolution, and admitted everywhere else private](decisions.md#an-opds-server-is-refused-link-local-after-resolution-and-admitted-everywhere-else-private) | 276 |
@@ -938,7 +943,7 @@ repeat the argument.
 |  | [A tie at the add door refuses without naming a Book](decisions.md#a-tie-at-the-add-door-refuses-without-naming-a-book) | 180 |
 |  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 219 |
 |  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 587 |
-|  | [Deleting for good reaches only the trashed Books the caller added](decisions.md#deleting-for-good-reaches-only-the-trashed-books-the-caller-added) | 743 |
+|  | [Deleting for good reaches only the trashed Books the caller added](decisions.md#deleting-for-good-reaches-only-the-trashed-books-the-caller-added) | 760 |
 |  | [A merge folds away only the Books the caller added, unless the caller is an admin](decisions.md#a-merge-folds-away-only-the-books-the-caller-added-unless-the-caller-is-an-admin) | 652 |
 |  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 290 |
 |  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
@@ -1124,4 +1129,10 @@ repeat the argument.
 | Patron records (2026-11-20) | [The search carries its term in a POST body](decisions.md#the-search-carries-its-term-in-a-post-body) | 59 |
 | Patron records (2026-11-20) | [An erasure zeroes the row on SQLite](decisions.md#an-erasure-zeroes-the-row-on-sqlite) | 78 |
 | Patron records (2026-11-20) | [Accepted as built](decisions.md#accepted-as-built) | 61 |
+|  | [Lending to a patron (2026-11-20)](decisions.md#lending-to-a-patron-2026-11-20) | 438 |
+| Lending to a patron (2026-11-20) | [Only an admin names a patron on a loan](decisions.md#only-an-admin-names-a-patron-on-a-loan) | 48 |
+| Lending to a patron (2026-11-20) | [An admin reads who has the book; everyone else reads that a patron has it](decisions.md#an-admin-reads-who-has-the-book-everyone-else-reads-that-a-patron-has-it) | 149 |
+| Lending to a patron (2026-11-20) | [An expired registration still lends](decisions.md#an-expired-registration-still-lends) | 106 |
+| Lending to a patron (2026-11-20) | [Registering at the loan is two requests, not one](decisions.md#registering-at-the-loan-is-two-requests-not-one) | 57 |
+| Lending to a patron (2026-11-20) | [The patron form and search are one copy, in the middle tier](decisions.md#the-patron-form-and-search-are-one-copy-in-the-middle-tier) | 23 |
 <!-- index: end -->

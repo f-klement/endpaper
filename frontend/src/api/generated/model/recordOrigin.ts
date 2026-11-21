@@ -49,4 +49,5 @@ export const RecordOrigin = {
   opds_import: "opds_import",
   calibre_import: "calibre_import",
   store_import: "store_import",
+  oai_harvest: "oai_harvest",
 } as const;

@@ -50,10 +50,12 @@ import logging
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import UTC, datetime, time
+from itertools import chain, repeat
 from typing import Any, Final, NewType
 
 import annotated_types
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -67,7 +69,7 @@ from catalogue import Link, Record
 from database import hold_book_ceilings
 from enums import OwnershipStatus, ReadStatus, RecordOrigin
 from errors import MetAnotherChange
-from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Note, OnlineLink
+from models import MAX_ONLINE_LINKS_PER_BOOK, Book, Harvest, Note, OnlineLink
 from reading import Reading, Records
 from schemas import ImportResultOut
 from schemas.book import BookCreate, admits_a_container
@@ -695,8 +697,10 @@ def _fill_gaps(book: Book, row: csv_import.ImportRow) -> None:
 # **It carries classifications**, which a CSV never does. That is the field a
 # cataloguer least wants to retype and the one this whole ticket turns on.
 #
-# **It matches on author and title together, never on title alone.** See
-# `identity.work_key`, and `recognition.Source.CATALOGUE` for the ladder.
+# **It matches on author and title together**, so a credited record never
+# matches on its title alone; a record crediting nobody matches a Book crediting
+# nobody by its title. See `identity.work_key`, and `recognition.Source.CATALOGUE`
+# for the ladder.
 
 
 #: A `Record` this Library has already held to its own bounds: what every
@@ -974,6 +978,99 @@ def _gap_fields(written: Sequence[str]) -> tuple[str, ...]:
 _MARC_GAP_FIELDS: Final = _gap_fields(_MARC_RECORD_FIELDS)
 
 
+class HarvestKeys:
+    """The Books one repository's harvests created, by their records' OAI identifiers.
+
+    **Asked before the ISBN ladder**, by the harvest's apply and its preview
+    alike: a record with no ISBN matches only on its title and author, so once
+    a cataloguer corrected either on the Book a run created, the next run,
+    the natural answer to `truncated`, created it again. An identifier is
+    unique only within its repository, so only Books whose run read the same
+    address are keyed.
+
+    **Read through `Shelf`**, on the shelf and in the trash as the admin
+    running it sees them, so an answer here is one the ladder could give:
+    `Seen`, `Tied` for two Books under one identifier, or `InTrash`. A
+    harvested Book is public, so none is `Hidden`.
+    """
+
+    __slots__ = ("_seen", "_trashed")
+
+    def __init__(self, seen: dict[str, set[int]], trashed: dict[str, set[int]]) -> None:
+        self._seen = seen
+        self._trashed = trashed
+
+    @classmethod
+    def none(cls) -> HarvestKeys:
+        """No key at all: a file import's, which names no record identifier."""
+        return cls({}, {})
+
+    @classmethod
+    def from_repository(cls, db: Session, viewer_id: int, base_url: str) -> HarvestKeys:
+        """Every keyed Book harvested from `base_url` that `viewer_id` sees."""
+        from_here = Book.harvest_id.in_(select(Harvest.id).where(Harvest.base_url == base_url))
+
+        def keyed(shelf: Shelf) -> dict[str, set[int]]:
+            rows = shelf.where(from_here, Book.harvested_identifier.is_not(None)).select(
+                Book.harvested_identifier, Book.id
+            )
+            grouped: dict[str, set[int]] = {}
+            for identifier, book_id in rows:
+                grouped.setdefault(identifier, set()).add(book_id)
+            return grouped
+
+        return cls(keyed(Shelf.seen_by(db, viewer_id)), keyed(Shelf.trashed_by(db, viewer_id)))
+
+    def answer(self, identifier: str | None) -> recognition.Answer | None:
+        """Which Book a record with this identifier is, or None to ask the ladder."""
+        held = self._seen.get(identifier or "")
+        if held:
+            return recognition.Seen(next(iter(held))) if len(held) == 1 else recognition.Tied(frozenset(held))
+        trashed = self._trashed.get(identifier or "")
+        return recognition.InTrash(frozenset(trashed)) if trashed else None
+
+    def remember(self, identifier: str | None, book_id: int) -> None:
+        """Key a Book this run just created, so the same record later in the run matches it."""
+        if identifier is not None:
+            self._seen.setdefault(identifier, set()).add(book_id)
+
+
+@dataclass(frozen=True, slots=True)
+class _Creating:
+    """Who a Book a MARC import creates belongs to, and where it says it came from.
+
+    **Apart from the viewer**, which is the split a harvest needs: matching
+    reads the shelf as the admin running it sees it, while what it creates is
+    nobody's and points at its run (`docs/decisions.md`, *Harvesting an OAI-PMH
+    repository*). A file import passes the same Member for both.
+    """
+
+    owner_id: int | None
+    origin: RecordOrigin
+    harvest: Harvest | None = None
+
+    @property
+    def harvest_id(self) -> int | None:
+        """The run's id, flushed by the caller before the import starts."""
+        return self.harvest.id if self.harvest is not None else None
+
+    def keys(self, db: Session, viewer_id: int) -> HarvestKeys:
+        """What a harvest matches first; nothing for a file."""
+        return (
+            HarvestKeys.none()
+            if self.harvest is None
+            else HarvestKeys.from_repository(db, viewer_id, self.harvest.base_url)
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _Keyed:
+    """One record's OAI identifier, with the keys it is matched and kept by."""
+
+    keys: HarvestKeys
+    identifier: str | None
+
+
 class MarcImport:
     """One parsed MARC file, applied to the Library as one Member.
 
@@ -987,21 +1084,47 @@ class MarcImport:
     that.
 
     The viewer is still fixed at construction, for `Import`'s reason: what is
-    read is what this Member may see, and a created Book is attributed to them.
+    read is what this Member may see. Who a created Book belongs to is
+    `_Creating`, the same Member for a file and nobody for a harvest.
     """
 
-    __slots__ = ("_db", "_member_id")
+    __slots__ = ("_creating", "_db", "_viewer_id")
 
-    def __init__(self, db: Session, member_id: int) -> None:
+    def __init__(self, db: Session, viewer_id: int, creating: _Creating) -> None:
         self._db = db
-        self._member_id = member_id
+        self._viewer_id = viewer_id
+        self._creating = creating
 
     @classmethod
     def for_member(cls, db: Session, member_id: int) -> MarcImport:
-        return cls(db, member_id)
+        return cls(db, member_id, _Creating(owner_id=member_id, origin=RecordOrigin.MARC_IMPORT))
 
-    def apply(self, parsed: marc.ParsedMarc, *, create_missing: bool = True) -> ImportResultOut:
+    @classmethod
+    def for_harvest(cls, db: Session, viewer_id: int, run: Harvest) -> MarcImport:
+        """A harvest run's records, matched as `viewer_id` sees the shelf.
+
+        **What it creates is nobody's, public and points at `run`**, which
+        `ck_books_harvested_is_nobodys_and_public` holds in the database.
+        **Its headings are not confirmed** (`docs/decisions.md`, *Harvesting an
+        OAI-PMH repository*): naming a repository once confirms no record, so
+        `_apply_one` writes none.
+        `run` is filled in with what was added and when it finished, in the
+        import's one commit.
+        """
+        return cls(db, viewer_id, _Creating(owner_id=None, origin=RecordOrigin.OAI_HARVEST, harvest=run))
+
+    def apply(
+        self,
+        parsed: marc.ParsedMarc,
+        *,
+        create_missing: bool = True,
+        identifiers: Sequence[str | None] = (),
+    ) -> ImportResultOut:
         """Apply every record, and report what happened.
+
+        `identifiers` are a harvest's OAI record identifiers, at the same
+        positions as `parsed.records`: each is matched first through
+        `HarvestKeys` and kept on the Book it creates. A file has none.
 
         **`create_missing` defaults to true here and to false on the CSV
         path**, which looks like an inconsistency and is the two files meaning
@@ -1016,12 +1139,16 @@ class MarcImport:
         uniformly clean, and failing the transfer on record 412 of 5,000 gives
         the cataloguer nothing to act on.
         """
-        index = recognition.Index.build(self._db, self._member_id, recognition.Source.CATALOGUE)
+        index = recognition.Index.build(self._db, self._viewer_id, recognition.Source.CATALOGUE)
+        keys = self._creating.keys(self._db, self._viewer_id)
         tally = _Tally()
 
-        with _a_vanished_match_met_another_change(self._db, self._member_id, tally):
-            for record, links in parsed.entries():
-                self._apply_one(record, index, tally, create_missing, links)
+        with _a_vanished_match_met_another_change(self._db, self._viewer_id, tally):
+            for (record, links), identifier in zip(
+                parsed.entries(), chain(identifiers, repeat(None)), strict=False
+            ):
+                self._apply_one(record, index, tally, create_missing, links, _Keyed(keys, identifier))
+            self._finish_the_run(tally)
             self._db.commit()
 
         return ImportResultOut(
@@ -1053,13 +1180,14 @@ class MarcImport:
         tally: _Tally,
         create_missing: bool,
         links: Sequence[Link],
+        keyed: _Keyed,
     ) -> None:
         # Once, before anything reads a value: matching and writing have to see
         # the same strings or a truncated record cannot match itself. See
         # `stored_record`.
         stored = stored_record(record)
         book = _settle_one(
-            recognise_stored(index, stored),
+            keyed.keys.answer(keyed.identifier) or recognise_stored(index, stored),
             tally,
             load=lambda book_id: self._db.get_one(Book, book_id),
             # A title the caller supplied in their own file, so reporting it
@@ -1088,7 +1216,7 @@ class MarcImport:
             # is wrong in exactly this way: this comment said the column had
             # dropped the title, which is the OPDS sentence.
             unmatched_title=stored.title or "",
-            create=lambda: self._create(stored, index),
+            create=lambda: self._create(stored, index, keyed),
             fill_gaps=lambda matched: _fill_marc_gaps(matched, stored),
             create_missing=create_missing,
         )
@@ -1096,11 +1224,20 @@ class MarcImport:
             return
 
         # After the create and after the gap fill, so a matched Book gains the
-        # headings it lacked as well as a new one getting all of them.
-        evidence.confirm_file_headings(book, record.headings, self._db)
+        # headings it lacked as well as a new one getting all of them. Never for
+        # a harvest: see `for_harvest`.
+        if self._creating.harvest is None:
+            evidence.confirm_file_headings(book, record.headings, self._db)
         _keep_links(book, links, self._db)
 
-    def _create(self, stored: Stored, index: recognition.Index) -> Book:
+    def _finish_the_run(self, tally: _Tally) -> None:
+        """Record on a harvest's run what it added, inside the import's commit."""
+        run = self._creating.harvest
+        if run is not None:
+            run.records_added = tally.created
+            run.finished_at = datetime.now(UTC).replace(tzinfo=None)
+
+    def _create(self, stored: Stored, index: recognition.Index, keyed: _Keyed) -> Book:
         """Add a Book the file catalogues and this Library does not hold.
 
         **`ownership=UNKNOWN`, exactly as the CSV path does it**, and the reason
@@ -1126,16 +1263,19 @@ class MarcImport:
             # and the `ast` pass over this module that reads it, named at `Stored`.
             **{name: getattr(stored, name) for name in _MARC_RECORD_FIELDS},
             isbn=stored.isbn,
-            added_by_user_id=self._member_id,
+            added_by_user_id=self._creating.owner_id,
+            harvest_id=self._creating.harvest_id,
+            harvested_identifier=keyed.identifier,
             ownership=OwnershipStatus.UNKNOWN,
             # The import, not the institution that catalogued it: the file's own
             # `040` is not read, so which agency that was is not known here.
-            record_origin=RecordOrigin.MARC_IMPORT,
+            record_origin=self._creating.origin,
             record_modified_here=False,
         )
         self._db.add(book)
         self._db.flush()
         index.remember(book)
+        keyed.keys.remember(keyed.identifier, book.id)
         return book
 
 

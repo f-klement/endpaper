@@ -123,6 +123,10 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # Never served. Not a preference: no field in `SettingsUpdate`, and written
     # by `record_oai_service` alone.
     SettingKey.OAI_FIRST_SERVED: "",
+    # Off, with no repository: the one setting that makes this server connect
+    # where a person typed starts silent, like every sender above.
+    SettingKey.OAI_HARVEST_ENABLED: "false",
+    SettingKey.OAI_HARVEST_BASE_URL: "",
     # Off: a public record says nothing about loans until an admin says so
     # (owner's decision on issue #29). See `availability_is_shown`.
     SettingKey.PUBLIC_AVAILABILITY_ENABLED: "false",
@@ -839,6 +843,20 @@ def oai_is_served(db: Session) -> bool:
         and get_bool(db, SettingKey.OAI_PROVIDER_ENABLED)
         and bool(get_raw(db, SettingKey.OAI_ADMIN_EMAIL).strip())
     )
+
+
+def harvest_repository(db: Session) -> str | None:
+    """The repository address stored for the harvester, or None while it may not run.
+
+    Library mode, the harvester's own switch **and** an address that is not
+    blank, which a restore can store without passing the settings route. **The
+    address is not validated here**: `harvester.configured_repository` applies
+    `harvester.is_harvestable` to what this answers, because that rule reaches
+    `fetch` and this layer sits below it.
+    """
+    if not (get_bool(db, SettingKey.LIBRARY_MODE) and get_bool(db, SettingKey.OAI_HARVEST_ENABLED)):
+        return None
+    return get_raw(db, SettingKey.OAI_HARVEST_BASE_URL).strip() or None
 
 
 def oai_has_served(db: Session) -> bool:

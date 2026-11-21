@@ -1,5 +1,6 @@
 """Lending: lending a book, returning it, and the overdue lists and reminders."""
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Annotated, Final
 
@@ -9,12 +10,14 @@ from sqlalchemy.orm import Session
 
 import lending
 import notifications
+import patrons
+import serialisation
 import settings_store
 from auth import require_admin
 from dependencies import CurrentUser, DbSession, Paging, RowId
 from enums import LendingWillingness, SettingKey
 from lending import Loans
-from models import Book, Loan, User
+from models import Book, Loan, Patron, User
 from refusals import refuses
 from schemas import LoanCreate, LoanOut, MyOverdueOut, OverdueNotifyResult, Page
 from shelf import Shelf
@@ -45,7 +48,7 @@ def _now() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
-def _to_out_many(loans: list[Loan], now: datetime) -> list[LoanOut]:
+def _to_out_many(loans: list[Loan], now: datetime, db: Session, viewer: User) -> list[LoanOut]:
     """Serialise a page of loans.
 
     **This used to run every book on the page through `books_to_out` a second
@@ -62,11 +65,15 @@ def _to_out_many(loans: list[Loan], now: datetime) -> list[LoanOut]:
 
     `now` is the caller's, so a page is serialised against the same instant its
     query was filtered with. See `_now`.
+
+    `viewer` decides whether a patron is named: `patrons.named_on_loans`, one
+    statement for the page and none for a member.
     """
-    return [_to_out(loan, now) for loan in loans]
+    named = patrons.named_on_loans(db, viewer, loans)
+    return [_to_out(loan, now, named) for loan in loans]
 
 
-def _to_out(loan: Loan, now: datetime) -> LoanOut:
+def _to_out(loan: Loan, now: datetime, named: Mapping[int, Patron]) -> LoanOut:
     """Serialise a loan, computing the three clock facts rather than reading them.
 
     A stored flag would be wrong from the moment the deadline passed until
@@ -86,10 +93,11 @@ def _to_out(loan: Loan, now: datetime) -> LoanOut:
     out.is_overdue = lending.is_overdue(loan, now)
     out.days_overdue = lending.days_overdue(loan, now)
     out.days_out = lending.days_out(loan, now)
+    out.patron = serialisation.loan_patron(loan, named)
     return out
 
 
-def _loan_with_relations(loan_id: int, db: Session, viewer_id: int, now: datetime) -> LoanOut:
+def _loan_with_relations(loan_id: int, db: Session, viewer: User, now: datetime) -> LoanOut:
     """One loan, scoped to the caller and loaded through the one plan.
 
     **The scope is new and the answers are not.** This was `db.query(Loan)`
@@ -114,10 +122,10 @@ def _loan_with_relations(loan_id: int, db: Session, viewer_id: int, now: datetim
     hand written trio they had before it, which is the divergence no guard on
     the other side could see.
     """
-    loan = Loans.seen_by(db, viewer_id).rendered().with_id(loan_id)
+    loan = Loans.seen_by(db, viewer.id).rendered().with_id(loan_id)
     if loan is None:
         raise HTTPException(status_code=404, detail="Loan not found")
-    return _to_out(loan, now)
+    return _to_out(loan, now, patrons.named_on_loans(db, viewer, [loan]))
 
 
 @router.get("", response_model=Page[LoanOut])
@@ -173,7 +181,7 @@ def list_loans(
     )
 
     return Page[LoanOut](
-        items=_to_out_many(rows, now),
+        items=_to_out_many(rows, now, db, current_user),
         total=total,
         page=paging.page,
         page_size=paging.page_size,
@@ -197,7 +205,7 @@ DIGITAL_COPY: Final = "digital_copy"
 
 
 @router.post("", response_model=LoanOut, status_code=status.HTTP_201_CREATED)
-@refuses(404)
+@refuses(403, 404)
 def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -> LoanOut:
     """Record that a book has gone out.
 
@@ -221,12 +229,7 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
     if book is None:
         raise HTTPException(status_code=404, detail="Book not found")
 
-    # Only a member has to exist. An external borrower is a name, and which of
-    # the two a payload may carry is `models.names_exactly_one_borrower`,
-    # applied by `LoanCreate` before this runs and by `ck_loans_one_borrower`
-    # after it.
-    if payload.loaned_to_user_id is not None and db.get(User, payload.loaned_to_user_id) is None:
-        raise HTTPException(status_code=404, detail="User not found")
+    _refuse_an_unknown_borrower(payload, db, current_user)
 
     # Refused outright, unlike `lending = never`: there is nothing to return,
     # so a loan would stay open for ever. Only a **new** loan is refused; one
@@ -256,13 +259,42 @@ def create_loan(payload: LoanCreate, db: DbSession, current_user: CurrentUser) -
         book_id=payload.book_id,
         loaned_to_user_id=payload.loaned_to_user_id,
         loaned_to_name=payload.loaned_to_name,
+        loaned_to_patron_id=payload.loaned_to_patron_id,
         loaned_by_user_id=current_user.id,
         due_at=payload.due_at,
     )
     db.add(loan)
     db.commit()
     db.refresh(loan)
-    return _loan_with_relations(loan.id, db, current_user.id, _now())
+    return _loan_with_relations(loan.id, db, current_user, _now())
+
+
+def _refuse_an_unknown_borrower(payload: LoanCreate, db: Session, current_user: User) -> None:
+    """A 404 for a member or a patron that does not exist, and a 403 for a patron named by a member.
+
+    An external borrower is a name and has nothing to exist. Which of the three
+    a payload may carry is `models.names_exactly_one_borrower`, applied by
+    `LoanCreate` before this runs and by `ck_loans_one_borrower` after it.
+
+    **The admin gate comes before the lookup**, as on `routers/patrons.py`, so
+    a member naming a patron id is answered 403 whether it exists or not and
+    learns nothing about which ids are taken.
+
+    **An expired registration still lends.** Nothing in `models.Patron` makes
+    `expires_on` a bar to lending, and refusing the person at the desk over a
+    date is a circulation policy, which this application does not have. The
+    loan form shows the expiry beside the patron instead.
+    """
+    if payload.loaned_to_user_id is not None and db.get(User, payload.loaned_to_user_id) is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if payload.loaned_to_patron_id is None:
+        return
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin may lend to a patron."
+        )
+    if db.get(Patron, payload.loaned_to_patron_id) is None:
+        raise HTTPException(status_code=404, detail="Patron not found")
 
 
 def _refuse_unless_acknowledged(book: Book, payload: LoanCreate) -> None:
@@ -346,7 +378,7 @@ def list_overdue(db: DbSession, current_user: CurrentUser, paging: Paging) -> Pa
     loans = query.options(*lending.RENDERED).offset(paging.offset).limit(paging.limit).all()
 
     return Page[LoanOut](
-        items=_to_out_many(loans, now),
+        items=_to_out_many(loans, now, db, current_user),
         total=total,
         page=paging.page,
         page_size=paging.page_size,
@@ -443,4 +475,4 @@ def return_loan(loan_id: RowId, db: DbSession, current_user: CurrentUser) -> Loa
     # The same instant the return was stamped with, so `days_out` on the row
     # this answers with counts to the return rather than to a clock read a
     # moment later. One call per request, which `TestOneClockPerRequest` pins.
-    return _loan_with_relations(loan.id, db, current_user.id, now)
+    return _loan_with_relations(loan.id, db, current_user, now)

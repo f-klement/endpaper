@@ -81,6 +81,7 @@ from models import (
     DegradingEnum,
     DeletedHighlight,
     DigitalReference,
+    Harvest,
     Highlight,
     KosyncDocument,
     Loan,
@@ -145,6 +146,10 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # existed restores with none, which is exactly the state it was
         # written in.
         ("collections", Collection),
+        # Before books, which carry a foreign key into it, and after users,
+        # whom a run names. Absent from `_REQUIRED_TABLES`: an archive taken
+        # before harvests existed restores with none.
+        ("harvests", Harvest),
         ("books", Book),
         # Before the headings, which carry a foreign key into it. Absent from
         # `_REQUIRED_TABLES`, and an archive taken before it existed still

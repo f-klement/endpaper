@@ -5,6 +5,7 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { PatronLoanOut } from "./patronLoanOut.ts";
 
 /**
  * A patron's whole record, as an admin reads it. Served by `routers/patrons.py` alone.
@@ -18,6 +19,7 @@ export interface PatronOut {
   house_number?: string | null;
   id: number;
   name: string;
+  open_loans?: PatronLoanOut[];
   phone?: string | null;
   postcode?: string | null;
   street?: string | null;

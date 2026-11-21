@@ -1,10 +1,11 @@
 """Tests for backend/patrons.py: the admin's search, and the one erasure."""
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 
 import patrons
@@ -191,3 +192,44 @@ class TestCardNumberTaken:
         patron = _patron(db, "C1", "Pat Lee")
 
         assert not patrons.card_number_taken(db, "C1", other_than=patron.id)
+
+
+def _statements[T](db, call: Callable[[], T]) -> tuple[T, int]:
+    """What `call` returns, and how many statements it sent to get it."""
+    seen: list[str] = []
+
+    def record(conn, cursor, statement, *rest):
+        seen.append(statement)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        result = call()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    return result, len(seen)
+
+
+class TestNamedOnLoans:
+    def test_a_members_request_reads_no_patron_row(self, db, lender):
+        loan = _lend(db, lender, _patron(db, "C1", "Pat Lee"), returned=None)
+        # Loaded outside the counter: the commits expired both, and a refresh
+        # counted here would be the fixture's statement, not the function's.
+        db.refresh(lender)
+        db.refresh(loan)
+
+        assert _statements(db, lambda: patrons.named_on_loans(db, lender, [loan])) == ({}, 0)
+
+    def test_an_admin_reads_the_patron_of_each_loan_in_one_statement(self, db, lender):
+        lender.is_admin = True
+        lee, roe = _patron(db, "C1", "Pat Lee"), _patron(db, "C2", "Pat Roe")
+        loans = [_lend(db, lender, lee, returned=None), _lend(db, lender, roe, returned=None)]
+        for row in [lender, *loans]:
+            db.refresh(row)
+
+        named, count = _statements(db, lambda: patrons.named_on_loans(db, lender, loans))
+
+        assert ({key: patron.name for key, patron in named.items()}, count) == (
+            {lee.id: "Pat Lee", roe.id: "Pat Roe"},
+            1,
+        )

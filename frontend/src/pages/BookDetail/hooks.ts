@@ -669,9 +669,9 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
   const complete = useReturnLoan({ mutation });
 
   return {
-    // Exactly one of the two borrower fields, which is what the API accepts
+    // Exactly one of the three borrower fields, which is what the API accepts
     // and what the CHECK constraint behind it enforces. The union is what
-    // stops the both-or-neither request being expressible at all.
+    // stops a request naming two, or none, being expressible at all.
     lend: (borrower, dueAt, acknowledgeNotLendable = false) =>
       create.mutate({
         data: {
@@ -679,6 +679,8 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
           loaned_to_user_id:
             borrower.kind === "member" ? borrower.userId : null,
           loaned_to_name: borrower.kind === "external" ? borrower.name : null,
+          loaned_to_patron_id:
+            borrower.kind === "patron" ? borrower.patronId : null,
           due_at: dueAt ?? null,
           // A book marked "never lent" is a 409 without this. It says
           // something about one request and is not stored, so it is passed

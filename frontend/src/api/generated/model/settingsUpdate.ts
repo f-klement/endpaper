@@ -31,6 +31,8 @@ export interface SettingsUpdate {
   mail_use_tls?: boolean | null;
   mail_username?: string | null;
   oai_admin_email?: string | null;
+  oai_harvest_base_url?: string | null;
+  oai_harvest_enabled?: boolean | null;
   oai_provider_enabled?: boolean | null;
   overdue_in_app_enabled?: boolean | null;
   overdue_mail_enabled?: boolean | null;

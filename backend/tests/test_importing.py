@@ -3465,3 +3465,13 @@ class TestTheLinkCapCountsWhatThisImportAlreadyAdded:
         assert db.query(OnlineLink).filter(OnlineLink.book_id == book.id).count() == (
             MAX_ONLINE_LINKS_PER_BOOK
         )
+
+
+class TestHarvestKeysAnswer:
+    """What a key answers, from the identifiers it holds; reading them is
+    `tests/routers/test_imports_harvest.py`'s."""
+
+    def test_two_books_under_one_identifier_are_tied(self):
+        keys = importing.HarvestKeys({"oai:x:1": {3, 4}}, {})
+
+        assert keys.answer("oai:x:1") == recognition.Tied(frozenset({3, 4}))

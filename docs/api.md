@@ -1178,10 +1178,12 @@ in three places from a lookup's:
   sends: they are the Library of Congress call number and subject heading, and
   both have columns here.
 
-**Matching is ISBN, then author and title together, never title alone.** It uses
-`identity.work_key`, which is also what the duplicate finder computes. The worst
-case for a catalogue transfer is two different books folded into one record, and
-every library holds more than one *Selected poems*.
+**Matching is ISBN, then author and title together.** A record crediting
+somebody never matches on its title alone; a record crediting nobody matches a
+Book crediting nobody by its title. It uses `identity.work_key`, which is also
+what the duplicate finder computes. The worst case for a catalogue transfer is
+two different books folded into one record, and every library holds more than
+one *Selected poems*.
 
 The CSV importer uses `identity.reading_history_title`, and it differs in two
 ways rather than one: no credit in the key, **and** the title is matched as

@@ -13,6 +13,7 @@ from enums import (
     OverdueSender,
     Transport,
 )
+from models import HARVEST_BASE_URL_MAX
 from schemas.common import UtcDateTime
 
 #: How far apart two reminders for the same loan may be, in days. The floor is
@@ -447,6 +448,11 @@ class SettingsOut(BaseModel):
     #: The repository contact address OAI-PMH's `Identify` serves, as stored. The
     #: switch above cannot be stored on while it is empty.
     oai_admin_email: str = ""
+    #: The OAI-PMH harvester's switch and its repository address, as stored. The
+    #: switch cannot be stored on while the address is empty, and the harvester
+    #: runs only in library mode: `settings_store.harvest_repository`.
+    oai_harvest_enabled: bool = False
+    oai_harvest_base_url: str = ""
     #: Whether a public record says if its book is on the shelf or on loan, as
     #: stored. Like the SRU switch, it also needs the catalogue published.
     public_availability_enabled: bool = False
@@ -659,6 +665,14 @@ class SettingsUpdate(BaseModel):
     #: can reach the provider, so a role address rather than a person's. An
     #: empty string clears it, which is refused while the switch is on.
     oai_admin_email: str | None = Field(default=None, max_length=MAX_MAIL_ADDRESS)
+    #: The OAI-PMH harvester's switch. Refused on while no repository address is
+    #: stored or sent beside it.
+    oai_harvest_enabled: bool | None = None
+    #: The repository the harvester reads: the one setting that makes this
+    #: server connect where a person typed. A household address is admitted,
+    #: over http or https. An empty string clears it, which is refused while the
+    #: switch is on.
+    oai_harvest_base_url: str | None = Field(default=None, max_length=HARVEST_BASE_URL_MAX)
     #: Whether a public record shows on the shelf or on loan. Stored whatever
     #: the publish state, for the SRU switch's reason.
     public_availability_enabled: bool | None = None
@@ -684,6 +698,17 @@ class SettingsUpdate(BaseModel):
         if trimmed and not mailer.looks_like_address(trimmed):
             raise ValueError("The repository contact address is not an address.")
         return trimmed
+
+    @field_validator("oai_harvest_base_url")
+    @classmethod
+    def a_repository_or_a_clear(cls, value: str | None) -> str | None:
+        """The address trimmed, or "" to clear it.
+
+        **Not validated here**: `routers/settings.py` refuses one
+        `harvester.is_harvestable` does not admit, since that rule reaches
+        `fetch` and a schema sits below it.
+        """
+        return None if value is None else value.strip()
 
     @field_validator("overdue_webhook_url")
     @classmethod

@@ -13460,24 +13460,80 @@ would make the public catalogue a weaker artefact than the thing it imitates.
 one named field joining it and not a relaxation of the rule. The security seat owns the check
 that it is the only surface that moved.
 
-## A harvested Book is owned by the harvest, not by the admin who ran it
+## Harvesting an OAI-PMH repository (owner, 2026-11-20)
 
-Owner's decision, 2026-09-07, against the recommendation that it be attributed to the
-running admin.
+### A harvested Book has no owner, points at its harvest run, and is never private
 
-Attribution to a person is a claim, and a bulk import of three thousand records is not that
-person's shelf. **A service account says what actually happened**, and it keeps the harvest
-out of every place that reasons about what a member added.
+This replaces the owner's decision of 2026-09-07, which gave harvested Books to a service
+account because the owner column could not be empty. It can, and has been since the baseline
+(`books.added_by_user_id` is nullable). A service account as a `users` row is adopted, with its
+Books, by any proxy or LDAP identity of the same name, so the run is recorded in `harvests`
+instead, one row per run, and `books.harvest_id` points at it.
+`ck_books_harvested_is_nobodys_and_public` (`harvest_id IS NULL OR (added_by_user_id IS NULL
+AND NOT is_private)`) holds it in the database. An ownerless private row would be seen by
+nobody, so `set_privacy` refuses with a 409. The reason harvested rows are public is
+unchanged: an institution cataloguing its holdings is publishing them, and a bulk import that
+lands three thousand private rows only defers the decision to whoever has to unprivate them.
 
-**This needs a non human owner, which does not exist today**, and that is the cost the
-decision accepts rather than a reason to refuse it. Every row needs an owner and the column
-is not nullable, so the concept has to be built rather than worked around. **It is very
-likely the same concept the patron record needs**, which also introduces an actor who is not
-a member of the household, and building two would be storing one fact twice.
+**The per member statistics count Books a member added.** A harvested Book has no adder, so it
+is in the total and in no member's row, the way an unfiled Book is in no collection's.
 
-Harvested rows are not private: an institution cataloguing its holdings is publishing them,
-which is the whole point of the harvest, and a bulk import that lands three thousand private
-rows only defers the same decision to whoever has to unprivate them.
+### The repository may be a household address, over http or https
+
+Migrating off another system on the same network is the case the feature exists for. Every
+request goes through `fetch.py`'s pinned client under `HOUSEHOLD_ADDRESSES`; the settings write
+refuses an address literal that policy refuses, and the settings card says this is the one
+setting that makes the server connect where a person typed. This server's own loopback is
+admitted with the household range, as at the OPDS door: an admin may point a harvest at a
+service on the pod's loopback, which the OPDS client already allows.
+
+**The harvester's switch is refused on without a repository**, as the OAI provider's switch is
+without a contact address. The write answers 409, and the card holds the switch off with the
+reason under it. `settings_store.harvest_repository` reads library mode, the switch and a non
+blank address again at every harvest, and `harvester.configured_repository` applies
+`is_harvestable` to it, since a restore stores the rows without passing the route.
+
+### A harvest reads MARCXML only, and writes no heading yet
+
+The harvester picks the format whose namespace is MARC21 slim, whatever the repository calls
+it, and reads each record through `marc.read`, as a file's records are read. A MARC record
+holding another, or a `<metadata>` holding two side by side, is unreadable, so each OAI record
+is at most one Book. A record a repository marks deleted is counted and deletes nothing.
+
+**Harvested subject headings land unconfirmed, as suggestions.** ADR 0006 lets a chosen MARC
+file's headings cross as confirmed because choosing the file is the confirmation; naming a
+repository once and pulling thousands of records confirms no record. The owner chose a pending
+suggestion store: one table and a confirm or discard action on the Book, built as a later phase
+keyed on the record's OAI identifier. Until it lands the headings are shown in the preview,
+counted in `headings_unconfirmed` and not kept.
+
+### How a harvested record is matched
+
+**A harvested Book keeps its record's OAI identifier**, and a later run of the same repository
+matches it first, so a Book corrected since is not created again. A merge whose survivor is not
+the harvested Book drops the identifier, and the absorbed record is then matched as a file's
+is. **A record crediting nobody and carrying no ISBN matches a Book crediting nobody by its
+title**, as a file's record does, so two such records of one repository are one Book.
+
+### A run is cut short rather than failed, and does not resume
+
+The run deadline, a request's timeout or a 503 after the first page ends a run truncated with
+the pages read, and `Retry-After` is not honoured. A re-run starts at the first page, so a
+repository too large for one run is narrowed by a set. **The preview and the apply each fetch
+the repository**, and nothing is kept between them, so with truncation the two can read
+different spans. **One run at a time**, preview or apply, a second answered 409. A failed run
+leaves no `harvests` row, so the table records the runs that wrote.
+
+**The apply names the address its client held when it read the preview**, and a 409
+`repository_changed` refuses it when another is stored, whether that one was saved before the
+read or after it. The preview route does not echo the address it read, so a tab holding an
+address saved over in another tab still learns of it at the apply, before anything is written.
+One case passes: the address changed and changed back between the read and the apply, which
+needs two saves elsewhere.
+
+**The preview's two count panels repeat four count rows between the MARC file card and the
+harvest card.** Sharing them needs one shape over two preview types with different extra rows
+(would add, deleted), which costs more than the four rows it saves.
 
 ## The competitor register's reference counts get a stated command and no guard
 
@@ -23439,8 +23495,9 @@ no code, because no client acts on it: the trash page never offers the verb on s
 **`DELETE /api/books/trash` skips what the rule refuses and counts only what it purged**, so
 `PurgeResult.purged` is the number destroyed, not the number listed.
 
-**A Book with no adder goes to an admin** (owner's answer of 2026-10-24). `added_by_user_id` is nullable, every write path in the application sets it and
-no route deletes an account, so a null is reachable only by a row written outside the
+**A Book with no adder goes to an admin** (owner's answer of 2026-10-24). `added_by_user_id` is nullable, every write path in the application but a harvest sets it,
+and no route deletes an account, so a null is reachable only by a harvested Book, which has no
+adder by decision (*Harvesting an OAI-PMH repository*), or a row written outside the
 application. Before the ruling nobody could ever destroy such a row. The owner's answer is
 about deleting such a Book on purpose, so it reaches the single purge and empty the trash,
 not the add door: an admin's scan or import card over such a holder answers 409 `in_trash`
@@ -27723,3 +27780,47 @@ wanted.
   Admin only, one process.
 - The patron text columns carry no byte bound CHECK: `String(n)` is unenforced by SQLite only
   on the restore path, which is admin only.
+
+## Lending to a patron (2026-11-20)
+
+### Only an admin names a patron on a loan
+
+`POST /api/loans` with `loaned_to_patron_id` answers a member 403 before the lookup, so a
+missing id and an existing one answer alike, as on the patron routes. The loan form draws the
+patron radio for an admin alone, whatever the library mode, the same rule as the Patrons page.
+
+### An admin reads who has the book; everyone else reads that a patron has it
+
+Owner's decision, 2026-11-20. Every loan carries `to_patron`, a flag and never the id. An
+admin's loan also carries `patron`, the name and card number and no contact detail, on the
+badge, the loans and overdue pages and a lend or return, filled per viewer by
+`patrons.named_on_loans`, which reads nothing for anybody else. The desk asks "who has this
+overdue book", and only the loan answers it. The admin's patron record lists the patron's open
+loans, through the admin's own `Loans.seen_by`.
+
+**The overdue digest a channel receives names no patron.** It has no viewer and goes to third
+parties, so a patron's loan is in it with its title and due date and an empty borrower, as an
+erased borrower's is. The owner's answer named "the overdue digest an admin receives"; the in
+app overdue page an admin reads is the surface that answers it, and it names the patron.
+
+### An expired registration still lends
+
+`models.Patron` says `expires_on` is what a scheduled erasure would key on, and nothing makes
+it a bar to lending. Refusing the person at the desk over a date is a circulation policy, which
+the ticket puts out of scope. The picker shows "Registration expired on X" in words, and the
+desk decides. `CHECK` or a 409 is the hold if a library asks for one. **A scheduled erasure
+must skip a patron with an open loan, or count a loan as renewing the registration**:
+otherwise a loan just made to a lapsed patron is anonymised while still open, and the book is
+left out with nobody.
+
+### Registering at the loan is two requests, not one
+
+The register write hands back the stored patron, which becomes the pick, and the loan names it
+by id. A loan that fails after the registration keeps the pick, so a retry registers nobody. A
+combined endpoint would make the pair atomic, at the cost of a second create path for the same
+record and its 409.
+
+### The patron form and search are one copy, in the middle tier
+
+`PatronForm` is in `pages/components/`, the search and register hooks in `pages/hooks.ts`, and
+the draft helpers in `pages/types.ts`, since two pages now hold them.

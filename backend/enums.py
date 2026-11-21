@@ -864,6 +864,13 @@ class SettingKey(StrEnum):
     # for never. Not a preference: `harvest.py` writes no tombstone before it,
     # since no harvester could have seen a record that left earlier.
     OAI_FIRST_SERVED = "oai_first_served"
+    # The OAI-PMH harvester's switch and the repository it reads, the import
+    # half of issue #178. One setting in two rows: the switch cannot be stored
+    # on while the address is empty, which `routers/settings.py` refuses and
+    # `settings_store.harvest_repository` reads again. No migration: nothing
+    # was ever harvested, so off is the default everywhere.
+    OAI_HARVEST_ENABLED = "oai_harvest_enabled"
+    OAI_HARVEST_BASE_URL = "oai_harvest_base_url"
     # Whether a public record says if the book is on the shelf or on loan.
     # Its own row, off by default: a loan is a member's activity, and showing
     # a stranger that one is open is a decision of its own rather than part of
@@ -1186,6 +1193,8 @@ class RecordOrigin(StrEnum):
     CALIBRE_IMPORT = "calibre_import"
     #: A store's export or a reading device's database, read in the browser.
     STORE_IMPORT = "store_import"
+    #: Another repository's records, harvested over OAI-PMH: `harvester.py`.
+    OAI_HARVEST = "oai_harvest"
 
     @classmethod
     def of_catalogue(cls, name: str) -> RecordOrigin | None:

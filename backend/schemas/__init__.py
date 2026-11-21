@@ -117,6 +117,8 @@ from schemas.identifier import (
     BookIdentifierOut,
 )
 from schemas.imports import (
+    HarvestPreviewOut,
+    HarvestResultOut,
     ImportPreviewOut,
     ImportPreviewRow,
     ImportResultOut,
@@ -134,7 +136,7 @@ from schemas.opds import (
     OpdsServerSummaryOut,
     OpdsSyncOut,
 )
-from schemas.patron import PatronCreate, PatronOut, PatronSearch, PatronUpdate
+from schemas.patron import LoanPatronOut, PatronCreate, PatronLoanOut, PatronOut, PatronSearch, PatronUpdate
 from schemas.progress import ProgressCreate, ProgressOut
 from schemas.public import (
     PublicAvailability,
@@ -285,6 +287,8 @@ __all__ = [
     "DuplicateReport",
     "EmailUpdate",
     "FeatureFlagsOut",
+    "HarvestPreviewOut",
+    "HarvestResultOut",
     "HeadingFacetOut",
     "HighlightImportOut",
     "HighlightOut",
@@ -306,6 +310,7 @@ __all__ = [
     "KosyncPasswordOut",
     "LoanCreate",
     "LoanOut",
+    "LoanPatronOut",
     "LocationOut",
     "LoginImageOut",
     "LoginRequest",
@@ -331,6 +336,7 @@ __all__ = [
     "OwnershipUpdate",
     "Page",
     "PatronCreate",
+    "PatronLoanOut",
     "PatronOut",
     "PatronSearch",
     "PatronUpdate",

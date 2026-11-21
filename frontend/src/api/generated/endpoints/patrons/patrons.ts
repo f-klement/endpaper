@@ -475,7 +475,7 @@ export const getGetPatronUrl = (patronId: number) => {
 };
 
 /**
- * One patron's whole record.
+ * One patron's whole record, with the books they have out.
  * @summary Get Patron
  */
 export const getPatron = async (
@@ -528,7 +528,7 @@ export type GetPatronQueryResult = NonNullable<
 export type GetPatronQueryError = Refusal | HTTPValidationError;
 
 /**
- * One patron's whole record.
+ * One patron's whole record, with the books they have out.
  * @summary Get Patron
  */
 export function useGetPatron<
@@ -555,7 +555,7 @@ export function useGetPatron<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
- * One patron's whole record.
+ * One patron's whole record, with the books they have out.
  * @summary Get Patron
  */
 export function useGetPatron<
@@ -582,7 +582,7 @@ export function useGetPatron<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
- * One patron's whole record.
+ * One patron's whole record, with the books they have out.
  * @summary Get Patron
  */
 export function useGetPatron<
@@ -601,7 +601,7 @@ export function useGetPatron<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
- * One patron's whole record.
+ * One patron's whole record, with the books they have out.
  * @summary Get Patron
  */
 export function useGetPatron<

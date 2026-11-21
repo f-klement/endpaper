@@ -33,6 +33,8 @@ export interface SettingsOut {
   mail_use_tls?: boolean;
   mail_username?: string;
   oai_admin_email?: string;
+  oai_harvest_base_url?: string;
+  oai_harvest_enabled?: boolean;
   oai_provider_enabled?: boolean;
   overdue_in_app_enabled?: boolean;
   overdue_mail_enabled?: boolean;

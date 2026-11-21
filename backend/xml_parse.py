@@ -1,7 +1,8 @@
 """What turning a stranger's XML into a tree may cost, and the one builder that holds it.
 
-**Four modules parse XML somebody else wrote**: `marc.py` an upload, `metadata.py` a
-catalogue's response, `authority.py` an authority file's and `opds.py` a feed page.
+**Five modules parse XML somebody else wrote**: `marc.py` an upload, `metadata.py` a
+catalogue's response, `authority.py` an authority file's, `opds.py` a feed page and
+`harvester.py` an OAI-PMH repository's page.
 Each refuses a document type declaration before it parses, for the reason
 `metadata.DOCTYPE` gives, and each builds its tree through `DepthBoundedTree` and `fed`
 here, which refuse five more constructs that make a document's size a lie (nesting, a long
@@ -9,8 +10,8 @@ namespace, many distinct names, a crowded tag and elements carrying attributes p
 close) and bound what refusing them costs. **Measured constructs, not a complete set**:
 `MAX_NAMES` says what it leaves.
 
-**A module of its own rather than a corner of any of the four**, because the bound is
-about XML and not about catalogues, uploads or feeds, and each of those modules argues for
+**A module of its own rather than a corner of any of the five**, because the bound is
+about XML and not about catalogues, uploads, feeds or repositories, and each of those modules argues for
 its own surface elsewhere. What this holds is a builder and a loop; the parse itself stays
 at each door, where `tests/test_house_rules.py` requires it and its suppression says why.
 """

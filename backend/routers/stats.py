@@ -76,6 +76,10 @@ def get_stats(db: DbSession, current_user: CurrentUser) -> StatsOut:
 
     total = shelf.count()
 
+    # Books a member added, so a Book with no adder, every harvested one among
+    # them, is deliberately not a row: `total` minus the sum of these is how
+    # many there are, as unfiled Books are for `by_collection` below. An outer
+    # join would put them under a null username the page cannot name.
     per_user = (
         shelf.select(User.username, func.count(Book.id).label("count"))
         .join(User, Book.added_by_user_id == User.id)

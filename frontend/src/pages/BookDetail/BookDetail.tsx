@@ -250,6 +250,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
           <LendingSection
             book={book}
             currentUserId={currentUser.id}
+            canLendToPatron={currentUser.is_admin}
             users={users}
             access={access}
             loan={loan}
@@ -543,6 +544,8 @@ function FilingSection({
 interface LendingSectionProps {
   book: BookOut;
   currentUserId: number;
+  /** An admin's alone: `LoanPanel` says why. */
+  canLendToPatron: boolean;
   users: UserOut[];
   access: UseBookAccessResult;
   loan: UseBookLoanResult;
@@ -554,6 +557,7 @@ interface LendingSectionProps {
 function LendingSection({
   book,
   currentUserId,
+  canLendToPatron,
   users,
   access,
   loan,
@@ -584,6 +588,7 @@ function LendingSection({
         <LoanPanel
           book={book}
           members={users.filter((member) => member.id !== currentUserId)}
+          canLendToPatron={canLendToPatron}
           isBusy={loan.isBusy}
           isSavingDetails={actions.isSavingDetails}
           onSaveLending={actions.updateDetails}

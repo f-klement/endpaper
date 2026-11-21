@@ -27,25 +27,35 @@ them, so that is not what choosing a reader decides.
 import functools
 import logging
 from collections import Counter
-from typing import Annotated
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from itertools import chain, repeat
+from typing import Annotated, Final
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+import anyio.to_thread
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 import csv_import
+import harvester
 import marc
 import recognition
 import settings_store
 import vocabulary_copy
+from auth import require_admin
 from classifications import bounded_headings
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
 from errors import a_lost_race_answers_409
 from import_readers import ImportReader
-from importing import Import, MarcImport, recognise_stored, stored_record
+from importing import HarvestKeys, Import, MarcImport, recognise_stored, stored_record
+from models import HARVEST_BASE_URL_MAX, HARVEST_SET_SPEC_MAX, Harvest, User
 from ratelimit import import_limiter
 from refusals import refuses
 from schemas import (
+    HarvestPreviewOut,
+    HarvestResultOut,
     ImportPreviewOut,
     ImportPreviewRow,
     ImportResultOut,
@@ -336,8 +346,18 @@ def preview_marc(
     _require_library_mode(db)
     import_limiter.check(current_user.username)
 
-    parsed = _read_marc(db, _read_upload(file))
-    index = recognition.Index.build(db, current_user.id, recognition.Source.CATALOGUE)
+    return _previewed(db, current_user.id, _read_marc(db, _read_upload(file)))
+
+
+def _previewed(
+    db: Session, viewer_id: int, parsed: marc.ParsedMarc, keyed: Sequence[recognition.Answer | None] = ()
+) -> MarcPreviewOut:
+    """`preview_marc`'s counts and rows over records already read, as `viewer_id`
+    sees the shelf. The harvest preview asks through here too, so a file and a
+    harvest cannot disagree about one record. `keyed` is a harvest's
+    `HarvestKeys` answer per record, asked before the ladder as the apply asks
+    it; a file has none."""
+    index = recognition.Index.build(db, viewer_id, recognition.Source.CATALOGUE)
     # The same stored view the import matches on. Matching the raw record here
     # and the truncated one there would make the two screens disagree about the
     # records the bound acts on, which is exactly what the counts are for.
@@ -349,7 +369,10 @@ def preview_marc(
     stored = [stored_record(record) for record in parsed.records]
     # Asked once per record and kept, so the four counts read one answer each.
     # No statement per record: the index answers ids and nothing is loaded.
-    answers = Counter(type(recognise_stored(index, record)) for record in stored)
+    answers = Counter(
+        type(known or recognise_stored(index, record))
+        for record, known in zip(stored, chain(keyed, repeat(None)), strict=False)
+    )
 
     return MarcPreviewOut(
         total_records=parsed.total,
@@ -431,3 +454,219 @@ def import_marc(
 _MET_ANOTHER_CHANGE = (
     "Another change to the same books met this import, and nothing was imported. Import the file again."
 )
+
+
+# ── OAI-PMH harvest ───────────────────────────────────────────────────────────
+#
+# Another repository read in as a MARC import (ticket 177): `harvester.py`
+# fetches, `MarcImport.for_harvest` applies. A preview then an apply, as for a
+# file, and the two fetch the repository each, since nothing is kept between.
+
+
+#: The `detail.code` on the 409 a harvest meets while another runs, preview or
+#: apply. The apply's other 409, a lost race with another change to the same
+#: books, carries none, and the card words the two apart by it:
+#: `frontend/src/pages/SettingsPage/LibrarySettingsPage/components/HarvestImport.tsx`.
+HARVEST_RUNNING: Final = "harvest_running"
+
+#: The `detail.code` on the apply's 409 when the repository it names is not the
+#: one stored. The client names the address its settings held when it read the
+#: preview, which the preview route never echoes, so an address saved in another
+#: tab, before that read or after it, is refused here: the preview may have
+#: counted the stored repository under the old label. The card words it by this
+#: code, and `frontend/src/pages/SettingsPage/LibrarySettingsPage/hooks.ts` drops
+#: the read on it.
+REPOSITORY_CHANGED: Final = "repository_changed"
+
+
+def _harvest_repository(db: Session) -> str:
+    """The repository an admin may harvest, or 404.
+
+    **404 rather than the MARC routes' 403**, the house rule for a feature that
+    is off: `harvester.configured_repository` answers None in a household, with
+    the switch off, or with no usable address, and the route then does not
+    exist.
+    """
+    address = harvester.configured_repository(db)
+    if address is None:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return address
+
+
+async def _harvested(base_url: str, set_spec: str | None) -> tuple[harvester.Identity, harvester.Harvested]:
+    """One run over the repository, or a 502 naming what went wrong.
+
+    502 for `opds.py`'s reason: the repository answered, or refused to, and it is
+    not this application that is broken. The message never names the address.
+    """
+    try:
+        return await harvester.harvest(base_url, set_spec=set_spec)
+    except harvester.HarvestError as failure:
+        raise HTTPException(status_code=502, detail=str(failure)) from None
+
+
+@contextmanager
+def _the_only_harvest() -> Iterator[None]:
+    """`harvester.one_run`, a second run answered 409 as a second vocabulary
+    download is (`routers/settings.py::download_vocabulary`)."""
+    try:
+        with harvester.one_run():
+            yield
+    except harvester.AlreadyRunning as running:
+        raise HTTPException(
+            status_code=409, detail={"message": str(running), "code": HARVEST_RUNNING}
+        ) from None
+
+
+#: A set to harvest, as the repository names it: `harvests.set_spec`'s width.
+_SetSpec = Annotated[
+    str | None,
+    Query(max_length=HARVEST_SET_SPEC_MAX, description="Harvest only this set of the repository"),
+]
+
+
+@router.post("/harvest/preview", response_model=HarvestPreviewOut)
+@refuses(404)
+async def preview_harvest(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+    set_spec: _SetSpec = None,
+) -> HarvestPreviewOut:
+    """Harvest the configured repository and report what an apply would do, writing nothing.
+
+    Admin only, library mode and the harvester's switch required. The counts are
+    `preview_marc`'s, over the harvested records, with a record an earlier
+    harvest of this repository created counted as already held, as the apply
+    matches it; `deleted` and `truncated` are the run's own. Rate limited with
+    the imports, and a 409 while another harvest, preview or apply, is running.
+
+    **`async`, unlike the file routes**, because the wait is the network: the
+    fetch runs on the event loop through `fetch.py`, and the counting, which
+    blocks on the database, runs in a thread, as `routers/opds.py::sync` does.
+    """
+    base_url = _harvest_repository(db)
+    import_limiter.check(current_user.username)
+
+    with _the_only_harvest():
+        identity, run = await _harvested(base_url, set_spec)
+        previewed = await anyio.to_thread.run_sync(
+            lambda: _previewed_harvest(db, current_user.id, base_url, run)
+        )
+    return HarvestPreviewOut.model_validate(
+        previewed.model_dump() | {"repository_name": identity.name} | _run_counts(run)
+    )
+
+
+def _previewed_harvest(
+    db: Session, viewer_id: int, base_url: str, run: harvester.Harvested
+) -> MarcPreviewOut:
+    """`_previewed` over a run, each record asked by its identifier first."""
+    keys = HarvestKeys.from_repository(db, viewer_id, base_url)
+    return _previewed(db, viewer_id, run.parsed, [keys.answer(identifier) for identifier in run.identifiers])
+
+
+def _the_previewed_repository(stored: str, previewed: str) -> None:
+    """A 409 unless the apply names the repository stored now.
+
+    **The address, not a fingerprint of it**: the admin reads it in the
+    settings, so sending it back discloses nothing, and the refusal's message
+    never names it. Trimmed, as `configured_repository` trims what is stored
+    and the settings read does not.
+    """
+    if previewed.strip() != stored:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "The stored repository is not the one this page read, and nothing was"
+                    " harvested. Read the repository again."
+                ),
+                "code": REPOSITORY_CHANGED,
+            },
+        )
+
+
+@router.post("/harvest", response_model=HarvestResultOut)
+@refuses(404)
+async def apply_harvest(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+    repository: Annotated[
+        str,
+        Query(
+            max_length=HARVEST_BASE_URL_MAX,
+            description="The address held when the preview was read; refused unless it is the one stored",
+        ),
+    ],
+    set_spec: _SetSpec = None,
+) -> HarvestResultOut:
+    """Harvest the configured repository into the catalogue.
+
+    Matching asks first for the Book an earlier harvest of this repository
+    created from the same record, by its OAI identifier, so a Book corrected
+    here since that run is still found. Then it is `import_marc`'s, as this admin sees
+    the shelf: ISBN, then author and title together, so a record crediting
+    somebody never matches on its title alone, while a record crediting nobody
+    matches a Book crediting nobody by its title. A matched Book has its gaps
+    filled and nothing overwritten. **A created Book is nobody's, public, keeps
+    its record's identifier and points at the run** this records in `harvests`.
+    **No heading is written**, matched Book or created one: a harvest confirms
+    no record (owner, 2026-11-20), so the headings the records carried are
+    counted in `headings_unconfirmed` and not kept. A deleted record is counted
+    and deletes nothing. A 409 while another harvest is running, and one when
+    `repository` is not the address stored now: the client held another when it
+    read the preview, whether the stored one was saved before that read or after
+    it, so the preview it showed was labelled with an address this would not
+    harvest.
+    """
+    base_url = _harvest_repository(db)
+    _the_previewed_repository(base_url, repository)
+    import_limiter.check(current_user.username)
+
+    with _the_only_harvest():
+        return await _applied(db, current_user.id, base_url, set_spec)
+
+
+async def _applied(db: Session, admin_id: int, base_url: str, set_spec: str | None) -> HarvestResultOut:
+    """`apply_harvest`'s run and its one transaction, under `_the_only_harvest`."""
+    started = datetime.now(UTC).replace(tzinfo=None)
+    _, run = await _harvested(base_url, set_spec)
+
+    def apply() -> HarvestResultOut:
+        row = Harvest(
+            base_url=base_url,
+            set_spec=set_spec,
+            metadata_prefix=run.prefix,
+            run_by_user_id=admin_id,
+            started_at=started,
+            records_seen=run.seen,
+        )
+        db.add(row)
+        db.flush()
+        applied = MarcImport.for_harvest(db, admin_id, row).apply(run.parsed, identifiers=run.identifiers)
+        return HarvestResultOut.model_validate(
+            applied.model_dump()
+            | {
+                "harvest_id": row.id,
+                "headings_unconfirmed": sum(
+                    len(bounded_headings(record.headings)) for record in run.parsed.records
+                ),
+            }
+            | _run_counts(run)
+        )
+
+    # The same one transaction as a file import, and the same deadlock with a
+    # merge through its gap fills: `import_marc` says why 409.
+    with a_lost_race_answers_409(db, _MET_ANOTHER_CHANGE):
+        return await anyio.to_thread.run_sync(apply)
+
+
+def _run_counts(run: harvester.Harvested) -> dict[str, object]:
+    """The fields of `_HarvestRun`, which both answers carry."""
+    return {
+        "metadata_prefix": run.prefix,
+        "pages_read": run.pages_read,
+        "records_seen": run.seen,
+        "deleted": run.deleted,
+        "truncated": run.truncated,
+    }

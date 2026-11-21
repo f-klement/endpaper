@@ -1398,6 +1398,23 @@ export const en = {
   "patrons.deleteConfirm":
     "Delete {name}? Their record is erased, and that cannot be undone. Their loans keep the dates each book went out and came back, and no longer name them. A book still out with them stays recorded as out, with no borrower.",
 
+  // ── Lending to a patron ─────────────────────────────────────────────────
+  // The loan form's two doors to the register, and what a loan says of a
+  // patron. An admin reads the patron's name and card on every loan, filled
+  // per viewer by the server; every other reader is told "a registered patron"
+  // and no more. The admin's patron record lists the books the patron has out.
+  "loans.borrowerPatron": "A registered patron",
+  "loans.patronExisting": "Existing patron",
+  "loans.patronNew": "New patron",
+  "loans.patronFindTitle": "Find a patron",
+  "loans.patronChange": "Choose another",
+  "loans.badgePatron": "Loaned to a registered patron",
+  "loans.loanedToPatronBy": "Loaned to a registered patron by {by}",
+  "loans.badgeNamedPatron": "Loaned to {name}, card {card}",
+  "loans.loanedToNamedPatronBy": "Loaned to {name}, card {card}, by {by}",
+  "patrons.openLoans": "Books out",
+  "patrons.outSince": "Out since {date}",
+
   // ── Authors ─────────────────────────────────────────────────────────────
   "authors.title": "Authors",
   "authors.label": "Author",
@@ -2440,6 +2457,50 @@ export const en = {
     "It records no fingerprint of its book, so it cannot be matched.",
   "highlights.outcomeEmpty": "It holds no highlights.",
   "highlights.outcomeFailed": "The import of this file failed.",
+  "harvest.title": "Harvest another catalogue",
+  "harvest.explain":
+    "Reads the records of another library system over OAI-PMH into this catalogue. A harvested book belongs to nobody and is always public, and its subject headings arrive unconfirmed, as suggestions.",
+  "harvest.switchLabel": "Harvest from the repository below",
+  "harvest.switchHint":
+    "Turning it off stops the next harvest. Books already harvested stay.",
+  "harvest.needsAddress": "Enter the repository address below first.",
+  "harvest.addressLabel": "Repository address",
+  "harvest.addressHint":
+    "This is the one setting that makes the server connect to an address somebody typed. It may be on your own network, over http or https, with no username, password, query or fragment.",
+  "harvest.addressSave": "Save address",
+  "origin.oai_harvest": "OAI-PMH harvest",
+  "harvestRun.title": "Harvest now",
+  "harvestRun.explain":
+    "Reads the repository above and shows what a harvest would add and fill in. Nothing is written until you confirm.",
+  "harvestRun.setLabel": "Set (optional)",
+  "harvestRun.setHint":
+    "Harvest only this set, spelled as the repository names it. Leave it empty for the whole repository.",
+  "harvestRun.read": "Read the repository",
+  "harvestRun.reading": "Reading the repository...",
+  "harvestRun.repository": "Repository: {name}",
+  "harvestRun.previewTitle":
+    "{seen} records read, {readable} this app can store.",
+  "harvestRun.wouldAdd": "{count} are new here and will be added.",
+  "harvestRun.deleted":
+    "{count} records are marked deleted by the repository. No book is removed for them.",
+  "harvestRun.headingsPreview":
+    "Headings and shelf notations in the records listed below: {count}. A harvest counts them and writes none yet: it confirms no record.",
+  "harvestRun.truncatedPreview":
+    "The run stopped before the end of the repository, at a limit or because the repository was busy, so these counts cover only part of it. Every harvest starts over from the beginning; naming a set narrows it.",
+  "harvestRun.confirm": "Harvest {count} records",
+  "harvestRun.importing": "Harvesting...",
+  "harvestRun.resultHeadings":
+    "Headings and shelf notations counted and not yet written: {count}.",
+  "harvestRun.truncatedResult":
+    "The harvest stopped before the end of the repository, at a limit or because the repository was busy. What was read is kept. A re-run starts over from the beginning; naming a set narrows it.",
+  "harvestRun.off":
+    "The harvester is off, or no repository address is stored. Turn it on and save the address above.",
+  "harvestRun.running":
+    "A harvest is already running. Wait until it finishes, then try again.",
+  "harvestRun.lostRace":
+    "Another change to the same books met this harvest, and nothing was harvested. Harvest again.",
+  "harvestRun.repositoryChanged":
+    "The stored repository is not the one this page read, and nothing was harvested. Read the repository again.",
 } as const;
 
 /** Every message key. Adding one here requires a German translation. */

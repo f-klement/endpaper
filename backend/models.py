@@ -1027,6 +1027,19 @@ PATRON_STREET_MAX = 120
 PATRON_HOUSE_NUMBER_MAX = 20
 PATRON_POSTCODE_MAX = 20
 PATRON_CITY_MAX = 80
+#: The widths of a harvest run's own columns. The repository address shares
+#: `BASE_URL_MAX`'s number, the width every typed address here has, and is its
+#: own constant because the settings field that names it is a different door.
+HARVEST_BASE_URL_MAX = 255
+#: An OAI-PMH `setSpec` is a colon separated path of short labels; no
+#: repository the ticket names serves one near this wide.
+HARVEST_SET_SPEC_MAX = 255
+#: `marcxml` and `oai_dc` are what a harvest asks for. Free text rather than an
+#: enum, because a repository names its own formats.
+HARVEST_METADATA_PREFIX_MAX = 32
+#: An OAI-PMH record identifier is a URI, usually `oai:<host>:<local id>`. One
+#: wider is not kept, and its record is then matched as a file's record is.
+HARVESTED_IDENTIFIER_MAX = 255
 
 
 #: The free text columns of `books` where a blank string and a null would
@@ -1066,10 +1079,70 @@ def blank_as_none[T](value: T) -> T | None:
     return value
 
 
+#: **A harvested Book is nobody's, and public.** A row naming a harvest has no
+#: adder and is never private (owner's decision on issue #177, 2026-11-20).
+#:
+#: An ownerless private row is seen by nobody, admins included, because
+#: `visible_to`'s ownership arm compares a null; so a harvest that wrote one
+#: would lose the record without an error. The CHECK is what makes that
+#: unstorable by every writer, a restore and the next import included.
+#: **At most one, not exactly one**: a Book with neither an adder nor a harvest
+#: already exists by design ("A Book with no adder goes to an admin" in
+#: `docs/decisions.md`), so a rule refusing both null would refuse those rows.
+#:
+#: One spelling for both engines: `NOT` over a boolean is a boolean on
+#: Postgres and `NOT 0` is `1` on SQLite, where `= 0` would be a type error on
+#: the first. `is_private` is `NOT NULL`, so no third value reaches the `NOT`.
+HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL = "harvest_id IS NULL OR (added_by_user_id IS NULL AND NOT is_private)"
+
+
+def harvested_is_nobodys_and_public(
+    harvest_id: int | None, added_by_user_id: int | None, is_private: bool
+) -> bool:
+    """Whether these three columns are a row the constraint above stores.
+
+    The Python reading of `HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL`, clause for
+    clause, asserted against it row by row in `tests/test_models.py` rather than
+    read beside it, for `names_exactly_one_borrower`'s reason.
+    """
+    return harvest_id is None or (added_by_user_id is None and not is_private)
+
+
 def datestamp_now() -> datetime:
     """Now, as naive UTC to the second. Stored to the second so a write's order
     is kept; `oai.py` serves only the day (owner's decision on ticket 176)."""
     return datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+
+
+class Harvest(Base):
+    """One run of the OAI-PMH harvester: which repository, which set, when.
+
+    **What a harvested Book points at instead of an owner.** The run is the
+    actor, so the Book says what happened to it: it came from this repository
+    on this day. Not a `users` row, because every sign in resolves a `users`
+    row by username, so a proxy or LDAP identity of the same name would adopt
+    it with every Book it held.
+    Nothing here has a username, a hash or a session, so nothing can sign in
+    as it.
+
+    `run_by_user_id` is who pressed the button, an audit fact and never an
+    owner: no rule reads it to decide who may see or change a Book.
+    """
+
+    __tablename__ = "harvests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    base_url: Mapped[str] = mapped_column(String(HARVEST_BASE_URL_MAX), nullable=False)
+    set_spec: Mapped[str | None] = mapped_column(String(HARVEST_SET_SPEC_MAX), nullable=True)
+    metadata_prefix: Mapped[str] = mapped_column(String(HARVEST_METADATA_PREFIX_MAX), nullable=False)
+    # Deliberately not indexed, like `loans.loaned_by_user_id`: nothing queries
+    # by it, and there is no delete account path whose child check it would
+    # speed up.
+    run_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    records_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    records_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class Book(Base):
@@ -1119,6 +1192,8 @@ class Book(Base):
             _enum_check("ownership", OwnershipStatus),
             name="ck_books_ownership",
         ),
+        # `HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL` says why.
+        CheckConstraint(HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL, name="ck_books_harvested_is_nobodys_and_public"),
         # **A deleted Book's id is never given to another Book.** Without it
         # SQLite gives an insert `max(rowid) + 1`, so a merge deleting the
         # highest id Book handed its id to the next Book created, and an import
@@ -1286,6 +1361,22 @@ class Book(Base):
     # Indexed for the "Recently Added" sort and the per-month statistic.
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # The harvest run this row came from, or null for every row a person or a
+    # file import created. Set only on a row the harvest created, never on a
+    # matched one, and then the row has no adder and is public: the CHECK in
+    # `__table_args__`. Indexed for "what did this run add".
+    harvest_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("harvests.id", name="fk_books_harvest_id"), nullable=True, index=True
+    )
+    # The OAI identifier of the record a harvest created this row from, and
+    # null on every other row. **What a re-run matches first**
+    # (`importing.HarvestKeys`): a record with no ISBN otherwise matches only
+    # on title and author, which a cataloguer may have corrected since.
+    # Unique only within its repository, which `harvest_id` names, so it is
+    # matched together with the run's address. Indexed for that match.
+    harvested_identifier: Mapped[str | None] = mapped_column(
+        String(HARVESTED_IDENTIFIER_MAX), nullable=True, index=True
+    )
 
     # When this book was moved to the trash, or null while it is on the shelf.
     #
@@ -1861,7 +1952,9 @@ class Patron(Base):
     it and none is optional:
 
     * **Only an admin reads or writes it.** `routers/patrons.py` takes
-      `require_admin` on every route, and no other module serialises the row.
+      `require_admin` on every route. The one other reader is a loan's
+      `patron`, the name and card alone, which `patrons.named_on_loans` fills
+      for an admin and for nobody else.
     * **It never reaches the public catalogue**, not as a field and not as a
       count. Nothing under `routers/public.py`, OAI, OPDS or SRU joins it.
     * **Deletion works whatever the loan history.** `patrons.erase` takes the

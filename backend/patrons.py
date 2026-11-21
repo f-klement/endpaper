@@ -1,23 +1,25 @@
 """Patrons: finding one, and erasing one so that no loan keeps their name.
 
 `models.Patron` says what the record is and the three rules that bind on it.
-This module is where two of them are kept: the search an admin runs, and the
-erasure. Who may call either is `routers/patrons.py`, which takes
-`require_admin` on every route; nothing here reads a caller.
+This module is where they are kept: the search an admin runs, the erasure,
+and who learns which patron holds a lent book. Who may search or erase is
+`routers/patrons.py`, which takes `require_admin` on every route;
+`named_on_loans` is the one function here that reads a caller, because the
+loan routes it serves are open to every member.
 
 **One erasure, whatever asked for it** (owner, 2026-09-05). Deleting one
 patron and any future bulk erasure, such as lapsed registrations, both call
 `erase`, so there is one implementation to test rather than two that drift.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from datetime import datetime
 from typing import Any, Final, cast
 
 from sqlalchemy import CursorResult, delete, or_, select, update
 from sqlalchemy.orm import Session
 
-from models import Loan, Patron
+from models import Loan, Patron, User
 
 #: The most rows one search returns. A search is how staff find the patron in
 #: front of them, so a long list is a term that was too short; a cap also means
@@ -69,6 +71,27 @@ def card_number_taken(db: Session, card_number: str, *, other_than: int | None =
     if other_than is not None:
         query = query.where(Patron.id != other_than)
     return db.scalar(query.limit(1)) is not None
+
+
+def named_on_loans(db: Session, viewer: User, loans: Iterable[Loan]) -> dict[int, Patron]:
+    """The patrons these loans went to, by id, for an admin; nobody for anyone else.
+
+    **The one place a loan's patron is looked up for a reader** (owner,
+    2026-11-20): an admin sees who holds a book and whom to chase, and a member,
+    who reads the same loan, is told only that a registered patron has it. The
+    badge, the loans and overdue pages and a lend or return all ask here, so the
+    rule has one site and one test.
+
+    **No statement at all for a member**, so a patron's row is never read on a
+    member's request, and none when no loan went to a patron. Otherwise one, for
+    the whole page.
+    """
+    if not viewer.is_admin:
+        return {}
+    ids = {loan.loaned_to_patron_id for loan in loans if loan.loaned_to_patron_id is not None}
+    if not ids:
+        return {}
+    return {patron.id: patron for patron in db.scalars(select(Patron).where(Patron.id.in_(ids)))}
 
 
 def erase(db: Session, patron_ids: Collection[int], now: datetime) -> int:

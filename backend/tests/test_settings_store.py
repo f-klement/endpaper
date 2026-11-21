@@ -288,6 +288,42 @@ class TestLibraryModeAndThePublicCatalogue:
         )
 
 
+class TestTheHarvesterReadsOneRepository:
+    """`harvest_repository`: library mode, the switch, and an address that is
+    not blank, or None. `harvester.configured_repository` validates the address."""
+
+    _REPOSITORY: Final = "http://10.0.0.10/oai"
+
+    def _switch_on(self, db, address: str = _REPOSITORY) -> None:
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "true")
+        settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, address)
+
+    def test_the_harvester_starts_off_with_no_repository(self, db):
+        assert settings_store.DEFAULTS[SettingKey.OAI_HARVEST_ENABLED] == "false"
+        assert settings_store.DEFAULTS[SettingKey.OAI_HARVEST_BASE_URL] == ""
+        assert settings_store.harvest_repository(db) is None
+
+    def test_the_repository_is_named_once_everything_is_on(self, db):
+        self._switch_on(db)
+        assert settings_store.harvest_repository(db) == self._REPOSITORY
+
+    def test_outside_library_mode_there_is_no_repository(self, db):
+        self._switch_on(db)
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "false")
+        assert settings_store.harvest_repository(db) is None
+
+    def test_with_the_switch_off_there_is_no_repository(self, db):
+        self._switch_on(db)
+        settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "false")
+        assert settings_store.harvest_repository(db) is None
+
+    def test_a_blank_stored_address_names_no_repository(self, db):
+        """A restore stores the rows without passing the settings route."""
+        self._switch_on(db, "   ")
+        assert settings_store.harvest_repository(db) is None
+
+
 class TestACredentialMakesASourceReady:
     """The generalisation, not the Google Books special case beside it.
 

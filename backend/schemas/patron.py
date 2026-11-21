@@ -1,9 +1,12 @@
 """What an admin sends and reads about a patron. `models.Patron` is the record.
 
-**No other schema carries a patron field**, and that is the privacy rule
-rather than an omission: a loan's response names a member or a typed name, the
-public catalogue names neither, and the only response holding a patron's name
-is `PatronOut`, served by `routers/patrons.py` to an admin alone.
+**Only an admin reads who a patron is** (owner, 2026-11-20). `PatronOut` is the
+whole record, served by `routers/patrons.py` alone, with the patron's open
+loans on it. A loan names its patron to an admin by `LoanPatronOut`, the name
+and the card and nothing to contact them by, filled per viewer by
+`patrons.named_on_loans`; every other reader of a loan, and the public
+catalogue, gets `LoanOut.to_patron` and no more. `LoanCreate` takes a patron's
+id on the way in, from an admin alone.
 """
 
 from datetime import date
@@ -166,6 +169,30 @@ class PatronSearch(BaseModel):
     limit: Annotated[int, Field(ge=1, le=patrons.SEARCH_LIMIT_MAX)] = SEARCH_LIMIT_DEFAULT
 
 
+class LoanPatronOut(BaseModel):
+    """Who holds a lent book, as an admin reads it on the loan.
+
+    **The name and the card, and no address**, because this answers "who has
+    it" and "whom to chase", and the record one click away has the rest. It
+    also keeps the address rule in `tests/test_house_rules.py` from having a
+    loan schema to allow.
+    """
+
+    name: str
+    card_number: str
+    model_config = {"from_attributes": True}
+
+
+class PatronLoanOut(BaseModel):
+    """One loan a patron still holds, as their record lists it."""
+
+    id: int
+    book_id: int
+    title: str
+    loaned_at: UtcDateTime
+    due_at: UtcDateTime | None = None
+
+
 class PatronOut(BaseModel):
     """A patron's whole record, as an admin reads it. Served by `routers/patrons.py` alone."""
 
@@ -180,4 +207,8 @@ class PatronOut(BaseModel):
     city: str | None = None
     expires_on: date | None = None
     enrolled_at: UtcDateTime
+    #: The books this patron has out, oldest loan first. Filled by the router
+    #: from `Loans.seen_by` the admin, never off the row, which has no such
+    #: relation: `routers/patrons.py::_records`.
+    open_loans: list[PatronLoanOut] = []
     model_config = {"from_attributes": True}

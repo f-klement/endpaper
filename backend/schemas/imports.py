@@ -224,3 +224,51 @@ class MarcPreviewOut(BaseModel):
         ),
     )
     rows: list[MarcPreviewRow] = []
+
+
+class _HarvestRun(BaseModel):
+    """What one run of the harvester read, beside what the records then did."""
+
+    metadata_prefix: str = Field(
+        description="The repository's name for the MARCXML format this run asked for"
+    )
+    pages_read: int = Field(ge=0, description="Pages the repository answered")
+    records_seen: int = Field(ge=0, description="Record headers read, deleted ones included")
+    deleted: int = Field(
+        ge=0,
+        description=(
+            "Records the repository marks deleted. Counted and acted on nowhere: "
+            "a repository withdrawing a record does not withdraw a book here"
+        ),
+    )
+    truncated: bool = Field(
+        description=(
+            "Whether the record cap, the page cap, the deadline or a busy repository "
+            "stopped the run before the repository ran out; what was read is kept"
+        )
+    )
+
+
+class HarvestPreviewOut(MarcPreviewOut, _HarvestRun):
+    """What a harvest would read and do, before anything is written.
+
+    `MarcPreviewOut`'s counts over the harvested records, asked through the same
+    index the apply asks, plus what the run itself read. `rows` carries each
+    record's headings, which is where a harvest's headings are offered: the
+    apply writes none (owner, 2026-11-20).
+    """
+
+    repository_name: str | None = Field(description="The name the repository gives itself, if it gives one")
+
+
+class HarvestResultOut(ImportResultOut, _HarvestRun):
+    """What a harvest did, and the run it recorded."""
+
+    harvest_id: int = Field(description="The run recorded in `harvests`, which every Book it added points at")
+    headings_unconfirmed: int = Field(
+        ge=0,
+        description=(
+            "Headings the harvested records carried, skipped records included: a "
+            "harvest confirms no record, so its headings are counted and not written"
+        ),
+    )

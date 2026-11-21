@@ -3,16 +3,11 @@ import { useState } from "react";
 import type { PatronOut } from "../../api/generated/model";
 import { Button, EmptyState, ErrorState, Spinner } from "../../components";
 import { useTranslation } from "../../i18n";
-import { Page, PageHeader, SearchBar } from "../components";
-import PatronForm from "./components/PatronForm";
+import { Page, PageHeader, PatronForm, SearchBar } from "../components";
+import { usePatronSearch, type UsePatronSearchResult } from "../hooks";
+import { BLANK_DRAFT, draftOf } from "../types";
 import PatronRow from "./components/PatronRow";
-import {
-  usePatronSearch,
-  usePatronWrites,
-  type UsePatronSearchResult,
-  type UsePatronWritesResult,
-} from "./hooks";
-import { BLANK_DRAFT, draftOf } from "./types";
+import { usePatronWrites, type UsePatronWritesResult } from "./hooks";
 
 /** Which form is open: none, a new patron, or one patron's record. */
 type Editing =

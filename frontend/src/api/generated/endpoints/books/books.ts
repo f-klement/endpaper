@@ -12987,6 +12987,14 @@ export const getSetPrivacyUrl = (bookId: number) => {
 };
 
 /**
+ * Make a Book private or public.
+ *
+ * **A harvested Book cannot be made private, and the refusal is a 409 here
+ * rather than the database's.** It has no adder, so private it would be seen
+ * by nobody, the admin who pressed the switch included, and
+ * `ck_books_harvested_is_nobodys_and_public` refuses the row: without this
+ * check that refusal surfaces as a 500. Only an admin reaches a harvested Book
+ * through `BookForOwner`, so the refusal says what to do instead.
  * @summary Set Privacy
  */
 export const setPrivacy = async (
@@ -13055,7 +13063,17 @@ export type SetPrivacyMutationVariables = {
   data: PrivacyUpdate;
 };
 
-/** @summary Set Privacy */
+/**
+ * Make a Book private or public.
+ *
+ * **A harvested Book cannot be made private, and the refusal is a 409 here
+ * rather than the database's.** It has no adder, so private it would be seen
+ * by nobody, the admin who pressed the switch included, and
+ * `ck_books_harvested_is_nobodys_and_public` refuses the row: without this
+ * check that refusal surfaces as a 500. Only an admin reaches a harvested Book
+ * through `BookForOwner`, so the refusal says what to do instead.
+ * @summary Set Privacy
+ */
 export const useSetPrivacy = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,

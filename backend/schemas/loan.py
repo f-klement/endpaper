@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from models import BORROWER_NAME_MAX, names_exactly_one_borrower
 from schemas.common import RowIdField, UtcDateTime, UtcDateTimeIn
+from schemas.patron import LoanPatronOut
 from schemas.user import UserOut
 
 if TYPE_CHECKING:
@@ -17,8 +18,12 @@ class LoanCreate(BaseModel):
     book_id: RowIdField
     #: A member of the library...
     loaned_to_user_id: RowIdField | None = None
-    #: ...or somebody with no account at all. Exactly one of the two.
+    #: ...or somebody with no account at all...
     loaned_to_name: str | None = Field(default=None, max_length=BORROWER_NAME_MAX)
+    #: ...or a registered patron. Exactly one of the three. Naming one is an
+    #: admin's act alone, since the id leads to a person's contact details:
+    #: `routers/loans.py::_refuse_an_unknown_borrower`.
+    loaned_to_patron_id: RowIdField | None = None
     # Optional. Most library lending has no deadline, and demanding one would
     # make the common case worse to serve the rare one.
     due_at: UtcDateTimeIn | None = None
@@ -61,8 +66,12 @@ class LoanCreate(BaseModel):
         that does not come this way.
         """
         self.loaned_to_name = (self.loaned_to_name or "").strip() or None
-        if not names_exactly_one_borrower(self.loaned_to_user_id, self.loaned_to_name):
-            raise ValueError("Name exactly one borrower: either loaned_to_user_id or loaned_to_name.")
+        if not names_exactly_one_borrower(
+            self.loaned_to_user_id, self.loaned_to_name, patron_id=self.loaned_to_patron_id
+        ):
+            raise ValueError(
+                "Name exactly one borrower: loaned_to_user_id, loaned_to_name or loaned_to_patron_id."
+            )
         return self
 
 
@@ -70,12 +79,34 @@ class LoanOut(BaseModel):
     id: int
     book_id: int
     # At most one of these two is set: a loan to a patron, or one whose borrower
-    # was erased, sets neither, and carries no patron field here.
-    # `models.ONE_BORROWER_SQL` is the one place that rule is spelled.
-    # `loaned_to` is the member's full record and is None for an external
-    # borrower, whose name is all there is.
+    # was erased, sets neither. `models.ONE_BORROWER_SQL` is the one place that
+    # rule is spelled. `loaned_to` is the member's full record and is None for
+    # an external borrower, whose name is all there is.
     loaned_to_user_id: int | None
     loaned_to_name: str | None = None
+    #: Read off the row and never served: `to_patron` is what leaves.
+    loaned_to_patron_id: int | None = Field(default=None, exclude=True)
+    #: Set by `_says_whether_a_patron_has_it` and never by a caller. A patron
+    #: is an admin's to read (`models.Patron`), and every member who sees a
+    #: book reads its loan, hence a flag rather than the id.
+    #:
+    #: **A plain field and not a `computed_field`**, which pydantic marks
+    #: `readOnly` in the schema; `frontend/tests/committedSchema.ts` refuses a
+    #: keyword no reader of the schema models, and this one says nothing a
+    #: reader needs. `model_config` below is what keeps it `required`.
+    to_patron: bool = Field(
+        default=False,
+        description=(
+            "Whether the borrower is a registered patron. A flag and not the id, so a "
+            "member learns that a patron has the book and never which one. Without it "
+            "a patron's loan and an erased borrower's would read alike, both naming nobody."
+        ),
+    )
+    #: Who the patron is, for an admin alone and None for everyone else (owner,
+    #: 2026-11-20). Filled per viewer by `serialisation.loan_patron`, never off
+    #: the row, so a route that forgets it serves nobody's name rather than
+    #: somebody's.
+    patron: LoanPatronOut | None = None
     loaned_by_user_id: int
     loaned_at: UtcDateTime
     # None while the book is still out. This is what marks a loan "active";
@@ -121,7 +152,18 @@ class LoanOut(BaseModel):
     book: BookColumns | None = None
     loaned_to: UserOut | None = None
     loaned_by: UserOut | None = None
-    model_config = {"from_attributes": True}
+    #: `json_schema_serialization_defaults_required`: the response schema marks
+    #: every defaulted field required, which is the truth of a response, since
+    #: the server always sends each one. Without it `to_patron` reaches the
+    #: client typed optional, and a fixture or a component that omits it type
+    #: checks and renders "Loaned to " with nobody after it.
+    model_config = {"from_attributes": True, "json_schema_serialization_defaults_required": True}
+
+    @model_validator(mode="after")
+    def _says_whether_a_patron_has_it(self) -> LoanOut:
+        """`to_patron` off the row's patron id, so no construction site can disagree with it."""
+        self.to_patron = self.loaned_to_patron_id is not None
+        return self
 
 
 class MyOverdueOut(BaseModel):
