@@ -34,6 +34,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   useCatalogueScope,
+  useLibraryMode,
   usePreference,
   useScopedPreference,
   type RememberedPerScope,
@@ -124,6 +125,11 @@ export interface UseLibraryResult {
    * with the patch `lib/bookFilters.ts` builds for it.
    */
   update: (patch: Partial<BookFilters>) => void;
+  /**
+   * Whether the origin filter is offered: library mode, where harvests exist.
+   * The harvest run filter follows it, though only a link draws its chip.
+   */
+  offersOrigin: boolean;
 
   locations: LocationOut[];
   /** The collections the caller may be told about, for the filter. */
@@ -160,9 +166,25 @@ export function useLibrary(): UseLibraryResult {
     [],
   );
 
-  const pages = useBookPages(filters);
+  // **Held at null outside library mode rather than cleared**, because the API
+  // refuses `origin` and `harvest` there with a 403: a link or a saved search
+  // carrying either would otherwise turn a household's whole grid into an
+  // error. Masked on the way out rather than written back, so a deep link
+  // opened before the flags arrive keeps its filter once they say library mode.
+  // The price is one unfiltered listing while the flags load, painted and then
+  // replaced; waiting on the flags instead would hold every listing back.
+  const offersOrigin = useLibraryMode();
+  const shown = useMemo(
+    () =>
+      offersOrigin || (filters.origin === null && filters.harvest === null)
+        ? filters
+        : { ...filters, origin: null, harvest: null },
+    [filters, offersOrigin],
+  );
+
+  const pages = useBookPages(shown);
   const lists = useFilterPanelLists();
-  return { filters, update, ...lists, ...pages };
+  return { filters: shown, update, offersOrigin, ...lists, ...pages };
 }
 
 /**
@@ -206,6 +228,7 @@ function useBookPages(
   UseLibraryResult,
   | "filters"
   | "update"
+  | "offersOrigin"
   | "locations"
   | "collections"
   | "classifications"

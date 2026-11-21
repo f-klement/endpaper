@@ -10,6 +10,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HarvestFormat,
   type HarvestPreviewOut,
   type HarvestResultOut,
   Locale,
@@ -24,6 +25,7 @@ function preview(
   return {
     already_held: 0,
     deleted: 0,
+    metadata_format: HarvestFormat.marcxml,
     metadata_prefix: "marc21",
     pages_read: 1,
     readable: 10,
@@ -43,6 +45,7 @@ function outcome(overrides: Partial<HarvestResultOut> = {}): HarvestResultOut {
     harvest_id: 1,
     headings_pending: 0,
     matched: 4,
+    metadata_format: HarvestFormat.marcxml,
     metadata_prefix: "marc21",
     pages_read: 1,
     records_seen: 10,
@@ -143,8 +146,51 @@ describe("HarvestImport", () => {
     });
 
     expect(
-      screen.getByText(/shelf notations in the records listed below: 3\./),
+      screen.getByText(/listed below carry 3 headings and shelf notations\./),
     ).toBeInTheDocument();
+  });
+
+  it("says nothing of the format on a MARCXML run", () => {
+    renderHarvest({ preview: preview() });
+
+    expect(screen.queryByText(/Read as/)).toBeNull();
+  });
+
+  it("says a preview read as Dublin Core carries less, and counts no headings", () => {
+    renderHarvest({
+      preview: preview({
+        metadata_format: HarvestFormat.dublin_core,
+        rows: [{ title: "Faust", classifications: [] }],
+      }),
+    });
+
+    expect(
+      screen.getByText(
+        /Read as Dublin Core, because the repository offers no MARCXML this app can ask for\./,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/headings and shelf notations\. A harvest/),
+    ).toBeNull();
+  });
+
+  it("says a result read as Dublin Core carries less", () => {
+    renderHarvest({
+      result: outcome({ metadata_format: HarvestFormat.dublin_core }),
+    });
+
+    expect(
+      screen.getByText(/no roles for the people it names/),
+    ).toBeInTheDocument();
+  });
+
+  it("says a Dublin Core run in German", () => {
+    renderHarvest(
+      { result: outcome({ metadata_format: HarvestFormat.dublin_core }) },
+      Locale.de,
+    );
+
+    expect(screen.getByText(/Als Dublin Core gelesen/)).toBeInTheDocument();
   });
 
   it("lists each previewed record with its headings", () => {
@@ -200,6 +246,30 @@ describe("HarvestImport", () => {
     expect(
       screen.getByText("10 records read, 4 matched, 6 added."),
     ).toBeInTheDocument();
+  });
+
+  it("links to the books this run added, by the run's id", () => {
+    renderHarvest({ result: outcome({ harvest_id: 42 }) });
+
+    expect(
+      screen.getByRole("link", { name: "Show the books this harvest added" }),
+    ).toHaveAttribute("href", "/?harvest=42");
+  });
+
+  it("links to the books this run added in German", () => {
+    renderHarvest({ result: outcome({ harvest_id: 42 }) }, Locale.de);
+
+    expect(
+      screen.getByRole("link", {
+        name: "Die Bücher zeigen, die diese Übernahme angelegt hat",
+      }),
+    ).toHaveAttribute("href", "/?harvest=42");
+  });
+
+  it("offers no link when the run added no book", () => {
+    renderHarvest({ result: outcome({ created: 0 }) });
+
+    expect(screen.queryByRole("link")).toBeNull();
   });
 
   it("counts the headings the harvest left waiting for an admin", () => {
@@ -290,13 +360,13 @@ describe("HarvestImport", () => {
   it("says a 502 in the server's own words, which name the fault", () => {
     renderHarvest({
       readError: new ApiError(
-        "The repository offers no MARCXML format, and Dublin Core alone is not read by this library yet.",
+        "The repository offers neither MARCXML nor Dublin Core, which every repository must offer.",
         502,
       ),
     });
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "The repository offers no MARCXML format",
+      "The repository offers neither MARCXML nor Dublin Core",
     );
   });
 

@@ -154,6 +154,11 @@ export const de: Messages = {
   "library.viewTable": "Tabelle",
   "library.viewList": "Liste",
   "library.loaned": "Verliehen",
+  "library.originLabel": "Woher die Bücher kommen",
+  "library.originAll": "Übernommen oder hinzugefügt",
+  "library.originHarvested": "Übernommen",
+  "library.originAdded": "Hier hinzugefügt",
+  "library.harvestRun": "Übernahmelauf",
 
   "sort.title_asc": "Titel A bis Z",
   "sort.title_desc": "Titel Z bis A",
@@ -2194,7 +2199,11 @@ export const de: Messages = {
   "harvestRun.deleted":
     "{count} Datensätze sind im Repository als gelöscht markiert. Für sie wird kein Buch entfernt.",
   "harvestRun.headingsPreview":
-    "Schlagwörter und Notationen in den unten aufgeführten Datensätzen: {count}. Eine Übernahme schreibt keine davon: sie schlägt sie nur an einem Buch vor, das eine Übernahme desselben Datensatzes angelegt hat, und ein Admin bestätigt oder verwirft sie dort. Ein Buch, das über die ISBN oder über Autor und Titel erkannt wurde, bekommt keine.",
+    "Die unten aufgeführten Datensätze enthalten {count} Schlagwörter und Notationen. Eine Übernahme schreibt keine davon. Vorgeschlagen werden sie an den Büchern, die diese Übernahme aus den Datensätzen anlegt, und an Büchern, die eine frühere Übernahme aus denselben Datensätzen angelegt hat; ein Admin bestätigt oder verwirft sie dort. Ein Buch, das über die ISBN oder über Autor und Titel erkannt wird, bekommt keine Vorschläge.",
+  "harvestRun.addedBooks":
+    "Die Bücher zeigen, die diese Übernahme angelegt hat",
+  "harvestRun.readDublinCore":
+    "Als Dublin Core gelesen, weil das Repository kein MARCXML anbietet, das diese App abfragen kann. Dublin Core enthält weniger: keine Schlagwörter oder Notationen, keine Reihe und keine Rollen der genannten Personen. Die angelegten Bücher enthalten also weniger Angaben.",
   "harvestRun.truncatedPreview":
     "Der Lauf hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war, diese Zahlen umfassen also nur einen Teil davon. Jede Übernahme beginnt wieder von vorn; eine Teilmenge grenzt sie ein.",
   "harvestRun.confirm": "{count} Datensätze übernehmen",

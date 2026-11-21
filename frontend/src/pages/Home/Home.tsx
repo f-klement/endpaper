@@ -128,6 +128,7 @@ export default function Home() {
           setShowClassificationPanel((open) => !open)
         }
         onFilterChange={library.update}
+        offersOrigin={library.offersOrigin}
         locations={library.locations}
         collections={library.collections}
         view={view}

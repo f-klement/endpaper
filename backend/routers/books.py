@@ -89,6 +89,7 @@ from enums import (
     AuthorityScheme,
     BookFormat,
     BookIdentifierScheme,
+    BookOrigin,
     BookSort,
     BulkAction,
     CatalogueSource,
@@ -1722,6 +1723,7 @@ def _price_column(minor: int | None) -> str:
 
 
 @router.get("", response_model=Page[BookOut])
+@refuses(403)
 def list_books(
     db: DbSession,
     current_user: CurrentUser,
@@ -1757,6 +1759,15 @@ def list_books(
     unfiled: Annotated[bool, Query(description="Only books in no collection at all")] = False,
     unrated: Annotated[bool, Query(description="Only books you have not rated")] = False,
     discuss: Annotated[bool, Query(description="Only books somebody has offered to talk about")] = False,
+    origin: Annotated[
+        BookOrigin | None,
+        Query(description="Library mode only. Only the books a harvest created, or only every other"),
+    ] = None,
+    harvest: Annotated[
+        int | None,
+        # Bounded above for the reason `collection_id` is.
+        Query(ge=1, le=MAX_ROW_ID, description="Library mode only. Only the books this harvest run created"),
+    ] = None,
     classification: HeadingList = None,
     ddc_division: Annotated[DivisionList, Query(alias="ddc")] = None,
     sort: Annotated[BookSort, Query()] = BookSort.TITLE_ASC,
@@ -1775,6 +1786,17 @@ def list_books(
         raise HTTPException(
             status_code=400,
             detail="Ask for one collection or for the unfiled books, not both.",
+        )
+
+    # **Refused rather than ignored outside library mode**, as the MARC export
+    # and the catalogue narrowing are: a harvest is a library mode feature, and
+    # a filter answered with the whole shelf is a 200 that lies. One settings
+    # read, paid only by a request that names either filter, so the listing's
+    # statement count is unchanged for everybody else.
+    if (origin is not None or harvest is not None) and not settings_store.library_mode(db):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Filtering by harvest is a library mode feature.",
         )
 
     # The author name is resolved to ids **here**, not on the shelf: deciding
@@ -1804,6 +1826,8 @@ def list_books(
         unfiled=unfiled,
         unrated=unrated,
         discuss=discuss,
+        origin=origin,
+        harvest_id=harvest,
         headings=parse_headings(classification),
         ddc_divisions=parse_divisions(ddc_division),
     )

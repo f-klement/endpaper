@@ -42,6 +42,9 @@
 - In library mode an admin can harvest another library system's catalogue over OAI-PMH from the library page: the repository, or one set of it, is read first and what a harvest would add and fill in is counted before anything is written; harvested books belong to nobody and are public.
 - An OAI-PMH harvest keeps each record's subject headings as suggestions on the Book it created, which an admin confirms or discards on the Book.
 - An admin confirms or discards the subject headings a harvest suggests, on each book's page.
+- A harvest reads a repository that offers no MARCXML in Dublin Core, and the preview and result say which format it read.
+- A harvest's result links to the books that run added.
+- The books list filters by origin and by harvest run in library mode, so a member can review the books harvesting, or one run, brought in.
 
 ## v0.22.0
 

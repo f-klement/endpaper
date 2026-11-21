@@ -17,6 +17,7 @@ import type { BookFilters as Filters } from "../types";
 import {
   FORMAT_FILTERS,
   LENDING_FILTERS,
+  ORIGIN_FILTERS,
   OWNERSHIP_FILTERS,
   SORT_OPTIONS,
   STATUS_FILTERS,
@@ -39,6 +40,8 @@ interface BookFiltersProps {
    * file before it is one anywhere else.
    */
   onFilterChange: (patch: Partial<Filters>) => void;
+  /** Whether to draw the origin select: library mode, where harvests exist. */
+  offersOrigin: boolean;
   locations: LocationOut[];
   collections: CollectionOut[];
   classifications: ClassificationFacets | undefined;
@@ -401,6 +404,26 @@ function CollectionFilter({
   );
 }
 
+/**
+ * Harvested books or every other, so a member can review what harvesting
+ * brought in. Library mode only, where the API answers it.
+ */
+function OriginFilter({ filters, onFilterChange }: FilterControlProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="mt-2">
+      <FilterSelect
+        value={filters.origin}
+        options={ORIGIN_FILTERS}
+        label={t("library.originLabel")}
+        onPick={(chosen) =>
+          onFilterChange({ origin: chosen as Filters["origin"] })
+        }
+      />
+    </div>
+  );
+}
+
 /** Drawn while the library has a location, or one is being filtered on. */
 function LocationFilter({
   filters,
@@ -440,6 +463,7 @@ export default function BookFilters({
   showTagPanel,
   onToggleTagPanel,
   onFilterChange,
+  offersOrigin,
   locations,
   collections,
   classifications,
@@ -468,6 +492,9 @@ export default function BookFilters({
         onFilterChange={onFilterChange}
         locations={locations}
       />
+      {offersOrigin && (
+        <OriginFilter filters={filters} onFilterChange={onFilterChange} />
+      )}
 
       {/* An author filter is arrived at by following a link, like the series
           one below, so it is a removable chip rather than a dropdown over
@@ -479,6 +506,17 @@ export default function BookFilters({
           label={t("authors.label")}
           value={filters.author}
           onClear={() => onFilterChange({ author: null })}
+        />
+      )}
+
+      {/* A harvest run is arrived at by following the link a run's result
+          offers, so it is a removable chip; the run's id is all the link
+          carried. Null outside library mode, where `useLibrary` holds it. */}
+      {filters.harvest !== null && (
+        <FilterChip
+          label={t("library.harvestRun")}
+          value={String(filters.harvest)}
+          onClear={() => onFilterChange({ harvest: null })}
         />
       )}
 

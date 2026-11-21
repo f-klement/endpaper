@@ -44,11 +44,19 @@ up to `MAX_PAGES` of them.
 
 ## What is read
 
-**MARCXML only**, chosen by namespace rather than by prefix, since a repository
-names its own formats (`oai.py` serves `marc21`; others say `marcxml`). Each
-record goes through `marc.read`, the upload reader, so a harvested record is
-read exactly as a file's. The `oai_dc` fallback is not built: a repository
-offering no MARC21 format is refused with that said.
+**MARCXML whenever the repository offers it, and Dublin Core only when it does
+not** (owner, 2026-11-21): `oai_dc` is the protocol's mandatory format, so every
+repository has it, and it carries less. A format is chosen by namespace rather
+than by prefix, since a repository names its own formats (`oai.py` serves
+`marc21`; others say `marcxml`), and `oai_dc` is also taken by its prefix, which
+the protocol reserves for it. `Harvested.read_as` says which a run read, and the
+preview and the result say it to the admin.
+
+A MARC record goes through `marc.read`, the upload reader, so a harvested record
+is read exactly as a file's. A Dublin Core record goes through
+`_dublin_core_record`, the same upload profile in the other serialisation: it
+refuses only a record with no title. What Dublin Core cannot say is said there.
+Either way the records reach the same apply and the same matching ladder.
 
 A deleted record's header is counted and nothing is deleted here: a partner
 withdrawing a record is not this Library withdrawing its Book.
@@ -69,6 +77,7 @@ import anyio.to_thread
 import httpx
 from sqlalchemy.orm import Session
 
+import bibliographic
 import credentials
 import fetch
 import marc
@@ -76,7 +85,9 @@ import marc_fields
 import metadata
 import settings_store
 import xml_parse
+from catalogue import Record, uncontrolled
 from deadline import in_, left
+from enums import HarvestFormat
 from models import HARVEST_METADATA_PREFIX_MAX, HARVESTED_IDENTIFIER_MAX
 
 logger = logging.getLogger("endpaper.harvester")
@@ -84,6 +95,22 @@ logger = logging.getLogger("endpaper.harvester")
 #: The OAI-PMH 2.0 namespace every response element is in.
 OAI: Final = "http://www.openarchives.org/OAI/2.0/"
 _OAI: Final = f"{{{OAI}}}"
+
+#: The `oai_dc` namespace, and the prefix the protocol reserves for it.
+#:
+#: **Spelled here and not imported from `oai.py`**, which serves the same format:
+#: that module is the provider, reads the Shelf and the public serialisation, and
+#: a client importing it would carry the server into every harvest.
+#: `tests/test_harvester.py` holds the two spellings equal.
+OAI_DC: Final = "http://www.openarchives.org/OAI/2.0/oai_dc/"
+OAI_DC_PREFIX: Final = "oai_dc"
+_DC: Final = "{http://purl.org/dc/elements/1.1/}"
+
+#: The formats a run reads, by namespace, in the order it prefers them.
+_PREFERRED: Final = ((marc_fields.NAMESPACE, HarvestFormat.MARCXML), (OAI_DC, HarvestFormat.DUBLIN_CORE))
+
+#: What labels a Dublin Core record, as `marc.SOURCE` labels a MARC one.
+DUBLIN_CORE_SOURCE: Final = "oai_dc"
 
 #: Records one run reads, deleted headers counted with the rest.
 #:
@@ -208,10 +235,20 @@ class Format:
 
 
 @dataclass(frozen=True, slots=True)
-class Harvested:
-    """What one run read: the records as `marc.read` reads a file, and the counts."""
+class Chosen:
+    """The format a run asks for: the repository's prefix, and what it is."""
 
     prefix: str
+    read_as: HarvestFormat
+
+
+@dataclass(frozen=True, slots=True)
+class Harvested:
+    """What one run read: the records as an upload reads a file, and the counts."""
+
+    prefix: str
+    #: Which serialisation the records were read in. Dublin Core carries less.
+    read_as: HarvestFormat
     parsed: marc.ParsedMarc
     #: Record headers read, deleted ones included.
     seen: int
@@ -231,6 +268,7 @@ class _Walk:
     """The records a run has taken so far, held to `max_records`."""
 
     max_records: int
+    read_as: HarvestFormat = HarvestFormat.MARCXML
     seen: int = 0
     deleted: int = 0
     unreadable: int = 0
@@ -262,7 +300,7 @@ class _Walk:
             if header is not None and header.get("status") == "deleted":
                 self.deleted += 1
                 continue
-            node = _the_one_record(record)
+            node = _the_one_record(record, self.read_as)
             if node is None:
                 self.unreadable += 1
             else:
@@ -271,6 +309,27 @@ class _Walk:
             self._read(kept)
 
     def _read(self, kept: list[tuple[str | None, ElementTree.Element]]) -> None:
+        """One page's records, each kept beside its identifier."""
+        if self.read_as is HarvestFormat.DUBLIN_CORE:
+            self._read_dublin_core(kept)
+        else:
+            self._read_marc(kept)
+
+    def _read_dublin_core(self, kept: list[tuple[str | None, ElementTree.Element]]) -> None:
+        """One page's Dublin Core records, one at a time, so a refused one
+        takes its identifier with it."""
+        records: list[Record] = []
+        skipped = 0
+        for key, node in kept:
+            record = _dublin_core_record(node)
+            if record is None:
+                skipped += 1
+                continue
+            records.append(record)
+            self.identifiers.append(key)
+        self.pages.append(marc.ParsedMarc(records=tuple(records), skipped=skipped))
+
+    def _read_marc(self, kept: list[tuple[str | None, ElementTree.Element]]) -> None:
         """One page's MARC records, each kept beside its identifier.
 
         **Read as one page, and again one record at a time only when the page
@@ -295,6 +354,7 @@ class _Walk:
         skipped = self.unreadable + sum(page.skipped for page in self.pages)
         return Harvested(
             prefix=prefix,
+            read_as=self.read_as,
             parsed=marc.ParsedMarc(records=records, skipped=skipped, links=links),
             seen=self.seen,
             deleted=self.deleted,
@@ -304,9 +364,16 @@ class _Walk:
         )
 
 
-def _the_one_record(record: ElementTree.Element) -> ElementTree.Element | None:
-    """An OAI record's one MARC record, or None where its `<metadata>` holds
-    none, two side by side, or one holding another."""
+def _the_one_record(record: ElementTree.Element, read_as: HarvestFormat) -> ElementTree.Element | None:
+    """An OAI record's one record in the run's format, or None where its
+    `<metadata>` holds none, two side by side, or a MARC record holding another.
+
+    **A Dublin Core record holding another is not refused**, because nothing
+    walks it: `_dublin_core_record` reads only its direct children.
+    """
+    if read_as is HarvestFormat.DUBLIN_CORE:
+        nodes = record.findall(f"{_OAI}metadata/{{{OAI_DC}}}dc")
+        return nodes[0] if len(nodes) == 1 else None
     nodes = record.findall(f"{_OAI}metadata/{marc_fields.RECORD_TAG}")
     if len(nodes) != 1 or _nests_a_record(nodes[0]):
         return None
@@ -392,6 +459,63 @@ def _read_marc(nodes: list[ElementTree.Element]) -> marc.ParsedMarc:
         ) from error
 
 
+def _dublin_core_record(node: ElementTree.Element) -> Record | None:
+    """One `oai_dc` record as evidence about a book, or None where it has no title.
+
+    **The upload profile, as `marc._record` is MARC's**: a record with no title
+    is the only thing refused, and an over wide string is cut to its column
+    rather than dropped, through `Record.from_upload`, for the reason given
+    there. So no carrier test runs: a MARC harvest imports a disc too, and a
+    Dublin Core `type` is a free word with no carrier code behind it.
+
+    **What Dublin Core cannot say, and what is read instead:**
+
+    | Element | Read as |
+    |---|---|
+    | `title` | the first, split by `bibliographic.split_title_statement` |
+    | `creator` | every one in order, through `bibliographic.credit_line`: no role, so all are authors |
+    | `contributor` | the authors where no `creator` is, as MARC names everybody where nobody wrote it |
+    | `identifier` | an ISBN, `bibliographic.isbn_among_identifiers` |
+    | `date` | the earliest year, `bibliographic.earliest_year` |
+    | `language` | a two letter code, `bibliographic.two_letter_language` |
+    | `publisher`, `description` | the first |
+    | `format` | a page count, where one reads as an extent |
+    | `subject` | uncontrolled subjects, and never a heading |
+
+    **No heading, so a Dublin Core run raises no suggestion.** `dc:subject`
+    names no scheme, and a heading is a number in a scheme: a `ddc:830` or a
+    bare `830` is one repository's convention, not the format's, and a guess
+    would put a number in the wrong vocabulary on a Book. No series, since
+    `dc:relation` is any relation at all, and no links, since a `dc:identifier`
+    URL is as often the repository's own landing page as a copy of the book.
+    """
+
+    def values(element: str) -> list[str]:
+        return [
+            text.strip() for child in node.findall(f"{_DC}{element}") if (text := child.text) and text.strip()
+        ]
+
+    titles = values("title")
+    title, subtitle = bibliographic.split_title_statement(titles[0]) if titles else ("", None)
+    if not title:
+        return None
+    return Record.from_upload(
+        source=DUBLIN_CORE_SOURCE,
+        isbn=bibliographic.isbn_among_identifiers(values("identifier")),
+        title=title,
+        subtitle=subtitle,
+        author=bibliographic.credit_line(values("creator") or values("contributor")),
+        publisher=next(iter(values("publisher")), None),
+        year=bibliographic.earliest_year(values("date")),
+        description=next(iter(values("description")), None),
+        language=bibliographic.two_letter_language(values("language")),
+        page_count=next(
+            (pages for extent in values("format") if (pages := bibliographic.pages_from_extent(extent))), None
+        ),
+        subjects=uncontrolled(values("subject")),
+    )
+
+
 def _parsed(body: str) -> ElementTree.Element:
     """A repository's response as a tree, refusing what unbounds its cost.
 
@@ -455,6 +579,14 @@ def _next_token(root: ElementTree.Element, seen: set[str]) -> str | None:
     return token
 
 
+def _reads_as(entry: Format, namespace: str, read_as: HarvestFormat) -> bool:
+    """Whether a listed format is the one `namespace` names, by its namespace
+    or, for Dublin Core alone, by the prefix the protocol reserves."""
+    return entry.namespace == namespace or (
+        read_as is HarvestFormat.DUBLIN_CORE and entry.prefix == OAI_DC_PREFIX
+    )
+
+
 class Repository:
     """One repository, for the length of one run. Made by `repository`."""
 
@@ -485,24 +617,40 @@ class Repository:
             if prefix
         )
 
-    async def marc_prefix(self) -> str:
-        """The prefix this repository serves MARC21 slim under.
+    async def chosen_format(self) -> Chosen:
+        """MARC21 slim where the repository offers it, else Dublin Core.
 
         **By namespace**, because the prefix is the repository's own name for
-        it. One wider than `harvests.metadata_prefix` is passed over, since the
-        run could not record what it asked for.
+        it, except that `oai_dc` is also taken by its prefix, which the protocol
+        reserves for Dublin Core. One wider than `harvests.metadata_prefix` is
+        passed over, since the run could not record what it asked for, so a
+        repository offering MARC only under such a prefix is read in Dublin
+        Core, and the admin is told it offers no MARCXML this app can ask for.
+        A repository offering neither is broken, since `oai_dc` is mandatory.
+
+        **MARCXML listed and then refused at `ListRecords` fails the run**
+        rather than falling back: the choice is made once, from what the
+        repository lists, and a repository refusing a format it lists is
+        broken in a way the admin should hear about.
         """
-        for entry in await self.metadata_formats():
-            if entry.namespace == marc_fields.NAMESPACE and len(entry.prefix) <= HARVEST_METADATA_PREFIX_MAX:
-                return entry.prefix
+        offered = [
+            entry
+            for entry in await self.metadata_formats()
+            if len(entry.prefix) <= HARVEST_METADATA_PREFIX_MAX
+        ]
+        for namespace, read_as in _PREFERRED:
+            for entry in offered:
+                if _reads_as(entry, namespace, read_as):
+                    return Chosen(entry.prefix, read_as)
         raise HarvestError(
-            "The repository offers no MARCXML format, and Dublin Core alone is not read by this library yet."
+            "The repository offers neither MARCXML nor Dublin Core, which every repository must offer."
         )
 
     async def list_records(
         self,
         prefix: str,
         *,
+        read_as: HarvestFormat = HarvestFormat.MARCXML,
         set_spec: str | None = None,
         max_records: int = MAX_RECORDS,
         max_pages: int = MAX_PAGES,
@@ -513,7 +661,7 @@ class Repository:
         rather than an error. Every way out of the loop but the last page is a
         truncation, and keeps the pages read.
         """
-        walk = _Walk(max_records)
+        walk = _Walk(max_records, read_as)
         params = {"verb": "ListRecords", "metadataPrefix": prefix} | ({"set": set_spec} if set_spec else {})
         tokens: set[str] = set()
         pages = 0
@@ -538,9 +686,11 @@ class Repository:
                 raise
             return None
 
-    async def get_record(self, identifier: str, prefix: str) -> Harvested:
+    async def get_record(
+        self, identifier: str, prefix: str, read_as: HarvestFormat = HarvestFormat.MARCXML
+    ) -> Harvested:
         """One record by its OAI identifier."""
-        walk = _Walk(1)
+        walk = _Walk(1, read_as)
         root = await self._ask({"verb": "GetRecord", "identifier": identifier, "metadataPrefix": prefix})
         walk.take(root.findall(f"{_OAI}GetRecord/{_OAI}record"))
         return walk.harvested(prefix, 1)
@@ -618,8 +768,9 @@ async def harvest(
     set_spec: str | None = None,
     resolver: fetch.Resolver = fetch.system_resolver,
 ) -> tuple[Identity, Harvested]:
-    """One run over `base_url`: who it is, then every MARC record it lists."""
+    """One run over `base_url`: who it is, then every record it lists, in MARCXML
+    where it offers that and in Dublin Core where it does not."""
     async with repository(base_url, resolver=resolver) as source:
         identity = await source.identify()
-        prefix = await source.marc_prefix()
-        return identity, await source.list_records(prefix, set_spec=set_spec)
+        chosen = await source.chosen_format()
+        return identity, await source.list_records(chosen.prefix, read_as=chosen.read_as, set_spec=set_spec)

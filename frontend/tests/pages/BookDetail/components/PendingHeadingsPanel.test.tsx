@@ -80,6 +80,14 @@ describe("what the panel shows", () => {
       screen.getByRole("button", { name: "Alle 2 bestätigen" }),
     ).toBeInTheDocument();
   });
+
+  it("confirms a single suggestion in German without counting it", () => {
+    renderPanel([DEWEY], { locale: Locale.de });
+
+    expect(
+      screen.getByRole("button", { name: "Bestätigen" }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("what the buttons do", () => {

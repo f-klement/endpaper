@@ -120,6 +120,41 @@ describe("useLibrary", () => {
       expect(query.get("tags")).toBeNull();
     });
 
+    it("sends the origin a link names in library mode", async () => {
+      inLibraryMode(true);
+      const { result } = renderLibrary("/?origin=harvested");
+
+      await waitFor(() => expect(result.current.offersOrigin).toBe(true));
+      await waitFor(() => expect(lastQuery().get("origin")).toBe("harvested"));
+    });
+
+    it("holds the origin back in a household, where the API refuses it", async () => {
+      inLibraryMode(false);
+      const { result } = renderLibrary("/?origin=harvested");
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(lastQuery().get("origin")).toBeNull();
+      expect(result.current.filters.origin).toBeNull();
+      expect(result.current.offersOrigin).toBe(false);
+    });
+
+    it("sends the harvest run a link names in library mode", async () => {
+      inLibraryMode(true);
+      const { result } = renderLibrary("/?harvest=12");
+
+      await waitFor(() => expect(result.current.offersOrigin).toBe(true));
+      await waitFor(() => expect(lastQuery().get("harvest")).toBe("12"));
+    });
+
+    it("holds the harvest run back in a household, where the API refuses it", async () => {
+      inLibraryMode(false);
+      const { result } = renderLibrary("/?harvest=12");
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(lastQuery().get("harvest")).toBeNull();
+      expect(result.current.filters.harvest).toBeNull();
+    });
+
     it("sends a search term", async () => {
       const { result } = renderLibrary();
       await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -912,6 +947,8 @@ describe("a write reaches every reader", () => {
  * once, the page and two panels paid a prop each, and every one of them worked,
  * so no other test saw them. They live behind `useViewChoice`,
  * `useColumnChoice` and `useSavedSearches`, which is where a sixth goes too.
+ * `offersOrigin` belongs: it is the library mode flag, a request, and it says
+ * which filters the request above was allowed to send.
  */
 describe("useLibrary returns the library and nothing a browser remembered", () => {
   it("offers exactly the members that are requests or derived from one", async () => {
@@ -930,6 +967,7 @@ describe("useLibrary returns the library and nothing a browser remembered", () =
       "isStale",
       "loadMore",
       "locations",
+      "offersOrigin",
       "refetch",
       "tags",
       "total",

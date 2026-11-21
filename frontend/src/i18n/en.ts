@@ -120,6 +120,11 @@ export const en = {
   "library.viewTable": "Table",
   "library.viewList": "List",
   "library.loaned": "Loaned",
+  "library.originLabel": "Where the books came from",
+  "library.originAll": "Harvested or added",
+  "library.originHarvested": "Harvested",
+  "library.originAdded": "Added here",
+  "library.harvestRun": "Harvest run",
 
   "sort.title_asc": "Title A to Z",
   "sort.title_desc": "Title Z to A",
@@ -2495,7 +2500,10 @@ export const en = {
   "harvestRun.deleted":
     "{count} records are marked deleted by the repository. No book is removed for them.",
   "harvestRun.headingsPreview":
-    "Headings and shelf notations in the records listed below: {count}. A harvest writes none of them: it suggests them only on a book a harvest of their record created, for an admin to confirm or discard there. A book matched by ISBN, or by author and title, gets none.",
+    "The records listed below carry {count} headings and shelf notations. A harvest writes none of them. It suggests them on the books it creates from these records, and on books an earlier harvest created from the same records, for an admin to confirm or discard there. A book found by ISBN, or by author and title, gets no suggestions.",
+  "harvestRun.addedBooks": "Show the books this harvest added",
+  "harvestRun.readDublinCore":
+    "Read as Dublin Core, because the repository offers no MARCXML this app can ask for. Dublin Core carries less: no headings or shelf notations, no series, and no roles for the people it names, so the books it adds are thinner.",
   "harvestRun.truncatedPreview":
     "The run stopped before the end of the repository, at a limit or because the repository was busy, so these counts cover only part of it. Every harvest starts over from the beginning; naming a set narrows it.",
   "harvestRun.confirm": "Harvest {count} records",

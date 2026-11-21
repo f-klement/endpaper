@@ -76,6 +76,7 @@ import classification_schemes
 import filing
 from enums import (
     BookFormat,
+    BookOrigin,
     BookSort,
     ClassificationScheme,
     LendingWillingness,
@@ -383,6 +384,11 @@ class BookFilters:
     unfiled: bool = False
     unrated: bool = False
     discuss: bool = False
+    #: Harvested Books, or every other. See `BookOrigin`.
+    origin: BookOrigin | None = None
+    #: One harvest run's Books, `books.harvest_id`. Composes with `origin`,
+    #: which it makes redundant beside `harvested` and empty beside `added`.
+    harvest_id: int | None = None
     #: Exact headings, each a scheme and that scheme's own identifier.
     #:
     #: A pair rather than a string, because the number alone means nothing:
@@ -719,6 +725,7 @@ class Shelf:
             (Book.lending, filters.lending),
             (Book.series_name, filters.series),
             (Book.location, filters.location),
+            (Book.harvest_id, filters.harvest_id),
         )
         shelf = self
         for column, value in exact:
@@ -726,6 +733,10 @@ class Shelf:
                 shelf = shelf.where(column == value)
         if filters.unfiled:
             shelf = shelf.where(Book.collection_id.is_(None))
+        if filters.origin is BookOrigin.HARVESTED:
+            shelf = shelf.where(Book.harvest_id.is_not(None))
+        elif filters.origin is BookOrigin.ADDED:
+            shelf = shelf.where(Book.harvest_id.is_(None))
 
         # One id is one bound parameter, and SQLite has a ceiling on those:
         # `SQLITE_LIMIT_VARIABLE_NUMBER`, measured per environment rather than

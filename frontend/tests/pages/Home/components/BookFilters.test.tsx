@@ -36,6 +36,7 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
     showTagPanel: false,
     onToggleTagPanel: vi.fn<Props["onToggleTagPanel"]>(),
     onFilterChange: vi.fn<Props["onFilterChange"]>(),
+    offersOrigin: false,
     locations: [],
     collections: [],
     classifications: undefined,
@@ -52,6 +53,27 @@ function renderFilters(overrides: Record<string, unknown> = {}) {
   renderLocalised(<BookFilters {...props} />);
   return props;
 }
+
+describe("the origin filter", () => {
+  it("is absent outside library mode", () => {
+    renderFilters();
+
+    expect(
+      screen.queryByLabelText("Where the books came from"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("reports the harvested books when they are picked", async () => {
+    const props = renderFilters({ offersOrigin: true });
+
+    await userEvent.selectOptions(
+      screen.getByLabelText("Where the books came from"),
+      "Harvested",
+    );
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ origin: "harvested" });
+  });
+});
 
 describe("the collection filter", () => {
   it("is absent until the library has divided its shelf", () => {
@@ -226,6 +248,26 @@ describe("the copy filters", () => {
     await userEvent.click(toggle);
 
     expect(props.onFilterChange).toHaveBeenCalledWith({ discuss: false });
+  });
+});
+
+describe("the harvest run chip", () => {
+  it("is absent until a link filtered by one", () => {
+    renderFilters({ offersOrigin: true });
+
+    expect(screen.queryByText(/^Harvest run:/)).not.toBeInTheDocument();
+  });
+
+  it("names the run and can be taken off", async () => {
+    const props = renderFilters({
+      offersOrigin: true,
+      filters: { ...DEFAULT_FILTERS, harvest: 12 },
+    });
+
+    expect(screen.getByText("Harvest run: 12")).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByLabelText("Clear selection"));
+
+    expect(props.onFilterChange).toHaveBeenCalledWith({ harvest: null });
   });
 });
 

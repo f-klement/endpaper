@@ -2182,6 +2182,15 @@
         "title": "BookMatch",
         "type": "object"
       },
+      "BookOrigin": {
+        "description": "Accepted values for `GET /api/books?origin=`: who brought a Book in.\n\n**Two values rather than a boolean**, so the parameter names what it asks\nand the filter panel offers it as one select beside format and lending.\nAbsent is every Book.\n\nHARVESTED is a Book an OAI-PMH harvest created, `books.harvest_id` set.\nADDED is every other: a member's, a file import's, or a row with no\nrecorded adder that no harvest wrote.",
+        "enum": [
+          "harvested",
+          "added"
+        ],
+        "title": "BookOrigin",
+        "type": "string"
+      },
       "BookOut": {
         "description": "One Book, as one member sees it. The wire shape, flat and unchanged.\n\n**Never cache one across accounts**: half of what is on it is an answer to\nwho asked. The split above is what makes that readable rather than a comment\nin the middle of a field list.\n\nBuilt only by `seen_by`, which is the point: `model_validate(book)` cannot\nproduce one, because a Book row does not know eleven of these twelve.\n\n**The base order is what puts the columns first in the response body.**\nPydantic collects fields in reverse MRO, so the class listed second is the\none whose fields lead, which is the opposite of how it reads. It governs the\nbody's key order and nothing else: `scripts/dump_openapi.py` dumps with\n`sort_keys=True`, so the schema and everything orval writes from it are\nalphabetical whatever this says.",
         "properties": {
@@ -4095,6 +4104,15 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HarvestFormat": {
+        "description": "The serialisation a harvest read a repository in: `harvester.py` chooses it.\n\nMARCXML wherever a repository offers it, and Dublin Core only where it does\nnot, since that is the protocol's mandatory format and carries less: no\nheading, no series, no role on a name. The preview and the result name it so\nan admin knows a Dublin Core run brings thinner Books.",
+        "enum": [
+          "marcxml",
+          "dublin_core"
+        ],
+        "title": "HarvestFormat",
+        "type": "string"
+      },
       "HarvestPreviewOut": {
         "description": "What a harvest would read and do, before anything is written.\n\n`MarcPreviewOut`'s counts over the harvested records, asked through the same\nindex the apply asks, plus what the run itself read. `rows` carries each\nrecord's headings. The apply writes none (owner, 2026-11-20): it raises\nthem as suggestions on a Book the record is, which an admin confirms or\ndiscards on the Book.",
         "properties": {
@@ -4131,8 +4149,12 @@
             "title": "In Trash",
             "type": "integer"
           },
+          "metadata_format": {
+            "$ref": "#/components/schemas/HarvestFormat",
+            "description": "Which format the run read: MARCXML where the repository offers it, else Dublin Core, which carries no heading, no series and no role on a name"
+          },
           "metadata_prefix": {
-            "description": "The repository's name for the MARCXML format this run asked for",
+            "description": "The repository's name for the format this run asked for",
             "title": "Metadata Prefix",
             "type": "string"
           },
@@ -4194,6 +4216,7 @@
         },
         "required": [
           "metadata_prefix",
+          "metadata_format",
           "pages_read",
           "records_seen",
           "deleted",
@@ -4276,8 +4299,12 @@
             "title": "Matched",
             "type": "integer"
           },
+          "metadata_format": {
+            "$ref": "#/components/schemas/HarvestFormat",
+            "description": "Which format the run read: MARCXML where the repository offers it, else Dublin Core, which carries no heading, no series and no role on a name"
+          },
           "metadata_prefix": {
-            "description": "The repository's name for the MARCXML format this run asked for",
+            "description": "The repository's name for the format this run asked for",
             "title": "Metadata Prefix",
             "type": "string"
           },
@@ -4334,6 +4361,7 @@
         },
         "required": [
           "metadata_prefix",
+          "metadata_format",
           "pages_read",
           "records_seen",
           "deleted",
@@ -10197,6 +10225,44 @@
             }
           },
           {
+            "description": "Library mode only. Only the books a harvest created, or only every other",
+            "in": "query",
+            "name": "origin",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/BookOrigin"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Library mode only. Only the books a harvest created, or only every other",
+              "title": "Origin"
+            }
+          },
+          {
+            "description": "Library mode only. Only the books this harvest run created",
+            "in": "query",
+            "name": "harvest",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2147483647,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Library mode only. Only the books this harvest run created",
+              "title": "Harvest"
+            }
+          },
+          {
             "description": "Only books carrying this heading, as `scheme:number`. Repeat the parameter for more than one; they are ANDed.",
             "in": "query",
             "name": "classification",
@@ -10293,6 +10359,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "422": {
             "content": {
@@ -17423,7 +17499,7 @@
     },
     "/api/imports/harvest": {
       "post": {
-        "description": "Harvest the configured repository into the catalogue.\n\nMatching asks first for the Book an earlier harvest of this repository\ncreated from the same record, by its OAI identifier, so a Book corrected\nhere since that run is still found. Then it is `import_marc`'s, as this admin sees\nthe shelf: ISBN, then author and title together, so a record crediting\nsomebody never matches on its title alone, while a record crediting nobody\nmatches a Book crediting nobody by its title. A matched Book has its gaps\nfilled and nothing overwritten. **A created Book is nobody's, public, keeps\nits record's identifier and points at the run** this records in `harvests`.\n**No heading is written**: a harvest confirms no record (owner, 2026-11-20),\nso a created Book's headings, and those of a Book keyed by the same\nidentifier, wait as suggestions an admin confirms or discards on the Book,\ncounted in `headings_pending`. A Book matched by ISBN or by author and\ntitle gets none. A deleted record is counted\nand deletes nothing. A 409 while another harvest is running, and one when\n`repository` is not the address stored now: the client held another when it\nread the preview, whether the stored one was saved before that read or after\nit, so the preview it showed was labelled with an address this would not\nharvest.",
+        "description": "Harvest the configured repository into the catalogue.\n\nMatching asks first for the Book an earlier harvest of this repository\ncreated from the same record, by its OAI identifier, so a Book corrected\nhere since that run is still found. Then it is `import_marc`'s, as this admin sees\nthe shelf: ISBN, then author and title together, so a record crediting\nsomebody never matches on its title alone, while a record crediting nobody\nmatches a Book crediting nobody by its title. A matched Book has its gaps\nfilled and nothing overwritten. **A created Book is nobody's, public, keeps\nits record's identifier and points at the run** this records in `harvests`.\n**No heading is written**: a harvest confirms no record (owner, 2026-11-20),\nso a created Book's headings, and those of a Book keyed by the same\nidentifier, wait as suggestions an admin confirms or discards on the Book,\ncounted in `headings_pending`. A Book matched by ISBN or by author and\ntitle gets none, and a run read in Dublin Core, whose subjects name no\nscheme, raises none at all. A deleted record is counted\nand deletes nothing. A 409 while another harvest is running, and one when\n`repository` is not the address stored now: the client held another when it\nread the preview, whether the stored one was saved before that read or after\nit, so the preview it showed was labelled with an address this would not\nharvest.",
         "operationId": "apply_harvest",
         "parameters": [
           {

@@ -2176,8 +2176,8 @@ Worth knowing before exposing this beyond a private network:
   it gives itself, shown in the preview, and as the records read out of it, which become
   public Books nobody added. Nothing else of a response is echoed but its status code and
   an OAI-PMH error code when it is one of the protocol's own, so only a response that
-  parses as OAI-PMH and MARCXML yields its text, and against any other address the door is
-  a small oracle rather than a blind one.
+  parses as OAI-PMH and as MARCXML or Dublin Core yields its text, and against any other
+  address the door is a small oracle rather than a blind one.
 - **A login stored for a household OPDS server can travel in the clear.** http is admitted
   and https is not required, because these servers rarely carry a certificate, so a login
   stored for an `http` feed travels as `Authorization: Basic` in the clear on the

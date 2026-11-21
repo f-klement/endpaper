@@ -459,8 +459,9 @@ _MET_ANOTHER_CHANGE = (
 # ── OAI-PMH harvest ───────────────────────────────────────────────────────────
 #
 # Another repository read in as a MARC import (ticket 177): `harvester.py`
-# fetches, `MarcImport.for_harvest` applies. A preview then an apply, as for a
-# file, and the two fetch the repository each, since nothing is kept between.
+# fetches, in MARCXML or else Dublin Core, and `MarcImport.for_harvest`
+# applies. A preview then an apply, as for a file, and the two fetch the
+# repository each, since nothing is kept between.
 
 
 #: The `detail.code` on the 409 a harvest meets while another runs, preview or
@@ -614,7 +615,8 @@ async def apply_harvest(
     so a created Book's headings, and those of a Book keyed by the same
     identifier, wait as suggestions an admin confirms or discards on the Book,
     counted in `headings_pending`. A Book matched by ISBN or by author and
-    title gets none. A deleted record is counted
+    title gets none, and a run read in Dublin Core, whose subjects name no
+    scheme, raises none at all. A deleted record is counted
     and deletes nothing. A 409 while another harvest is running, and one when
     `repository` is not the address stored now: the client held another when it
     read the preview, whether the stored one was saved before that read or after
@@ -663,6 +665,7 @@ def _run_counts(run: harvester.Harvested) -> dict[str, object]:
     """The fields of `_HarvestRun`, which both answers carry."""
     return {
         "metadata_prefix": run.prefix,
+        "metadata_format": run.read_as,
         "pages_read": run.pages_read,
         "records_seen": run.seen,
         "deleted": run.deleted,

@@ -703,6 +703,22 @@ if _FORMATS_WITHOUT_A_MEDIA_TYPE:
     )
 
 
+class BookOrigin(StrEnum):
+    """Accepted values for `GET /api/books?origin=`: who brought a Book in.
+
+    **Two values rather than a boolean**, so the parameter names what it asks
+    and the filter panel offers it as one select beside format and lending.
+    Absent is every Book.
+
+    HARVESTED is a Book an OAI-PMH harvest created, `books.harvest_id` set.
+    ADDED is every other: a member's, a file import's, or a row with no
+    recorded adder that no harvest wrote.
+    """
+
+    HARVESTED = "harvested"
+    ADDED = "added"
+
+
 class BookSort(StrEnum):
     """Accepted values for `GET /api/books?sort=`.
 
@@ -1216,6 +1232,19 @@ if _SOURCES_WITHOUT_AN_ORIGIN:
         "Every CatalogueSource is a RecordOrigin under the same value, and these "
         f"are not: {sorted(_SOURCES_WITHOUT_AN_ORIGIN)}. Add each to RecordOrigin."
     )
+
+
+class HarvestFormat(StrEnum):
+    """The serialisation a harvest read a repository in: `harvester.py` chooses it.
+
+    MARCXML wherever a repository offers it, and Dublin Core only where it does
+    not, since that is the protocol's mandatory format and carries less: no
+    heading, no series, no role on a name. The preview and the result name it so
+    an admin knows a Dublin Core run brings thinner Books.
+    """
+
+    MARCXML = "marcxml"
+    DUBLIN_CORE = "dublin_core"
 
 
 class SourceFamily(StrEnum):

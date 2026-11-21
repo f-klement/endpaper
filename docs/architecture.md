@@ -549,7 +549,9 @@ flowchart LR
   readers -->|"metadata and a fingerprint"| books --> recognition
   exports --> importreaders --> recognition
   exports --> marc --> recognition
-  exports --> harvester --> marc
+  exports --> harvester
+  harvester -->|"MARCXML"| marc
+  harvester -->|"Dublin Core, where no MARCXML is offered"| recognition
   recognition --> importing
 ```
 
@@ -563,9 +565,12 @@ one Book asks `recognition.recognise_one` instead.
 server rarely sends the headers a browser needs to read it, and an OPDS feed is a catalogue
 rather than a file. `opds.py` says why at length.
 
-**The OAI-PMH harvester fetches on the server too**, from the one repository an admin names,
-and reads each page's MARC records through `marc.read`, so a harvested record is read exactly
-as a file's. `importing.MarcImport.for_harvest` applies them as Books nobody added, public,
+**The OAI-PMH harvester fetches on the server too**, from the one repository an admin names.
+It reads MARCXML wherever the repository offers it, each page's records through `marc.read`, so
+a harvested record is read exactly as a file's. Where the repository offers none it reads
+Dublin Core, which every repository must offer, through `harvester._dublin_core_record` and the
+value rules in `bibliographic.py`; such a record carries no heading.
+`importing.MarcImport.for_harvest` applies them as Books nobody added, public,
 pointing at the run recorded in `harvests`. A record's headings are not written: on a Book the
 record created, or one keyed by its identifier, `pending_headings.raise_on` keeps them as
 suggestions an admin confirms or discards on the Book. `harvester.py` holds its bounds.

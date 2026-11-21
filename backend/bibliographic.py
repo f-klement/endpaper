@@ -4,8 +4,8 @@ A catalogue answers in MARC21, in Dublin Core, in MODS or in its own JSON, and
 the same rules decide what the values inside mean: which language a code names,
 how many pages an extent statement claims, whether a title is a volume slot
 rather than a work, whether a person's name is in catalogue order. Every decoder
-in `metadata.py` and `marc.py` reads a `catalogue.Record` into existence and none
-of them owns these.
+in `metadata.py`, `marc.py` and `harvester.py` reads a `catalogue.Record` into
+existence and none of them owns these.
 
 **The membership test is one sentence: a rule about what a bibliographic value
 means, independent of the serialisation it arrived in.** It admits everything
@@ -48,6 +48,8 @@ from collections.abc import Iterable
 from typing import Final
 
 from authors import join_authors
+from isbn import normalise as normalise_isbn
+from isbn import parse as parse_isbn
 from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
 #: ISO 639-2/B, which is what every MARC derived source emits, to the 639-1
@@ -563,3 +565,98 @@ def credit_line(names: Iterable[str]) -> str | None:
     the list may not carry, or one it does not carry yet.
     """
     return join_authors(flip_catalogue_name(name) for name in names)
+
+
+# ── A repository's free lists ────────────────────────────────────────────────
+#
+# Three rules for values a record lists with no field saying which is which:
+# Dublin Core's `identifier`, `date` and `language`, as an OAI-PMH repository
+# serves them, read by `harvester._dublin_core_record`.
+#
+# **The catalogue readers in `metadata.py` read the same three elements by
+# other rules.** Two are stricter here, and one is more lenient:
+#
+# - `identifier`, stricter: here, one named an ISBN or a bare ISBN-13; there
+#   (`_bnf_isbn`), anything that parses, a bare ten digits included. A
+#   catalogue's record answers a query for one ISBN, so a number in it that
+#   parses as one is most likely the one asked about. A repository lists
+#   whatever identifies a record, unasked, a local number as likely as an ISBN.
+# - `date`, stricter: here, the earliest year standing alone; there
+#   (`_year_in`), the first four digits of the joined values. A repository
+#   lists a record's cataloguing dates beside its publication date.
+# - `language`, more lenient: here, 639-2 through `LANGUAGES` or a 639-1 code
+#   or an RFC 5646 tag (`en-GB`) as itself; there (`_dc_language`), 639-2
+#   only. Dublin Core recommends a language tag, so a repository may write
+#   either, where the BnF and the NKP write 639-2 (`fre` and `cze` in the
+#   records their tests hold). Leniency costs nothing here: a two letter code
+#   is taken only when `LANGUAGES` gives it as some language's code, so no
+#   other value passes. The catalogue rule is narrower only because neither
+#   catalogue was seen writing a tag, not for a reason of its own.
+
+
+#: A `dc:identifier` naming itself an ISBN: `URN:ISBN:` as Koha and `oai.py`
+#: write it, `ISBN` as the BnF does, and `ISBN-13:`, `ISBN 13:`, `ISBN10` and the
+#: like. The spaced `13` or `10` must not be followed by a digit, or it would be
+#: the head of an ISBN-10 such as `ISBN 1350000000`, eaten as a label.
+_NAMES_AN_ISBN: Final = re.compile(r"\s*(?:urn:isbn:|isbn(?:-?1[03]|\s1[03](?!\d))?)[\s:]*", re.IGNORECASE)
+
+#: The ISMN's EAN prefix. A score's ISMN-13 is a valid EAN-13 in the Bookland
+#: range, so `isbn.parse` accepts it, and no ISBN is ever issued under it.
+_ISMN_PREFIX: Final = "9790"
+
+
+def isbn_among_identifiers(identifiers: Iterable[str]) -> str | None:
+    """The first of a record's identifiers that is an ISBN, as ISBN-13, or None.
+
+    **One naming itself an ISBN, or a bare ISBN-13, and never a bare ten
+    digits.** The list holds whatever identifies the record, a local number
+    among them, and a ten digit number passes the ISBN-10 checksum one time in
+    eleven. A thirteen digit one must also start with a Bookland prefix, which
+    `isbn.parse` asks, and not with the ISMN's, which it does not. A trailing
+    qualifier, `(pbk.)`, is dropped first.
+    """
+    for value in identifiers:
+        named = _NAMES_AN_ISBN.match(value)
+        candidate = value[named.end() if named else 0 :].split("(", 1)[0]
+        parsed = parse_isbn(candidate)
+        if parsed is None or parsed.startswith(_ISMN_PREFIX):
+            continue
+        # `parsed` is always an ISBN-13, so a bare value must have been one.
+        if named or len(normalise_isbn(candidate)) == len(parsed):
+            return parsed
+    return None
+
+
+#: A run of four digits standing alone, as a year is written in a date.
+_A_YEAR: Final = re.compile(r"(?<!\d)\d{4}(?!\d)")
+
+
+def earliest_year(dates: Iterable[str]) -> int | None:
+    """The earliest year among a record's dates, or None.
+
+    **The earliest, not the first**: DSpace writes the date a record was
+    accessioned and made available beside the date it was issued, each a
+    `dc:date`, and the publication is never later than its cataloguing.
+
+    **Years nought and one are passed over before the minimum is taken**, since
+    each is a date never set: a database's zero date (`0000-00-00`), and the
+    minimum date of .NET and several ORMs (`0001-01-01`). Taken as the minimum,
+    nought is a year `catalogue.Record` drops, which would cost the real one
+    beside it, and one is stored as the year. Nought is the whole of
+    `books.year`'s range a minimum can fall below: the range starts at 1
+    (`schemas.book.MIN_YEAR`, which this module cannot import, since that
+    module imports this one), and a year past its end is never the minimum
+    unless every year is, when `Record` drops it anyway.
+    """
+    years = [year for value in dates for found in _A_YEAR.findall(value) if (year := int(found)) > 1]
+    return min(years, default=None)
+
+
+def two_letter_language(codes: Iterable[str]) -> str | None:
+    """The first language code as a two letter one, or None.
+
+    ISO 639-2 through `LANGUAGES`, and ISO 639-1 or an RFC 5646 tag (`en-GB`)
+    as itself where that table answers with it. A language's name is not read.
+    """
+    code = next(iter(codes), "").lower().split("-", 1)[0]
+    return LANGUAGES.get(code) or (code if code in LANGUAGES.values() else None)

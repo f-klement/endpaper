@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 import { ApiError } from "../../../../api/mutator";
-import type {
-  HarvestPreviewOut,
-  HarvestResultOut,
-  MarcPreviewRow,
+import {
+  HarvestFormat,
+  type HarvestPreviewOut,
+  type HarvestResultOut,
+  type MarcPreviewRow,
 } from "../../../../api/generated/model";
 import { Button } from "../../../../components";
 import { type MessageKey, useTranslation } from "../../../../i18n";
@@ -41,9 +43,11 @@ interface HarvestImportProps {
  * Dumb: it owns the set field and draws the rest from `./ImportChrome`. The
  * mutations live in the page's `useHarvestImport`.
  *
- * **No link to the harvested Books.** `GET /api/books` has no filter by origin
- * or by harvest, so there is no list to point at; the result says what was
- * added in counts instead.
+ * **The result links to the Books this run added**, at the Home page's
+ * `harvest` key, and to no others: `books.harvest_id` keeps the first run that
+ * created a Book, so a Book a later run matched lists under that first run. No
+ * count stands beside the link, since a Book trashed or merged away since has
+ * left the list and `created` would no longer be its size.
  */
 export default function HarvestImport({
   isPreviewing,
@@ -192,6 +196,7 @@ function PreviewCounts({ preview }: { preview: HarvestPreviewOut }) {
           readable: preview.readable,
         })}
       </p>
+      <FormatRead format={preview.metadata_format} />
       {counts
         .filter(([, count]) => count > 0)
         .map(([key, count]) => (
@@ -199,14 +204,14 @@ function PreviewCounts({ preview }: { preview: HarvestPreviewOut }) {
             {t(key, { count })}
           </p>
         ))}
-      {rows.length > 0 && (
+      {rows.length > 0 && preview.metadata_format === HarvestFormat.marcxml && (
         <p className="text-xs text-paper-600 dark:text-paper-400">
           {t("harvestRun.headingsPreview", { count: headingsIn(rows) })}
         </p>
       )}
       <RecordRows rows={rows} />
       {preview.truncated && (
-        <Truncated message={t("harvestRun.truncatedPreview")} />
+        <Caution message={t("harvestRun.truncatedPreview")} />
       )}
     </div>
   );
@@ -231,6 +236,17 @@ function HarvestResult({ result }: { result: HarvestResultOut }) {
           created: result.created,
         })}
       </p>
+      {result.created > 0 && (
+        <p className="text-xs">
+          <Link
+            to={`/?harvest=${result.harvest_id}`}
+            className="text-accent-700 underline dark:text-accent-300"
+          >
+            {t("harvestRun.addedBooks")}
+          </Link>
+        </p>
+      )}
+      <FormatRead format={result.metadata_format} />
       {result.skipped > 0 && (
         <p className="text-xs text-paper-600 dark:text-paper-400">
           {t("marc.resultSkipped", { count: result.skipped })}
@@ -249,7 +265,7 @@ function HarvestResult({ result }: { result: HarvestResultOut }) {
         </p>
       )}
       {result.truncated && (
-        <Truncated message={t("harvestRun.truncatedResult")} />
+        <Caution message={t("harvestRun.truncatedResult")} />
       )}
       <TitleList
         heading={t("marc.resultInTrash", { count: result.in_trash ?? 0 })}
@@ -263,8 +279,20 @@ function HarvestResult({ result }: { result: HarvestResultOut }) {
   );
 }
 
-/** A run cut short: what was read is kept, and the next one starts over. */
-function Truncated({ message }: { message: string }) {
+/**
+ * Says a run read Dublin Core, a fallback the server takes only where the
+ * repository offers no MARCXML it can ask for, and which carries less. A
+ * MARCXML run says nothing: it is the ordinary case and asks nothing of the
+ * admin.
+ */
+function FormatRead({ format }: { format: HarvestFormat }) {
+  const { t } = useTranslation();
+  if (format !== HarvestFormat.dublin_core) return null;
+  return <Caution message={t("harvestRun.readDublinCore")} />;
+}
+
+/** What an admin should weigh before trusting the counts: a run cut short, or one read in Dublin Core. */
+function Caution({ message }: { message: string }) {
   return (
     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 dark:text-amber-300 dark:bg-amber-950 dark:border-amber-900">
       {message}

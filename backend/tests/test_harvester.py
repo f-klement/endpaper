@@ -19,10 +19,12 @@ from hypothesis import strategies as st
 
 import fetch
 import harvester
+import oai
 import settings_store
 import xml_parse
-from enums import SettingKey
-from models import HARVESTED_IDENTIFIER_MAX
+from catalogue import Record
+from enums import HarvestFormat, SettingKey
+from models import HARVEST_METADATA_PREFIX_MAX, HARVESTED_IDENTIFIER_MAX
 from tests.strategies import (
     FAR_PAST_ANY_DEPTH,
     Node,
@@ -63,6 +65,23 @@ def oai_record(title: str, *, deleted: bool = False, isbn: str | None = None) ->
     )
 
 
+def dc_record(title: str | None, *elements: str) -> str:
+    """An `oai_dc` record in the shape `oai.py` serves, each of `elements` a
+    `dc:` element already written."""
+    titled = f"<dc:title>{title}</dc:title>" if title is not None else ""
+    return (
+        f'<oai_dc:dc xmlns:oai_dc="{harvester.OAI_DC}" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        f"{titled}{''.join(elements)}</oai_dc:dc>"
+    )
+
+
+def oai_dc_record(title: str | None, *elements: str, key: str | None = None) -> str:
+    return (
+        f"<record><header><identifier>oai:x:{key or title}</identifier></header>"
+        f"<metadata>{dc_record(title, *elements)}</metadata></record>"
+    )
+
+
 def list_records(*records: str, token: str | None = None) -> str:
     resumption = f"<resumptionToken>{token}</resumptionToken>" if token is not None else ""
     return response(f"<ListRecords>{''.join(records)}{resumption}</ListRecords>")
@@ -83,6 +102,18 @@ def run(coroutine):
 async def listed(deadline_seconds: float = harvester.RUN_DEADLINE_SECONDS, **options) -> harvester.Harvested:
     async with harvester.repository(BASE, deadline_seconds=deadline_seconds) as source:
         return await source.list_records("marcxml", **options)
+
+
+async def listed_in_dublin_core() -> harvester.Harvested:
+    async with harvester.repository(BASE) as source:
+        return await source.list_records("marcxml", read_as=HarvestFormat.DUBLIN_CORE)
+
+
+def read_one_dublin_core_record(*elements: str, title: str | None = "Dune") -> Record:
+    """The one Record a page holding one `oai_dc` record reads as."""
+    respx.get(BASE, params=first_page()).respond(text=list_records(oai_dc_record(title, *elements)))
+    (record,) = run(listed_in_dublin_core()).parsed.records
+    return record
 
 
 def answered_late(text: str):
@@ -413,6 +444,125 @@ class TestWhatARecordBecomes:
             run(listed())
 
 
+class TestWhatADublinCoreRecordBecomes:
+    """`harvester._dublin_core_record`, Dublin Core's upload profile, through a
+    page as a run reads one."""
+
+    @respx.mock
+    def test_the_title_statement_is_split_into_title_and_subtitle(self):
+        record = read_one_dublin_core_record(title="Dune : a novel / Frank Herbert")
+
+        assert (record.title, record.subtitle) == ("Dune", "a novel")
+
+    @respx.mock
+    def test_every_creator_is_an_author_in_the_records_order_and_flipped(self):
+        record = read_one_dublin_core_record(
+            "<dc:creator>Pratchett, Terry</dc:creator>", "<dc:creator>Neil Gaiman</dc:creator>"
+        )
+
+        assert record.author == "Terry Pratchett, Neil Gaiman"
+
+    @respx.mock
+    def test_a_contributor_is_an_author_only_where_no_creator_is_named(self):
+        credited = read_one_dublin_core_record(
+            "<dc:creator>Herbert, Frank</dc:creator>", "<dc:contributor>Some Editor</dc:contributor>"
+        )
+        uncredited = read_one_dublin_core_record("<dc:contributor>Some Editor</dc:contributor>")
+
+        assert (credited.author, uncredited.author) == ("Frank Herbert", "Some Editor")
+
+    @respx.mock
+    def test_the_identifier_date_and_language_are_read_by_the_shared_rules(self):
+        """Each rule on its own is `tests/test_bibliographic.py`'s; this is that
+        the record reaches them, and a zero date costs no year."""
+        record = read_one_dublin_core_record(
+            "<dc:identifier>https://repository.example/item/7</dc:identifier>",
+            "<dc:identifier>ISBN-13: 978-0-441-17271-9</dc:identifier>",
+            "<dc:date>0000-00-00</dc:date>",
+            "<dc:date>2015-03-02T10:11:12Z</dc:date>",
+            "<dc:date>1965</dc:date>",
+            "<dc:language>ger</dc:language>",
+        )
+
+        assert (record.isbn, record.year, record.language) == ("9780441172719", 1965, "de")
+
+    @respx.mock
+    def test_the_publisher_description_and_extent_are_read(self):
+        record = read_one_dublin_core_record(
+            "<dc:publisher>Ace</dc:publisher>",
+            "<dc:description>A desert planet.</dc:description>",
+            "<dc:format>application/pdf</dc:format>",
+            "<dc:format>412 pages</dc:format>",
+        )
+
+        assert (record.publisher, record.description, record.page_count) == ("Ace", "A desert planet.", 412)
+
+    @respx.mock
+    def test_a_subject_is_an_uncontrolled_subject_and_never_a_heading(self):
+        record = read_one_dublin_core_record(
+            "<dc:subject>ddc:833</dc:subject>", "<dc:subject>Deserts</dc:subject>"
+        )
+
+        assert [subject.label for subject in record.subjects] == ["ddc:833", "Deserts"]
+        assert record.headings == ()
+
+    @respx.mock
+    def test_a_title_wider_than_its_column_is_cut_rather_than_dropped(self):
+        """`books.title` is NOT NULL, so a dropped title would cost the record."""
+        record = read_one_dublin_core_record(title="t" * 5000)
+
+        assert record.title is not None
+        assert 0 < len(record.title) < 5000
+
+    @respx.mock
+    def test_a_record_with_no_title_is_skipped_counted_and_takes_its_identifier_with_it(self):
+        respx.get(BASE, params=first_page()).respond(
+            text=list_records(oai_dc_record("One"), oai_dc_record(None, key="untitled"), oai_dc_record("Two"))
+        )
+
+        got = run(listed_in_dublin_core())
+
+        assert [record.title for record in got.parsed.records] == ["One", "Two"]
+        assert got.identifiers == ("oai:x:One", "oai:x:Two")
+        assert (got.parsed.skipped, got.read_as) == (1, HarvestFormat.DUBLIN_CORE)
+
+    @respx.mock
+    def test_a_deleted_header_is_counted_as_in_marc(self):
+        respx.get(BASE, params=first_page()).respond(
+            text=list_records(oai_dc_record("Kept"), oai_record("Gone", deleted=True))
+        )
+
+        got = run(listed_in_dublin_core())
+
+        assert [record.title for record in got.parsed.records] == ["Kept"]
+        assert (got.seen, got.deleted) == (2, 1)
+
+    @respx.mock
+    def test_a_marc_record_on_a_dublin_core_run_is_unreadable(self):
+        respx.get(BASE, params=first_page()).respond(
+            text=list_records(oai_record("Marc"), oai_dc_record("Dc"))
+        )
+
+        got = run(listed_in_dublin_core())
+
+        assert [record.title for record in got.parsed.records] == ["Dc"]
+        assert got.parsed.skipped == 1
+
+    @respx.mock
+    def test_two_dublin_core_records_in_one_oai_record_are_unreadable(self):
+        """Each OAI record is at most one Book, whichever format carried it."""
+        two = (
+            "<record><header><identifier>oai:x:Two</identifier></header>"
+            f"<metadata>{dc_record('First')}{dc_record('Second')}</metadata></record>"
+        )
+        respx.get(BASE, params=first_page()).respond(text=list_records(two, oai_dc_record("One")))
+
+        got = run(listed_in_dublin_core())
+
+        assert [record.title for record in got.parsed.records] == ["One"]
+        assert got.parsed.skipped == 1
+
+
 class TestTheOtherVerbs:
     @respx.mock
     def test_identify_reads_the_repository_name(self):
@@ -441,39 +591,61 @@ class TestTheOtherVerbs:
 
         assert run(asked()).name == "n" * harvester.NAME_MAX
 
+    @staticmethod
+    def _offering(*formats: tuple[str, str | None]) -> harvester.Chosen:
+        """The format a run chooses from a repository listing `formats`, each
+        a prefix and its namespace or None for none."""
+        listed = "".join(
+            f"<metadataFormat><metadataPrefix>{prefix}</metadataPrefix>"
+            + (f"<metadataNamespace>{namespace}</metadataNamespace>" if namespace else "")
+            + "</metadataFormat>"
+            for prefix, namespace in formats
+        )
+        respx.get(BASE, params={"verb": "ListMetadataFormats"}).respond(
+            text=response(f"<ListMetadataFormats>{listed}</ListMetadataFormats>")
+        )
+
+        async def chosen() -> harvester.Chosen:
+            async with harvester.repository(BASE) as source:
+                return await source.chosen_format()
+
+        return run(chosen())
+
+    @respx.mock
+    def test_marc_is_chosen_over_dublin_core_whichever_is_listed_first(self):
+        got = self._offering(("oai_dc", harvester.OAI_DC), ("marc21", MARC))
+
+        assert got == harvester.Chosen("marc21", HarvestFormat.MARCXML)
+
+    @respx.mock
+    def test_dublin_core_is_chosen_where_no_marc_is_offered(self):
+        got = self._offering(("dc", harvester.OAI_DC), ("mods", "http://www.loc.gov/mods/v3"))
+
+        assert got == harvester.Chosen("dc", HarvestFormat.DUBLIN_CORE)
+
+    @respx.mock
+    def test_dublin_core_is_known_by_its_reserved_prefix_where_no_namespace_is_listed(self):
+        assert self._offering(("oai_dc", None)) == harvester.Chosen("oai_dc", HarvestFormat.DUBLIN_CORE)
+
+    @respx.mock
+    def test_a_repository_offering_neither_is_refused(self):
+        with pytest.raises(harvester.HarvestError, match="neither MARCXML nor Dublin Core"):
+            self._offering(("mods", "http://www.loc.gov/mods/v3"))
+
+    @respx.mock
+    def test_a_prefix_wider_than_its_column_is_passed_over(self):
+        wide = "m" * (HARVEST_METADATA_PREFIX_MAX + 1)
+
+        got = self._offering((wide, MARC), ("oai_dc", harvester.OAI_DC))
+
+        assert got == harvester.Chosen("oai_dc", HarvestFormat.DUBLIN_CORE)
+
+    def test_the_dublin_core_namespace_is_the_one_this_server_serves(self):
+        assert oai.FORMATS[harvester.OAI_DC_PREFIX].namespace == harvester.OAI_DC
+
     @respx.mock
     def test_the_marc_format_is_chosen_by_namespace_not_by_prefix(self):
-        respx.get(BASE, params={"verb": "ListMetadataFormats"}).respond(
-            text=response(
-                "<ListMetadataFormats>"
-                "<metadataFormat><metadataPrefix>oai_dc</metadataPrefix>"
-                "<metadataNamespace>http://www.openarchives.org/OAI/2.0/oai_dc/</metadataNamespace></metadataFormat>"
-                f"<metadataFormat><metadataPrefix>marc21</metadataPrefix><metadataNamespace>{MARC}</metadataNamespace>"
-                "</metadataFormat></ListMetadataFormats>"
-            )
-        )
-
-        async def chosen() -> str:
-            async with harvester.repository(BASE) as source:
-                return await source.marc_prefix()
-
-        assert run(chosen()) == "marc21"
-
-    @respx.mock
-    def test_a_repository_offering_no_marc_is_refused(self):
-        respx.get(BASE, params={"verb": "ListMetadataFormats"}).respond(
-            text=response(
-                "<ListMetadataFormats><metadataFormat><metadataPrefix>oai_dc</metadataPrefix>"
-                "</metadataFormat></ListMetadataFormats>"
-            )
-        )
-
-        async def chosen() -> str:
-            async with harvester.repository(BASE) as source:
-                return await source.marc_prefix()
-
-        with pytest.raises(harvester.HarvestError, match="no MARCXML"):
-            run(chosen())
+        assert self._offering(("marc", "x"), ("records", MARC)).prefix == "records"
 
     @respx.mock
     def test_get_record_reads_one_record(self):

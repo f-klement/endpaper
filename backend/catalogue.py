@@ -671,7 +671,7 @@ class Record:
         number here would be a second thing to keep in step.
 
         `tests/test_catalogue.py::TestARecordFromAnUploadedFile` pins the split,
-        including that no module but `marc.py` opens this door.
+        including that only the two upload readers open this door.
         """
         cut = {
             name: value[: _TEXT_CEILINGS[name]]

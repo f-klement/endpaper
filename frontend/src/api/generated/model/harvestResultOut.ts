@@ -5,6 +5,7 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { HarvestFormat } from "./harvestFormat.ts";
 
 /**
  * What a harvest did, and the run it recorded.
@@ -49,7 +50,9 @@ export interface HarvestResultOut {
    * @minimum 0
    */
   matched: number;
-  /** The repository's name for the MARCXML format this run asked for */
+  /** Which format the run read: MARCXML where the repository offers it, else Dublin Core, which carries no heading, no series and no role on a name */
+  metadata_format: HarvestFormat;
+  /** The repository's name for the format this run asked for */
   metadata_prefix: string;
   /**
    * Pages the repository answered

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 
+from enums import HarvestFormat
 from import_readers import ImportReader
 
 
@@ -229,8 +230,12 @@ class MarcPreviewOut(BaseModel):
 class _HarvestRun(BaseModel):
     """What one run of the harvester read, beside what the records then did."""
 
-    metadata_prefix: str = Field(
-        description="The repository's name for the MARCXML format this run asked for"
+    metadata_prefix: str = Field(description="The repository's name for the format this run asked for")
+    metadata_format: HarvestFormat = Field(
+        description=(
+            "Which format the run read: MARCXML where the repository offers it, else Dublin Core, "
+            "which carries no heading, no series and no role on a name"
+        )
     )
     pages_read: int = Field(ge=0, description="Pages the repository answered")
     records_seen: int = Field(ge=0, description="Record headers read, deleted ones included")

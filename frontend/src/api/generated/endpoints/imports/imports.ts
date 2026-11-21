@@ -250,7 +250,8 @@ export const getApplyHarvestUrl = (params: ApplyHarvestParams) => {
  * so a created Book's headings, and those of a Book keyed by the same
  * identifier, wait as suggestions an admin confirms or discards on the Book,
  * counted in `headings_pending`. A Book matched by ISBN or by author and
- * title gets none. A deleted record is counted
+ * title gets none, and a run read in Dublin Core, whose subjects name no
+ * scheme, raises none at all. A deleted record is counted
  * and deletes nothing. A 409 while another harvest is running, and one when
  * `repository` is not the address stored now: the client held another when it
  * read the preview, whether the stored one was saved before that read or after
@@ -330,7 +331,8 @@ export type ApplyHarvestMutationVariables = { params: ApplyHarvestParams };
  * so a created Book's headings, and those of a Book keyed by the same
  * identifier, wait as suggestions an admin confirms or discards on the Book,
  * counted in `headings_pending`. A Book matched by ISBN or by author and
- * title gets none. A deleted record is counted
+ * title gets none, and a run read in Dublin Core, whose subjects name no
+ * scheme, raises none at all. A deleted record is counted
  * and deletes nothing. A 409 while another harvest is running, and one when
  * `repository` is not the address stored now: the client held another when it
  * read the preview, whether the stored one was saved before that read or after

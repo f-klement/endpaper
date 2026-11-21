@@ -13493,12 +13493,37 @@ reason under it. `settings_store.harvest_repository` reads library mode, the swi
 blank address again at every harvest, and `harvester.configured_repository` applies
 `is_harvestable` to it, since a restore stores the rows without passing the route.
 
-### A harvest reads MARCXML only
+### A harvest reads MARCXML where offered, and Dublin Core where not
 
-The harvester picks the format whose namespace is MARC21 slim, whatever the repository calls
-it, and reads each record through `marc.read`, as a file's records are read. A MARC record
-holding another, or a `<metadata>` holding two side by side, is unreadable, so each OAI record
-is at most one Book. A record a repository marks deleted is counted and deletes nothing.
+**MARCXML whenever the repository offers it, and Dublin Core only when it does not** (owner,
+2026-11-21). `oai_dc` is the protocol's mandatory format, so a repository with no MARC21 slim
+is still harvestable; it is known by the `oai_dc` namespace or by the prefix the protocol
+reserves. MARC is known by its namespace whatever the repository calls it, and a prefix wider
+than `harvests.metadata_prefix` is passed over, since the run could not record it. The choice
+is made once, from what the repository lists, so MARCXML listed and then refused at
+`ListRecords` fails the run rather than falling back. The preview and the result name the
+format read, and a Dublin Core run says it carries less.
+
+A MARC record goes through `marc.read`, as a file's records are read. A Dublin Core record is
+read by the same upload profile in that serialisation (`harvester._dublin_core_record`): it
+refuses only a record with no title, and reaches the same apply and matching ladder. **Each
+OAI record is at most one Book**: a MARC record holding another, or a `<metadata>` holding two
+records side by side, in either format, is unreadable. A record a repository marks deleted is
+counted and deletes nothing.
+
+**What Dublin Core cannot say is not guessed.** It carries no heading, since `dc:subject`
+names no scheme and a guessed one would put a number in the wrong vocabulary, so a Dublin
+Core run raises no pending heading. An ISBN is read only from an identifier naming itself one
+or a bare ISBN-13, because the list holds whatever identifies the record and a local ten digit
+number passes the ISBN-10 checksum one time in eleven; an ISMN's `979-0` is not an ISBN. The
+year is the earliest in any `dc:date`, because DSpace lists the accession and availability
+dates beside the issue date, and a year nought or one is passed over as a date never set.
+Every creator is an author in record order, since Dublin Core has no role, and contributors
+are authors only where no creator is named, as MARC credits everybody only where nobody is the
+author. No series, since `dc:relation` is any relation, and no links, since an identifier URL
+is as often the repository's landing page. These value rules live in `bibliographic.py`, which
+states where and why the catalogue readers' rules differ: looser for an identifier and a date,
+stricter for a language.
 
 ### A harvest's headings wait as suggestions
 
@@ -13535,6 +13560,13 @@ the harvested Book drops the identifier, and the absorbed record is then matched
 is. **A record crediting nobody and carrying no ISBN matches a Book crediting nobody by its
 title**, as a file's record does, so two such records of one repository are one Book.
 
+**Dublin Core makes title only matching common, and the rule stands.** DSpace and EPrints
+repositories hold reports, theses and grey literature that often name neither a creator nor an
+ISBN, so two different records of one title, such as two "Annual report 2019", become one Book
+on the first run. The rule stands because it is the one a file's records are matched by, and a
+harvest is a bulk import like a file: a harvest matching by a looser or stricter ladder would
+make the same record two Books depending on how it arrived.
+
 ### A run is cut short rather than failed, and does not resume
 
 The run deadline, a request's timeout or a 503 after the first page ends a run truncated with
@@ -13554,6 +13586,22 @@ needs two saves elsewhere.
 **The preview's two count panels repeat four count rows between the MARC file card and the
 harvest card.** Sharing them needs one shape over two preview types with different extra rows
 (would add, deleted), which costs more than the four rows it saves.
+
+### The books list filters by origin and by harvest run
+
+`GET /api/books?origin=harvested` lists the Books a harvest created and `origin=added` every
+other, so a member can review what harvesting brought in. `?harvest=<run id>` lists one
+run's Books, so a member can review what that run brought in; it arrives by the link a
+run's result offers, and the library page shows it as a removable chip rather than a
+picker, since no route lists the runs. Both narrow the caller's shelf like any column
+filter, composing with each other, the rest, the paging and the count. `origin` takes two
+values rather than a boolean, so the parameter says what it asks and the panel offers it as
+one select.
+
+**Refused with 403 outside library mode**, as the MARC export and the catalogue narrowing
+are, rather than answered with the whole shelf. The library page draws the select only in
+library mode and holds both filters at null in a household, so a link or a saved search
+carrying one never turns the grid into an error.
 
 ## The competitor register's reference counts get a stated command and no guard
 

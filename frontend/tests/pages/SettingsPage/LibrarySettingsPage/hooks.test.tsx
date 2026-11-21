@@ -2046,6 +2046,7 @@ describe("which set a harvest asks the repository for", () => {
   const HARVEST_PREVIEW: HarvestPreviewOut = {
     already_held: 0,
     deleted: 0,
+    metadata_format: "marcxml",
     metadata_prefix: "marc21",
     pages_read: 1,
     readable: 2,
@@ -2061,6 +2062,7 @@ describe("which set a harvest asks the repository for", () => {
     harvest_id: 1,
     headings_pending: 0,
     matched: 0,
+    metadata_format: "marcxml",
     metadata_prefix: "marc21",
     pages_read: 1,
     records_seen: 2,

@@ -26,6 +26,7 @@
 
 import {
   BookFormat,
+  BookOrigin,
   BookSort,
   LendingWillingness,
   OwnershipStatus,
@@ -72,6 +73,17 @@ export interface BookFilters {
    * opposite view, books nobody has offered, is the rest of the library.
    */
   discuss: boolean;
+  /**
+   * Only the books a harvest created, or only every other. Library mode only:
+   * the API refuses it in a household, so `useLibrary` holds it at null there.
+   */
+  origin: BookOrigin | null;
+  /**
+   * One harvest run's books, by the run's id. Arrived at by a link from the
+   * run's result (`?harvest=`), so it has no control of its own, only a chip.
+   * Library mode only, held at null in a household as `origin` is.
+   */
+  harvest: number | null;
   sort: BookSort;
   tagIds: number[];
   /**
@@ -124,6 +136,8 @@ export const DEFAULT_FILTERS: BookFilters = Object.freeze({
   lending: null,
   collection: null,
   discuss: false,
+  origin: null,
+  harvest: null,
   sort: BookSort.title_asc,
   tagIds: NO_TAG_IDS,
   headings: NO_HEADINGS,
@@ -272,6 +286,12 @@ function isLending(value: string | null): value is LendingWillingness {
   );
 }
 
+function isOrigin(value: string | null): value is BookOrigin {
+  return (
+    value !== null && (Object.values(BookOrigin) as string[]).includes(value)
+  );
+}
+
 function isOwnership(value: string | null): value is OwnershipStatus {
   return (
     value === OwnershipStatus.owned ||
@@ -282,6 +302,11 @@ function isOwnership(value: string | null): value is OwnershipStatus {
 
 function readCollection(value: string | null): BookFilters["collection"] {
   if (value === "unfiled") return "unfiled";
+  return readRowId(value);
+}
+
+/** A positive whole number, or null for anything else a link could carry. */
+function readRowId(value: string | null): number | null {
   if (value === null) return null;
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : null;
@@ -304,6 +329,7 @@ export function readFilters(params: URLSearchParams): BookFilters {
   const sort = params.get("sort");
   const format = params.get("format");
   const lending = params.get("lending");
+  const origin = params.get("origin");
 
   return {
     ...DEFAULT_FILTERS,
@@ -312,6 +338,7 @@ export function readFilters(params: URLSearchParams): BookFilters {
     sort: checked(sort, isSort, DEFAULT_FILTERS.sort),
     format: checked(format, isFormat, DEFAULT_FILTERS.format),
     lending: checked(lending, isLending, DEFAULT_FILTERS.lending),
+    origin: checked(origin, isOrigin, DEFAULT_FILTERS.origin),
     // Present and not "false" is on. A bare `?discuss` is what a link somebody
     // typed looks like, and treating it as off would make the link silently do
     // nothing.
@@ -322,6 +349,8 @@ export function readFilters(params: URLSearchParams): BookFilters {
     // `?collection=4` is the link the collections page offers, and
     // `?collection=unfiled` the one the picker's empty option offers.
     collection: readCollection(params.get("collection")),
+    // `?harvest=12` is the link a harvest run's result offers.
+    harvest: readRowId(params.get("harvest")),
     // Repeated, not comma separated, because an LCSH heading is a phrase and
     // phrases carry commas. `getAll` is what makes that work, and it is why
     // this one field cannot follow `tags`.
@@ -359,7 +388,7 @@ export function toParams(filters: BookFilters): ListBooksParams {
   };
 }
 
-/** The eight filters holding one string each, sent only when set. */
+/** The ten filters holding one value each, sent only when set. */
 function singleValueParams(filters: BookFilters): ListBooksParams {
   return {
     ...whenSet("q", filters.query),
@@ -370,6 +399,8 @@ function singleValueParams(filters: BookFilters): ListBooksParams {
     ...whenSet("location", filters.location),
     ...whenSet("format", filters.format),
     ...whenSet("lending", filters.lending),
+    ...whenSet("origin", filters.origin),
+    ...whenSet("harvest", filters.harvest),
   };
 }
 

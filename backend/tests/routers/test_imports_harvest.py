@@ -17,7 +17,7 @@ from enums import OwnershipStatus, RecordOrigin, SettingKey
 from models import Book, Classification, Harvest, PendingHeading
 from routers.imports import HARVEST_RUNNING, REPOSITORY_CHANGED
 from tests.corpus import REPO
-from tests.test_harvester import BASE, MARC, list_records, oai_record, response
+from tests.test_harvester import BASE, MARC, list_records, oai_dc_record, oai_record, response
 
 PREVIEW = "/api/imports/harvest/preview"
 #: The apply names the repository its preview read, as the card sends it.
@@ -36,20 +36,26 @@ def switched_on(db, *, library: bool = True, harvester: bool = True) -> None:
     settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "true" if harvester else "false")
 
 
-def a_repository(*records: str) -> None:
-    """The three requests a run makes, the last answering `records` on one page."""
+def a_repository(*records: str, prefix: str = "marcxml", namespace: str = MARC) -> None:
+    """The three requests a run makes, the last answering `records` on one page,
+    from a repository offering one format: MARCXML by default."""
     respx.get(BASE, params={"verb": "Identify"}).respond(
         text=response("<Identify><repositoryName>Old Catalogue</repositoryName></Identify>")
     )
     respx.get(BASE, params={"verb": "ListMetadataFormats"}).respond(
         text=response(
-            "<ListMetadataFormats><metadataFormat><metadataPrefix>marcxml</metadataPrefix>"
-            f"<metadataNamespace>{MARC}</metadataNamespace></metadataFormat></ListMetadataFormats>"
+            f"<ListMetadataFormats><metadataFormat><metadataPrefix>{prefix}</metadataPrefix>"
+            f"<metadataNamespace>{namespace}</metadataNamespace></metadataFormat></ListMetadataFormats>"
         )
     )
-    respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": "marcxml"}).respond(
+    respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": prefix}).respond(
         text=list_records(*records)
     )
+
+
+def a_dublin_core_repository(*records: str) -> None:
+    """`a_repository`, offering Dublin Core alone."""
+    a_repository(*records, prefix="oai_dc", namespace=harvester.OAI_DC)
 
 
 def with_a_heading(title: str, *numbers: str, isbn: str | None = None) -> str:
@@ -419,3 +425,110 @@ class TestARerunMatchesByRecordIdentifier:
         again = client.post(APPLY, headers=admin["headers"]).json()
 
         assert (again["created"], again["in_trash"]) == (0, 1)
+
+
+class TestADublinCoreRun:
+    """A repository offering no MARCXML, read in `oai_dc` through the same
+    apply and the same ladder."""
+
+    @respx.mock
+    def test_the_preview_says_it_read_dublin_core(self, client, admin, harvesting):
+        a_dublin_core_repository(oai_dc_record("One"))
+
+        body = client.post(PREVIEW, headers=admin["headers"]).json()
+
+        assert (body["metadata_format"], body["metadata_prefix"], body["readable"]) == (
+            "dublin_core",
+            "oai_dc",
+            1,
+        )
+
+    @respx.mock
+    def test_a_marc_run_says_it_read_marcxml(self, client, admin, harvesting):
+        a_repository(oai_record("One"))
+
+        assert client.post(PREVIEW, headers=admin["headers"]).json()["metadata_format"] == "marcxml"
+
+    @respx.mock
+    def test_a_created_book_carries_the_records_values_and_waits_on_no_heading(
+        self, client, admin, harvesting, db
+    ):
+        a_dublin_core_repository(
+            oai_dc_record(
+                "Dune : a novel",
+                "<dc:creator>Herbert, Frank</dc:creator>",
+                "<dc:subject>ddc:813</dc:subject>",
+                "<dc:date>1965</dc:date>",
+                "<dc:identifier>urn:isbn:9780441172719</dc:identifier>",
+                key="dune",
+            )
+        )
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        book = db.scalars(select(Book)).one()
+        assert (book.title, book.subtitle, book.author, book.year, book.isbn) == (
+            "Dune",
+            "a novel",
+            "Frank Herbert",
+            1965,
+            "9780441172719",
+        )
+        assert (book.harvest_id, book.harvested_identifier, book.is_private) == (
+            body["harvest_id"],
+            "oai:x:dune",
+            False,
+        )
+        assert (body["metadata_format"], body["headings_pending"]) == ("dublin_core", 0)
+        assert pending(db, book.id) == []
+
+    @respx.mock
+    def test_a_book_is_matched_by_isbn_and_filled_not_overwritten(
+        self, client, admin, harvesting, make_book, db
+    ):
+        held = make_book(admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441172719")
+        a_dublin_core_repository(
+            oai_dc_record(
+                "Dune, retitled",
+                "<dc:publisher>Ace</dc:publisher>",
+                "<dc:identifier>ISBN 0441172717</dc:identifier>",
+            )
+        )
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        book = db.get_one(Book, held["id"])
+        assert (body["matched"], body["created"]) == (1, 0)
+        assert (book.title, book.publisher, book.harvest_id) == ("Dune", "Ace", None)
+
+    @respx.mock
+    def test_a_book_is_matched_by_author_and_title(self, client, admin, harvesting, make_book, db):
+        make_book(admin["headers"], title="Dune", author="Frank Herbert")
+        a_dublin_core_repository(oai_dc_record("Dune", "<dc:creator>Herbert, Frank</dc:creator>"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["created"]) == (1, 0)
+
+    @respx.mock
+    def test_a_second_run_matches_by_the_record_identifier_and_creates_nothing(
+        self, client, admin, harvesting, db
+    ):
+        a_dublin_core_repository(oai_dc_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()
+        book = db.scalars(select(Book).where(Book.harvest_id == first["harvest_id"])).one()
+        book.title = "One, corrected"
+        db.commit()
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (again["matched"], again["created"]) == (1, 0)
+        assert db.scalars(select(Book.id)).all() == [book.id]
+
+    @respx.mock
+    def test_a_deleted_record_is_counted_and_deletes_nothing(self, client, admin, harvesting, db):
+        a_dublin_core_repository(oai_dc_record("Kept"), oai_record("Gone", deleted=True))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["created"], body["deleted"], body["records_seen"]) == (1, 1, 2)
