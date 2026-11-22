@@ -532,12 +532,13 @@ repeat the argument.
 |  | [The heading count was already derived, and the sentence around it was wrong](decisions.md#the-heading-count-was-already-derived-and-the-sentence-around-it-was-wrong) | 64 |
 |  | [A candidate name added at the end of a list is a different change from one added in it](decisions.md#a-candidate-name-added-at-the-end-of-a-list-is-a-different-change-from-one-added-in-it) | 268 |
 |  | [A value assertion names its input only where one column feeds it](decisions.md#a-value-assertion-names-its-input-only-where-one-column-feeds-it) | 291 |
-|  | [A catalogue login is resolved by the route, never read by the module that sends it](decisions.md#a-catalogue-login-is-resolved-by-the-route-never-read-by-the-module-that-sends-it) | 524 |
+|  | [A catalogue login is resolved by the route, never read by the module that sends it](decisions.md#a-catalogue-login-is-resolved-by-the-route-never-read-by-the-module-that-sends-it) | 527 |
 |  | [A test count is not a roster count, and the census refuses one by grammar](decisions.md#a-test-count-is-not-a-roster-count-and-the-census-refuses-one-by-grammar) | 1,526 |
 |  | [The suite runner ships the repository it belongs to, not the caller's directory](decisions.md#the-suite-runner-ships-the-repository-it-belongs-to-not-the-callers-directory) | 210 |
 |  | [The census's declaration window is bracketed where the number may be read](decisions.md#the-censuss-declaration-window-is-bracketed-where-the-number-may-be-read) | 150 |
 |  | [An unverified account may do nothing, and the admin override is what makes that safe](decisions.md#an-unverified-account-may-do-nothing-and-the-admin-override-is-what-makes-that-safe) | 212 |
 |  | [A catalogue credential is per source row, and the envelope already says so](decisions.md#a-catalogue-credential-is-per-source-row-and-the-envelope-already-says-so) | 126 |
+|  | [A catalogue login is stored only for a source whose credential is a login](decisions.md#a-catalogue-login-is-stored-only-for-a-source-whose-credential-is-a-login) | 156 |
 |  | [The importer gets a reader per service, rather than a pre-pass in front of one path](decisions.md#the-importer-gets-a-reader-per-service-rather-than-a-pre-pass-in-front-of-one-path) | 179 |
 |  | [The key is resolved once for a loop, and the arm that costs is stated with the one that saves](decisions.md#the-key-is-resolved-once-for-a-loop-and-the-arm-that-costs-is-stated-with-the-one-that-saves) | 421 |
 |  | [The lever on a hosted deployment is one variable, and unwritable is not the condition](decisions.md#the-lever-on-a-hosted-deployment-is-one-variable-and-unwritable-is-not-the-condition) | 202 |
@@ -696,9 +697,9 @@ repeat the argument.
 |  | [SQLite is the engine, and a dialect keyword in `models.py` is a description](decisions.md#sqlite-is-the-engine-and-a-dialect-keyword-in-modelspy-is-a-description) | 285 |
 |  | [A deadline is a bare float, and the type behind it stayed deferred](decisions.md#a-deadline-is-a-bare-float-and-the-type-behind-it-stayed-deferred) | 340 |
 |  | [`errors.API_PREFIXES` and `covers.LOCAL_COVER_PREFIX` are two concepts sharing a spelling](decisions.md#errorsapi_prefixes-and-coverslocal_cover_prefix-are-two-concepts-sharing-a-spelling) | 215 |
-|  | [The key, the plan and the logins reach a catalogue as one value](decisions.md#the-key-the-plan-and-the-logins-reach-a-catalogue-as-one-value) | 1,102 |
+|  | [The key, the plan and the logins reach a catalogue as one value](decisions.md#the-key-the-plan-and-the-logins-reach-a-catalogue-as-one-value) | 1,086 |
 |  | [A locally refused catalogue request spends no rate limit budget](decisions.md#a-locally-refused-catalogue-request-spends-no-rate-limit-budget) | 138 |
-|  | [Two predicates decide whether a credentialled catalogue is asked, and they ask different questions](decisions.md#two-predicates-decide-whether-a-credentialled-catalogue-is-asked-and-they-ask-different-questions) | 215 |
+|  | [A credentialled catalogue is admitted and resolved over one subject, and a disagreement is logged](decisions.md#a-credentialled-catalogue-is-admitted-and-resolved-over-one-subject-and-a-disagreement-is-logged) | 178 |
 |  | [One matcher serves both catalogue door rules, with a receiver exemption](decisions.md#one-matcher-serves-both-catalogue-door-rules-with-a-receiver-exemption) | 272 |
 |  | [`sources.parse` returns the whole roster, so naming one source narrows nothing](decisions.md#sourcesparse-returns-the-whole-roster-so-naming-one-source-narrows-nothing) | 164 |
 |  | [The bound before a write that a review asked for was already there](decisions.md#the-bound-before-a-write-that-a-review-asked-for-was-already-there) | 95 |
@@ -1138,7 +1139,7 @@ repeat the argument.
 | Lending to a patron (2026-11-20) | [An expired registration still lends](decisions.md#an-expired-registration-still-lends) | 106 |
 | Lending to a patron (2026-11-20) | [Registering at the loan is two requests, not one](decisions.md#registering-at-the-loan-is-two-requests-not-one) | 57 |
 | Lending to a patron (2026-11-20) | [The patron form and search are one copy, in the middle tier](decisions.md#the-patron-form-and-search-are-one-copy-in-the-middle-tier) | 23 |
-|  | [The curated catalogue registry and the source test (2026-11-22)](decisions.md#the-curated-catalogue-registry-and-the-source-test-2026-11-22) | 371 |
-| The curated catalogue registry and the source test (2026-11-22) | [The catalogue registry is vendored, and a pick is a name](decisions.md#the-catalogue-registry-is-vendored-and-a-pick-is-a-name) | 180 |
+|  | [The curated catalogue registry and the source test (2026-11-22)](decisions.md#the-curated-catalogue-registry-and-the-source-test-2026-11-22) | 529 |
+| The curated catalogue registry and the source test (2026-11-22) | [The catalogue registry is vendored, and a pick is a name](decisions.md#the-catalogue-registry-is-vendored-and-a-pick-is-a-name) | 338 |
 | The curated catalogue registry and the source test (2026-11-22) | [The test action is the scan's door](decisions.md#the-test-action-is-the-scans-door) | 143 |
 <!-- index: end -->

@@ -67,7 +67,14 @@ import z3950
 # mistake; building a decoder from anything but `Target.decoding` is.
 from decoders import IMPORT_READERS, MARC_READERS, Decoding
 from decoders import Reader as Reader
-from enums import Capability, CatalogueSource, RecordCharset, RegisteredCatalogue, SourceFamily
+from enums import (
+    Capability,
+    CatalogueSource,
+    CredentialKind,
+    RecordCharset,
+    RegisteredCatalogue,
+    SourceFamily,
+)
 
 # Re-exported for the reason `Reader` is: `Target.transport` is typed on it, and
 # `enums.Transport` says why it lives there.
@@ -663,16 +670,18 @@ class Target:
         self._check_timeout()
 
     def _check_waivers(self) -> None:
-        """Refuses a waived ISBN claim off the DNB, and a shipped login on a row needing none."""
+        """Refuses a waived ISBN claim off the DNB, and a shipped login off a LOGIN row."""
         if not self.requires_isbn_claim and self.source not in _MAY_WAIVE_THE_ISBN_CLAIM:
             raise ValueError(f"{self.source}: only the DNB may waive the ISBN identity check")
-        if self.shipped_credential is not None and not self.needs_key:
-            # A default on a row that authenticates nothing is a credential
-            # published for no reason, and it would put the source in
-            # `credentials`' ladder while `sources.NEEDS_A_KEY` says the source
-            # asks for nothing. Refused at construction rather than ignored,
-            # which is the rule the bespoke fields above already follow.
-            raise ValueError(f"{self.source}: a shipped login on a row that needs no credential")
+        if self.shipped_credential is not None and self.credential_kind is not CredentialKind.LOGIN:
+            # A shipped default is the bottom of the login ladder, which
+            # `credentials._resolve` walks for `sources.NEEDS_A_LOGIN` and for
+            # nothing else. On a row needing no credential it is published for
+            # no reason; on a row whose secret is a settings row it is read by
+            # nothing, and the next reader to assume otherwise would be wrong.
+            # Refused at construction rather than ignored, which is the rule
+            # the bespoke fields above already follow.
+            raise ValueError(f"{self.source}: a shipped login on a row whose credential is not a login")
 
     def _check_retry(self) -> None:
         """Refuses an ISBN-10 retry on a row whose lookup query this module does not build.
@@ -945,6 +954,32 @@ class Target:
     def can(self, capability: Capability) -> bool:
         """Whether this source can be asked for that."""
         return capability in self.capabilities
+
+    @property
+    def credential_kind(self) -> CredentialKind:
+        """Which store this row's credential lives in, read off the two fields that decide it.
+
+        NONE asks nobody for anything. API_KEY is the deployment's own key, the
+        `settings` row `secret` names. LOGIN is an institution's login, walked by
+        `credentials._resolve` from pinned through stored to shipped.
+
+        **A projection and not a field**, for the reason `capabilities` is one:
+        the facts are `needs_key` and `secret`, and `_check_secret` refuses the
+        one combination that would make this ambiguous, a secret on a row
+        needing no credential. A stored copy would be a third spelling kept in
+        step by hand.
+
+        **Whether this build ships a default is not a fourth value.** It is the
+        bottom rung of the LOGIN ladder, and a stored login beats it, so a row
+        that ships one still routes through `catalogue_credentials`.
+        `shipped_credential` says it, and `_check_waivers` refuses one on any
+        other kind.
+        """
+        if not self.needs_key:
+            return CredentialKind.NONE
+        if self.secret is Secret.NONE:
+            return CredentialKind.LOGIN
+        return CredentialKind.API_KEY
 
     @property
     def decoding(self) -> Decoding:

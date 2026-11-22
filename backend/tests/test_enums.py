@@ -1,4 +1,4 @@
-"""Tests for `backend/enums.py`: the read end of an unconstrained enum column."""
+"""Tests for `backend/enums.py`: the read end of an unconstrained enum column, and a record's origin."""
 
 import logging
 from enum import StrEnum
@@ -8,8 +8,11 @@ import pytest
 from enums import (
     BookCondition,
     BookFormat,
+    CatalogueSource,
     CustomFieldKind,
     LendingWillingness,
+    RecordOrigin,
+    RegisteredCatalogue,
     member_or,
 )
 
@@ -89,3 +92,12 @@ class TestMemberOr:
         """
         for member in enum:
             assert member_or(enum, member.value, None) is member
+
+
+class TestACataloguesRecordNamesItsOrigin:
+    @pytest.mark.parametrize("catalogue", [*CatalogueSource, *RegisteredCatalogue])
+    def test_every_seeded_source_and_registry_entry_is_an_origin(self, catalogue):
+        assert RecordOrigin.of_catalogue(catalogue.value) == catalogue.value
+
+    def test_a_name_no_catalogue_has_is_no_origin(self):
+        assert RecordOrigin.of_catalogue("marc") is None

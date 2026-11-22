@@ -12,8 +12,9 @@
  * **Closed, and a second enum rather than more `CatalogueSource` members.** A
  * `CatalogueSource` is asked by default and has a measured place in
  * `sources.DEFAULT_ORDER`; one of these is asked by nobody until an admin
- * picks it, and has no measurement to place it by. Folding them would put an
- * unmeasured catalogue into every household's roster on upgrade.
+ * picks it, and has no measurement to place it by, so a pick is asked only
+ * after the whole chain missed: `sources.Plan.picked`. Folding them would put
+ * an unmeasured catalogue into every household's roster on upgrade.
  *
  * **Closed because the registry is vendored**: a member is a reachable host
  * this build ships, so adding one is a diff somebody reads, which is the

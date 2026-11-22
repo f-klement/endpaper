@@ -178,7 +178,7 @@ def nothing_answers_an_isbn() -> HTTPException:
     """The refusal `metadata.Outcome.NO_SOURCES` earns, for a caller holding a `Lookup`.
 
     **The lookup path is the one that does not test up front, deliberately.**
-    `sources.Plan.lookup_chain`'s emptiness *is* what `NO_SOURCES` means, and that
+    `sources.Plan.lookup_roster`'s emptiness *is* what `NO_SOURCES` means, and that
     docstring is where the fact lives. A door here re-testing it would be the same fact
     in two places, free to disagree, so what this module owns on that path is the
     sentence and not the predicate.
@@ -202,6 +202,9 @@ def _resolved_access(db: Session) -> metadata.Access:
     a credential to a bespoke adapter and `_search_one` to a metered one, and neither is
     constructed for a source the plan left out.
 
+    **The picks join the plan here and nowhere else**, after `sources.in_force`, so a
+    narrowed lookup, which goes through `in_force` again, asks none: `registry.with_picks`.
+
     **The key is resolved once here and handed to all three**, because each opens
     something sealed: the logins, a credentialled source's readiness, and the Google
     Books key since it is sealed too. Each resolving its own cost a lookup three
@@ -210,7 +213,7 @@ def _resolved_access(db: Session) -> metadata.Access:
     """
     state = credentials.key_state()
     access = metadata.Access(
-        plan=settings_store.catalogue_sources(db, state),
+        plan=registry.with_picks(db, settings_store.catalogue_sources(db, state)),
         api_key=settings_store.google_books_api_key(db, state),
         logins=settings_store.catalogue_logins(db, state),
     )
@@ -297,14 +300,13 @@ async def probe(
 def _warn_about_any_source_asked_with_no_login(access: metadata.Access) -> None:
     """Say so when the plan admits a credentialled source no login was resolved for.
 
-    **Here because this is the one place both halves are in hand.** Two predicates
-    decide whether such a source is asked, in `settings_store`, and they ask different
-    questions of different subjects: `ready_sources` admits one on
-    `credentials.is_held`, and `catalogue_logins` resolves one on
-    `metadata.carries_a_credential`. A source in the first and not the second is in
-    the plan with no entry in the mapping, and every request to it goes out with no
-    credential and nothing saying so. `settings_store.catalogue_logins` carries the
-    measurement and why this is a warning rather than a refusal.
+    **Here because this is the one place both halves are in hand.** Both range over
+    `sources.NEEDS_A_LOGIN`, in `settings_store`, but read the keychain twice:
+    `ready_sources` admits one on `credentials.is_held` and `catalogue_logins`
+    resolves one on `credentials.for_request`. A key rotated between the two puts a
+    source in the plan with no entry in the mapping, and every request to it goes
+    out with no credential and nothing saying so. `settings_store.catalogue_logins`
+    says why this is a warning rather than a refusal.
 
     **Read off the resolved value, not off either predicate**, so it reports what this
     request will actually do rather than re-deriving whether it should. The source is
@@ -407,13 +409,15 @@ class Enquiry:
         switched off got a lookup's refusal and then a search's, from one request.
         Asking nothing is one answer rather than two.
 
-        **The predicate is `plan.asked` rather than either roster**, and it is the
-        honest one for a caller with fallbacks: it asks whether anything is enabled, not
-        whether the first path can answer. `test_sources.py` pins that every seeded
-        target answers a lookup or a search, which is what makes this equivalent to
-        both rosters being empty rather than merely equal to it today.
+        **The predicate is `plan.asked` and `plan.picked` rather than either roster**,
+        and it is the honest one for a caller with fallbacks: it asks whether anything is
+        enabled, not whether the first path can answer. `test_sources.py` pins that every
+        seeded target answers a lookup or a search, which is what makes this equivalent
+        to both rosters being empty rather than merely equal to it today. A pick counts
+        because a lookup asks it: without it, a library asking only a pick would be told
+        here that nothing is switched on, and told by `lookup` that the book was missed.
         """
-        if not self._access.plan.asked:
+        if not self._access.plan.asked and not self._access.plan.picked:
             raise _refused(NOTHING_IS_SWITCHED_ON)
 
     async def lookup(self, isbn: str) -> metadata.Lookup:

@@ -12,7 +12,15 @@
  * **A closed set rather than a free string**, so every surface can label each
  * value and a stored value nobody can name degrades to unknown rather than
  * arriving on screen untranslated. Every `CatalogueSource` is a member under
- * its own value; the rest are the origins that are not a catalogue.
+ * its own value, and so is every `RegisteredCatalogue`; the rest are the
+ * origins that are not a catalogue.
+ *
+ * **Closed across a registry refresh because a refresh is a commit.** A new
+ * `RegisteredCatalogue` member without an origin is refused at import below,
+ * and the frontend's catalogue name test then refuses a frontend with no
+ * label for it. An entry a later snapshot drops may keep its member here,
+ * so the books it supplied keep their label; removing it is safe too, since
+ * a stored value nobody names reads as unknown.
  *
  * **Where the record came from, never whether it was changed since.** That is
  * `books.record_modified_here`, and why the two are two columns is on
@@ -42,6 +50,9 @@ export const RecordOrigin = {
   porbase: "porbase",
   oszk: "oszk",
   snk: "snk",
+  nls: "nls",
+  nli: "nli",
+  csic: "csic",
   manual: "manual",
   file: "file",
   csv_import: "csv_import",

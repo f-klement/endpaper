@@ -679,7 +679,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks nineteen catalogues in two phases and merges what comes back.
+`GET /api/books/lookup` asks nineteen catalogues in two phases, then any picked registry catalogue, and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
@@ -715,7 +715,9 @@ is asked about them too, after Open Library. The Polish, Danish and Hungarian fr
 named, reaches every such catalogue, so that lookup asks all seven before Open Library: their
 measured p90s sum to about 3.4 seconds, and each Z39.50 catalogue that cannot be reached adds
 up to its ten second timeout, since a lookup has no overall deadline. Open Library is the broadest source and much the slowest, which is why it is here
-rather than in phase one.
+rather than in phase one. **After phase two come the catalogues an admin picked from the
+registry**, in the registry's order and on any ISBN, so a pick costs a request only on a book
+every other catalogue missed.
 
 **Three of the nineteen need a credential and only one of them costs money**, which is why the
 last three are where they are. Google Books has a key, a quota and a bill attached, so it is
@@ -1957,6 +1959,12 @@ An unknown source is **404** on the write. The delete reaches a stored row whose
 no longer in the roster, because `catalogue_credentials` carries no foreign key on purpose
 and an orphan nothing can remove would need a database edit; deleting sends nothing anywhere,
 so the roster check buys nothing there.
+
+A source whose credential is not a login is **409** on the write, naming that it takes none:
+one that answers without a credential, and Google Books, whose key is a setting. A login is
+resolved for a request only where the source's credential is one, so a login stored for any
+other would be sealed and read by nothing. The delete still reaches such a row, which an
+archive written before this refusal can carry.
 
 A source whose login the deployment pinned through `CATALOGUE_CREDENTIAL_<SOURCE>` is **409**
 on the write, naming the variable, the same rule every other pinned setting follows. **On the

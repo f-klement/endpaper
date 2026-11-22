@@ -3540,6 +3540,7 @@ class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:
 
     def test_a_login_this_deployment_holds_reaches_the_catalogue(self, client, admin, dnb_hit, monkeypatch):
         monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB}))
+        monkeypatch.setattr(sources, "NEEDS_A_LOGIN", frozenset({CatalogueSource.DNB}))
         monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
 
         res = client.get("/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"])
@@ -3568,6 +3569,7 @@ class TestACatalogueLoginLeavesTheDeploymentWithItsRequest:
         was never resolved at all.
         """
         monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset({CatalogueSource.K10PLUS}))
+        monkeypatch.setattr(sources, "NEEDS_A_LOGIN", frozenset({CatalogueSource.K10PLUS}))
         monkeypatch.setenv(credentials.env_variable_name("k10plus"), "alice:hunter2")
 
         res = client.get("/api/books/lookup", params={"isbn": self.ISBN}, headers=admin["headers"])
@@ -3628,6 +3630,7 @@ class TestTheLookupRouteDoesNotPayPerSourceEither:
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         ):
             monkeypatch.setattr(sources, "NEEDS_A_KEY", roster)
+            monkeypatch.setattr(sources, "NEEDS_A_LOGIN", roster)
             tally = _resolutions_counted(monkeypatch)
             res = client.get(
                 "/api/books/lookup",

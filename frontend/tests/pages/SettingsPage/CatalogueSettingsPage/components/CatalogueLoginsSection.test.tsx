@@ -28,7 +28,8 @@ let api: MockApi;
 
 function source(over: Record<string, unknown> = {}) {
   return {
-    source: "bne",
+    source: "bnu",
+    credential: "login",
     enabled: true,
     answers_lookup: true,
     answers_search: false,
@@ -61,9 +62,24 @@ describe("with nothing stored", () => {
     expect(screen.getByText("No login stored.")).toBeInTheDocument();
   });
 
-  it("still offers to add one to any catalogue", () => {
+  it("still offers to add one to any catalogue that takes one", () => {
     render([source()]);
     expect(screen.getByLabelText("Add a login for")).toBeInTheDocument();
+  });
+
+  it("does not offer a catalogue whose credential is not a login", () => {
+    render([
+      source(),
+      source({ source: "bne", credential: "none" }),
+      source({ source: "google_books", credential: "api_key" }),
+    ]);
+    const chooser = screen.getByLabelText(
+      "Add a login for",
+    ) as HTMLSelectElement;
+    expect([...chooser.options].map((option) => option.value)).toEqual([
+      "",
+      "bnu",
+    ]);
   });
 });
 
@@ -97,7 +113,7 @@ describe("with one stored", () => {
 
     await waitFor(() =>
       expect(api.lastCall(/credential$/, "DELETE")?.url).toContain(
-        "/api/settings/catalogue-sources/bne/credential",
+        "/api/settings/catalogue-sources/bnu/credential",
       ),
     );
   });
@@ -132,7 +148,7 @@ describe("with one the deployment pinned", () => {
     render([source({ credential_provenance: "env" })]);
     expect(
       screen.getByText(
-        /Change CATALOGUE_CREDENTIAL_BNE where the app is deployed/,
+        /Change CATALOGUE_CREDENTIAL_BNU where the app is deployed/,
       ),
     ).toBeInTheDocument();
     expect(
@@ -140,10 +156,18 @@ describe("with one the deployment pinned", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("and does not offer it as somewhere to add one", async () => {
-    render([source({ credential_provenance: "env" })]);
-    const chooser = screen.getByLabelText("Add a login for");
-    expect(chooser).not.toHaveTextContent("Spanish National Library");
+  it("and does not offer it as somewhere to add one", () => {
+    render([
+      source({ credential_provenance: "env" }),
+      source({ source: "bna" }),
+    ]);
+    const chooser = screen.getByLabelText(
+      "Add a login for",
+    ) as HTMLSelectElement;
+    expect([...chooser.options].map((option) => option.value)).toEqual([
+      "",
+      "bna",
+    ]);
   });
 });
 
@@ -153,7 +177,7 @@ describe("saving one", () => {
     api.on(/credential$/, { body: { catalogue_sources: [] } }, "PUT");
     render([source()]);
 
-    await user.selectOptions(screen.getByLabelText("Add a login for"), "bne");
+    await user.selectOptions(screen.getByLabelText("Add a login for"), "bnu");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: "Save login" }));
@@ -171,7 +195,7 @@ describe("saving one", () => {
     api.on(/credential$/, { body: { catalogue_sources: [] } }, "PUT");
     render([source()]);
 
-    await user.selectOptions(screen.getByLabelText("Add a login for"), "bne");
+    await user.selectOptions(screen.getByLabelText("Add a login for"), "bnu");
     await user.type(screen.getByLabelText("Username"), " alice ");
     await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: "Save login" }));
@@ -187,7 +211,7 @@ describe("saving one", () => {
     const user = userEvent.setup();
     render([source()]);
 
-    await user.selectOptions(screen.getByLabelText("Add a login for"), "bne");
+    await user.selectOptions(screen.getByLabelText("Add a login for"), "bnu");
     await user.type(screen.getByLabelText("Username"), "alice");
 
     expect(screen.getByRole("button", { name: "Save login" })).toBeDisabled();
@@ -216,7 +240,7 @@ describe("saving one", () => {
     );
     render([source()]);
 
-    await user.selectOptions(screen.getByLabelText("Add a login for"), "bne");
+    await user.selectOptions(screen.getByLabelText("Add a login for"), "bnu");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: "Save login" }));
@@ -232,10 +256,10 @@ describe("closing the form", () => {
     render([source()]);
     const picker = screen.getByLabelText("Add a login for");
 
-    await user.selectOptions(picker, "bne");
+    await user.selectOptions(picker, "bnu");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.selectOptions(picker, "");
-    await user.selectOptions(picker, "bne");
+    await user.selectOptions(picker, "bnu");
 
     expect(screen.getByLabelText("Username")).toHaveValue("alice");
   });
@@ -245,11 +269,11 @@ describe("closing the form", () => {
     render([source()]);
     const picker = screen.getByLabelText("Add a login for");
 
-    await user.selectOptions(picker, "bne");
+    await user.selectOptions(picker, "bnu");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.selectOptions(picker, "bne");
+    await user.selectOptions(picker, "bnu");
 
     expect(screen.getByLabelText("Username")).toHaveValue("");
     expect(screen.getByLabelText("Password")).toHaveValue("");
@@ -261,14 +285,14 @@ describe("closing the form", () => {
     render([source()]);
     const picker = screen.getByLabelText("Add a login for");
 
-    await user.selectOptions(picker, "bne");
+    await user.selectOptions(picker, "bnu");
     await user.type(screen.getByLabelText("Username"), "alice");
     await user.type(screen.getByLabelText("Password"), "hunter2");
     await user.click(screen.getByRole("button", { name: "Save login" }));
     await waitFor(() =>
       expect(screen.queryByLabelText("Username")).not.toBeInTheDocument(),
     );
-    await user.selectOptions(picker, "bne");
+    await user.selectOptions(picker, "bnu");
 
     expect(screen.getByLabelText("Username")).toHaveValue("");
     expect(screen.getByLabelText("Password")).toHaveValue("");
@@ -284,11 +308,17 @@ describe("a catalogue that already has one", () => {
   });
 
   it("is not offered again in the picker", () => {
-    render([source({ credential_provenance: "stored" })]);
+    render([
+      source({ credential_provenance: "stored" }),
+      source({ source: "bna" }),
+    ]);
     const chooser = screen.getByLabelText(
       "Add a login for",
     ) as HTMLSelectElement;
-    expect([...chooser.options].map((option) => option.value)).toEqual([""]);
+    expect([...chooser.options].map((option) => option.value)).toEqual([
+      "",
+      "bna",
+    ]);
   });
 });
 
@@ -335,11 +365,17 @@ describe("with one this build ships", () => {
   });
 
   it("is not offered again in the picker", () => {
-    render([source({ credential_provenance: "shipped" })]);
+    render([
+      source({ credential_provenance: "shipped" }),
+      source({ source: "bna" }),
+    ]);
     const chooser = screen.getByLabelText(
       "Add a login for",
     ) as HTMLSelectElement;
-    expect([...chooser.options].map((option) => option.value)).toEqual([""]);
+    expect([...chooser.options].map((option) => option.value)).toEqual([
+      "",
+      "bna",
+    ]);
   });
 
   it("takes the same form as any other login when it is replaced", async () => {
@@ -356,7 +392,7 @@ describe("with one this build ships", () => {
 
     await waitFor(() =>
       expect(api.lastCall(/credential$/, "PUT")?.url).toContain(
-        "/api/settings/catalogue-sources/bne/credential",
+        "/api/settings/catalogue-sources/bnu/credential",
       ),
     );
   });
@@ -423,6 +459,29 @@ describe("before there is a key", () => {
       "Make an encryption key below before storing a login.",
     );
     expect(screen.getByRole("button", { name: "Change login" })).toBeDisabled();
+  });
+});
+
+describe("on a stock roster", () => {
+  // Every source whose credential is a login ships one, so nothing is left to
+  // add: a picker drawn anyway offers "Choose a catalogue" and nothing else.
+  const stock = [
+    source({ source: "bna", credential_provenance: "shipped" }),
+    source({ source: "bnu", credential_provenance: "shipped" }),
+    source({ source: "bne", credential: "none" }),
+    source({ source: "google_books", credential: "api_key" }),
+  ];
+
+  it("draws no picker, because there is no catalogue to offer", () => {
+    render(stock);
+    expect(screen.queryByLabelText("Add a login for")).not.toBeInTheDocument();
+  });
+
+  it("still lets each shipped login be replaced from its own row", () => {
+    render(stock);
+    expect(
+      screen.getAllByRole("button", { name: "Use this library's own login" }),
+    ).toHaveLength(2);
   });
 });
 

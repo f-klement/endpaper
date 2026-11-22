@@ -16,7 +16,7 @@ import sources
 import targets
 import z3950
 from database import Base
-from enums import Capability, CatalogueSource, RecordCharset
+from enums import Capability, CatalogueSource, CredentialKind, RecordCharset
 from tests.helpers import z3950_row
 
 
@@ -749,6 +749,18 @@ class TestARowNamesTheSecretItsOwnDoorTakes:
         one that is believed: a bespoke row needing a credential and naming no
         secret is refused by `metadata.resolve`."""
         assert _seeded().secret is targets.Secret.NONE
+
+    @pytest.mark.parametrize(
+        ("source", "kind"),
+        [
+            (CatalogueSource.BNE, CredentialKind.NONE),
+            (CatalogueSource.GOOGLE_BOOKS, CredentialKind.API_KEY),
+            (CatalogueSource.BNA, CredentialKind.LOGIN),
+        ],
+    )
+    def test_the_store_a_credential_lives_in_is_read_off_the_row(self, source, kind):
+        """One row of each kind, so a projection answering one value for all is red."""
+        assert targets.SEEDED[source].credential_kind is kind
 
 
 #: The readers a catalogue row may name, derived from the import registry rather

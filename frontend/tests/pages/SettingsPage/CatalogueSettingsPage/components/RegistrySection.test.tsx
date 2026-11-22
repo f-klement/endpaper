@@ -1,14 +1,15 @@
 /**
  * Tests for src/pages/SettingsPage/CatalogueSettingsPage/components/RegistrySection.tsx.
  *
- * Each entry is drawn with the evidence it shipped on, a pick is sent by the
- * entry's name, and an aged snapshot says so.
+ * Each entry is drawn with the evidence it shipped on and named in the reader's
+ * language, a pick is sent by the entry's name, and an aged snapshot says so.
  */
 
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it } from "vitest";
 
+import { Locale } from "../../../../../src/api/generated/model";
 import RegistrySection from "../../../../../src/pages/SettingsPage/CatalogueSettingsPage/components/RegistrySection";
 import { mockApi, renderWithProviders, type MockApi } from "../../../../utils";
 
@@ -69,6 +70,15 @@ it("sends a pick by the entry's name", async () => {
         call.url.endsWith("/api/settings/catalogue-registry/csic"),
     ),
   ).toBe(true);
+});
+
+it("names an entry in the reader's language", async () => {
+  api.on("/api/settings/catalogue-registry", { body: registry() });
+  renderWithProviders(<RegistrySection />, { locale: Locale.de });
+
+  expect(
+    await screen.findByRole("checkbox", { name: /Bibliotheksnetz des CSIC/ }),
+  ).toBeInTheDocument();
 });
 
 it("says when the snapshot has aged", async () => {

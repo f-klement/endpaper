@@ -49,14 +49,18 @@ named in this file, and never a value a directory supplied. The identity check
 travels with it: `requires_isbn_claim` stays true on every entry, which
 `targets.Target` refuses to waive anywhere but the DNB.
 
-**A pick does not join the scan chain here.** `sources.Plan` is a permutation
-of `CatalogueSource` and `metadata` asks `targets.SEEDED`; placing a picked
-entry in that order is ticket 820 (owner, lib9). Until then a picked entry is
-listed as chosen and tested, not asked.
+**A pick is asked on a scan, at the tail of the chain and lookup only.**
+`with_picks` hands the picked entries' targets to `sources.Plan.picked`, which
+`metadata.lookup` asks one at a time after the chain missed, in this
+file's order. Unpicked, or dropped from a later snapshot, an entry is not in
+the plan, so it is not asked. A pick is never in the tier asked on every
+lookup, never in a title search, and never in a narrowed lookup: nothing
+measured where an entry would earn more, which is the rule `docs/decisions.md`
+sets for a new catalogue.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from types import MappingProxyType
 from typing import Final, Literal
@@ -65,6 +69,7 @@ from sqlalchemy.orm import Session
 
 import isbn
 import settings_store
+import sources
 import targets
 from decoders import Reader
 from enums import CatalogueSource, Disposition, RegisteredCatalogue, SettingKey, Transport
@@ -140,7 +145,8 @@ def _alma(source: RegisteredCatalogue, base_url: str) -> targets.Target:
     return targets.Target(
         source=source,
         # No place in `sources.DEFAULT_ORDER`, so after every seeded row, in this
-        # file's order. Nothing reads it at runtime, as on the seeded rows.
+        # file's order. Nothing reads it at runtime, as on the seeded rows: the
+        # order a pick is asked in is `with_picks`'.
         rank=len(targets.SEEDED) + list(RegisteredCatalogue).index(source),
         transport=Transport.SRU,
         timeout_seconds=3.0,
@@ -263,3 +269,17 @@ def pick(db: Session, which: RegisteredCatalogue) -> None:
 def drop(db: Session, which: RegisteredCatalogue) -> None:
     """Forget a pick. Dropping one never picked does nothing."""
     _store(db, picked(db) - {which})
+
+
+def with_picks(db: Session, plan: sources.Plan) -> sources.Plan:
+    """`plan` with this library's picks at its tail, in `RegisteredCatalogue` order.
+
+    **The one way a pick reaches a scan**, and `catalogue_access` its one
+    caller, so a pick is asked under the same resolved `Access` as every other
+    catalogue and nothing else assembles a plan holding one. What replaces
+    `plan.picked` is read fresh, so dropping an entry stops it being asked on
+    the next request.
+    """
+    chosen = picked(db)
+    asked = tuple(ENTRIES[member].target for member in RegisteredCatalogue if member in chosen)
+    return replace(plan, picked=asked)

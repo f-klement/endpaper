@@ -104,7 +104,10 @@ IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 # answers. Nine of them are asked only about ISBNs in their own registration
 # groups, all `978` groups and no group in two remits. So in the default order a
 # `978` ISBN whose group this build can name reaches eleven at most, while a `979`
-# ISBN, or one whose group it cannot name, can reach all nineteen. Each of the
+# ISBN, or one whose group it cannot name, can reach all nineteen. Either then
+# reaches every catalogue an admin picked from the registry, which a lookup asks
+# last on any ISBN the rest missed, and whose own limits nobody has measured, so
+# this limit is what bounds them. Each of the
 # four Z39.50 catalogues a lookup reaches puts a search again at most twice
 # when the catalogue refuses it as a temporary error, and three of them search a
 # second time, with the ten digit form, when the first search misses, so one of

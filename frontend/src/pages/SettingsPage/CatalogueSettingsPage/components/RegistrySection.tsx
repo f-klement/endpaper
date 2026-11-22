@@ -1,5 +1,6 @@
 import { ErrorState } from "../../../../components";
 import { useTranslation } from "../../../../i18n";
+import { catalogueName } from "../../../../lib/catalogueName";
 import { numericDate } from "../../../../lib/date";
 import { SettingsSection } from "../../../components";
 import ToggleField from "../../components/ToggleField";
@@ -11,8 +12,11 @@ import SourceTest, { DISPOSITION_TEXT } from "./SourceTest";
  *
  * **Each entry shows the evidence it shipped on**, the date it was probed, the
  * ISBN asked and how it answered, so an admin can compare it with a test of
- * their own. A pick records the choice and is not asked on a scan yet, which
- * the hint says, so nobody picks one and wonders why nothing changed.
+ * their own. A pick is asked last on an ISBN lookup, which the hint says.
+ *
+ * **Named by `catalogueName`, not by the entry's `name`**, which is the
+ * registry's English: the book page names a pick's records by the same key, so
+ * both screens agree in every language.
  */
 export default function RegistrySection() {
   const { t, locale } = useTranslation();
@@ -34,28 +38,31 @@ export default function RegistrySection() {
         <ErrorState error={error} fallback={t("settings.couldNotLoad")} />
       )}
       <ul className="space-y-3">
-        {registry?.entries.map((entry) => (
-          <li
-            key={entry.source}
-            className="border-t border-paper-200 pt-3 first:border-0 first:pt-0 dark:border-paper-800"
-          >
-            <ToggleField
-              label={entry.name}
-              hint={t("registry.evidence", {
-                country: entry.country,
-                host: entry.host,
-                date: numericDate(entry.evidence.probed_on, locale),
-                answer: t(DISPOSITION_TEXT[entry.evidence.disposition], {
-                  isbn: entry.evidence.isbn,
-                }),
-              })}
-              checked={entry.picked}
-              disabled={isWorking}
-              onChange={(checked) => setPicked(entry.source, checked)}
-            />
-            <SourceTest source={entry.source} name={entry.name} />
-          </li>
-        ))}
+        {registry?.entries.map((entry) => {
+          const name = t(catalogueName(entry.source));
+          return (
+            <li
+              key={entry.source}
+              className="border-t border-paper-200 pt-3 first:border-0 first:pt-0 dark:border-paper-800"
+            >
+              <ToggleField
+                label={name}
+                hint={t("registry.evidence", {
+                  country: entry.country,
+                  host: entry.host,
+                  date: numericDate(entry.evidence.probed_on, locale),
+                  answer: t(DISPOSITION_TEXT[entry.evidence.disposition], {
+                    isbn: entry.evidence.isbn,
+                  }),
+                })}
+                checked={entry.picked}
+                disabled={isWorking}
+                onChange={(checked) => setPicked(entry.source, checked)}
+              />
+              <SourceTest source={entry.source} name={name} />
+            </li>
+          );
+        })}
       </ul>
     </SettingsSection>
   );

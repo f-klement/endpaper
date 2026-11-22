@@ -357,6 +357,7 @@ CARDINALITIES = {
 NOT_A_ROSTER_COUNT = {
     "METERED": "which sources cost money, not how many there are",
     "NEEDS_A_KEY": "which sources need a credential",
+    "NEEDS_A_LOGIN": "which sources need an institution's login",
     "SHIPS_A_CREDENTIAL": "which sources this build carries a login for",
     "SERVES_GROUPS": "which sources have a registration group remit",
     "TAIL_MARGINAL": "what each tail source answers, keyed on the source",

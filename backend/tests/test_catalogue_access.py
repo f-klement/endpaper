@@ -32,7 +32,7 @@ import registry
 import settings_store
 import sources
 import targets
-from enums import CatalogueSource, Disposition, RegisteredCatalogue
+from enums import CatalogueSource, Disposition, RegisteredCatalogue, SettingKey
 from tests.bindings import SourceNames
 from tests.corpus import application_sources
 from tests.helpers import enable_google_books
@@ -608,10 +608,9 @@ class TestABareCatalogueIsAudible:
     """The credential gap's runtime half, which nothing was invoking.
 
     **This is the half that can actually fire.** The test in
-    `test_settings_store.py` says the two predicates agree on today's roster, which is a
-    fact about the seed table; this says that when they do not agree, or when a key is
-    rotated between the two keychain reads, the request that goes out with no credential
-    says so. Before this arm the warning was at the **stated** rung: deleting its body
+    `test_settings_store.py` says the two loops range over one subject; this says that
+    when a key is rotated between their two keychain reads, the request that goes out
+    with no credential says so. Before this arm the warning was at the **stated** rung: deleting its body
     left nothing red.
 
     `settings_store.catalogue_logins` carries why this is a warning and not a refusal.
@@ -903,3 +902,26 @@ class TestTheSourceTest:
 
     def test_the_default_isbn_is_a_normalised_isbn(self):
         assert isbn.parse(catalogue_access.DEFAULT_TEST_ISBN) == catalogue_access.DEFAULT_TEST_ISBN
+
+
+class TestAPickReachesTheStandingPlanAndNoNarrowedOne:
+    """`registry.with_picks` at its one call site, `_resolved_access`."""
+
+    def test_the_resolved_access_asks_this_librarys_picks(self, db):
+        registry.pick(db, RegisteredCatalogue.CSIC)
+        plan = catalogue_access._resolved_access(db).plan
+        assert plan.picked == (registry.ENTRIES[RegisteredCatalogue.CSIC].target,)
+
+    def test_a_dropped_pick_is_gone_on_the_next_request(self, db):
+        registry.pick(db, RegisteredCatalogue.CSIC)
+        catalogue_access._resolved_access(db)
+        registry.drop(db, RegisteredCatalogue.CSIC)
+        assert catalogue_access._resolved_access(db).plan.picked == ()
+
+    def test_a_narrowed_lookup_asks_no_pick(self, db):
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        registry.pick(db, RegisteredCatalogue.CSIC)
+        enquiry = catalogue_access.Enquiry.for_a_narrowed_lookup(
+            db, member="cataloguer", only=frozenset({CatalogueSource.DNB})
+        )
+        assert enquiry._access.plan.picked == ()

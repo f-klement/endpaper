@@ -336,9 +336,9 @@ class TestACredentialMakesASourceReady:
 
     @pytest.fixture
     def needs_a_credential(self, monkeypatch):
-        """Pretend the BNE declares that it needs a credential."""
-        widened = sources.NEEDS_A_KEY | {CatalogueSource.BNE}
-        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset(widened))
+        """Pretend the BNE declares that it needs a login."""
+        monkeypatch.setattr(sources, "NEEDS_A_KEY", sources.NEEDS_A_KEY | {CatalogueSource.BNE})
+        monkeypatch.setattr(sources, "NEEDS_A_LOGIN", sources.NEEDS_A_LOGIN | {CatalogueSource.BNE})
         return CatalogueSource.BNE
 
     def test_it_is_neither_held_nor_ready_without_one(self, db, needs_a_credential):
@@ -464,7 +464,7 @@ class TestTheKeyIsResolvedOncePerRequest:
     def test_two_sealed_logins_cost_what_one_costs(self, db, key_phrase, monkeypatch):
         """The count is flat in the number of sources, which is the whole fix."""
         self._seal(db, key_phrase, monkeypatch, "dnb")
-        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB}))
+        monkeypatch.setattr(sources, "NEEDS_A_LOGIN", frozenset({CatalogueSource.DNB}))
         tally = self._counted(monkeypatch)
         assert len(settings_store.catalogue_logins(db)) == 1
         one = tally[0]
@@ -478,7 +478,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         )
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_KEY",
+            "NEEDS_A_LOGIN",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         tally[0] = 0
@@ -504,7 +504,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_KEY",
+            "NEEDS_A_LOGIN",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY")
@@ -525,7 +525,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         """
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_KEY",
+            "NEEDS_A_LOGIN",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
@@ -546,7 +546,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_KEY",
+            "NEEDS_A_LOGIN",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         reads: list[str] = []
@@ -1954,83 +1954,67 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
 
 
 class TestThePlanAndTheLoginsAgreeOnWhoNeedsOne:
-    """A source admitted to the plan has a login resolved for it, or goes out bare.
+    """A source admitted to the plan on a held login has a login resolved for it, or goes out bare.
 
-    **Two predicates decide this and nothing made them agree.** `ready_sources`
-    admits a credentialled source through `_sources_with_a_credential`, which asks
-    `credentials.is_held` over `sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW`.
-    `catalogue_logins` resolves a login over `sources.NEEDS_A_KEY` filtered by
-    `metadata.carries_a_credential`. Different subjects, different readers. A source
-    in the first and not the second sits in the plan with no entry in the mapping,
-    and `metadata` asks it with no credential.
+    **One subject, read by both loops.** `ready_sources` admits a login source
+    through `_sources_with_a_credential`, and `catalogue_logins` resolves over
+    `sources_whose_door_carries_a_login`; both range over `sources.NEEDS_A_LOGIN`.
+    A source in the first and not the second sits in the plan with no entry in the
+    mapping, and `metadata` asks it with no credential.
 
-    **They agree on today's roster, on a set of size one, by coincidence.**
-    `carries_a_credential` answers False for every transport but SRU, so the first
-    catalogue that needs a key, keeps its secret sealed rather than in a settings
-    row, and speaks anything else opens the gap. This is the arm that fails on the
-    row that opens it, rather than a member's search going out bare and nothing
-    saying so.
-
-    **Why this is a test and not a refusal at the site.** A raise in
-    `catalogue_logins` would turn a silent unauthenticated request into a 500, on a
-    case that cannot happen today, for a cause the caller cannot fix: `is_held` and
-    `for_request` are two reads of the keychain, so a key rotated between them is a
-    legitimate disagreement. The runtime half is a `logger.warning`, which makes the
-    silent case audible without inventing a new failure.
+    **Asked of the two functions that loop rather than of the set**, with every
+    login held and every request handed one, so a loop that stops reading it, or
+    filters inside itself, is what goes red. That every member's door carries a
+    login is `metadata.resolve`'s refusal, planted in `tests/test_metadata.py` on
+    rows the roster has not got; the runtime half, a key rotated between the two
+    keychain reads, is `catalogue_access`'s warning.
     """
 
-    def _needs_a_login(self) -> set[CatalogueSource]:
-        """What `catalogue_logins` will try to resolve, asked rather than restated."""
-        return set(settings_store.sources_whose_door_carries_a_login())
+    @staticmethod
+    def _gap(db, monkeypatch) -> set[CatalogueSource]:
+        """Admitted on a login and not resolved for, with every login held and handed over."""
+        login = credentials.Credential("https://catalogue.invalid", "alice", "hunter2")
+        monkeypatch.setattr(credentials, "is_held", lambda *_: True)
+        monkeypatch.setattr(credentials, "for_request", lambda *_: login)
+        admitted = settings_store._sources_with_a_credential(db)
+        assert admitted, "nothing is admitted on a login, so this proves nothing"
+        return admitted - set(settings_store.catalogue_logins(db))
 
-    def _admitted_by_a_credential(self) -> set[CatalogueSource]:
-        """What `ready_sources` will admit on a held credential, read off its rule."""
-        return set(sources.NEEDS_A_KEY) - settings_store._SECRET_IS_A_SETTINGS_ROW
-
-    def test_every_source_admitted_on_a_credential_has_one_resolved_for_it(self):
-        gap = sorted(source.value for source in self._admitted_by_a_credential() - self._needs_a_login())
+    def test_every_source_admitted_on_a_login_has_one_resolved_for_it(self, db, monkeypatch):
+        gap = sorted(source.value for source in self._gap(db, monkeypatch))
 
         assert not gap, (
-            f"{gap} reach the plan on a held credential and have no login resolved, "
+            f"{gap} reach the plan on a held login and have no login resolved, "
             "so their requests go out unauthenticated"
         )
 
-    def test_the_two_subjects_are_not_empty(self):
-        """Both sets empty would make the arm above pass on nothing at all."""
-        assert self._needs_a_login()
-        assert self._admitted_by_a_credential()
+    def test_a_resolver_that_drops_a_login_source_is_reported(self, db, monkeypatch):
+        """The diagonal: the resolver's subject narrowed by one, as a filter of its own would."""
+        stranded, *kept = settings_store.sources_whose_door_carries_a_login()
+        monkeypatch.setattr(settings_store, "sources_whose_door_carries_a_login", lambda: kept)
 
-    def test_a_sealed_non_sru_source_is_reported(self, monkeypatch):
-        """The diagonal, and it plants the defect in the predicate rather than the sets.
-
-        **The first version of this asserted that two literal sets subtract**, which
-        passes with the warning deleted, both helpers deleted and the whole production
-        rule gone. Its docstring claimed the rule fires and the rule was never invoked:
-        the covered case, chosen by the person who believed the guard.
-
-        This makes one real change, to the capability predicate `catalogue_logins` reads,
-        and then asks the first arm's own expression what it sees. A source that needs a
-        key and whose door stops carrying a credential is admitted by `ready_sources` and
-        skipped by the login resolver, which is the gap.
-        """
-        import metadata
-
-        admitted = self._admitted_by_a_credential()
-        assert admitted, "nothing is admitted on a credential, so this proves nothing"
-        stranded = min(admitted)
-
-        monkeypatch.setattr(
-            metadata,
-            "carries_a_credential",
-            lambda target: target is not targets.SEEDED[stranded],
+        assert stranded in self._gap(db, monkeypatch), (
+            "the rule no longer notices a source admitted on a login whose request "
+            "has none resolved, which is the whole of what it is for"
         )
 
-        gap = self._admitted_by_a_credential() - self._needs_a_login()
 
-        assert stranded in gap, (
-            "the rule no longer notices a source admitted on a credential whose door "
-            "carries none, which is the whole of what it is for"
-        )
+class TestASourceWhoseCredentialIsAKeyReadsTheRowsItsSecretNames:
+    """`ready_sources` reads a key source's rows off its `Secret`, so a row naming none is refused."""
+
+    def test_a_secret_naming_no_settings_row_is_refused(self, db):
+        with pytest.raises(ValueError, match="names the secret"):
+            settings_store._key_in_force(db, targets.Secret.NONE, None, switched_on=False)
+
+    def test_a_key_under_a_switched_off_section_is_not_ready(self, db, encryption_key):
+        """The switch is read before the key: a stored key alone sends no ISBN to Google."""
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "a-real-key")
+        assert CatalogueSource.GOOGLE_BOOKS not in settings_store.ready_sources(db)
+
+    def test_but_is_still_reported_as_held(self, db, encryption_key):
+        """`source_credentials` asks whether a key exists, which the switch does not change."""
+        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "a-real-key")
+        assert CatalogueSource.GOOGLE_BOOKS in settings_store.source_credentials(db)
 
 
 class TestTheAppsOwnSecretsAreSealedAtRest:

@@ -2379,7 +2379,7 @@ export const en = {
     "Unreachable: no reply in time when asked about ISBN {isbn}.",
   "registry.title": "More catalogues",
   "registry.hint":
-    "National and union catalogues this release ships, each checked answering on the date shown. Picking one records your choice; it is not yet asked when a book is added.",
+    "National and union catalogues this release ships, each checked answering on the date shown. A picked one is asked last: when a book is looked up by its ISBN and no other catalogue answered.",
   "registry.aged":
     "This list was checked on {date} and is due for a recheck, so an entry may no longer answer.",
   "registry.evidence": "{country}, {host}. Checked on {date}: {answer}",
@@ -2402,6 +2402,9 @@ export const en = {
   "providers.name.porbase": "PORBASE",
   "providers.name.oszk": "National Széchényi Library",
   "providers.name.snk": "Slovak National Library",
+  "providers.name.nls": "National Library of Scotland",
+  "providers.name.nli": "National Library of Israel",
+  "providers.name.csic": "CSIC Library Network",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

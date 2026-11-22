@@ -3561,7 +3561,7 @@
         "type": "object"
       },
       "CredentialKind": {
-        "description": "What a catalogue wants before it answers, as a compliance reader names it.\n\n**Two kinds and not one flag**, because a policy is written about them\nseparately: an API key is this deployment's own account at a commercial\nservice, sent in a query string; a login is the institution's account at\nanother library's server. `sources.describe` derives it from\n`targets.Target.needs_key` and `targets.Target.secret`.",
+        "description": "What a catalogue wants before it answers, as a compliance reader names it.\n\n**Two kinds and not one flag**, because a policy is written about them\nseparately: an API key is this deployment's own account at a commercial\nservice, sent in a query string; a login is the institution's account at\nanother library's server. `targets.Target.credential_kind` derives it from\nthe row's `needs_key` and `secret`.",
         "enum": [
           "none",
           "api_key",
@@ -7999,7 +7999,7 @@
         "type": "object"
       },
       "RecordOrigin": {
-        "description": "Where a Book's record came from: a catalogue, a file, an import, or a person.\n\n**A closed set rather than a free string**, so every surface can label each\nvalue and a stored value nobody can name degrades to unknown rather than\narriving on screen untranslated. Every `CatalogueSource` is a member under\nits own value; the rest are the origins that are not a catalogue.\n\n**Where the record came from, never whether it was changed since.** That is\n`books.record_modified_here`, and why the two are two columns is on\n`models.Book`.",
+        "description": "Where a Book's record came from: a catalogue, a file, an import, or a person.\n\n**A closed set rather than a free string**, so every surface can label each\nvalue and a stored value nobody can name degrades to unknown rather than\narriving on screen untranslated. Every `CatalogueSource` is a member under\nits own value, and so is every `RegisteredCatalogue`; the rest are the\norigins that are not a catalogue.\n\n**Closed across a registry refresh because a refresh is a commit.** A new\n`RegisteredCatalogue` member without an origin is refused at import below,\nand the frontend's catalogue name test then refuses a frontend with no\nlabel for it. An entry a later snapshot drops may keep its member here,\nso the books it supplied keep their label; removing it is safe too, since\na stored value nobody names reads as unknown.\n\n**Where the record came from, never whether it was changed since.** That is\n`books.record_modified_here`, and why the two are two columns is on\n`models.Book`.",
         "enum": [
           "open_library",
           "google_books",
@@ -8022,6 +8022,9 @@
           "porbase",
           "oszk",
           "snk",
+          "nls",
+          "nli",
+          "csic",
           "manual",
           "file",
           "csv_import",
@@ -8111,7 +8114,7 @@
         "type": "object"
       },
       "RegisteredCatalogue": {
-        "description": "A catalogue in the curated registry this build ships: `registry.ENTRIES`.\n\n**Closed, and a second enum rather than more `CatalogueSource` members.** A\n`CatalogueSource` is asked by default and has a measured place in\n`sources.DEFAULT_ORDER`; one of these is asked by nobody until an admin\npicks it, and has no measurement to place it by. Folding them would put an\nunmeasured catalogue into every household's roster on upgrade.\n\n**Closed because the registry is vendored**: a member is a reachable host\nthis build ships, so adding one is a diff somebody reads, which is the\nproperty ticket 148 exists for. `registry` refuses at import a member with\nno entry and an entry with no member, and a value one `CatalogueSource`\nalready spells: the test route tries `CatalogueSource` first, so the entry\ncould not be named, and logins and `sources.Plan` key on the same string.",
+        "description": "A catalogue in the curated registry this build ships: `registry.ENTRIES`.\n\n**Closed, and a second enum rather than more `CatalogueSource` members.** A\n`CatalogueSource` is asked by default and has a measured place in\n`sources.DEFAULT_ORDER`; one of these is asked by nobody until an admin\npicks it, and has no measurement to place it by, so a pick is asked only\nafter the whole chain missed: `sources.Plan.picked`. Folding them would put\nan unmeasured catalogue into every household's roster on upgrade.\n\n**Closed because the registry is vendored**: a member is a reachable host\nthis build ships, so adding one is a diff somebody reads, which is the\nproperty ticket 148 exists for. `registry` refuses at import a member with\nno entry and an entry with no member, and a value one `CatalogueSource`\nalready spells: the test route tries `CatalogueSource` first, so the entry\ncould not be named, and logins and `sources.Plan` key on the same string.",
         "enum": [
           "nls",
           "nli",
@@ -20676,7 +20679,7 @@
         ]
       },
       "put": {
-        "description": "Pick one registry catalogue. Picking it again changes nothing.\n\nA pick records the choice and does not yet add the catalogue to the\nlookup order; `registry` says why.",
+        "description": "Pick one registry catalogue. Picking it again changes nothing.\n\nA picked catalogue is asked when a book is added by its ISBN, after every\ncatalogue in the lookup order missed, and never in a title search;\n`registry` says why.",
         "operationId": "pick_registry_catalogue",
         "parameters": [
           {
@@ -20830,7 +20833,7 @@
         ]
       },
       "put": {
-        "description": "Store a login for one catalogue, sealed.\n\n**Any roster source, not only one that declares it needs a credential.** A\nlibrary may hold an account at a catalogue that also answers anonymously,\nand refusing it would be the storage deciding who may have an account\nsomewhere else.\n\n409 when the deployment pinned this source's credential, the same rule and\nthe same reason `_refuse_if_pinned` states for a settings row: a value the\nenvironment supplies wins, so storing a different one produces a screen that\ndisagrees with what the next request actually sends.",
+        "description": "Store a login for one catalogue, sealed.\n\n**Only a source whose credential is a login**, `targets.Target.credential_kind`.\n`settings_store.catalogue_logins` resolves a login for those and no other, so\na login stored for a catalogue that answers anonymously, or for one whose\ncredential is this deployment's key, would be sealed and read by nothing.\n409 names that the source takes none.\n\n409 when the deployment pinned this source's credential, the same rule and\nthe same reason `_refuse_if_pinned` states for a settings row: a value the\nenvironment supplies wins, so storing a different one produces a screen that\ndisagrees with what the next request actually sends.",
         "operationId": "set_source_credential",
         "parameters": [
           {

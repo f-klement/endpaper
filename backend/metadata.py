@@ -79,7 +79,9 @@ from enums import (
     Capability,
     CatalogueSource,
     ClassificationScheme,
+    CredentialKind,
     Disposition,
+    RegisteredCatalogue,
 )
 from isbn import parse as parse_isbn
 from isbn import registration_group
@@ -4298,11 +4300,11 @@ def resolve(target: targets.Target) -> None:
     to know what code exists.
     """
     door = _DOORS[target.transport]
-    if target.needs_key and target.secret is targets.Secret.NONE and not door.carries_a_credential:
+    if target.credential_kind is CredentialKind.LOGIN and not door.carries_a_credential:
         # **The refusal the bespoke path did not have, and it is about the row
         # rather than about either capability**, which is why it is hoisted above
-        # both arms instead of written into one. A row needing a credential, naming
-        # no secret, and going out of a door that carries no login has nothing
+        # both arms instead of written into one. A row whose credential is a
+        # login, going out of a door that carries none, has nothing
         # that can supply one: a sealed login goes out of the SRU door and no
         # other, which `carries_a_credential` states and
         # `tests/test_metadata.py::TestWhichDoorCarriesALogin` measures at the
@@ -4355,13 +4357,14 @@ def carries_a_credential(target: targets.Target) -> bool:
     dropped without a word.
 
     **Public, and asked rather than restated, which is the whole reason it is a
-    function.** `routers/books.py` resolves a login only for the targets this
-    admits, and `tests/test_credentials.py` asks the same question of the roster.
-    Written out at both sites instead, the day a transport starts carrying one
-    would turn the test red and the edit it demands is to the test's own copy,
-    which greens the suite while the router still skips the row and the request
-    still goes out unauthenticated. That is #209 recurring with its own tripwire
-    green.
+    function.** No production code calls it: `resolve` reads the same `_DOORS`
+    column to refuse at boot a row whose credential is a login and whose door
+    carries none, which is what lets `settings_store.catalogue_logins` resolve a
+    login for every source in `sources.NEEDS_A_LOGIN` without filtering on this.
+    Its askers are `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt`,
+    over the roster, and `TestWhichDoorCarriesALogin` below, at the wire. A copy
+    of the rule written into a test instead would be the thing a red test asks
+    to be edited, and would green while the door still dropped the login.
 
     **Measured against the wire rather than stated**, by
     `tests/test_metadata.py::TestWhichDoorCarriesALogin`, which asks every seeded
@@ -4403,11 +4406,11 @@ async def _lookup_one(
 
     **A bespoke target is handed `api_key` and never a sealed login**, because
     that is where its secret lives: Google Books' key is an argument to its own
-    adapter. A row that needed a sealed login on a bespoke transport would be
-    resolved by the router and dropped here. `carries_a_credential` above is that
-    rule as a question anything may ask, and
-    `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is
-    the tripwire that asks it of the roster.
+    adapter. A row whose credential is a login on a bespoke transport never
+    reaches here: `resolve` refuses it at boot. `carries_a_credential` above is
+    that rule as a question a test may ask, and
+    `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt`
+    asks it of the roster.
 
     **Only the source the key belongs to, which is a narrower question than the
     one this used to ask.** `api_key` is Google Books' key, this deployment's
@@ -5850,8 +5853,9 @@ _MAX_ENTRIES: Final = 2_000
 #: chain cached, built from catalogues they had just excluded, and a DNB only record would
 #: be served to every later full lookup with the other catalogues' fields missing.
 #: Neither contacts anything it should not, so a transport assertion passes both; the
-#: answer is still from the wrong catalogues.
-type _CacheKey = tuple[str, tuple[CatalogueSource, ...]]
+#: answer is still from the wrong catalogues. The picks are in it for the same reason:
+#: `sources.Plan.lookup_roster`.
+type _CacheKey = tuple[str, tuple[CatalogueSource | RegisteredCatalogue, ...]]
 
 _cache: dict[_CacheKey, tuple[float, Lookup]] = {}
 _cache_lock = asyncio.Lock()
@@ -5939,7 +5943,7 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
     if isbn is None:
         return Lookup(Outcome.NOT_FOUND, source="")
 
-    key = (isbn, access.plan.lookup_chain)
+    key = (isbn, access.plan.lookup_roster)
     async with _cache_lock:
         hit = _cached(key)
     if hit is not None:
@@ -5975,7 +5979,7 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
     # what `test_a_metered_source_with_a_remit_is_still_not_no_sources` pins.
     # The chain is the thing actually being asked about; `attempts` getting the
     # right answer is a coincidence of two rules that live elsewhere.
-    outcome = Outcome.NO_SOURCES if not access.plan.lookup_chain else _worst(attempts)
+    outcome = Outcome.NO_SOURCES if not access.plan.lookup_roster else _worst(attempts)
     missed = Lookup(outcome, source="", attempts=attempts)
     async with _cache_lock:
         _remember(key, missed)
@@ -6024,7 +6028,7 @@ async def _lookup_together(isbn: str, access: Access, attempts: list[tuple[str, 
     # the search path builds and the one the cache and the log carry.
     found = Lookup(Outcome.FOUND, record=merged, source=merged.source, attempts=attempts)
     async with _cache_lock:
-        _remember((isbn, access.plan.lookup_chain), found)
+        _remember((isbn, access.plan.lookup_roster), found)
     logger.info("Resolved %s from %s", isbn, merged.source)
     return found
 
@@ -6040,14 +6044,12 @@ async def _lookup_in_turn(isbn: str, access: Access, attempts: list[tuple[str, O
     one: it is a round trip that cannot answer, and the tail stops at the first
     hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
     carries the measurement and the bound that keeps it from losing a book.
+
+    **Then the picks**, `sources.Plan.picked`, which is the tail's end.
     """
-    for name in access.plan.lookup_in_turn(registration_group(isbn)):
-        result = await _lookup_one(
-            targets.SEEDED[name],
-            isbn,
-            access.api_key,
-            credential=access.logins.get(name),
-        )
+    for target, login in _in_turn(isbn, access):
+        name = target.source.value
+        result = await _lookup_one(target, isbn, access.api_key, credential=login)
         attempts.append((name, result.outcome))
         if result.found and result.record is not None:
             # Open Library's own record carries a cover URL and Google's
@@ -6057,7 +6059,21 @@ async def _lookup_in_turn(isbn: str, access: Access, attempts: list[tuple[str, O
             record = result.record.with_cover(await covers.resolve(isbn, result.record.cover_url))
             found = Lookup(Outcome.FOUND, record=record, source=name, attempts=attempts)
             async with _cache_lock:
-                _remember((isbn, access.plan.lookup_chain), found)
+                _remember((isbn, access.plan.lookup_roster), found)
             logger.info("Resolved %s from %s", isbn, name)
             return found
     return None
+
+
+def _in_turn(isbn: str, access: Access) -> tuple[tuple[targets.Target, fetch.Credential | None], ...]:
+    """What `_lookup_in_turn` asks, in order, each with the login it carries.
+
+    **A pick carries no login**, whatever `access.logins` holds: the logins are
+    keyed by the seeded roster, and a registry entry needing one is refused at
+    import, so there is nothing a pick could be owed.
+    """
+    seeded = tuple(
+        (targets.SEEDED[name], access.logins.get(name))
+        for name in access.plan.lookup_in_turn(registration_group(isbn))
+    )
+    return seeded + tuple((target, None) for target in access.plan.picked)

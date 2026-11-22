@@ -53,7 +53,7 @@ class RegistryEntryOut(BaseModel):
     #: ISO 3166-1 alpha-2.
     country: str
     kind: Literal["national", "union"]
-    #: The host a test reaches, and a pick would, shown so an admin sees where it goes.
+    #: The host a test and a picked entry's lookup reach, shown so an admin sees where it goes.
     host: str
     picked: bool
     evidence: ProbeEvidenceOut

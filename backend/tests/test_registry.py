@@ -10,6 +10,7 @@ import pytest
 import metadata
 import registry
 import settings_store
+import sources
 import targets
 from enums import CatalogueSource, Disposition, RegisteredCatalogue, SettingKey
 
@@ -116,3 +117,29 @@ class TestPicking:
     def test_a_row_that_holds_no_list_reads_as_nothing_picked(self, db):
         settings_store.set_json(db, SettingKey.PICKED_CATALOGUES, {"picked": "csic"})
         assert registry.picked(db) == frozenset()
+
+
+class TestWithPicks:
+    """What a pick adds to a scan's plan: `registry.with_picks`."""
+
+    def test_nothing_picked_adds_nothing_to_the_plan(self, db):
+        assert registry.with_picks(db, sources.DEFAULT_PLAN) == sources.DEFAULT_PLAN
+
+    def test_the_picks_follow_in_the_registrys_order_whatever_order_they_were_picked_in(self, db):
+        registry.pick(db, RegisteredCatalogue.CSIC)
+        registry.pick(db, RegisteredCatalogue.NLS)
+        plan = registry.with_picks(db, sources.DEFAULT_PLAN)
+        assert plan.picked == (
+            registry.ENTRIES[RegisteredCatalogue.NLS].target,
+            registry.ENTRIES[RegisteredCatalogue.CSIC].target,
+        )
+        assert plan.preferences == sources.DEFAULT_PLAN.preferences
+
+    def test_a_dropped_pick_leaves_the_plan(self, db):
+        registry.pick(db, RegisteredCatalogue.NLS)
+        registry.drop(db, RegisteredCatalogue.NLS)
+        assert registry.with_picks(db, sources.DEFAULT_PLAN).picked == ()
+
+    def test_a_pick_a_later_snapshot_dropped_is_not_asked(self, db):
+        settings_store.set_json(db, SettingKey.PICKED_CATALOGUES, {"picked": ["nlw"]})
+        assert registry.with_picks(db, sources.DEFAULT_PLAN).picked == ()

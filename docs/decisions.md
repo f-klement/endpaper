@@ -12560,22 +12560,24 @@ held one bespoke source whose secret is a settings row.
 
 **The mapping is resolved for the SRU targets and no others**, because the SRU door is what
 passes a credential to `fetch`. A bespoke target's secret is an argument to its own adapter,
-so a login resolved for one would be dropped without a word. That residual cannot be refused
-in `metadata.resolve`, which is where a row naming an unservable capability is turned away at
-boot: which store a source's secret lives in is `settings_store._SECRET_IS_A_SETTINGS_ROW`,
-and the capability that would make it refusable is not built yet. Until then
-`tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is the tripwire.
+so a login resolved for one would be dropped without a word. `metadata.resolve` refuses that
+residual at boot, where a row naming an unservable capability is turned away: which store a
+source's secret lives in is `targets.Target.credential_kind`, and a row whose credential is a
+login going out of a door that carries none is refused.
+`tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` asks the same of
+the roster.
 
-**Which transport carries a login has one spelling, `metadata.carries_a_credential`, and the
-router and the tripwire both ask it.** Written at both sites instead, the day a transport
-starts carrying one turns the tripwire red and the cheap edit is to the test's own copy,
-which greens the suite while the router still skips the row and the request still goes out
-unauthenticated. The predicate is measured against the wire rather than compared with a
+**Which transport carries a login has one spelling, `metadata.carries_a_credential`, a
+column of `metadata._DOORS`.** `metadata.resolve` reads that column for the refusal above,
+and the tripwire and `TestWhichDoorCarriesALogin` ask the predicate; no production code calls
+it. A copy of the rule written into the tripwire instead would be the edit a red tripwire asks
+for, and would green while the door still dropped the login. The predicate is measured against
+the wire rather than compared with a
 second reading of the transport field: `TestWhichDoorCarriesALogin` drives every seeded row
 that answers a lookup through `_lookup_one` holding a login for that row's own origin, and
-asserts the answer matches whether an `Authorization` header left the process. `_lookup_one`
-still spells the transport test at its own branch, deliberately, because calling the
-predicate there would make that test compare the rule with itself.
+asserts the answer matches whether an `Authorization` header left the process. The column is
+a declaration and each door's own `lookup` is the behaviour, so that test compares the two
+rather than the rule with itself.
 
 **The call sites are guarded structurally rather than by one behavioural test each.** Measured
 by mutation: dropping the credential inside `metadata._sru_search` was caught only in
@@ -12774,6 +12776,25 @@ rather than implied: the key lives in the operator's environment, so the operato
 decrypt every credential stored on the instance. That is a property of holding the key, not
 a defect to be fixed by a switch, and a deployment whose tenants cannot accept it should not
 offer the feature.
+
+## A catalogue login is stored only for a source whose credential is a login
+
+Owner's decision, 2026-11-22. `PUT /api/settings/catalogue-sources/{source}/credential`
+answers 409 for a source whose `targets.Target.credential_kind` is not LOGIN, naming that it
+takes none, and the settings screen offers only the sources that take one.
+
+**It reverses the rule the route's docstring stated**: any roster source, because a library
+may hold an account at a catalogue that also answers anonymously. Nothing ever sent such a
+login. `settings_store.catalogue_logins` resolves one for `sources.NEEDS_A_LOGIN` and no other
+source, so a login stored for a free catalogue, or for Google Books, whose credential is this
+deployment's key, was sealed, shown on the screen as held, and read by nothing. Accepting it
+promised an effect the code did not have.
+
+**The delete is unchanged.** A row stored before the refusal, or carried in by an archive, is
+still removable, for the reason `catalogue_credentials` carries no foreign key.
+
+The 409 is undeclared in the schema, like every other 409: `refusals.DECLARED` holds 401, 403
+and 404 only.
 
 ## The importer gets a reader per service, rather than a pre-pass in front of one path
 
@@ -16413,12 +16434,12 @@ collection: `mailer` imports `settings_store`, which would import `metadata`,
 which imports `catalogue`, which imports `schemas.book`, which imports the
 `schemas` package, which imports `schemas.user`, which reads
 `mailer.MAX_ADDRESS` before `mailer` has defined it. Measured 2026-09-17,
-`AttributeError: partially initialized module 'mailer'`. So `metadata` is
-imported inside the two functions that need it at run time and under
-`TYPE_CHECKING` for the annotation, which PEP 649 never evaluates. **What goes
-red if that block is deleted is `mypy`, not the suite**: collection still exits
-0 and the targeted files pass, while `mypy` reports `Name "metadata" is not
-defined`. The rung is tested rather than self enforcing.
+`AttributeError: partially initialized module 'mailer'`. So `settings_store`
+does not import `metadata` at all: which sources a login is resolved for is
+`sources.NEEDS_A_LOGIN`, read off `targets.Target.credential_kind`, and
+`metadata.resolve` refuses at boot a login row whose door carries none, so
+nothing here asks `metadata.carries_a_credential` at run time, and nothing here
+annotates a `metadata` type.
 
 **The Google Books switch is not read on the outbound path any more.**
 `ready_sources` puts Google Books in the plan only when its section is on and a
@@ -16519,19 +16540,14 @@ reachable. `tests/test_catalogue_access.py::TestALocallyRefusedRequestSpendsNoBu
 both routes. The first draft of that test used ten zeroes as its malformed ISBN, which is a
 **valid** ISBN-10, and passed for the wrong reason.
 
-## Two predicates decide whether a credentialled catalogue is asked, and they ask different questions
+## A credentialled catalogue is admitted and resolved over one subject, and a disagreement is logged
 
-`settings_store.ready_sources` admits a credentialled source on `credentials.is_held`, over
-`sources.NEEDS_A_KEY` minus the one source whose secret is a settings row.
-`settings_store.catalogue_logins` resolves a login on `metadata.carries_a_credential`, over
-`sources.NEEDS_A_KEY`. Different subjects, different readers. A source in the first and not
-the second sits in the plan with no entry in the mapping, and every request to it goes out
-with no credential and nothing saying so.
-
-**They agree today on a set of size one, by coincidence**, and `catalogue_logins`' docstring
-carries the measurement. `carries_a_credential` answers False for every transport but SRU, so
-the first catalogue that needs a key, keeps its secret sealed rather than in a settings row,
-and speaks anything else opens the gap.
+`settings_store.ready_sources` admits a source whose credential is a login on
+`credentials.is_held`, and `settings_store.catalogue_logins` resolves its login on
+`credentials.for_request`, both over `sources.NEEDS_A_LOGIN`, which
+`targets.Target.credential_kind` derives. A source in the first and not the second would sit
+in the plan with no entry in the mapping, and every request to it would go out with no
+credential and nothing saying so.
 
 **Logged rather than refused, and the refusal of the refusal is the decision.** A raise would
 turn a silent unauthenticated request into a 500, on a case that cannot happen today, for a
@@ -16540,7 +16556,9 @@ key rotated between them is a legitimate disagreement. The runtime half is
 `catalogue_access._warn_about_any_source_asked_with_no_login`, which makes the silent case
 audible, and it reads the resolved value rather than either predicate. The test half is
 `tests/test_settings_store.py::TestThePlanAndTheLoginsAgreeOnWhoNeedsOne`, which fails on the
-row that opens the gap rather than on the search that goes out bare.
+row that opens the gap rather than on the search that goes out bare. It asks
+`catalogue_logins` itself with `credentials.for_request` stubbed, so a filter written inside
+that loop is red there too.
 
 ## One matcher serves both catalogue door rules, with a receiver exemption
 
@@ -19938,7 +19956,7 @@ reader keyed table carrying a credential slot is wrong now.
 `metadata.carries_a_credential`, which is a claim about the effect of a branch and is measured
 against whether an `Authorization` header left the process. A second spelling on the row would be
 checked only against the first, and the measurement is the whole reason that function exists
-rather than being written out at its call sites.
+rather than being written out where it is read.
 
 **The two tables are the enforcement, not a check.** `_FREE_LOOKUPS` values take an ISBN and
 `_KEYED_LOOKUPS` values take an ISBN and a key, so the free door has no parameter a secret could
@@ -27957,8 +27975,20 @@ later than every probe would hide an old one. The snapshot is checked again at e
 
 **A pick is a `RegisteredCatalogue` name in `SettingKey.PICKED_CATALOGUES`, never a
 `catalogue_targets` row**, so no table holds a picked address and the roster table stays a
-copy of the seeded targets. **A picked entry is not asked on a scan until ticket 820** (owner,
-2026-11-22): this release lists, picks and tests, and the lookup chain does not read a pick.
+copy of the seeded targets.
+
+**A picked entry is asked at the tail of an ISBN lookup, lookup only** (owner, 2026-11-22):
+after the seeded chain missed, in `RegisteredCatalogue` order, never in the leading tier,
+a title search or a narrowed lookup, and with no login. That is the place a new catalogue gets:
+nothing measured where an entry would earn more, so it costs a request only on a book the chain
+could not find. Its own rate limits are unmeasured; `METADATA_LIMIT`, per member, is what bounds
+the requests it takes. The plan carries a pick as the snapshot's own `targets.Target`, filled at
+the one place an `Access` is built, because `metadata` reaches no database. A library whose only
+catalogue is a pick has something to ask: a lookup misses as not found rather than "nothing
+switched on", and enrichment is not refused up front. `RecordOrigin` holds every
+`RegisteredCatalogue` and the frontend names each, so a registry refresh that adds an entry is
+refused at import and by the frontend's catalogue name test until both exist; the type check does
+not refuse it, since the name's key is built from a template.
 
 The National Library of Wales was a candidate; on 2026-11-22 no Alma host gave a record of it
 to probe with, so it is not listed.

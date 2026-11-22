@@ -2097,7 +2097,7 @@ export const de: Messages = {
     "Nicht erreichbar: Auf die Frage nach der ISBN {isbn} kam keine Antwort in der Zeit.",
   "registry.title": "Weitere Kataloge",
   "registry.hint":
-    "Nationalkataloge und Verbundkataloge, die diese Version mitliefert, jeder am angegebenen Datum als antwortend geprüft. Eine Auswahl wird gespeichert; beim Hinzufügen eines Buchs wird der Katalog noch nicht gefragt.",
+    "Nationalkataloge und Verbundkataloge, die diese Version mitliefert, jeder am angegebenen Datum als antwortend geprüft. Ein ausgewählter Katalog wird zuletzt gefragt: wenn ein Buch über seine ISBN gesucht wird und kein anderer Katalog geantwortet hat.",
   "registry.aged":
     "Diese Liste wurde am {date} geprüft und muss neu geprüft werden; ein Eintrag antwortet womöglich nicht mehr.",
   "registry.evidence": "{country}, {host}. Geprüft am {date}: {answer}",
@@ -2120,6 +2120,9 @@ export const de: Messages = {
   "providers.name.porbase": "PORBASE",
   "providers.name.oszk": "Ungarische Nationalbibliothek",
   "providers.name.snk": "Slowakische Nationalbibliothek",
+  "providers.name.nls": "Schottische Nationalbibliothek",
+  "providers.name.nli": "Israelische Nationalbibliothek",
+  "providers.name.csic": "Bibliotheksnetz des CSIC",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":

@@ -257,7 +257,7 @@ listed.
 | Domain | [`pending_headings.py`](../backend/pending_headings.py) | A harvest's headings, held on the Book until an admin confirms or discards them. |
 | Domain | [`reading.py`](../backend/reading.py) | One Member's reading of the Books in this Library, and the only place a `user_books` row is read or written. |
 | Domain | [`recognition.py`](../backend/recognition.py) | Which existing Book a record is, as one Member sees it. |
-| Domain | [`registry.py`](../backend/registry.py) | The curated catalogue registry this build ships, and what picking an entry writes. |
+| Domain | [`registry.py`](../backend/registry.py) | The curated catalogue registry this build ships, what picking an entry writes, and the picks a lookup plan asks at its tail. |
 | Domain | [`shelf.py`](../backend/shelf.py) | Every query that returns or counts many Books, and the only place the privacy predicate is applied. |
 | Domain | [`shelving.py`](../backend/shelving.py) | Which named parts of the shelf one Member may be told exist, and which they may file a Book into. |
 | Domain | [`tags.py`](../backend/tags.py) | Deciding a tag from a name, how many one Book may carry, and who may be told one exists. |
@@ -534,8 +534,18 @@ newest probe. Nothing in it opens a connection: the snapshot changes by a commit
 
 **A pick is a name, never an address.** `registry.pick` writes `RegisteredCatalogue` values
 into one settings row, `SettingKey.PICKED_CATALOGUES`, and wherever a picked entry is reached
-its target is read from `ENTRIES`. No `catalogue_targets` row holds an entry. A picked entry
-is listed as chosen and tested, and is not yet asked when a book is scanned.
+its target is read from `ENTRIES`. No `catalogue_targets` row holds an entry.
+
+**A pick is asked at the tail of a lookup, and nowhere else.** `catalogue_access` builds the
+request's plan and `registry.with_picks` puts the picked entries' targets in
+`sources.Plan.picked`; `metadata.lookup` asks them one at a time after every seeded source in
+`lookup_in_turn` missed. A pick is never in the leading tier, a title search or a narrowed
+lookup, and carries no login. `Plan.lookup_roster`, the chain and then the picks, is the
+lookup cache's key and the roster whose emptiness is `NO_SOURCES`. A record a pick supplies
+carries its `RecordOrigin`, since every `RegisteredCatalogue` is one, and the frontend names
+it under the same `providers.name.` key as a seeded source, so a new entry is refused by the
+import check and by the frontend's catalogue name test until both exist. The client's type check
+does not refuse it: `catalogueName` builds its key from a template.
 
 The admin's **test** action asks one source, seeded or from the registry, and returns how it
 answered and never what it said:

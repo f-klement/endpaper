@@ -9,7 +9,7 @@ union types like `"unread" | "reading" | "read"` instead of `string`.
 
 import logging
 from enum import StrEnum
-from typing import overload
+from typing import Final, overload
 
 from logvalues import clipped
 
@@ -1169,8 +1169,9 @@ class RegisteredCatalogue(StrEnum):
     **Closed, and a second enum rather than more `CatalogueSource` members.** A
     `CatalogueSource` is asked by default and has a measured place in
     `sources.DEFAULT_ORDER`; one of these is asked by nobody until an admin
-    picks it, and has no measurement to place it by. Folding them would put an
-    unmeasured catalogue into every household's roster on upgrade.
+    picks it, and has no measurement to place it by, so a pick is asked only
+    after the whole chain missed: `sources.Plan.picked`. Folding them would put
+    an unmeasured catalogue into every household's roster on upgrade.
 
     **Closed because the registry is vendored**: a member is a reachable host
     this build ships, so adding one is a diff somebody reads, which is the
@@ -1220,7 +1221,15 @@ class RecordOrigin(StrEnum):
     **A closed set rather than a free string**, so every surface can label each
     value and a stored value nobody can name degrades to unknown rather than
     arriving on screen untranslated. Every `CatalogueSource` is a member under
-    its own value; the rest are the origins that are not a catalogue.
+    its own value, and so is every `RegisteredCatalogue`; the rest are the
+    origins that are not a catalogue.
+
+    **Closed across a registry refresh because a refresh is a commit.** A new
+    `RegisteredCatalogue` member without an origin is refused at import below,
+    and the frontend's catalogue name test then refuses a frontend with no
+    label for it. An entry a later snapshot drops may keep its member here,
+    so the books it supplied keep their label; removing it is safe too, since
+    a stored value nobody names reads as unknown.
 
     **Where the record came from, never whether it was changed since.** That is
     `books.record_modified_here`, and why the two are two columns is on
@@ -1248,6 +1257,10 @@ class RecordOrigin(StrEnum):
     PORBASE = "porbase"
     OSZK = "oszk"
     SNK = "snk"
+    #: The registry's entries, `RegisteredCatalogue`, asked on a scan once picked.
+    NLS = "nls"
+    NLI = "nli"
+    CSIC = "csic"
     #: Typed by a member, or sent by a client that named no other origin.
     MANUAL = "manual"
     #: Read off the book's own file, or its name, on the scan page.
@@ -1271,18 +1284,26 @@ class RecordOrigin(StrEnum):
 
         A name rather than a `CatalogueSource`, because `catalogue.Record.leading`
         is a string: a record a test or a file reader labels `marc` is no
-        catalogue's, and answers None rather than raising.
+        catalogue's, and answers None rather than raising. A picked registry
+        entry is a catalogue: without it, a book a pick supplied would read as
+        having no origin, and a refresh from one would flag the book as changed
+        here rather than say where the record came from.
         """
-        return cls(name) if name in set(CatalogueSource) else None
+        return cls(name) if name in _CATALOGUES else None
 
+
+#: Every name a catalogue's record can lead with: the roster and the registry.
+_CATALOGUES: Final[frozenset[str]] = frozenset(map(str, CatalogueSource)) | frozenset(
+    map(str, RegisteredCatalogue)
+)
 
 #: Refused at import, for `book_columns._MISFILED`'s reason: a catalogue added to
-#: the roster without an origin of its own would answer a lookup whose record
-#: then reads as coming from nowhere.
-_SOURCES_WITHOUT_AN_ORIGIN = set(map(str, CatalogueSource)) - set(map(str, RecordOrigin))
+#: the roster or the registry without an origin of its own would answer a lookup
+#: whose record then reads as coming from nowhere.
+_SOURCES_WITHOUT_AN_ORIGIN = _CATALOGUES - set(map(str, RecordOrigin))
 if _SOURCES_WITHOUT_AN_ORIGIN:
     raise RuntimeError(
-        "Every CatalogueSource is a RecordOrigin under the same value, and these "
+        "Every CatalogueSource and RegisteredCatalogue is a RecordOrigin under the same value, and these "
         f"are not: {sorted(_SOURCES_WITHOUT_AN_ORIGIN)}. Add each to RecordOrigin."
     )
 
@@ -1472,8 +1493,8 @@ class CredentialKind(StrEnum):
     **Two kinds and not one flag**, because a policy is written about them
     separately: an API key is this deployment's own account at a commercial
     service, sent in a query string; a login is the institution's account at
-    another library's server. `sources.describe` derives it from
-    `targets.Target.needs_key` and `targets.Target.secret`.
+    another library's server. `targets.Target.credential_kind` derives it from
+    the row's `needs_key` and `secret`.
     """
 
     #: Answers anybody.

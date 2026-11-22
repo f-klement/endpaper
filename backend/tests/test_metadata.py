@@ -9189,16 +9189,13 @@ class TestOnlyTheKeysOwnerIsHandedIt:
 class TestWhichDoorCarriesALogin:
     """`metadata.carries_a_credential` measured against the wire, row by row.
 
-    **The rule is asked wherever it is needed and spelled in a single place.**
-    `routers/books.py` resolves a login only for the rows it admits,
-    `test_credentials.py` asks it of the roster, and `_lookup_one` is the branch
-    it describes. Spelled out at each site instead, the day a transport starts
-    carrying a login the tripwire goes red and the edit it demands is to the
-    tripwire's own copy, which greens the suite while the router still skips the
-    row.
+    **The rule is spelled in a single place, a column of `metadata._DOORS`.**
+    `metadata.resolve` reads it at boot and `test_credentials.py` asks it of the
+    roster. A copy written into the tripwire instead would be the edit a red
+    tripwire asks for, and would green while the door still dropped the login.
 
-    **So the rule is not compared with the branch, which would be the same
-    comparison written again.** Every seeded row that answers a lookup is asked through
+    **So the column, a declaration, is compared with each door's behaviour
+    rather than read again.** Every seeded row that answers a lookup is asked through
     `_lookup_one` holding a login for its own origin, and the verdict is whether
     an `Authorization` header actually left the process. That is a different
     instrument from reading the transport field, and it is the one that would
@@ -10439,3 +10436,104 @@ class TestProbeAtTheOtherDoors:
         with respx.mock(assert_all_called=True) as mock:
             mock.get(url__startswith=target.base_url).mock(side_effect=[reply])
             assert await metadata.probe(target, self.ISBN, access=access()) is disposition
+
+
+class TestAPickedEntryIsAskedAtTheTail:
+    """`sources.Plan.picked` through `metadata.lookup`: after every seeded source, and only then."""
+
+    NLS = registry.ENTRIES[RegisteredCatalogue.NLS].target
+    #: English, so outside every remit and the whole seeded tail is asked.
+    ISBN = "9780306406157"
+
+    @staticmethod
+    def _asking(monkeypatch: pytest.MonkeyPatch, holder: str) -> list[tuple[str, Any]]:
+        """Stand one door in front of every catalogue, where only `holder` has the book.
+
+        Returns what was asked, in order, with the login each request carried.
+        """
+        asked: list[tuple[str, Any]] = []
+
+        async def door(target: Any, isbn: str, api_key: str, *, credential: Any = None) -> metadata.Lookup:
+            name = target.source.value
+            asked.append((name, credential))
+            if name != holder:
+                return metadata.Lookup(metadata.Outcome.NOT_FOUND)
+            record = Record(source=name, isbn=isbn, title="Held here")
+            return metadata.Lookup(metadata.Outcome.FOUND, record=record, source=name)
+
+        async def no_cover(
+            raw_isbn: str, supplied: str | None = None, deadline: float | None = None
+        ) -> str | None:
+            return None
+
+        monkeypatch.setattr(metadata, "_lookup_one", door)
+        monkeypatch.setattr(covers, "resolve", no_cover)
+        metadata.clear_cache()
+        return asked
+
+    def _picked(self, plan: sources.Plan = ALL_SOURCES) -> sources.Plan:
+        return dataclasses.replace(plan, picked=(self.NLS,))
+
+    async def test_a_pick_answers_once_every_seeded_source_missed(self, monkeypatch):
+        asked = self._asking(monkeypatch, "nls")
+        plan = self._picked()
+        result = await metadata.lookup(self.ISBN, access=access(plan))
+
+        assert result.outcome is metadata.Outcome.FOUND
+        assert result.source == "nls"
+        seeded = (*plan.lookup_together, *plan.lookup_in_turn(registration_group(self.ISBN)))
+        assert [name for name, _ in asked] == [*seeded, "nls"]
+
+    async def test_a_pick_is_not_asked_when_a_seeded_source_answers(self, monkeypatch):
+        asked = self._asking(monkeypatch, ALL_SOURCES.lookup_in_turn(registration_group(self.ISBN))[-1])
+        result = await metadata.lookup(self.ISBN, access=access(self._picked()))
+
+        assert result.outcome is metadata.Outcome.FOUND
+        assert "nls" not in [name for name, _ in asked]
+
+    async def test_a_pick_carries_no_login(self, monkeypatch):
+        asked = self._asking(monkeypatch, "nls")
+        login = credentials.Credential(credentials.origin_of(self.NLS.base_url), "alice", "hunter2")
+        logins = dict.fromkeys(sources.LOOKUP_SOURCES, login)
+        await metadata.lookup(self.ISBN, access=access(self._picked(), logins=logins))
+
+        assert asked[-1] == ("nls", None)
+
+    async def test_a_library_asking_only_a_pick_misses_as_not_found(self, monkeypatch):
+        # NO_SOURCES tells an admin to switch a catalogue back on, and this
+        # library has one to ask.
+        asked = self._asking(monkeypatch, "nobody")
+        plan = self._picked(sources.in_force(ALL_SOURCES, frozenset()))
+        result = await metadata.lookup(self.ISBN, access=access(plan))
+
+        assert result.outcome is metadata.Outcome.NOT_FOUND
+        assert asked == [("nls", None)]
+
+    async def test_a_miss_cached_before_a_pick_does_not_answer_after_it(self, monkeypatch):
+        self._asking(monkeypatch, "nls")
+        before = await metadata.lookup(self.ISBN, access=access(ALL_SOURCES))
+        after = await metadata.lookup(self.ISBN, access=access(self._picked()))
+
+        assert before.outcome is metadata.Outcome.NOT_FOUND
+        assert after.outcome is metadata.Outcome.FOUND
+
+    @pytest.mark.parametrize(
+        ("held", "outcome"),
+        [("9783701716678", metadata.Outcome.NOT_FOUND), (ISBN, metadata.Outcome.FOUND)],
+        ids=["another-isbn-is-refused", "this-isbn-is-found"],
+    )
+    async def test_a_pick_is_held_to_the_isbn_it_was_asked(self, held, outcome):
+        """Through the real SRU door: a pick's record naming another ISBN is a miss.
+
+        The found arm shows the reply is read at all, so the miss is the identity check's.
+        """
+        plan = self._picked(sources.in_force(ALL_SOURCES, frozenset()))
+        reply = _oenb_envelope(_marc_record(isbn=held))
+        with respx.mock(assert_all_called=False) as mock:
+            silence_covers(mock)
+            route = mock.get(url__startswith=self.NLS.base_url).mock(return_value=_xml(reply))
+            result = await metadata.lookup(self.ISBN, access=access(plan))
+
+        assert route.called
+        assert result.outcome is outcome
+        assert ("nls", outcome) in result.attempts

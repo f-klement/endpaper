@@ -7,6 +7,7 @@ cares about, because the failure is silent in exactly one direction.
 """
 
 import contextlib
+import dataclasses
 import functools
 import itertools
 import json
@@ -15,9 +16,10 @@ from pathlib import Path
 
 import pytest
 
+import registry
 import sources
 import targets
-from enums import CatalogueSource, ClassificationScheme, CredentialKind, Transport
+from enums import CatalogueSource, ClassificationScheme, CredentialKind, RegisteredCatalogue, Transport
 from isbn import registration_group
 
 #: The survey `sources.MEASURED` and `sources.TIER_UNION` were read off.
@@ -1976,3 +1978,44 @@ class TestARowSaysHowItsCatalogueIsAsked:
 
     def test_the_dnb_supplies_gnd(self):
         assert ClassificationScheme.GND in self._described()[CatalogueSource.DNB].classification_schemes
+
+
+class TestAPickIsAskedOnlyAtTheTailOfALookup:
+    """`Plan.picked`: after the whole chain, and on no other path."""
+
+    PICKED = (registry.ENTRIES[RegisteredCatalogue.NLS].target,)
+
+    def _plan(self) -> sources.Plan:
+        return dataclasses.replace(sources.DEFAULT_PLAN, picked=self.PICKED)
+
+    def test_the_lookup_roster_is_the_chain_then_the_picks(self):
+        plan = self._plan()
+        assert plan.lookup_roster == (*sources.DEFAULT_PLAN.lookup_chain, RegisteredCatalogue.NLS)
+
+    def test_a_pick_is_in_no_seeded_roster(self):
+        plan = self._plan()
+        seeded = (
+            plan.asked,
+            plan.lookup_chain,
+            plan.lookup_together,
+            plan.lookup_in_turn(None),
+            plan.searched_harder,
+        )
+        assert seeded == (
+            sources.DEFAULT_PLAN.asked,
+            sources.DEFAULT_PLAN.lookup_chain,
+            sources.DEFAULT_PLAN.lookup_together,
+            sources.DEFAULT_PLAN.lookup_in_turn(None),
+            sources.DEFAULT_PLAN.searched_harder,
+        )
+
+    def test_a_pick_alone_is_still_a_roster(self):
+        everything_off = sources.in_force(sources.DEFAULT_PLAN, frozenset())
+        plan = dataclasses.replace(everything_off, picked=self.PICKED)
+        assert plan.lookup_chain == ()
+        assert plan.lookup_roster == (RegisteredCatalogue.NLS,)
+
+    def test_narrowing_a_plan_drops_its_picks(self):
+        # A narrowed lookup goes through `in_force` and asks only what it names.
+        narrowed = sources.in_force(self._plan(), frozenset({CatalogueSource.DNB}))
+        assert narrowed.picked == ()

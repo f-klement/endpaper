@@ -26,6 +26,7 @@ import {
   OwnershipStatus,
   ReadStatus,
   RecordOrigin,
+  RegisteredCatalogue,
   TagCategory,
 } from "../api/generated/model";
 import type {
@@ -219,18 +220,19 @@ export const OWNERSHIP_LABELS: Record<OwnershipStatus, MessageKey> = {
  * public page alike.
  *
  * **A catalogue is named by `catalogueName`, never by a second key**: every
- * `CatalogueSource` is a `RecordOrigin` under the same value, and the settings
- * list already names each, so a copy here would be the one that drifts. The
+ * `CatalogueSource` and every `RegisteredCatalogue` is a `RecordOrigin` under
+ * the same value, and the settings list already names each, so a copy here
+ * would be the one that drifts. The
  * origins that are not a catalogue have keys of their own. `Record<...>` for
  * `FORMAT_LABELS`' reason: an origin added to the backend is a compile error.
  */
 export const ORIGIN_LABELS: Record<RecordOrigin, MessageKey> = {
   ...(Object.fromEntries(
-    Object.values(CatalogueSource).map((source) => [
-      source,
-      catalogueName(source),
-    ]),
-  ) as Record<CatalogueSource, MessageKey>),
+    [
+      ...Object.values(CatalogueSource),
+      ...Object.values(RegisteredCatalogue),
+    ].map((source) => [source, catalogueName(source)]),
+  ) as Record<CatalogueSource | RegisteredCatalogue, MessageKey>),
   [RecordOrigin.manual]: "origin.manual",
   [RecordOrigin.file]: "origin.file",
   [RecordOrigin.csv_import]: "origin.csv_import",

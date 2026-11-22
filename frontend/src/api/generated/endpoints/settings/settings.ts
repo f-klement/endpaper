@@ -622,8 +622,9 @@ export const getPickRegistryCatalogueUrl = (source: string) => {
 /**
  * Pick one registry catalogue. Picking it again changes nothing.
  *
- * A pick records the choice and does not yet add the catalogue to the
- * lookup order; `registry` says why.
+ * A picked catalogue is asked when a book is added by its ISBN, after every
+ * catalogue in the lookup order missed, and never in a title search;
+ * `registry` says why.
  * @summary Pick Registry Catalogue
  */
 export const pickRegistryCatalogue = async (
@@ -690,8 +691,9 @@ export type PickRegistryCatalogueMutationVariables = { source: string };
 /**
  * Pick one registry catalogue. Picking it again changes nothing.
  *
- * A pick records the choice and does not yet add the catalogue to the
- * lookup order; `registry` says why.
+ * A picked catalogue is asked when a book is added by its ISBN, after every
+ * catalogue in the lookup order missed, and never in a title search;
+ * `registry` says why.
  * @summary Pick Registry Catalogue
  */
 export const usePickRegistryCatalogue = <
@@ -877,10 +879,11 @@ export const getSetSourceCredentialUrl = (source: string) => {
 /**
  * Store a login for one catalogue, sealed.
  *
- * **Any roster source, not only one that declares it needs a credential.** A
- * library may hold an account at a catalogue that also answers anonymously,
- * and refusing it would be the storage deciding who may have an account
- * somewhere else.
+ * **Only a source whose credential is a login**, `targets.Target.credential_kind`.
+ * `settings_store.catalogue_logins` resolves a login for those and no other, so
+ * a login stored for a catalogue that answers anonymously, or for one whose
+ * credential is this deployment's key, would be sealed and read by nothing.
+ * 409 names that the source takes none.
  *
  * 409 when the deployment pinned this source's credential, the same rule and
  * the same reason `_refuse_if_pinned` states for a settings row: a value the
@@ -958,10 +961,11 @@ export type SetSourceCredentialMutationVariables = {
 /**
  * Store a login for one catalogue, sealed.
  *
- * **Any roster source, not only one that declares it needs a credential.** A
- * library may hold an account at a catalogue that also answers anonymously,
- * and refusing it would be the storage deciding who may have an account
- * somewhere else.
+ * **Only a source whose credential is a login**, `targets.Target.credential_kind`.
+ * `settings_store.catalogue_logins` resolves a login for those and no other, so
+ * a login stored for a catalogue that answers anonymously, or for one whose
+ * credential is this deployment's key, would be sealed and read by nothing.
+ * 409 names that the source takes none.
  *
  * 409 when the deployment pinned this source's credential, the same rule and
  * the same reason `_refuse_if_pinned` states for a settings row: a value the

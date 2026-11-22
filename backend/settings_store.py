@@ -25,7 +25,7 @@ conjunction that must not be spelled twice.
 import json
 import logging
 import secrets
-from typing import Any, Final
+from typing import Any, Final, assert_never
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -34,13 +34,13 @@ import config
 import credentials
 import sources
 import targets
-from enums import CatalogueSource, Locale, SettingKey
+from enums import CatalogueSource, CredentialKind, Locale, SettingKey
 from models import Setting, datestamp_now
 
 logger = logging.getLogger(__name__)
 
-#: **`metadata` is imported inside each function that needs it, never at module
-#: level.** A module level import is a cycle: the chain measured on 2026-09-17 is
+#: **`metadata` is not imported here, and a module level import of it is a
+#: cycle**: the chain measured on 2026-09-17 is
 #: `mailer` -> this module -> `metadata` -> `catalogue` -> `schemas.book` ->
 #: `schemas` -> `schemas.user` -> `mailer`, which reaches `mailer.MAX_ADDRESS`
 #: before `mailer` has defined it and fails at collection with an
@@ -504,41 +504,17 @@ def google_books_api_key(db: Session, state: credentials.KeyState | None = None)
     return in_force_if_readable(db, SettingKey.GOOGLE_BOOKS_API_KEY, state)
 
 
-#: The sources whose credential is a **settings row** rather than a sealed login.
-#:
-#: **One member, named here rather than spelled inline**, and the distinction it
-#: draws is the one `credentials.py` opens with: Google Books' credential is an
-#: API key in a query string, this deployment's own, held in `settings`. Every
-#: other source that needs one needs a login at somebody else's server, held
-#: sealed in `catalogue_credentials`. Two kinds of secret, and this is where the
-#: routing between them lives.
-#:
-#: **A set is not the right shape and this is not the fix.** Which store a
-#: source's secret uses is a property of the source, so it belongs beside
-#: `Capability.NEEDS_A_CREDENTIAL` as a second capability, read through
-#: `Target.can` like every other. That is an enum member, a column on
-#: `models.CatalogueTarget`, a value on every seeded row, a line in the seeder
-#: and a migration, which is more than this ticket may take for a rule with one
-#: member. #210 carries this paragraph. Until then the
-#: exception is named and in one place, which is what stops it being a
-#: condition somebody has to notice inside a comprehension.
-_SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_BOOKS})
-
-
 def _sources_with_a_credential(
     db: Session, state: credentials.KeyState | None = None
 ) -> set[CatalogueSource]:
-    """Which credential-needing sources hold a readable login, from any level.
+    """Which sources whose credential is a login hold a readable one, from any level.
 
-    **Two sources today, and that is a fact about the roster rather than about
-    this function.** It was empty while `sources.NEEDS_A_KEY` was Google Books
-    alone, whose secret is a settings row; the Argentine and Uruguayan national
-    libraries are the two members whose secret is not one, so the loop runs
-    twice and the key is resolved on every call that reaches here. It was written
-    for the set rather than for the member, which is why that cost the roster
-    nothing to arrive at.
-    `tests/test_settings_store.py` exercises it against a roster with a second
-    such source in it.
+    **Over `sources.NEEDS_A_LOGIN`, the subject `catalogue_logins` resolves for**,
+    so a source this admits to the plan is one whose login is resolved for its
+    request. The store is read off the row by `targets.Target.credential_kind`;
+    a source whose secret is a settings row is `_sources_with_a_key`'s.
+    Written for the set rather than for its members, so a login source arriving
+    on the roster costs this nothing.
 
     **Not "holds a sealed row", which is what this used to say.** `is_held` asks
     the whole ladder, so a source whose login this build ships answers true with
@@ -552,14 +528,51 @@ def _sources_with_a_credential(
     The key is resolved once for the whole loop rather than per source: see
     `credentials.KeyState`.
     """
-    sealed = sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW
-    if not sealed:
+    if not sources.NEEDS_A_LOGIN:
         return set()
     resolved = _resolved(state)
     return {
         source
-        for source in sealed
+        for source in sources.NEEDS_A_LOGIN
         if credentials.is_held(db, source.value, targets.SEEDED[source].base_url, resolved)
+    }
+
+
+def _key_in_force(
+    db: Session, secret: targets.Secret, state: credentials.KeyState | None, *, switched_on: bool
+) -> bool:
+    """Whether the settings row key `secret` names is readable, and its section switched on if asked.
+
+    **A `match` with an `assert_never` tail, as `metadata._bespoke_lookup` has**,
+    so a second `Secret` member is a mypy error here as well as there. Naming
+    Google Books in `ready_sources` instead let a second key source type check
+    and never be ready. Each arm names its keys literally, so
+    `TestAnOverriddenSettingIsReadWhereItIsPinned` can read them. A row whose
+    credential is a key names a secret, by `targets.Target.credential_kind`, so
+    `Secret.NONE` is refused.
+
+    `switched_on` is `ready_sources`' question and not `source_credentials`'.
+    The switch is read first, so a source switched off resolves no key.
+    """
+    match secret:
+        case targets.Secret.GOOGLE_BOOKS_KEY:
+            if switched_on and not get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED):
+                return False
+            return bool(google_books_api_key(db, state))
+        case targets.Secret.NONE:
+            raise ValueError("a source whose credential is a key names the secret it reads")
+    assert_never(secret)
+
+
+def _sources_with_a_key(
+    db: Session, state: credentials.KeyState | None, *, switched_on: bool
+) -> set[CatalogueSource]:
+    """Which sources whose credential is a settings row key hold a readable one. See `_key_in_force`."""
+    return {
+        source
+        for source in sources.NEEDS_A_KEY
+        if targets.SEEDED[source].credential_kind is CredentialKind.API_KEY
+        and _key_in_force(db, targets.SEEDED[source].secret, state, switched_on=switched_on)
     }
 
 
@@ -578,9 +591,7 @@ def source_credentials(db: Session) -> frozenset[CatalogueSource]:
     many levels there are.
     """
     held = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
-    if google_books_api_key(db):
-        held.add(CatalogueSource.GOOGLE_BOOKS)
-    return frozenset(held | _sources_with_a_credential(db))
+    return frozenset(held | _sources_with_a_key(db, None, switched_on=False) | _sources_with_a_credential(db))
 
 
 def ready_sources(db: Session, state: credentials.KeyState | None = None) -> frozenset[CatalogueSource]:
@@ -592,9 +603,9 @@ def ready_sources(db: Session, state: credentials.KeyState | None = None) -> fro
     anyway is what sent an ISBN to a third party with the feature switched off.
     """
     ready = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
-    if get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) and google_books_api_key(db, state):
-        ready.add(CatalogueSource.GOOGLE_BOOKS)
-    return frozenset(ready | _sources_with_a_credential(db, state))
+    return frozenset(
+        ready | _sources_with_a_key(db, state, switched_on=True) | _sources_with_a_credential(db, state)
+    )
 
 
 def stored_catalogue_sources(db: Session) -> sources.Plan:
@@ -641,24 +652,24 @@ def catalogue_sources(db: Session, state: credentials.KeyState | None = None) ->
 def sources_whose_door_carries_a_login() -> list[CatalogueSource]:
     """Which catalogues a login is resolved for, in a stable order.
 
-    **One home for the predicate, because two readers of it disagreeing silently is the
-    gap `catalogue_logins` describes.** That function resolves the logins and
-    `catalogue_access._warn_about_any_source_asked_with_no_login` checks the plan against
-    them; when each spelled this itself, widening one left the other behind in the miss
-    direction, which is a request going out with no credential and nothing saying so.
+    **`sources.NEEDS_A_LOGIN`, the subject `_sources_with_a_credential` admits to
+    the plan over, so the plan and the logins cannot disagree about who needs
+    one.** A source admitted there and skipped here would sit in the plan with no
+    entry in `catalogue_logins` and be asked with no credential. Not filtered by
+    `metadata.carries_a_credential`: `metadata.resolve` refuses, at boot, a LOGIN
+    row whose door carries none, so the filter would drop nothing that booted.
 
-    **Pure, and that is what keeps it cheap to ask twice.** It reads the seed table and
-    the capability rule, takes no `Session`, and resolves no key, so asking it does not
-    move the one resolution per request that
+    **One home, because two readers of it disagreeing silently is the gap above.**
+    `catalogue_logins` resolves the logins and
+    `catalogue_access._warn_about_any_source_asked_with_no_login` checks the plan
+    against them.
+
+    **Pure, and that is what keeps it cheap to ask twice.** It reads the seed table,
+    takes no `Session`, and resolves no key, so asking it does not move the one
+    resolution per request that
     `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest` holds.
     """
-    import metadata  # function level, for the cycle above
-
-    return [
-        source
-        for source in sorted(sources.NEEDS_A_KEY)
-        if metadata.carries_a_credential(targets.SEEDED[source])
-    ]
+    return sorted(sources.NEEDS_A_LOGIN)
 
 
 def catalogue_logins(
@@ -673,40 +684,16 @@ def catalogue_logins(
     next request send", which is `credentials.for_request`'s own question, and
     `catalogue_access._resolved_access` hands the answer over as an argument.
 
-    **Only the targets whose door carries one**, which is
-    `metadata.carries_a_credential` and is asked rather than restated here: the
-    rule and this loop must not be able to disagree about which rows to resolve,
-    because a row skipped here is a request that goes out unauthenticated with
-    nothing saying so.
+    **Over `sources_whose_door_carries_a_login`, the set `ready_sources` admits a
+    login source from**, so a source in the plan on a held login is one this loop
+    resolves for. Which rows those are is `targets.Target.credential_kind`, and
+    `metadata.resolve` refuses one whose door would drop the login.
 
-    **That agreement is not the one that matters, and this paragraph is the
-    correction.** The sentence above buys agreement between this loop and
-    `carries_a_credential`. What decides whether a request goes out
-    unauthenticated is agreement between this loop and **`ready_sources`**, which
-    is what admits a credentialled source to the plan, and the two ask different
-    questions of different subjects: `ready_sources` asks `credentials.is_held`
-    over `sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW`, and this asks
-    `credentials.for_request` over `sources.NEEDS_A_KEY` filtered by
-    `carries_a_credential`. A source admitted there and skipped here sits in the
-    plan with no entry in this mapping, and `metadata` asks it with no
-    credential.
-
-    **They agree on today's roster, on a set of size two, and nothing made them.**
-    `NEEDS_A_KEY` is Google Books and the Argentine and Uruguayan national
-    libraries, `_SECRET_IS_A_SETTINGS_ROW` is Google Books, and both subjects come
-    out as those two rows. `carries_a_credential` answers False for every
-    transport but SRU, so the first catalogue that needs a key, keeps its secret
-    sealed rather than in a settings row, and speaks anything else falls in the
-    gap. `tests/test_settings_store.py::TestThePlanAndTheLoginsAgreeOnWhoNeedsOne`
-    fails on the row that opens it.
-
-    **The gap is logged and not refused, deliberately.** A raise here would turn a
-    silent unauthenticated request into a 500, and it would do so on a case that
-    cannot happen today for a cause the caller cannot fix: `is_held` and
-    `for_request` are two reads of the keychain, so a key rotated between them is
-    a legitimate disagreement. What the warning buys is that the silent case stops
-    being silent; what the test buys is that it is caught when the row is added
-    rather than when a member's search goes out bare.
+    **What is left of the gap is logged and not refused, deliberately.** `is_held`
+    and `for_request` are two reads of the keychain, so a key rotated between them
+    is a legitimate disagreement, and a raise here would turn a silent
+    unauthenticated request into a 500 for a cause the caller cannot fix. What the
+    warning buys is that the silent case stops being silent.
 
     **The warning lives in `catalogue_access._resolved_access` and not here**,
     because it needs the plan beside these logins and this function holds only the

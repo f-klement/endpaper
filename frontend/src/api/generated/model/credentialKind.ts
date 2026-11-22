@@ -12,8 +12,8 @@
  * **Two kinds and not one flag**, because a policy is written about them
  * separately: an API key is this deployment's own account at a commercial
  * service, sent in a query string; a login is the institution's account at
- * another library's server. `sources.describe` derives it from
- * `targets.Target.needs_key` and `targets.Target.secret`.
+ * another library's server. `targets.Target.credential_kind` derives it from
+ * the row's `needs_key` and `secret`.
  */
 export type CredentialKind =
   (typeof CredentialKind)[keyof typeof CredentialKind];

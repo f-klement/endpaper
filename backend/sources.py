@@ -25,7 +25,14 @@ from urllib.parse import urlsplit
 import decoders
 import isbn
 import targets
-from enums import Capability, CatalogueSource, ClassificationScheme, CredentialKind, Transport
+from enums import (
+    Capability,
+    CatalogueSource,
+    ClassificationScheme,
+    CredentialKind,
+    RegisteredCatalogue,
+    Transport,
+)
 
 
 @dataclass(frozen=True)
@@ -636,6 +643,23 @@ NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
     source for source, target in targets.SEEDED.items() if target.can(Capability.NEEDS_A_CREDENTIAL)
 )
 
+#: The sources whose credential is an institution's login rather than this
+#: deployment's own key: `targets.Target.credential_kind`.
+#:
+#: **The one subject both credential loops in `settings_store` range over**, the
+#: one that admits a source to the plan on a held login and the one that
+#: resolves the login its request carries. One set rather than a predicate at
+#: each, because a source in the first and not the second goes out
+#: unauthenticated with nothing saying so.
+#: `metadata.resolve` refuses a LOGIN row whose door carries none, at boot, so
+#: every member here is a row whose request a login can ride.
+#:
+#: `SHIPS_A_CREDENTIAL` below is a subset by construction:
+#: `targets.Target._check_waivers` refuses a shipped pair on any other kind.
+NEEDS_A_LOGIN: Final[frozenset[CatalogueSource]] = frozenset(
+    source for source, target in targets.SEEDED.items() if target.credential_kind is CredentialKind.LOGIN
+)
+
 #: The sources this build carries a login for, because their library publishes
 #: one about itself.
 #:
@@ -900,12 +924,26 @@ class Preference:
 class Plan:
     """Which sources to ask on one request, resolved once and passed in.
 
-    **A permutation of the roster, always.** `parse` guarantees it, so nothing
-    downstream has to handle a name `targets.SEEDED` has no row for, and
-    there is no `KeyError` to reach on the hourly path.
+    **`preferences` is a permutation of the roster, always.** `parse` guarantees
+    it, so nothing downstream has to handle a name `targets.SEEDED` has no row
+    for, and there is no `KeyError` to reach on the hourly path.
     """
 
     preferences: tuple[Preference, ...]
+    #: The registry entries this library picked, as the snapshot's own targets,
+    #: asked after `lookup_in_turn` and on no other path.
+    #:
+    #: **The tail, and lookup only**, the place `docs/decisions.md` gives a new
+    #: catalogue: nothing measured where an entry would earn a slot, so it costs
+    #: a request only on an ISBN the whole chain missed, never one in the tier
+    #: `ALWAYS_ASKED` fixes. `registry.with_picks` fills it from the stored pick,
+    #: and only `catalogue_access` calls that, so a plan parsed from settings,
+    #: and any plan `in_force` returns, carries none.
+    #:
+    #: **Targets rather than names**, because `metadata` reaches no database and
+    #: imports nothing that does, so it cannot look a name up in `registry`. Each
+    #: is `registry.ENTRIES`' own, so no address comes from a stored row.
+    picked: tuple[targets.Target, ...] = ()
 
     @property
     def asked(self) -> tuple[CatalogueSource, ...]:
@@ -1012,14 +1050,28 @@ class Plan:
     def lookup_chain(self) -> tuple[CatalogueSource, ...]:
         """Every enabled source that can answer an ISBN at all, in order.
 
-        **Public because emptiness here is what `metadata.Outcome.NO_SOURCES`
-        means**, and that is a different question from what any one ISBN is
-        asked. `lookup_in_turn` can be empty because this library's catalogues
-        do not reach one registration group, which is a fact about the book;
-        this being empty is a fact about the library, and it is the one the 409
-        and its "switch one back on" wording describe.
+        **Public because it is the roster a narrowed lookup may name**, and the
+        seeded half of `lookup_roster`, whose emptiness is what
+        `metadata.Outcome.NO_SOURCES` means. That is a different question from
+        what any one ISBN is asked. `lookup_in_turn` can be empty because this
+        library's catalogues do not reach one registration group, which is a
+        fact about the book; the roster being empty is a fact about the
+        library, and it is the one the 409 and its "switch one back on" wording
+        describe.
         """
         return tuple(name for name in self.asked if name in LOOKUP_SOURCES)
+
+    @property
+    def lookup_roster(self) -> tuple[CatalogueSource | RegisteredCatalogue, ...]:
+        """Everything an ISBN lookup may ask: `lookup_chain`, then the picks.
+
+        **Public because emptiness here is what `metadata.Outcome.NO_SOURCES`
+        means**: a library that switched every seeded source off and picked a
+        registry entry still has a catalogue to ask, and its miss is a fact
+        about the book. It is also the lookup cache's key, so picking or
+        dropping an entry is never answered from a lookup made before it.
+        """
+        return (*self.lookup_chain, *(target.source for target in self.picked))
 
 
 #: What a library that has never opened the settings screen gets.
@@ -1239,23 +1291,9 @@ def _how_asked(source: CatalogueSource) -> dict[str, Any]:
         "protocol_version": target.sru_version,
         "record_schema": target.record_schema,
         "encrypted": urlsplit(target.base_url).scheme == "https",
-        "credential": _credential_kind(target),
+        "credential": target.credential_kind,
         "classification_schemes": tuple(scheme for scheme in ClassificationScheme if scheme in schemes),
     }
-
-
-def _credential_kind(target: targets.Target) -> CredentialKind:
-    """An API key where the row names a deployment secret, a login where it needs
-    any other credential. `targets.Secret` says why a secret names its owner.
-
-    Display only, and it cannot claim a login nobody sends: a row needing a
-    credential, naming no secret and going out of a door that carries no login
-    is refused at boot by `metadata.resolve`."""
-    if not target.needs_key:
-        return CredentialKind.NONE
-    if target.secret is targets.Secret.NONE:
-        return CredentialKind.LOGIN
-    return CredentialKind.API_KEY
 
 
 def in_force(plan: Plan, ready: frozenset[CatalogueSource]) -> Plan:
@@ -1278,6 +1316,11 @@ def in_force(plan: Plan, ready: frozenset[CatalogueSource]) -> Plan:
     `stored_catalogue_sources` is what the settings screen reads, for the reason
     `get_raw` exists beside `in_force`: a screen must show what an admin typed,
     or they turn a switch on and watch it come back off.
+
+    **The picks do not survive**, deliberately: this is what a narrowed lookup
+    goes through, and a lookup narrowed to the catalogues a cataloguer named
+    asks only those. The standing plan gains its picks after this, in
+    `catalogue_access`.
     """
     return Plan(
         tuple(Preference(entry.source, entry.enabled and entry.source in ready) for entry in plan.preferences)
