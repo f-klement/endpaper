@@ -1007,8 +1007,8 @@ export const getNotifyOverdueUrl = () => {
  *
  * This is what makes the feature testable by a person, and it is the endpoint
  * an external cron would call instead of the in-process ticker. Running it by
- * hand stamps `notified_at` exactly as a tick does, so a manual run also
- * quiets the next scheduled one for the interval.
+ * hand stamps `notified_at` and `patron_notified_at` exactly as a tick does,
+ * so a manual run also quiets the next scheduled one for the interval.
  * @summary Notify Overdue
  */
 export const notifyOverdue = async (
@@ -1078,8 +1078,8 @@ export type NotifyOverdueMutationError = Refusal;
  *
  * This is what makes the feature testable by a person, and it is the endpoint
  * an external cron would call instead of the in-process ticker. Running it by
- * hand stamps `notified_at` exactly as a tick does, so a manual run also
- * quiets the next scheduled one for the interval.
+ * hand stamps `notified_at` and `patron_notified_at` exactly as a tick does,
+ * so a manual run also quiets the next scheduled one for the interval.
  * @summary Notify Overdue
  */
 export const useNotifyOverdue = <TError = Refusal, TContext = unknown>(

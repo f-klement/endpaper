@@ -1428,7 +1428,7 @@ WHOLE_BOOK_READERS: Final = {
         (
             "due_for_patrons: db.query(Loan).join(Book, Loan.book_id == Book.id)",
             "the same join, for the patron notice's own selection; `JOIN_CALLERS` again. Private Books "
-            "reach it by the owner's decision on #24: each patron is mailed their own loans.",
+            "reach it by design (owner, 2026-11-22): each patron is mailed their own loans.",
         ),
         (
             "count_private_overdue: db.query(Loan).join(Book, Loan.book_id == Book.id)",

@@ -1056,7 +1056,7 @@ export const de: Messages = {
   "settings.patronMailEnable":
     "Benutzer:innen per E-Mail an die eigenen überfälligen Ausleihen erinnern",
   "settings.patronMailHint":
-    "Eine Nachricht an jede Benutzerin und jeden Benutzer, an die Adresse aus dem eigenen Eintrag, mit nur den Ausleihen dieser Person. Gesendet wird über den Mailserver oben, und jede Ausleihe wird höchstens einmal pro Erinnerungsabstand angemahnt. Das Einschalten des Bibliotheksmodus schaltet diese und die E-Mail an den Haushalt einmalig ein, sofern keine von beiden schon eigens eingestellt wurde; das Ausschalten ändert keine von beiden.",
+    "Eine Nachricht an jede Benutzerin und jeden Benutzer, an die Adresse aus dem eigenen Eintrag, mit nur den Ausleihen dieser Person. Gesendet wird über den Mailserver oben, und jede Ausleihe wird höchstens einmal pro Erinnerungsabstand angemahnt. Der erste Lauf schreibt an alle mit einer überfälligen Ausleihe, gleich wie lange sie schon überfällig ist. Das Einschalten des Bibliotheksmodus schaltet diese und die E-Mail an den Haushalt einmalig ein, sofern keine von beiden schon eigens eingestellt wurde; das Ausschalten ändert keine von beiden.",
   "settings.public.modeTurnsOnNotices":
     "Beim ersten Einschalten werden auch die Mahn-E-Mails an jede Benutzerin und jeden Benutzer und an den Haushalt eingeschaltet, sofern sie nicht schon eigens eingestellt wurden. Beide stehen unter Ausleihe.",
   "settings.patronMailPrivacyNote":

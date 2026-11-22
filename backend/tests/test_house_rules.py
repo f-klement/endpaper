@@ -7145,7 +7145,7 @@ class TestOneInstanceIssuesALoan:
         "notifications.py: writes loans.patron_notified_at": (
             "the same delivery state for the patron's own notice, its own "
             "column so a failure on one audience never silences the other "
-            "(owner's decision on #24)"
+            "(owner, 2026-11-22)"
         ),
         "routers/patrons.py: builds a row shaped like a loan": (
             "not a write at all: `PatronLoanOut`, one loan on a patron's record, "

@@ -1195,7 +1195,7 @@ export const en = {
   // ── The patron's own overdue notice (#24) ───────────────────────────────
   //
   // One mail per patron about the loans that patron holds. It goes to the
-  // borrower, so it names a private book they hold (owner's decision on #24).
+  // borrower, so it names a private book they hold (owner, 2026-11-22).
   "settings.overdueSenderPatronMail": "Patron email",
   "settings.overdueNotSentNoAddress":
     "Nothing was sent: a patron with an overdue loan has no usable email address. Add one to their record, or switch the patron email off.",
@@ -1205,7 +1205,7 @@ export const en = {
   "settings.patronMailEnable":
     "Email each patron about their own overdue loans",
   "settings.patronMailHint":
-    "One message to each patron, at the address on their record, listing only the loans that patron holds. It uses the mail server above, and a loan is chased at most once per reminder interval. Switching library mode on turns this and the household email on, once, unless you have set either yourself; switching it off changes neither.",
+    "One message to each patron, at the address on their record, listing only the loans that patron holds. It uses the mail server above, and a loan is chased at most once per reminder interval. The first run mails every patron with a loan overdue, however long ago it fell due. Switching library mode on turns this and the household email on, once, unless you have set either yourself; switching it off changes neither.",
   "settings.public.modeTurnsOnNotices":
     "The first time it is switched on, it also turns on the overdue emails to each patron and to the household, unless you have set them yourself. Both are under Lending.",
   "settings.patronMailPrivacyNote":

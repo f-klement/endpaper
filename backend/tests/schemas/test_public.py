@@ -120,9 +120,9 @@ WITHHELD: dict[str, str] = {
     "accession": (
         "the number on this household's label for the object, which is how it "
         "handles a copy rather than a fact about the work (owner, 2026-11-22). It "
-        "is minted from the public id, so withholding it hides nothing a "
-        "determined reader cannot compute, and that is acceptable because the "
-        "code grants nothing"
+        "is minted from the public id, or from a merged away copy's for the "
+        "copy that kept it, so withholding it hides little a determined reader "
+        "cannot compute, and that is acceptable because the code grants nothing"
     ),
     # ── Facts about the transaction ───────────────────────────────────────
     "purchase_price_minor": "what the household paid",

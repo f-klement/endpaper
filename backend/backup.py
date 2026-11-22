@@ -876,11 +876,16 @@ def build_archive(db: Session) -> bytes:
         # same thing.
         "created_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         "tables": {},
-        _HIGHEST_ISSUED: _highest_issued(db),
     }
 
     for name, _model, table in _TABLES:
         manifest["tables"][name] = {"lines": _LINES[name]} if name in _LINES else _stored_values(db, table)
+    # **After the rows, never before.** No snapshot holds the rows and the
+    # counter together, so a copy created and purged while the tables are
+    # read is above a mark read first and absent from the rows, and a restore
+    # onto a fresh database would issue its id, and its code, again. Read
+    # last, the mark is at or above every id the rows saw.
+    manifest[_HIGHEST_ISSUED] = _highest_issued(db)
 
     # The tag association carries no model of its own, so it is read straight
     # from the table. Forgetting it loses every book's tags while looking like
@@ -1440,9 +1445,10 @@ def _issued_marks(manifest: dict[str, Any]) -> dict[str, int]:
 
     **An archive without them restores**, since one taken before they existed
     must: each counter then goes past the highest restored row and the highest
-    serial a restored code carries, and no further. A copy purged before such
-    an archive was taken left no trace in it, so after a restore onto a fresh
-    database its id, and with it its accession number, may be issued again.
+    serial a restored code carries, and no further. Such an archive predates
+    accession numbers, so it gives up only ids: a copy purged before it was
+    taken left no trace in it, and after a restore onto a fresh database its id
+    may be issued again, but no label was ever printed with it.
     """
     marks = manifest.get(_HIGHEST_ISSUED, {})
     if not isinstance(marks, dict) or not all(

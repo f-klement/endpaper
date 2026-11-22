@@ -7,7 +7,7 @@ Create Date: 2026-11-22
 One nullable column, `loans.patron_notified_at`: when a mail about the loan
 last reached the patron holding it (#24). `notified_at` stays the household
 digest's, and each selection reads its own, so a failure on one audience never
-silences the other (owner's decision on #24). `models.Loan` says what each holds.
+silences the other (owner, 2026-11-22). `models.Loan` says what each holds.
 
 **Existing stamps stay where they are, and the new column starts null.** Every
 `notified_at` written before this revision records the digest, because the

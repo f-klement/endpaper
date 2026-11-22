@@ -199,7 +199,7 @@ class TestLibraryModeAndThePublicCatalogue:
         assert settings_store.sru_is_served(db) is False
 
     def test_headings_from_a_vocabulary_are_offered_by_default_in_library_mode_alone(self, db):
-        """Owner's decision on #135: on by default in a library, never in a household."""
+        """On by default in a library, never in a household (owner, 2026-11-22)."""
         assert settings_store.headings_from_vocabulary(db) is False
         settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
         assert settings_store.headings_from_vocabulary(db) is True

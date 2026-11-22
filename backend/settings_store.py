@@ -153,9 +153,9 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # Not dismissed: an installation with no copy is offered one until an
     # admin loads a copy or says no.
     SettingKey.VOCABULARY_OFFER_DISMISSED: "false",
-    # On: the owner's decision on #135 is that a library offers controlled
-    # headings unless an admin says otherwise. Read with library mode, so a
-    # household that reads no setting never meets it.
+    # On: a library offers controlled headings unless an admin says otherwise
+    # (owner, 2026-11-22). Read with library mode, so a household that reads
+    # no setting never meets it.
     SettingKey.HEADINGS_FROM_VOCABULARY: "true",
 }
 

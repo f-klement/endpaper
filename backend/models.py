@@ -2165,7 +2165,7 @@ class Loan(Base):
     # last reached the patron holding it. Its own column rather than
     # `notified_at`, so a failure on one audience never silences the other: one
     # stamp for both would let a digest that delivered hold back a patron whose
-    # mail failed, for the whole reminder interval (owner's decision on #24).
+    # mail failed, for the whole reminder interval (owner, 2026-11-22).
     patron_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     book: Mapped[Book] = relationship("Book", back_populates="loans")

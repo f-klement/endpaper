@@ -495,11 +495,15 @@ class TestEachCellIsDerivableFromSomethingThatIsNotItself:
         """A column no two rows may share names one object, which is what a copy
         identity is. The ISBN's index is partial, unique only among rows that
         are no one's second copy, so it names the work and stays outside: the
-        `sqlite_where` is what tells the two apart, not the column's name."""
+        `where` clause is what tells the two apart, not the column's name. Each
+        engine's is read: an index partial on either engine is not unique over
+        every row on both, so it names no object."""
         unconditional = {
             column.name
             for index in _books_table().indexes
-            if index.unique and index.dialect_kwargs.get("sqlite_where") is None
+            if index.unique
+            and index.dialect_kwargs.get("sqlite_where") is None
+            and index.dialect_kwargs.get("postgresql_where") is None
             for column in index.columns
         }
 

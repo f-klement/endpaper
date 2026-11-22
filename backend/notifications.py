@@ -17,7 +17,7 @@ the feature was off for them in practice. SMTP is universal and Telegram is one
 fixed host, so neither costs a service.
 
 **The patron notice is the one pushing audience that carries a private book**,
-because being reminded of a book you hold is not a disclosure (owner's decision on #24).
+because being reminded of a book you hold is not a disclosure (owner, 2026-11-22).
 It goes to one patron's own address, about that patron's loans and nobody
 else's, from its own selection: `due_for_patrons`. A member's `User.email` is
 still read by nothing here; a member is chased in the app.
@@ -294,7 +294,7 @@ def _not_chased_since(
     The cadence of every pushing sender: one notice per loan per interval at
     most **per audience**. `stamp` is `Loan.notified_at` for the digest and
     `Loan.patron_notified_at` for the patron notice, so a failure on one
-    audience never holds the other back (owner's decision on #24). Written once
+    audience never holds the other back (owner, 2026-11-22). Written once
     for both selections below, so they cannot come to disagree about how often.
     """
     cutoff = now - timedelta(days=days)
@@ -331,8 +331,8 @@ def due_for_patrons(db: Session, now: datetime, days: int) -> list[Loan]:
 
     **The patron notice's own selection, and the one place a pushing sender
     reads a private Book.** Its audience is the patron the loan went to, and a
-    Book in that patron's hands is not disclosed to them by a reminder (the
-    owner's decision on #24). So this is not `Loans.for_a_channel`: that shelf drops every
+    Book in that patron's hands is not disclosed to them by a reminder
+    (owner, 2026-11-22). So this is not `Loans.for_a_channel`: that shelf drops every
     private Book, which here would be the borrower never being chased for the
     one book the library most wants back.
 
@@ -533,7 +533,7 @@ def render_text(digest: dict[str, Any], *, limit: int | None = None) -> str:
     header = f"{count} overdue {'book' if count == 1 else 'books'}."
     lines = [
         f"{entry['title'] or 'Untitled'}: {entry['borrower'] or 'no name sent'}, "
-        f"{entry['days_overdue']} days overdue"
+        f"{_days(entry['days_overdue'])} overdue"
         for entry in digest["loans"]
     ]
 
@@ -976,20 +976,27 @@ def _patron_text(digest: dict[str, Any]) -> str:
     the mail server is configured with is what tells a patron who wrote.
     """
     lines = [
-        f"{entry['title'] or 'Untitled'}: due {entry['due_at'][:10]}, {entry['days_overdue']} days overdue"
+        f"{entry['title'] or 'Untitled'}: due {entry['due_at'][:10]}, {_days(entry['days_overdue'])} overdue"
         for entry in digest["loans"]
     ]
+    # A patron often holds one loan, often one day late, and reads the mail.
+    books, them = ("this book", "it") if len(lines) == 1 else ("these books", "them")
     return "\n".join(
         [
             f"Hello {digest['patron']},",
             "",
-            "The library's records show these books you borrowed as overdue:",
+            f"The library's records show {books} you borrowed as overdue:",
             "",
             *lines,
             "",
-            "Please bring them back, or ask the library for more time.",
+            f"Please bring {them} back, or ask the library for more time.",
         ]
     )
+
+
+def _days(count: int) -> str:
+    """`count` days, in the singular for one."""
+    return "1 day" if count == 1 else f"{count} days"
 
 
 async def _run_sender(
@@ -1007,8 +1014,7 @@ async def _run_sender(
     **The exception is returned beside the entry** because one caller decides on
     its class: `_mail_patrons` goes on past a failure about one patron's
     address and stops on anything else, and the entry's `UNREACHABLE` is the
-    same for both. It is
-    never reported or stored, only read.
+    same for both. It is never reported or stored, only read.
 
     **`skipped_private` is carried per sender, not once for the run.** The three
     channels withhold the same rows and report the same number; the patron
@@ -1538,7 +1544,7 @@ async def _push(
 ) -> dict[str, Any]:
     """Send the digest on every channel and each patron their own loans; stamp what went out.
 
-    **Each audience stamps its own column** (owner's decision on #24): the
+    **Each audience stamps its own column** (owner, 2026-11-22): the
     digest's loans on `notified_at` when any channel delivered, a patron's
     loans on `patron_notified_at` when that patron's mail did. A loan in both
     selections is chased once per interval by each, and a failure on one
@@ -1675,11 +1681,12 @@ async def _mail_patrons(db: Session, now: datetime, held: list[Loan]) -> tuple[d
     stopping on one would hold every later patron back behind them on every
     run. A server that refuses to relay refuses every recipient the same way,
     so it costs one refused conversation per patron per run and reads
-    `UNREACHABLE`; nothing about it waits on a deadline or a login. Anything else is the server or its
-    configuration, the same for every patron: a server that is down would
-    cost one `MAIL_DEADLINE_SECONDS` and one stranded thread per patron and
-    hold "Send now" for minutes, and a wrong password would make one failed
-    login per patron an hour, which is how a provider locks an account.
+    `UNREACHABLE`; nothing about it waits on a deadline or a login. Anything
+    else is the server or its configuration, the same for every patron: a
+    server that is down would cost one `MAIL_DEADLINE_SECONDS` and one
+    stranded thread per patron and hold "Send now" for minutes, and a wrong
+    password would make one failed login per patron an hour, which is how a
+    provider locks an account.
     """
     delivered: list[Loan] = []
     failures: list[dict[str, Any]] = []

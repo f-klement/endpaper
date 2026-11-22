@@ -1045,7 +1045,7 @@ class OverdueSender(StrEnum):
     #: One mail per patron, about that patron's own overdue loans, to the
     #: address on their record. The one pushing sender whose audience is a
     #: person rather than a channel, so the one that names a private Book: the
-    #: borrower holding it (owner's decision on #24). Its loans are its own selection,
+    #: borrower holding it (owner, 2026-11-22). Its loans are its own selection,
     #: `notifications.due_for_patrons`, not the digest the other three share.
     PATRON_MAIL = "patron_mail"
 

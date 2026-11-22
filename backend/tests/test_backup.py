@@ -3226,6 +3226,33 @@ class TestARestoreNeverLowersACounter:
         assert created.id > purged_id
 
 
+class TestTheMarkBoundsEveryRowTheArchiveRead:
+    """The rows are read one table after another, and a copy can be created and
+    purged in between. A mark read before them stands below that copy's id, and
+    a restore onto a fresh database issues the id, and its code, again."""
+
+    def test_a_copy_created_and_purged_while_the_tables_are_read_is_under_the_mark(
+        self, db, admin, monkeypatch
+    ):
+        read_a_table = backup._stored_values
+        purged: list[int] = []
+
+        def read_after_a_purge(session, table):
+            if not purged:
+                book = Book(title="Weeded mid backup", added_by_user_id=admin["user"]["id"])
+                session.add(book)
+                session.commit()
+                purged.append(book.id)
+                session.delete(book)
+                session.commit()
+            return read_a_table(session, table)
+
+        monkeypatch.setattr(backup, "_stored_values", read_after_a_purge)
+        data = backup.build_archive(db)
+
+        assert backup.read_manifest(data)["highest_issued"].get("books", 0) >= purged[0]
+
+
 def _forget_every_id_counter(db) -> None:
     """Every counter as a fresh installation has it."""
     if db.get_bind().dialect.name == "sqlite":

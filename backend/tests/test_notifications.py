@@ -802,6 +802,18 @@ class TestRenderText:
         )
         assert text.startswith("2 overdue books.")
 
+    def test_a_loan_one_day_overdue_reads_in_the_singular(self, db, lend):
+        lend(title="Dune", days=1)
+        text = notifications.render_text(
+            notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
+        )
+        assert "Dune: Kim, 1 day overdue" in text
+
+    def test_a_loan_overdue_by_less_than_a_day_reads_in_the_plural(self):
+        """Whole days, so a loan overdue by hours is 0 of them, and 0 is plural."""
+        digest = {"count": 1, "loans": [{"title": "Dune", "borrower": "Kim", "days_overdue": 0}]}
+        assert "Dune: Kim, 0 days overdue" in notifications.render_text(digest)
+
     def test_a_limit_drops_entries_and_says_how_many(self, db, lend):
         for index in range(20):
             lend(title=f"Book {index}")
@@ -2158,9 +2170,9 @@ def patron_mail_on(db):
 
 @pytest.fixture
 def lend_to_patron(db, admin):
-    """Put a book out to a new patron, overdue by three days, and return the loan."""
+    """Put a book out to a new patron, overdue by three days unless told otherwise, and return the loan."""
 
-    def _lend(*, name: str, email: str | None, title: str, private: bool = False) -> Loan:
+    def _lend(*, name: str, email: str | None, title: str, private: bool = False, days_late: int = 3) -> Loan:
         patron = Patron(card_number=f"C-{name}", name=name, email=email)
         book = Book(title=title, is_private=private, added_by_user_id=admin["user"]["id"])
         db.add_all([patron, book])
@@ -2169,7 +2181,7 @@ def lend_to_patron(db, admin):
             book_id=book.id,
             loaned_to_patron_id=patron.id,
             loaned_by_user_id=admin["user"]["id"],
-            due_at=now() - timedelta(days=3),
+            due_at=now() - timedelta(days=days_late),
         )
         db.add(loan)
         db.commit()
@@ -2203,8 +2215,8 @@ class TestThePatronsOwnNotice:
     async def test_a_private_book_is_named_to_its_borrower_and_withheld_from_the_digest(
         self, patron_mail_on, mail_on, lend_to_patron, sent_mail
     ):
-        """The owner's decision on #24: privacy protects a book from other members, not from the
-        patron holding it. The service digest still only counts it."""
+        """Privacy protects a book from other members, not from the patron holding it
+        (owner, 2026-11-22). The service digest still only counts it."""
         lend_to_patron(name="Ada", email="ada@example.org", title="Diary", private=True)
 
         result = await notifications.run_digest(patron_mail_on)
@@ -2284,8 +2296,41 @@ class TestThePatronsOwnNotice:
         [(_config, _subject, body, _thread)] = sent_mail
         assert body.startswith("Hello Ada,")
         assert f"Dune: due {loan.due_at.date().isoformat()}, 3 days overdue" in body
-        assert "Please bring them back" in body
+        assert "Please bring it back" in body
         assert "no name sent" not in body
+
+    @pytest.mark.asyncio
+    async def test_two_loans_read_in_the_plural(self, db, patron_mail_on, lend_to_patron, sent_mail):
+        first = lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
+        book = Book(title="Emma", added_by_user_id=first.loaned_by_user_id)
+        db.add(book)
+        db.flush()
+        db.add(
+            Loan(
+                book_id=book.id,
+                loaned_to_patron_id=first.loaned_to_patron_id,
+                loaned_by_user_id=first.loaned_by_user_id,
+                due_at=first.due_at,
+            )
+        )
+        db.commit()
+
+        await notifications.run_digest(patron_mail_on)
+
+        [(_config, _subject, body, _thread)] = sent_mail
+        assert ("these books you borrowed" in body, "bring them back" in body) == (True, True)
+
+    @pytest.mark.asyncio
+    async def test_one_loan_a_day_overdue_reads_in_the_singular(
+        self, patron_mail_on, lend_to_patron, sent_mail
+    ):
+        lend_to_patron(name="Ada", email="ada@example.org", title="Dune", days_late=1)
+
+        await notifications.run_digest(patron_mail_on)
+
+        [(_config, _subject, body, _thread)] = sent_mail
+        singular = ("1 day overdue", "this book you borrowed", "bring it back")
+        assert [phrase for phrase in singular if phrase not in body] == []
 
     def test_a_mail_server_setting_configures_both_mail_senders(self):
         """A fix to the server has to clear the patron notice's health record too."""
@@ -2424,8 +2469,8 @@ class TestThePatronLoopStops:
 
 
 class TestEachAudienceKeepsItsOwnStamp:
-    """Owner's decision on #24: the digest and the patron notice each stamp their
-    own column, so a failure on one audience never silences the other."""
+    """The digest and the patron notice each stamp their own column, so a
+    failure on one audience never silences the other (owner, 2026-11-22)."""
 
     @pytest.mark.asyncio
     async def test_a_patron_whose_mail_failed_is_chased_again_though_the_digest_delivered(
