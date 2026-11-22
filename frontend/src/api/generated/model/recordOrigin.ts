@@ -41,7 +41,6 @@ export const RecordOrigin = {
   sbn: "sbn",
   porbase: "porbase",
   oszk: "oszk",
-  snk: "snk",
   manual: "manual",
   file: "file",
   csv_import: "csv_import",
@@ -49,5 +48,4 @@ export const RecordOrigin = {
   opds_import: "opds_import",
   calibre_import: "calibre_import",
   store_import: "store_import",
-  oai_harvest: "oai_harvest",
 } as const;

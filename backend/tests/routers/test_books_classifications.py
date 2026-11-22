@@ -120,41 +120,8 @@ class TestAddingABookWithHeadings:
         assert res.status_code == 201
         assert len(headings(res.json()["id"], db)) == 1
 
-    def test_a_scheme_with_no_row_is_refused_naming_the_heading(self, client, admin, db):
-        """A member named it, so a typo is told rather than dropped:
-        `routers.books._refuse_unknown_schemes`."""
-        res = client.post(
-            "/api/books",
-            json={
-                "title": "Docker",
-                "classifications": [
-                    {"scheme": "ddc", "number": "004"},
-                    {"scheme": "rvk", "number": "ST 250"},
-                ],
-            },
-            headers=admin["headers"],
-        )
-
-        assert res.status_code == 422
-        assert [error["loc"] for error in res.json()["detail"]] == [["body", "classifications", 1, "scheme"]]
-        assert db.query(Book).count() == 0
-
-    def test_a_built_in_scheme_in_capitals_is_refused(self, client, admin):
-        """A code is matched exactly, as the closed enum matched it."""
-        res = client.post(
-            "/api/books",
-            json={"title": "Docker", "classifications": [{"scheme": "DDC", "number": "004"}]},
-            headers=admin["headers"],
-        )
-
-        assert res.status_code == 422
-
-    def test_a_heading_under_a_library_s_own_scheme_is_kept(self, client, admin, db):
-        client.post(
-            "/api/settings/classification-schemes",
-            json={"scheme": "rvk", "name": "Regensburger Verbundklassifikation"},
-            headers=admin["headers"],
-        )
+    def test_a_scheme_nobody_recognises_is_refused(self, client, admin):
+        """A number with no scheme has no reading, so the enum is closed."""
         res = client.post(
             "/api/books",
             json={
@@ -164,7 +131,7 @@ class TestAddingABookWithHeadings:
             headers=admin["headers"],
         )
 
-        assert [(row.scheme, row.number) for row in headings(res.json()["id"], db)] == [("rvk", "ST 250")]
+        assert res.status_code == 422
 
     def test_a_number_carrying_a_control_character_is_refused(self, client, admin):
         """NUL specifically, and the reason is `filing`.
@@ -488,19 +455,6 @@ class TestEnrichment:
             "004",
             "4026894-9",
         ]
-
-    def test_a_selected_record_under_a_scheme_with_no_row_is_refused(self, client, admin, db):
-        """The client posts the record back, so this is a member's write too."""
-        created = client.post("/api/books", json={"title": "Docker"}, headers=admin["headers"]).json()
-
-        res = client.post(
-            f"/api/books/{created['id']}/enrich/apply",
-            json={"classifications": [{"scheme": "rvk", "number": "ST 250"}]},
-            headers=admin["headers"],
-        )
-
-        assert res.status_code == 422
-        assert headings(created["id"], db) == []
 
     def test_a_caption_is_the_only_change_and_still_commits(self, client, admin, db):
         """The isolated case, which the test above cannot reach.

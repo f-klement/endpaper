@@ -1,8 +1,6 @@
 from pydantic import BaseModel, Field
 
-from enums import HarvestFormat
 from import_readers import ImportReader
-from schemas.common import UtcDateTime
 
 
 class ImportResultOut(BaseModel):
@@ -226,68 +224,3 @@ class MarcPreviewOut(BaseModel):
         ),
     )
     rows: list[MarcPreviewRow] = []
-
-
-class _HarvestRun(BaseModel):
-    """What one run of the harvester read, beside what the records then did."""
-
-    metadata_prefix: str = Field(description="The repository's name for the format this run asked for")
-    metadata_format: HarvestFormat = Field(
-        description=(
-            "Which format the run read: MARCXML where the repository offers it, else Dublin Core, "
-            "which carries no heading, no series and no role on a name"
-        )
-    )
-    pages_read: int = Field(ge=0, description="Pages the repository answered")
-    records_seen: int = Field(ge=0, description="Record headers read, deleted ones included")
-    deleted: int = Field(
-        ge=0,
-        description=(
-            "Records the repository marks deleted. Counted and acted on nowhere: "
-            "a repository withdrawing a record does not withdraw a book here"
-        ),
-    )
-    truncated: bool = Field(
-        description=(
-            "Whether the record cap, the page cap, the deadline or a busy repository "
-            "stopped the run before the repository ran out; what was read is kept"
-        )
-    )
-
-
-class HarvestPreviewOut(MarcPreviewOut, _HarvestRun):
-    """What a harvest would read and do, before anything is written.
-
-    `MarcPreviewOut`'s counts over the harvested records, asked through the same
-    index the apply asks, plus what the run itself read. `rows` carries each
-    record's headings. The apply writes none (owner, 2026-11-20): it raises
-    them as suggestions on a Book the record is, which an admin confirms or
-    discards on the Book.
-    """
-
-    repository_name: str | None = Field(description="The name the repository gives itself, if it gives one")
-
-
-class HarvestResultOut(ImportResultOut, _HarvestRun):
-    """What a harvest did, and the run it recorded."""
-
-    harvest_id: int = Field(description="The run recorded in `harvests`, which every Book it added points at")
-    headings_pending: int = Field(
-        ge=0,
-        description=(
-            "Headings this run raised as suggestions on the Books its records are, "
-            "waiting for an admin to confirm or discard them on each Book: a harvest "
-            "confirms no record, so it writes none"
-        ),
-    )
-
-
-class ResumableHarvestOut(BaseModel):
-    """The run of the stored repository a harvest may carry on from: the latest,
-    and only while a cap, the deadline or a busy repository cut it short."""
-
-    harvest_id: int = Field(description="The truncated run; pass it as `continues` to carry on from it")
-    started_at: UtcDateTime = Field(description="When the truncated run started")
-    set_spec: str | None = Field(description="The set it read, which a continuation reads too")
-    metadata_format: HarvestFormat = Field(description="The format it read, which a continuation reads too")
-    records_seen: int = Field(ge=0, description="Record headers the truncated run itself read")

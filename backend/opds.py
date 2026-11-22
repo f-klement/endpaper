@@ -114,7 +114,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Final
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -125,7 +125,7 @@ import metadata
 import xml_parse
 from bibliographic import credit_line
 from catalogue import Record
-from credentials import Credential, origin_of, typed_address_host
+from credentials import Credential, origin_of
 from deadline import in_, left
 from decoders import Decoding, Reader
 from models import AUTHOR_LINE_MAX
@@ -259,8 +259,9 @@ def is_fetchable(url: str) -> bool:
     and is a machine on their own network, so there is no list to test against
     and the module docstring says what stands in place of one.
 
-    **The rule is `credentials.typed_address_host`**, shared with the harvester's
-    repository address, which says what it refuses and in which order.
+    Refused, in this order: an address that cannot be parsed at all, a scheme
+    that is not http or https, a port that is not a number or is out of range,
+    an address carrying credentials, and an address with no host.
 
     **The credentials case is the one that matters most here**, for #131's
     reason: an admin reads back what they typed, and
@@ -269,6 +270,13 @@ def is_fetchable(url: str) -> bool:
     login this deployment holds is bound to an origin computed from the same
     string, so a credential would not follow it, but the request would.
 
+    **The parse is inside the `try` and that is not defensive habit**, for
+    `covers.is_fetchable`'s measured reason: `urlsplit` raises on an
+    unterminated IPv6 literal, and `.port` is a lazy property that raises on a
+    port that is not a number or is out of range. A stored
+    `http://host:99999/opds` would otherwise 500 every sync of that row, for
+    good, with nothing naming the cause.
+
     **http is admitted and https is not required.** Every one of these servers
     is reachable over plaintext on a home network and most are configured that
     way. What that costs is stated where it is paid: the login travels in a
@@ -276,7 +284,21 @@ def is_fetchable(url: str) -> bool:
     it over their own LAN in the clear. A downgrade cannot be forced on them,
     because scheme is part of the origin every later hop is compared to.
     """
-    return typed_address_host(url) is not None
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if parsed.username or parsed.password:
+        return False
+    if port is not None and not 0 < port < 65536:
+        # `urlsplit.port` raises for most of these rather than returning them,
+        # so this arm is the belt: a parser that starts answering instead of
+        # raising must not widen what is admitted.
+        return False
+    return bool(parsed.hostname)
 
 
 def _text(node: ElementTree.Element | None) -> str | None:

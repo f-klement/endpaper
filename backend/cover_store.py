@@ -179,15 +179,6 @@ def login_background_to_serve(extension: str) -> Path | None:
     return _to_serve(LOGIN_BG_BASE, extension)
 
 
-def image_slot_to_serve(image_id: int, extension: str) -> Path | None:
-    """The file of one further image of a book, by its row's id, or None.
-
-    The route that calls this has already resolved the book through the read
-    rule and the row through that book, so this answers only where the file is.
-    """
-    return _to_serve(_slot_base(image_id), extension)
-
-
 def book_ids() -> set[int]:
     """Every book id with a cover file behind it.
 
@@ -247,46 +238,6 @@ def write(book_id: int, data: bytes) -> Path:
     counted failure and which is a 500.
     """
     return write_image(COVERS_DIR, str(book_id), _identify(data), data)
-
-
-def write_over(db: Session, book_id: int, data: bytes) -> Path:
-    """`write`, and the bytes the name held put back if `db` never commits.
-
-    For a swap, which promises that the cover it replaces is kept as a further
-    image. That image's row and file go with the same rollback, and `settle`
-    leaves a same format write's new bytes under the surviving row, which an
-    upload accepts because the member asked to replace. Without this a failed
-    swap commit showed the chosen image twice and kept the old cover nowhere.
-
-    What it lets through: a process killed between the write and the commit
-    runs no rollback, so the shelf keeps the new bytes, and the further image
-    the old cover was copied to stays on disk with no row naming it, which an
-    operator can find and nothing else will.
-    """
-    destination = COVERS_DIR / f"{book_id}.{_identify(data)}"
-    try:
-        previous: bytes | None = destination.read_bytes()
-    except FileNotFoundError:
-        previous = None
-    written = write(book_id, data)
-    if previous is not None:
-        on_rollback(db, partial(_put_back, written, _identity(written), previous))
-    return written
-
-
-def _put_back(path: Path, written: tuple[int, int], previous: bytes) -> None:
-    """Write `previous` over `path` if it is still the file `write_over` made.
-
-    By `_identity` and not by name, for `_discard`'s reason: a later write
-    under the name may be one a committed row stands on. A file already gone
-    is left gone, since what took it was not this request.
-    """
-    try:
-        if _identity(path) != written:
-            return
-    except FileNotFoundError:
-        return
-    write_image(COVERS_DIR, path.stem, path.suffix.lstrip("."), previous)
 
 
 def sweep(book_id: int, kept: Path) -> None:
@@ -375,69 +326,6 @@ def _discard(path: Path, written: tuple[int, int]) -> None:
             path.unlink()
     except FileNotFoundError:
         pass
-
-
-# ── Further images of a book ──────────────────────────────────────────────────
-#
-# A book's shelf cover is `<book id>.<ext>`; every further image is
-# `image_<row id>.<ext>`, named by its `models.CoverImage` row and not by the
-# book. A merge then carries a row to the survivor without moving a file, and
-# `book_ids` never counts one, since its stem is not an integer. `files` lists
-# them, so a backup carries them and a restore writes them back by name.
-
-#: The prefix of a further image's base name. Not an integer, which is what
-#: keeps these out of `book_ids` and out of `remove`.
-IMAGE_SLOT_PREFIX: Final = "image_"
-
-
-def _slot_base(image_id: int) -> str:
-    return f"{IMAGE_SLOT_PREFIX}{image_id}"
-
-
-def extension_of(data: bytes) -> str:
-    """The extension these bytes would be stored under. Raises `NotAnImage`.
-
-    For a caller that has to record the extension on a row before the file can
-    be named after that row's id.
-    """
-    return _identify(data)
-
-
-def write_image_slot(image_id: int, data: bytes) -> Path:
-    """Store `data` as the further image whose row has this id.
-
-    Sniffed like every other write here, so a slot holds only a format this app
-    serves. **No sweep and no `settle`**: the id is new, so there is no other
-    format of this name to sweep, and the caller discards the file by name if
-    its row never commits (`remove_image_slot`). Raises `NotAnImage` and
-    `OSError` as `write` does.
-    """
-    return write_image(COVERS_DIR, _slot_base(image_id), _identify(data), data)
-
-
-def image_slot_bytes(image_id: int, extension: str) -> bytes | None:
-    """The stored bytes of one further image, or None if no file holds them."""
-    path = _to_serve(_slot_base(image_id), extension)
-    return None if path is None else path.read_bytes()
-
-
-def cover_bytes(book_id: int) -> bytes | None:
-    """The stored bytes of a book's shelf cover, or None if it has no file."""
-    path = path_of(book_id)
-    return None if path is None else path.read_bytes()
-
-
-def remove_image_slot(image_id: int) -> None:
-    """Delete one further image's file, in every format. Missing is fine.
-
-    By name, which is safe here where it is not for a book's cover. Run after a
-    delete commits, the id is spent for good (`models.CoverImage` says why).
-    Run on a rollback, the file is this request's own: SQLite may issue that
-    uncommitted id again, but only to a request that starts after this one
-    discarded it.
-    """
-    for extension in ALLOWED_IMAGE_EXTENSIONS:
-        (COVERS_DIR / f"{_slot_base(image_id)}.{extension}").unlink(missing_ok=True)
 
 
 def save_login_background(data: bytes) -> Path:

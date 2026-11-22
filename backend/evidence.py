@@ -19,9 +19,8 @@ definitions of empty between them. This module is the one place that decides:
   replaces the record, names its catalogue as the origin instead;
 - **whether Classifications cross**: only through a door a Member's choice
   opened, which is ADR 0006 held by which door a caller can reach. `confirm`
-  is the door for a record a Member selected, `confirm_file_headings` for
-  a MARC file a Member chose to import, and `confirm_harvested_headings` for
-  a harvested Book's pending set an admin confirmed.
+  is the door for a record a Member selected, and `confirm_file_headings` for
+  a MARC file a Member chose to import.
 
 What stays with the caller: fetching the cover (`routers/books._store_cover`,
 which the create paths share and which runs on a thread from a coroutine) and the
@@ -45,7 +44,6 @@ from enums import RecordOrigin
 from logvalues import clipped
 from models import Book, blank_as_none
 from schemas import BookMatch
-from schemas.classification import ClassificationIn
 
 logger = logging.getLogger("endpaper.evidence")
 
@@ -202,18 +200,6 @@ def confirm_file_headings(book: Book, headings: Sequence[Heading], db: Session) 
     repeated import can push a Book past the ceiling.
     """
     return add_headings(book, bounded_headings(headings), db)
-
-
-def confirm_harvested_headings(book: Book, headings: Sequence[ClassificationIn], db: Session) -> list[str]:
-    """Add the pending headings an admin confirmed to `book`, returning the numbers changed.
-
-    `pending_headings.confirm`'s door. A harvest raised them and wrote none
-    (`models.PendingHeading`); the admin confirming the Book's whole set is the
-    choice ADR 0006 asks for, as selecting a picker row is for `confirm`. The
-    headings arrive through `ClassificationIn`, so `add_headings` takes them as
-    they are, and counts the ceiling against what the Book carries.
-    """
-    return add_headings(book, headings, db)
 
 
 def fill_gaps(book: Book, values: Mapping[str, object]) -> list[str]:

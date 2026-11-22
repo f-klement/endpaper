@@ -2718,26 +2718,3 @@ class TestASealedSettingIsCountedWhenItIsStranded:
         with pytest.raises(credentials.KeyConfigurationError) as refusal:
             credentials.generate_key(db)
         assert "unset MAIL_PASSWORD and TELEGRAM_BOT_TOKEN where" in str(refusal.value)
-
-
-class TestAnAddressAnAdminTypedHasOneForm:
-    """`typed_address_host` is the form both typed doors share, and
-    `household_admits` the literal check the harvester adds to it."""
-
-    def test_the_host_of_an_admitted_address_is_returned(self):
-        assert credentials.typed_address_host("http://10.0.0.10:8083/opds") == "10.0.0.10"
-
-    @pytest.mark.parametrize(
-        "url",
-        ["ftp://10.0.0.10/", "http://user@10.0.0.10/", "http://", "http://10.0.0.10:99999/", "http://[::1/"],
-    )
-    def test_a_refused_form_has_no_host(self, url):
-        assert credentials.typed_address_host(url) is None
-
-    @pytest.mark.parametrize("host", ["repository.example", "10.0.0.10", "127.0.0.1"])
-    def test_a_name_or_a_household_literal_is_admitted(self, host):
-        assert credentials.household_admits(host)
-
-    @pytest.mark.parametrize("host", ["169.254.169.254", "224.0.0.1", "0.0.0.0"])
-    def test_a_literal_the_household_policy_refuses_is_refused(self, host):
-        assert not credentials.household_admits(host)

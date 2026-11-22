@@ -434,22 +434,21 @@ certificates are always checked.
 
 ### Library mode and the public catalogue
 
-**Public catalogue** holds several switches, and every one is off until you turn it on.
+**Public catalogue** holds two switches, and both are off until you turn them on.
 
 **Library mode** (**Catalogue this library as a library**) is for a library or an archive. It
 shows the call number and the subject headings, puts ownership and reading status away, opens
 the shelf on the dense list, and turns on MARC import (**Take a catalogue across**) and MARC
-export. Every member sees every overdue loan on a book they can see, not only their own. On the
-scan page, each record offered by the title search or by a file name lookup names the catalogues it
-came from. It publishes nothing.
+export. Every member sees every overdue loan on a book they can see, not only their own. It publishes
+nothing.
 
 **Publishing** (**Let anyone search this catalogue**) is a second decision, refused while library
 mode is off. Before it publishes, Endpaper shows exactly what a visitor will see and what they
 will not:
 
 - Shown: search, and one record per book with its bibliographic facts, tags and classifications.
-- Not shown: who owns a book, whether it is lent (unless you show availability, below), who has
-  read it, where it is shelved, what it cost, and every note.
+- Not shown: who owns a book, whether it is lent, who has read it, where it is shelved, what it
+  cost, and every note.
 - Private books and the trash stay private
   ([Private and shared books](#private-and-shared-books)).
 
@@ -457,36 +456,16 @@ Once published, the login page links the catalogue as **Browse the public catalo
 told to stay away until **Let search engines index it** is turned on separately. Turning library
 mode back off withdraws the catalogue.
 
-**Show whether a book is on the shelf or on loan** adds one line to each published record: on the
-shelf, or on loan. It starts off, and it can be turned on only once the catalogue is published. A
-title with several copies reads as on the shelf while any public copy is in. A visitor sees
-whether it is out now, and one who keeps checking can tell when that changes; nobody sees when it
-is due back or who has it, and a private copy counts for nothing.
-
 ### SRU and Z39.50 for other libraries
 
 **SRU** is how another library's software searches a catalogue. A published catalogue answers
 it at `/sru` on the same address: a CQL query in, MARCXML records out, and `operation=explain`
 tells a client which indexes exist. It exposes exactly what the public catalogue does, behind the
-same two switches and one of its own: **Serve this catalogue over SRU**, under *Protocols for
-other libraries* on the public catalogue settings page. That switch starts off on a new
-installation, and it can be turned on only once the catalogue is published. An installation whose
-catalogue was already published when it upgraded to the switch finds it on, so SRU keeps
-answering there. With any of the three off, `/sru` answers 404.
+same two switches. With either switch off it does not answer.
 
 **Z39.50 is not served.** It is a binary protocol over raw TCP, and the
 [feature list](featurelist.md#deliberately-not-built) says why it is left out. Give another
 library the SRU address instead.
-
-**OAI-PMH** is how a union catalogue or an aggregator collects a catalogue rather than
-searching it. A published catalogue answers it at `/oai` on the same address, behind the same
-two switches and one of its own: **Let aggregators harvest this catalogue over OAI-PMH**, beside
-the SRU switch. It starts off on every installation, new or upgraded, and can be turned on only
-once the catalogue is published and a **Repository contact address** is saved below the switch.
-Every aggregator is shown that address, so use a role address rather than a person's. Give the aggregator the base URL, `https://` and your address
-followed by `/oai`; `?verb=Identify` on it shows what the aggregator will see first. Records are
-offered as `oai_dc` and `marc21`, and a record that leaves the published catalogue is reported
-as deleted, so the aggregator drops it too. With any of the three off, `/oai` answers 404.
 
 ### Seeing the library as a member
 

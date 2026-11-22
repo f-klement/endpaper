@@ -50,12 +50,10 @@ export function fakeStream(
       .fn<MediaStreamTrack["applyConstraints"]>()
       .mockResolvedValue(undefined),
   };
-  // On `MediaStream.prototype`, so a `<video>` takes it as its `srcObject`:
-  // happy-dom refuses anything that is not an instance, as a browser does.
-  return Object.assign(Object.create(MediaStream.prototype) as MediaStream, {
+  return {
     getTracks: () => [track],
     getVideoTracks: () => [track],
-  });
+  } as unknown as MediaStream;
 }
 
 /** Install a working camera. Call it from `beforeEach`, not once per file. */

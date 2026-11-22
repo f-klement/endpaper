@@ -10,18 +10,15 @@ nothing to `books`, and that undoing one really does restore what was there.
 from typing import Any
 
 import httpx
-import pytest
 import respx
 from sqlalchemy import event
 
-import settings_store
 from authors import author_key
 from database import engine
-from enums import SettingKey
 from models import AuthorAlias, AuthorIdentifier, Book
 from schemas.author import MAX_BATCH_KEYS
 from tests.helpers import DNB, silence_catalogues, sru_response
-from tests.test_authority import NAF, NAF_EMPTY, NAF_RECORD, ORCID, ORCID_RECORD, ORCID_SEARCH
+from tests.test_authority import NAF, NAF_RECORD
 
 AUTHORS = "/api/books/authors"
 
@@ -1258,69 +1255,6 @@ class TestALibraryOfCongressRecordOnceConfirmed:
         assert [(row["scheme"], row["identifier"], row["certain"]) for row in rows] == [
             ("lcnaf", "n78088964", True)
         ]
-
-
-class TestOrcidIsAskedByNameOnlyInLibraryMode:
-    """ORCID's top hit was the book's own author for 30 of 385 authors on the
-    catalogue sample, so a household is not offered its namesakes. A stored iD
-    is a key rather than a name, and resolves in either mode."""
-
-    @staticmethod
-    def _looked_up(
-        client, headers, author: str, orcid: dict[str, Any], q: str | None = None
-    ) -> tuple[list[dict], list[str]]:
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(200, json={"member": []}))
-            mock.get(url__startswith=NAF).mock(
-                return_value=httpx.Response(200, text=NAF_EMPTY, headers={"content-type": "text/xml"})
-            )
-            mock.get(url__startswith=ORCID).mock(return_value=httpx.Response(200, json=orcid))
-            mock.get(url__startswith=WIKIDATA).mock(return_value=httpx.Response(200, json=WIKIDATA_NO_ITEM))
-            params = {"author": author} if q is None else {"author": author, "q": q}
-            res = client.get(f"{AUTHORS}/authority", params=params, headers=headers)
-            asked = [str(call.request.url) for call in mock.calls if str(call.request.url).startswith(ORCID)]
-        assert res.status_code == 200, res.text
-        return res.json(), asked
-
-    # The shelf spelling and a retyped name reach `authority.search` from two
-    # call sites, and each passes the library mode flag on its own.
-    NAME_SEARCHES = pytest.mark.parametrize("q", [None, "Josiah S. Carberry"], ids=["shelf", "retyped"])
-
-    @NAME_SEARCHES
-    def test_a_household_name_search_does_not_ask_it(self, client, admin, make_book, q):
-        make_book(admin["headers"], title="Ghosts of Providence", author="Josiah Carberry")
-
-        rows, asked = self._looked_up(client, admin["headers"], "Josiah Carberry", ORCID_SEARCH, q)
-
-        assert (rows, asked) == ([], [])
-
-    @NAME_SEARCHES
-    def test_a_library_name_search_asks_it_where_both_files_find_nobody(
-        self, client, admin, make_book, db, q
-    ):
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        make_book(admin["headers"], title="Ghosts of Providence", author="Josiah Carberry")
-
-        rows, asked = self._looked_up(client, admin["headers"], "Josiah Carberry", ORCID_SEARCH, q)
-
-        assert [(row["scheme"], row["certain"]) for row in rows] == [("orcid", False), ("orcid", False)]
-        assert len(asked) == 1
-
-    def test_a_household_still_resolves_a_stored_orcid_id(self, client, admin, make_book):
-        make_book(admin["headers"], title="Ghosts of Providence", author="Josiah Carberry")
-        assert (
-            confirm(
-                client, admin["headers"], "Josiah Carberry", "0000-0002-1825-0097", scheme="orcid"
-            ).status_code
-            == 201
-        )
-
-        rows, asked = self._looked_up(client, admin["headers"], "Josiah Carberry", ORCID_RECORD)
-
-        assert [(row["scheme"], row["identifier"], row["certain"]) for row in rows] == [
-            ("orcid", "0000-0002-1825-0097", True)
-        ]
-        assert len(asked) == 1
 
 
 class TestSteeringTheAuthoritySearch:

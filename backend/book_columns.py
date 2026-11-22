@@ -120,23 +120,13 @@ COPY_STANDING: Final[tuple[str, ...]] = ("copy_group", "ownership")
 #: to whoever created it, so absorbing one would reattribute it. `deleted_at` is
 #: the trash marker `Shelf` reads. `is_private` is the privacy rule's own column,
 #: and a copy inherits it because a copy of a private book that came back public
-#: would disclose the book. `oai_datestamp` is `harvest.py`'s, which moves it on
-#: every write a harvester could see, so no writer carries it from another row.
-#: `harvest_id` stands where `added_by_user_id` would on a harvested row, so it
-#: is kept for the same reason; and a copy, which takes the caller as its adder,
-#: must not inherit it, since `ck_books_harvested_is_nobodys_and_public` refuses
-#: a harvested row with an adder. `harvested_identifier` ties the row to the
-#: record a harvest created it from, so a copy or a merge's survivor that took
-#: it would be the Book the next run matches in its place.
+#: would disclose the book.
 ROW_KEEPING: Final[tuple[str, ...]] = (
     "id",
     "added_at",
     "added_by_user_id",
-    "harvest_id",
-    "harvested_identifier",
     "deleted_at",
     "is_private",
-    "oai_datestamp",
 )
 
 #: Where the record came from and whether anything here changed it since: facts

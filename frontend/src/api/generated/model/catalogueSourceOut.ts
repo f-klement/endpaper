@@ -6,10 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { CatalogueSource } from "./catalogueSource.ts";
-import type { ClassificationScheme } from "./classificationScheme.ts";
-import type { CredentialKind } from "./credentialKind.ts";
 import type { CredentialProvenance } from "./credentialProvenance.ts";
-import type { Transport } from "./transport.ts";
 
 /**
  * One catalogue, as the settings screen needs to draw it.
@@ -28,19 +25,13 @@ export interface CatalogueSourceOut {
   answers_lookup: boolean;
   answers_search: boolean;
   asked_first: boolean;
-  classification_schemes: ClassificationScheme[];
-  credential: CredentialKind;
   credential_provenance?: CredentialProvenance;
   credential_unreadable?: boolean;
   credential_username_preview?: string;
   enabled: boolean;
-  encrypted: boolean;
   has_key: boolean;
   needs_a_key: boolean;
-  protocol: Transport;
-  protocol_version: string;
   ready: boolean;
-  record_schema: string;
   serves_groups: string[];
   slow: boolean;
   source: CatalogueSource;

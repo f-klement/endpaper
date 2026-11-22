@@ -4,29 +4,23 @@ from typing import Annotated, Any, Final
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-import classification_schemes
 import config
 import cover_store
 import covers
 import credentials
-import harvester
 import metadata
 import notifications
 import settings_store
 import sources
 import targets
-import vocabulary_copy
 from auth import require_admin
-from dependencies import CurrentUser, DbSession
+from dependencies import DbSession
 from enums import CatalogueSource, SettingKey
-from models import ClassificationSchemeRow, User
+from models import User
 from refusals import refuses
 from schemas import (
     CatalogueSourceOut,
     CatalogueSourcePreference,
-    ClassificationSchemeCreate,
-    ClassificationSchemeOut,
-    ClassificationSchemeRename,
     CredentialKeyOut,
     FeatureFlagsOut,
     LoginImageOut,
@@ -36,8 +30,6 @@ from schemas import (
     SettingsOut,
     SettingsUpdate,
     SourceCredentialIn,
-    VocabularyOut,
-    VocabularyProgressOut,
 )
 from uploads import read_image_upload
 
@@ -90,21 +82,6 @@ _STORED_BOOL: Final[dict[str, SettingKey]] = {
     # reason: an account policy turned on by mistake has to be correctable
     # without a redeploy.
     "accounts_open_to_outsiders": SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS,
-    # The SRU server's switch. Stored whatever the publish state, like the
-    # publish row: `settings_store.sru_is_served` reads both.
-    "sru_server_enabled": SettingKey.SRU_SERVER_ENABLED,
-    # The OAI-PMH provider's switch, stored the same way and read by
-    # `settings_store.oai_is_served` with the publish state.
-    "oai_provider_enabled": SettingKey.OAI_PROVIDER_ENABLED,
-    # The OAI-PMH harvester's switch. Refused on without a repository by
-    # `_refuse_harvest_without_a_repository`, and read by
-    # `settings_store.harvest_repository` with library mode.
-    "oai_harvest_enabled": SettingKey.OAI_HARVEST_ENABLED,
-    # Whether a public record shows on the shelf or on loan. Stored whatever
-    # the publish state: `settings_store.availability_is_shown` reads both.
-    "public_availability_enabled": SettingKey.PUBLIC_AVAILABILITY_ENABLED,
-    # The library page's vocabulary offer, put away for the installation.
-    "vocabulary_offer_dismissed": SettingKey.VOCABULARY_OFFER_DISMISSED,
 }
 
 _SENDER_BOOL: Final[dict[str, SettingKey]] = {
@@ -304,14 +281,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
             db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
         ),
         public_catalogue_published=settings_store.public_catalogue_is_published(db),
-        sru_server_enabled=settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED),
-        oai_provider_enabled=settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED),
-        oai_admin_email=settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL),
-        oai_harvest_enabled=settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED),
-        oai_harvest_base_url=settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL),
-        public_availability_enabled=settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED),
         accounts_open_to_outsiders=settings_store.accounts_are_open_to_outsiders(db),
-        vocabulary_offer_dismissed=settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED),
         # **The stored list, not the one in force.** An admin has to see what
         # they set: a screen that hid Google Books because no key is configured
         # would be one they cannot use, since they would switch it on and watch
@@ -339,11 +309,8 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
     has_key = bool(settings_store.google_books_api_key(db))
 
     return FeatureFlagsOut(
-        # The conjunction alone; the raw toggle is admin-only: see
-        # `FeatureFlagsOut.google_books_ready`. Public deliberately, and
-        # `catalogue_access.GOOGLE_BOOKS_IS_NOT_ASKED` relies on it: that refusal tells a
-        # member no more than this tells anybody. Narrowing this fails
-        # `TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`, and the refusal goes with it.
+        # The conjunction alone. The raw toggle is admin-only on purpose: see
+        # `FeatureFlagsOut.google_books_ready`.
         google_books_ready=google_books_enabled and has_key,
         goodreads_lookup_enabled=settings_store.get_bool(db, SettingKey.GOODREADS_LOOKUP_ENABLED),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
@@ -464,91 +431,6 @@ def _write_table[T](
         _store(db, key, encode(value))
 
 
-#: Why the OAI-PMH switch was refused. Named in the UI's hint as well.
-_OAI_NEEDS_AN_ADDRESS: Final = (
-    "OAI-PMH needs a repository contact address before it can be turned on, because every "
-    "harvester is told one. Enter it first."
-)
-
-
-def _refuse_oai_without_an_address(db: DbSession, payload: SettingsUpdate) -> None:
-    """409 for a write that would leave the OAI-PMH switch on with no address.
-
-    Owner's decision on issue #176: `Identify` must name a contact, and a role
-    address chosen on purpose is the only one this app publishes. Checked
-    before any field is written, so a refused request changes nothing. Only a
-    write naming either field is checked: one that names neither leaves the
-    pair as it was.
-    """
-    if payload.oai_provider_enabled is None and payload.oai_admin_email is None:
-        return
-    switched_on = (
-        payload.oai_provider_enabled
-        if payload.oai_provider_enabled is not None
-        else settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED)
-    )
-    address = (
-        payload.oai_admin_email
-        if payload.oai_admin_email is not None
-        else settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL).strip()
-    )
-    if switched_on and not address:
-        raise HTTPException(status_code=409, detail=_OAI_NEEDS_AN_ADDRESS)
-
-
-#: Why the harvester's switch was refused. Named in the UI's hint as well.
-_HARVEST_NEEDS_A_REPOSITORY: Final = (
-    "The OAI-PMH harvester needs a repository address before it can be turned on. Enter it first."
-)
-
-
-def _refuse_harvest_without_a_repository(db: DbSession, payload: SettingsUpdate) -> None:
-    """409 for a write that would leave the harvester on with no repository.
-
-    The import half of issue #178: a switch with no endpoint turns on nothing,
-    so it is refused where it is set rather than found broken at the harvest.
-    The shape of `_refuse_oai_without_an_address`, for its reasons: checked
-    before any field is written, and only for a write naming either field.
-    """
-    if payload.oai_harvest_enabled is None and payload.oai_harvest_base_url is None:
-        return
-    switched_on = (
-        payload.oai_harvest_enabled
-        if payload.oai_harvest_enabled is not None
-        else settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED)
-    )
-    address = (
-        payload.oai_harvest_base_url
-        if payload.oai_harvest_base_url is not None
-        else settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL).strip()
-    )
-    if switched_on and not address:
-        raise HTTPException(status_code=409, detail=_HARVEST_NEEDS_A_REPOSITORY)
-
-
-#: Why a repository address was refused. **A constant sentence**: the 400 never
-#: echoes what was typed.
-_REPOSITORY_NOT_HARVESTABLE: Final = (
-    "The repository address must be an http or https address with no username, password, query or fragment."
-)
-
-
-def _refuse_an_unharvestable_repository(payload: SettingsUpdate) -> None:
-    """400 for a repository address `harvester.is_harvestable` refuses.
-
-    Here rather than in `SettingsUpdate`, which only trims it: the rule reaches
-    `fetch`, and a schema sits below it. The same rule
-    `harvester.configured_repository` reads the stored row with, so a row this
-    write accepts is never one the harvester then refuses. Checked before any
-    field is written. 400 rather than 422: the schema types a 422's `detail`
-    as a list of validation entries, and this one is a sentence
-    (`tests/test_errors.py`).
-    """
-    address = payload.oai_harvest_base_url
-    if address and not harvester.is_harvestable(address):
-        raise HTTPException(status_code=400, detail=_REPOSITORY_NOT_HARVESTABLE)
-
-
 def _write_catalogue_sources(db: DbSession, wire: list[CatalogueSourcePreference]) -> None:
     """Merged against what is stored rather than taken whole: a payload that
     names one source must not be read as switching the other eight on. See
@@ -599,9 +481,6 @@ def update_settings(
     submit without the API key: the browser never received the real value, so
     sending the field back would blank it.
     """
-    _refuse_oai_without_an_address(db, payload)
-    _refuse_an_unharvestable_repository(payload)
-    _refuse_harvest_without_a_repository(db, payload)
     _write_lookup_settings(db, payload)
     _write_reminder_settings(db, payload)
     # An empty string is a deliberate clear, like the Google key and the
@@ -611,13 +490,6 @@ def update_settings(
     if payload.catalogue_sources is not None:
         _write_catalogue_sources(db, payload.catalogue_sources)
 
-    if payload.oai_admin_email is not None:
-        # Already checked as an address, or "", by `SettingsUpdate`.
-        _store(db, SettingKey.OAI_ADMIN_EMAIL, payload.oai_admin_email)
-    if payload.oai_harvest_base_url is not None:
-        # Trimmed by `SettingsUpdate`, checked by `harvester.is_harvestable`
-        # above unless "", and refused empty while the switch is on.
-        _store(db, SettingKey.OAI_HARVEST_BASE_URL, payload.oai_harvest_base_url)
     _write_table(db, payload, _STORED_BOOL, _flag, refuse_pinned=False)
     _write_table(db, payload, _SENDER_BOOL, _flag, refuse_pinned=True)
 
@@ -892,155 +764,3 @@ def forget_source_credential(
     credentials.forget(db, source)
     metadata.clear_cache()
     return _read_settings(db)
-
-
-#: The `code` of a delete refused because books quote the scheme. The client
-#: reads it with the `count` beside it to word the refusal in the reader's
-#: language; `SCHEME_IN_USE` in the frontend's `ClassificationSchemesSection`.
-SCHEME_IN_USE: Final = "scheme_in_use"
-
-
-def _scheme_out(row: ClassificationSchemeRow) -> ClassificationSchemeOut:
-    return ClassificationSchemeOut(
-        scheme=row.code,
-        name=row.name,
-        filing=row.filing,
-        built_in=classification_schemes.is_built_in(row.code),
-    )
-
-
-@refuses(404)
-def _scheme(scheme: str, db: DbSession) -> ClassificationSchemeRow:
-    """The scheme whose code is `scheme`, or a 404."""
-    row = db.get(ClassificationSchemeRow, scheme)
-    if row is None:
-        raise HTTPException(status_code=404, detail="No such classification scheme.")
-    return row
-
-
-@router.get("/classification-schemes", response_model=list[ClassificationSchemeOut])
-def list_classification_schemes(db: DbSession, current_user: CurrentUser) -> list[ClassificationSchemeOut]:
-    """Every scheme a heading may quote: the built in four, then the library's own.
-
-    **Any member**, because a book page names each heading's scheme from this
-    list. It says nothing about a book: no count, and no scheme is hidden for
-    being quoted only by somebody's private one.
-    """
-    return [_scheme_out(row) for row in classification_schemes.listing(db)]
-
-
-@router.post("/classification-schemes", response_model=ClassificationSchemeOut, status_code=201)
-def define_classification_scheme(
-    payload: ClassificationSchemeCreate,
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> ClassificationSchemeOut:
-    """Add a scheme. A code already taken is a 409.
-
-    **Admin only**, unlike defining a custom field: a scheme's filing rule is
-    fixed once defined, and what it files under orders a library's shelves.
-    """
-    try:
-        row = classification_schemes.define(db, payload.scheme, payload.name, payload.filing)
-    except classification_schemes.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    db.commit()
-    return _scheme_out(row)
-
-
-@router.patch("/classification-schemes/{scheme}", response_model=ClassificationSchemeOut)
-def rename_classification_scheme(
-    payload: ClassificationSchemeRename,
-    row: Annotated[ClassificationSchemeRow, Depends(_scheme)],
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> ClassificationSchemeOut:
-    """Rename a library's own scheme. A built in one is a 409."""
-    try:
-        classification_schemes.rename(db, row, payload.name)
-    except classification_schemes.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    db.commit()
-    return _scheme_out(row)
-
-
-@router.delete("/classification-schemes/{scheme}", status_code=204)
-def delete_classification_scheme(
-    row: Annotated[ClassificationSchemeRow, Depends(_scheme)],
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> None:
-    """Delete a scheme no heading quotes.
-
-    **A 409 naming how many books still quote it**, the owner's rule: no soft
-    delete and no reassignment. Its `detail` carries `code` `scheme_in_use` and
-    the `count` apart from the English sentence, for a client to word;
-    `classification_schemes.remove` says what the count covers. A built in
-    scheme is a 409 too, with a sentence only.
-    """
-    try:
-        classification_schemes.remove(db, row, current_user.id)
-    except classification_schemes.StillQuoted as refusal:
-        raise HTTPException(
-            status_code=409,
-            detail={"message": str(refusal), "code": SCHEME_IN_USE, "count": refusal.count},
-        ) from refusal
-    except classification_schemes.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    db.commit()
-
-
-# ── The local copy of each subject vocabulary ────────────────────────────────
-
-
-def _vocabulary_out(status: vocabulary_copy.Status) -> VocabularyOut:
-    copy, progress = status.copy, status.progress
-    return VocabularyOut(
-        scheme=status.scheme.id,
-        name=status.scheme.name,
-        licence=status.scheme.licence,
-        copyable=status.copyable,
-        entries=copy.entries if copy else None,
-        fetched_at=copy.fetched_at if copy else None,
-        released=copy.released if copy else None,
-        progress=(
-            VocabularyProgressOut(
-                phase=progress.phase, done=progress.done, total=progress.total, error=progress.error
-            )
-            if progress
-            else None
-        ),
-    )
-
-
-@router.get("/vocabularies", response_model=list[VocabularyOut])
-def list_vocabularies(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> list[VocabularyOut]:
-    """Every declared subject vocabulary: its licence, what is loaded of it and
-    when, and any download under way. **Admin only**, beside the download it
-    is read to start."""
-    return [_vocabulary_out(status) for status in vocabulary_copy.statuses(db)]
-
-
-@router.post("/vocabularies/{scheme}/download", response_model=VocabularyOut, status_code=202)
-@refuses(404)
-def download_vocabulary(
-    scheme: str, db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> VocabularyOut:
-    """Fetch the vocabulary's release and load it in the background, replacing
-    the copy in use only once the new one is complete. The first download and
-    every refresh are this one request.
-
-    A 404 for a vocabulary nobody declared. A 409 where its licence permits no
-    local copy, or a download of it is already under way.
-    """
-    try:
-        vocabulary_copy.start(scheme)
-    except vocabulary_copy.Unknown as unknown:
-        raise HTTPException(status_code=404, detail="No such vocabulary.") from unknown
-    except vocabulary_copy.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    return next(
-        _vocabulary_out(status) for status in vocabulary_copy.statuses(db) if status.scheme.id == scheme
-    )

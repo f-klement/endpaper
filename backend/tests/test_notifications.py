@@ -26,10 +26,9 @@ import respx
 
 import mailer
 import notifications
-import patrons
 import settings_store
 from enums import OverdueNotifyReason, OverdueSender, SettingKey
-from models import Book, Loan, Patron, User
+from models import Book, Loan, User
 from tests.conftest import forget_any_encryption_key
 
 HOOK = "https://hooks.example.org/t/abcdef"
@@ -662,77 +661,13 @@ def test_the_ticker_is_off_under_test():
     assert config.overdue_ticker_enabled() is False
 
 
-def test_a_loan_to_a_member_or_a_typed_name_names_its_borrower(db, lend, admin):
-    """`ck_loans_one_borrower` sets one of the two on such a loan, so the
-    digest carries it. A patron's loan is the exception, below."""
+def test_the_borrower_is_always_named(db, lend, admin):
+    """`ck_loans_one_borrower` guarantees exactly one of the two, so the digest
+    never carries a null borrower."""
     lend()
     digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
     assert digest["loans"][0]["borrower"]
     assert db.query(User).count() >= 1
-
-
-#: In every text column of the patron below, so a field the digest picks up
-#: from the record, whichever it is, shows as this.
-PATRON_MARKER = "Qzpatronmark"
-
-
-@pytest.fixture
-def patron_loan(db, admin):
-    """An overdue loan to a patron whose every text column carries the marker."""
-    patron = Patron(
-        card_number=f"C{PATRON_MARKER}",
-        name=f"Name {PATRON_MARKER}",
-        email=f"{PATRON_MARKER}@example.org",
-        phone=f"+43 {PATRON_MARKER}",
-        street=f"Street {PATRON_MARKER}",
-        house_number=PATRON_MARKER,
-        postcode=PATRON_MARKER,
-        city=f"City {PATRON_MARKER}",
-    )
-    book = Book(title="Dune", added_by_user_id=admin["user"]["id"])
-    db.add_all([patron, book])
-    db.flush()
-    loan = Loan(
-        book_id=book.id,
-        loaned_to_patron_id=patron.id,
-        loaned_by_user_id=admin["user"]["id"],
-        due_at=now() - timedelta(days=3),
-    )
-    db.add(loan)
-    db.commit()
-    return loan
-
-
-class TestAPatronNeverLeavesForAChannel:
-    """A channel is a third party, so a patron's record never reaches one.
-
-    The digest names the borrower from the loan's member or typed name, both
-    null on a patron's loan. A fallback to the patron's name would read as a
-    helpful fix, and these go red on it.
-    """
-
-    def test_the_digest_carries_nothing_of_the_patron(self, db, patron_loan):
-        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
-
-        assert digest["count"] == 1
-        assert PATRON_MARKER not in json.dumps(digest)
-
-    def test_the_text_says_no_name_was_sent(self, db, patron_loan):
-        text = notifications.render_text(
-            notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
-        )
-
-        assert PATRON_MARKER not in text
-        assert "Dune: no name sent, 3 days overdue" in text
-
-    def test_an_erased_borrower_sends_no_name_either(self, db, patron_loan):
-        patrons.erase(db, [patron_loan.loaned_to_patron_id], now())
-        db.commit()
-
-        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
-
-        assert digest["loans"][0]["borrower"] is None
-        assert "Dune: no name sent" in notifications.render_text(digest)
 
 
 # ── The two senders added beside the webhook ─────────────────────────────────

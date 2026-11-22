@@ -1,6 +1,5 @@
 import { useRef, type ReactNode } from "react";
 
-import type { MarcPreviewRow } from "../../../../api/generated/model";
 import { errorText } from "../../../../components/ErrorState";
 import { useTranslation, type MessageKey } from "../../../../i18n";
 import {
@@ -176,32 +175,6 @@ export function ImportError({ error }: { error: unknown }) {
     <ImportAlert>
       {errorText(error, t("common.somethingWentWrong"), t)}
     </ImportAlert>
-  );
-}
-
-/**
- * The records a MARC preview read, one line each, so a bad field is visible
- * before the write: the file's and the harvest's preview both. Nothing when
- * there are none.
- */
-export function RecordRows({ rows }: { rows: MarcPreviewRow[] }) {
-  if (rows.length === 0) return null;
-  return (
-    <ul className="text-xs text-paper-600 mt-1 space-y-0.5 dark:text-paper-400">
-      {rows.map((row, index) => (
-        <li key={`${row.title}-${index}`}>{describeRow(row)}</li>
-      ))}
-    </ul>
-  );
-}
-
-/** What a record was read as: its title, author and headings. */
-function describeRow(row: MarcPreviewRow): string {
-  const classifications = row.classifications ?? [];
-  return (
-    row.title +
-    (row.author ? ` · ${row.author}` : "") +
-    (classifications.length > 0 ? ` · ${classifications.join(", ")}` : "")
   );
 }
 

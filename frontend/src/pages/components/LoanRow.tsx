@@ -144,7 +144,7 @@ function BookHeading({ loan }: { loan: LoanOut }) {
 }
 
 /**
- * Whole phrases, not one with the borrower swapped in: German does not
+ * Two whole phrases, not one with the borrower swapped in: German does not
  * keep the English word order, and a borrower with no account here is worth
  * saying rather than leaving to look like a member nobody recognises.
  *
@@ -154,16 +154,6 @@ function BookHeading({ loan }: { loan: LoanOut }) {
  */
 function borrowerLine(loan: LoanOut, t: Translate): string {
   const by = loan.loaned_by?.username ?? "";
-  // A patron's name only where the server sent it, which it does for an admin
-  // alone: this row is read by every member who sees the book.
-  if (loan.patron) {
-    return t("loans.loanedToNamedPatronBy", {
-      name: loan.patron.name,
-      card: loan.patron.card_number,
-      by,
-    });
-  }
-  if (loan.to_patron) return t("loans.loanedToPatronBy", { by });
   return loan.loaned_to_name
     ? t("loans.loanedToExternalBy", { name: loan.loaned_to_name, by })
     : t("loans.loanedToBy", { to: loan.loaned_to?.username ?? "", by });
@@ -203,7 +193,17 @@ function Deadline({ loan, isOpen }: { loan: LoanOut; isOpen: boolean }) {
  */
 function TimeOut({ loan, isOpen }: { loan: LoanOut; isOpen: boolean }) {
   const { t } = useTranslation();
-  const daysOut = loan.days_out;
+  // Defaulted because the field is optional in the generated type: it carries
+  // a server side default, so orval emits it as `number | undefined` and
+  // TypeScript will not let it be compared without this. `overdueText` does
+  // the same for `days_overdue`.
+  //
+  // **Not because of `serialisation.loan_summary`**, which was the reason
+  // written here first and is a real omission on a payload this component
+  // never sees: `active_loan` is rendered by the book detail page, and every
+  // loan reaching `LoanRow` comes from the loans list or the overdue page,
+  // where both fields are filled. Zero renders nothing either way.
+  const daysOut = loan.days_out ?? 0;
   if (!isOpen || daysOut <= 0) return null;
   return (
     <p className="text-xs text-paper-600 mt-1 dark:text-paper-400">

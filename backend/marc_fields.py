@@ -32,8 +32,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import Final
 from xml.etree import ElementTree
 
@@ -80,84 +79,6 @@ GND_PREFIX: Final = "(DE-588)"
 #: over 85 live records, 10 of the 13 600 fields carry a heading no other field
 #: carries, and 3 of the 13 689 chains do.
 _DNB_SUBJECT_TAGS: Final = ("650", "651", "655", "689", "600")
-
-#: The vocabulary a subject field's second indicator names where it carries no
-#: `$2`, as the MARC 21 bibliographic format defines the indicator on `600`,
-#: `650`, `651` and `655`. `4` (source not specified) and `7` (source in `$2`)
-#: name nothing here. `1` is `lcshac`, which the source code list now marks
-#: deprecated for `cyac`: it is what LC's MODS writes and what
-#: `metadata.py`'s MODS reader reads, so the two readers agree.
-#:
-#: **Read as given only on a record the Library of Congress catalogued**
-#: (`_INDICATOR_TRUSTING_AGENCIES`), owner's ruling 2026-11-20, and elsewhere
-#: only where a local copy confirms the heading (`_SUBDIVISION_FORMS`). Other catalogues
-#: write the indicator wrongly: of 21 `650` fields with indicator `0` and no `$2`
-#: in 150 live OENB records (2026-11-20), at least 10 were MeSH from Austrian
-#: medical libraries, which an upload would store as LCSH classifications and
-#: `sru.py` would republish as `$2 lcsh`.
-#:
-#: **`689` is left out because its second indicator is not a thesaurus**: it
-#: numbers the heading inside an RSWK chain, so its `0` is the first link and
-#: reading it here would file every chain's first heading under LCSH. A Library
-#: of Congress record writes LCSH as `650 #0` with no `$2`: 117 of 117 LCSH
-#: fields in 100 LC MARCXML records measured 2026-11-20.
-#:
-#: Keyed from one string rather than six literals, as `_LINK_RELATIONS` is
-#: derived: an indicator `"2"` spelled at module level reads as the `$2` code to
-#: `test_house_rules.py::TestOneReaderPerAmbiguousSubfield`.
-_THESAURUS_TAGS: Final = frozenset({"600", "650", "651", "655"})
-_VOCABULARY_BY_SECOND_INDICATOR: Final[dict[str, str]] = dict(
-    zip("012356", ("lcsh", "lcshac", "mesh", "nal", "cash", "rvm"), strict=True)
-)
-
-#: The cataloguing agencies (`040 $a`) whose records' subject field second
-#: indicator is read as `_VOCABULARY_BY_SECOND_INDICATOR` says. On any other
-#: record the indicator counts only where a local copy confirms it
-#: (`_SUBDIVISION_FORMS`).
-_INDICATOR_TRUSTING_AGENCIES: Final = frozenset({"DLC"})
-
-#: A `$0` that names its authority file, and the vocabulary code that file is,
-#: matched at the start of the value with any URL scheme and `www.` removed.
-#: Read where a field carries no `$2`, before the second indicator: a link to
-#: an authority record says which vocabulary the heading is from, whatever the
-#: indicator claims (owner's ruling 2026-11-20, option AC).
-_VOCABULARY_BY_AUTHORITY_LINK: Final = (
-    (GND_PREFIX, "gnd"),
-    ("d-nb.info/gnd/", "gnd"),
-    ("(DNLM)", "mesh"),
-    ("id.nlm.nih.gov/mesh/", "mesh"),
-    ("id.loc.gov/authorities/subjects/", "lcsh"),
-    ("(IDREF)", "rameau"),
-    ("idref.fr/", "rameau"),
-    ("(OCoLC)fst", "fast"),
-)
-
-
-#: A `(vocabulary, label)` pair: the vocabulary a subject field's second
-#: indicator names and the field's `$a`, put to that vocabulary's local copy.
-type CopyQuestion = tuple[str, str]
-
-
-def _capitalised(subdivisions: list[str]) -> bool:
-    """Whether no subdivision opens lower case, as no LCSH subdivision does.
-    A MeSH qualifier does (`history`), so this keeps a MeSH heading under
-    indicator `0` from being confirmed by its main heading alone."""
-    return not any(part.strip()[:1].islower() for part in subdivisions)
-
-
-#: The vocabularies a second indicator may name on a record outside
-#: `_INDICATOR_TRUSTING_AGENCIES`, each with the subdivision form a heading of
-#: it takes. Such a field is that vocabulary only where `$a` is an exact
-#: preferred label in its local copy and the subdivisions fit the form
-#: (owner's ruling 2026-11-20, option AC). A vocabulary missing here is never
-#: asked, so its indicator declares nothing: MeSH joins with its own form when
-#: a MeSH copy exists.
-_SUBDIVISION_FORMS: Final[dict[str, Callable[[list[str]], bool]]] = {"lcsh": _capitalised}
-
-#: Trailing punctuation a question's label sheds, a final full stop included:
-#: a MARC heading ends with one (`Psychology, Industrial.`) and a preferred
-#: label does not.
-_TRAILING_PUNCTUATION: Final = re.compile(r"[\s.,;:/=]+$")
 
 
 #: The `$2` codes that say a field is asserting something other than a subject.
@@ -350,24 +271,6 @@ def _subject_kind(vocabulary: str | None) -> HeadingKind | None:
     return _KIND_BY_VOCABULARY.get(vocabulary) if vocabulary else None
 
 
-def _linked_vocabulary(value: str) -> str | None:
-    """The vocabulary one `$0` names by its prefix (`_VOCABULARY_BY_AUTHORITY_LINK`), or None."""
-    bare = value.strip().split("://", 1)[-1].removeprefix("www.")
-    return next((code for marker, code in _VOCABULARY_BY_AUTHORITY_LINK if bare.startswith(marker)), None)
-
-
-@dataclass(frozen=True, slots=True)
-class _Indicator:
-    """A field's second indicator, and what licenses reading it as a thesaurus:
-    `trusted` where the record's agency is in `_INDICATOR_TRUSTING_AGENCIES`,
-    else only the questions in `held`, which a local copy confirmed.
-    `Fields` builds it, since only it sees `040`."""
-
-    value: str
-    trusted: bool
-    held: frozenset[CopyQuestion]
-
-
 class Subfields(dict[str, str]):
     """One MARC field's subfields: the first value per code, repeats kept.
 
@@ -393,13 +296,12 @@ class Subfields(dict[str, str]):
     exception and `entry.get("a")` is the rule.
     """
 
-    def __init__(self, pairs: Iterable[tuple[str, str]], indicator: _Indicator | None = None) -> None:
+    def __init__(self, pairs: Iterable[tuple[str, str]]) -> None:
         repeats: dict[str, list[str]] = {}
         for code, value in pairs:
             repeats.setdefault(code, []).append(value)
         super().__init__({code: values[0] for code, values in repeats.items()})
         self._repeats = repeats
-        self._indicator = indicator
 
     def all(self, code: str) -> list[str]:
         """Every value under one code, in the order the record wrote them."""
@@ -547,11 +449,7 @@ class Subfields(dict[str, str]):
         return next((value for value in self.all("0") if value), None)
 
     def subject_vocabulary(self, tag: str) -> str | None:
-        """The vocabulary a subject field's `$2` names, lower cased; failing a
-        `$2`, the one a `$0` prefix names (`_VOCABULARY_BY_AUTHORITY_LINK`);
-        failing that, the one its second indicator names
-        (`_VOCABULARY_BY_SECOND_INDICATOR`) on a Library of Congress record, or
-        elsewhere where a local copy confirmed it (`copy_question`); or None.
+        """The vocabulary a subject field's `$2` names, lower cased, or None.
 
         **`tag` is taken and checked, and that is the rule rather than a
         parameter.** `$2` does not mean the same thing on every field: on `082` it
@@ -588,67 +486,7 @@ class Subfields(dict[str, str]):
         if tag not in _DNB_SUBJECT_TAGS:
             raise ValueError(f"$2 is not a subject vocabulary on MARC {tag}")
         value = self.get("2")
-        if value:
-            return value.lower()
-        return self._linked_vocabulary() or self._indicated_vocabulary(tag)
-
-    def heading_label(self) -> str:
-        """`$a` in a preferred label's form: trailing punctuation and the
-        closing full stop removed, so `Psychology, Industrial.` reads
-        `Psychology, Industrial`.
-
-        **One form for the question and the stored LCSH number**
-        (`marc._extra_headings`). Two forms would confirm a heading against a
-        copy's label and then store one that equals no label of that copy, nor,
-        for a heading with no subdivision, the one the Library of Congress
-        catalogue sends for the same book, so `Record` would keep both.
-        Migration `c2015421927e` put the rows stored before into this form.
-        """
-        return _TRAILING_PUNCTUATION.sub("", self.get("a", "").strip())
-
-    def copy_question(self, tag: str) -> CopyQuestion | None:
-        """What this field asks a local copy before its second indicator counts,
-        or None where the indicator is trusted, names no vocabulary
-        `_SUBDIVISION_FORMS` holds, or the subdivisions do not fit its form.
-
-        Asked whatever `$2` or `$0` say, since this cannot read `$2` without
-        becoming a second reader of it: the answer is consulted only where
-        neither decides, so an extra question costs a label in one query.
-        """
-        named = self._untrusted_indicator(tag)
-        if named is None or named not in _SUBDIVISION_FORMS:
-            return None
-        label = self.heading_label()
-        if not label or not _SUBDIVISION_FORMS[named](self._subdivisions()):
-            return None
-        return (named, label)
-
-    def _linked_vocabulary(self) -> str | None:
-        """The vocabulary the first `$0` naming one names, or None."""
-        return next((code for value in self.all("0") if (code := _linked_vocabulary(value))), None)
-
-    def _indicated_vocabulary(self, tag: str) -> str | None:
-        """The second indicator's vocabulary where it is trusted or confirmed."""
-        indicator = self._indicator
-        if indicator is None or tag not in _THESAURUS_TAGS:
-            return None
-        if indicator.trusted:
-            return _VOCABULARY_BY_SECOND_INDICATOR.get(indicator.value)
-        question = self.copy_question(tag)
-        return question[0] if question in indicator.held else None
-
-    def _untrusted_indicator(self, tag: str) -> str | None:
-        """The vocabulary the second indicator names on a thesaurus tag of a
-        record whose agency is not trusted, or None."""
-        indicator = self._indicator
-        if indicator is None or indicator.trusted or tag not in _THESAURUS_TAGS:
-            return None
-        return _VOCABULARY_BY_SECOND_INDICATOR.get(indicator.value)
-
-    def _subdivisions(self) -> list[str]:
-        """Every heading part after the first `$a`: the OENB's GBV import
-        repeats `$a` for a subdivision where others write `$x`."""
-        return self.all("a")[1:] + [value for code in "bvxyz" for value in self.all(code)]
+        return value.lower() if value else None
 
     def _relator_codes(self) -> list[str]:
         """Every role one `100` or `700` states, as bare relator codes.
@@ -942,24 +780,6 @@ def _names_a_creator(entry: Subfields) -> bool:
     return "t" not in entry and any(code in _AUTHOR_RELATORS for code in entry._relator_codes())
 
 
-def _subfields(datafield: ElementTree.Element, indicator: _Indicator | None = None) -> Subfields:
-    """One datafield node's subfields, in record order."""
-    return Subfields(
-        (
-            (subfield.get("code") or "", _marc_text(subfield.text))
-            for subfield in datafield.findall(f"{_MARC}subfield")
-        ),
-        indicator,
-    )
-
-
-def _trusts_the_thesaurus_indicator(record: ElementTree.Element) -> bool:
-    """Whether the record's cataloguing agency, its first `040 $a`, is one whose
-    subject field second indicator names a thesaurus (`_INDICATOR_TRUSTING_AGENCIES`)."""
-    agency = record.find(f"{_MARC}datafield[@tag='040']")
-    return agency is not None and (_subfields(agency).get("a") or "").strip() in _INDICATOR_TRUSTING_AGENCIES
-
-
 class Fields:
     """One MARC record's datafields, and every question this app asks of them.
 
@@ -968,33 +788,22 @@ class Fields:
     `datafield` only. Holding the two apart is how a caller ends up asking one
     record's node about another record's fields: `describes_a_book` needed all
     three of a node, a field map and a title until they lived here.
-
-    `held` is the questions a local copy confirmed (`copy_questions`), handed
-    in rather than looked up: this layer reads no database. Empty, a second
-    indicator counts on a Library of Congress record only.
     """
 
-    def __init__(self, record: ElementTree.Element, held: frozenset[CopyQuestion] = frozenset()) -> None:
+    def __init__(self, record: ElementTree.Element) -> None:
         self._record = record
-        trusted = _trusts_the_thesaurus_indicator(record)
         fields: dict[str, list[Subfields]] = {}
         for datafield in record.findall(f"{_MARC}datafield"):
             tag = datafield.get("tag")
             if tag is None:
                 continue
-            indicator = _Indicator(datafield.get("ind2") or " ", trusted, held)
-            fields.setdefault(tag, []).append(_subfields(datafield, indicator))
+            fields.setdefault(tag, []).append(
+                Subfields(
+                    (subfield.get("code") or "", _marc_text(subfield.text))
+                    for subfield in datafield.findall(f"{_MARC}subfield")
+                )
+            )
         self._fields = fields
-
-    def copy_questions(self) -> set[CopyQuestion]:
-        """Every question this record's subject fields put to a local copy
-        (`Subfields.copy_question`), for the caller to answer in one batch."""
-        return {
-            question
-            for tag in _THESAURUS_TAGS
-            for entry in self.get(tag)
-            if (question := entry.copy_question(tag)) is not None
-        }
 
     def get(self, tag: str) -> list[Subfields]:
         """Every occurrence of one tag, in the order the record wrote them.
@@ -1015,9 +824,8 @@ class Fields:
         Koha's order, and never derived from the URL. The second indicator is
         the relation (`_LINK_RELATIONS`); anything else there is no statement.
 
-        Read off the node rather than `get`, because `Subfields` exposes no
-        indicator: it keeps the second one for `subject_vocabulary` and
-        `copy_question` alone.
+        Read off the node rather than `get`, because `Subfields` keeps no
+        indicators.
         """
         links: list[Link] = []
         seen: set[str] = set()
@@ -1112,8 +920,8 @@ class Fields:
 
         **The GND number is the half that does not move**, the way a Dewey number
         is: `(DE-588)4203576-4` names one heading whatever a record captions it.
-        Unlike Dewey that is untested here rather than measured, every caption
-        being German. It is stored bare, under its own
+        Unlike Dewey that is untested here rather than measured, the DNB being the
+        only supplier and every caption German. It is stored bare, under its own
         scheme, with the heading text as the caption.
 
         **Repeats are not folded here, and they used to be.** A record restates
@@ -1151,14 +959,13 @@ class Fields:
 
         **Two catalogues through this one parser disagree about which tag
         declares.** Measured 2026-08-31: the DNB's `650` declares `gnd` on 130 of
-        134 while the OENB's declares nothing by `$2` on 17 of 29, and both arrive here
+        134 while the OENB's declares nothing on 17 of 29, and both arrive here
         through `metadata._dnb_record`. That is the whole argument for reading the subfield
         rather than inferring from the tag, and it is made entirely of fields this
-        function actually sees. Where no `$2` does, a `$0` prefix or the second
-        indicator may supply the code (`Subfields.subject_vocabulary`).
+        function actually sees.
 
         **K10plus is the sharper illustration and is not the evidence.** Its `689`
-        declares `gnd` on all 113 and its `650` on 3 of 133 by `$2`, an exact mirror of the
+        declares `gnd` on all 113 and its `650` on 3 of 133, an exact mirror of the
         DNB. But `metadata._k10plus_record` reads `650` alone and never calls this, so those
         113 fields reach no reader in this app: quoting them here would rest a rule
         on data nothing reads.

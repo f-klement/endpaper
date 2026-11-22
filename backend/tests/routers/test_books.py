@@ -51,7 +51,6 @@ from models import (
     Book,
     Classification,
     Collection,
-    Harvest,
     Tag,
     User,
     UserBook,
@@ -664,36 +663,6 @@ class TestPrivacy:
         )
         assert res.status_code == 200
 
-    def _a_harvested_book(self, db) -> int:
-        run = Harvest(base_url="http://10.0.0.10/oai", metadata_prefix="marcxml")
-        db.add(run)
-        db.flush()
-        book = Book(title="Harvested", harvest_id=run.id, added_by_user_id=None, is_private=False)
-        db.add(book)
-        db.commit()
-        return book.id
-
-    def test_a_harvested_book_cannot_be_made_private(self, client, admin, db):
-        """Ownerless and private, it would be a record nobody can see."""
-        book_id = self._a_harvested_book(db)
-        res = client.patch(
-            f"/api/books/{book_id}/privacy", json={"is_private": True}, headers=admin["headers"]
-        )
-
-        assert res.status_code == 409
-        db.expire_all()
-        assert db.get(Book, book_id).is_private is False
-
-    def test_a_harvested_book_may_be_kept_public(self, client, admin, db):
-        """The refusal is of privacy, not of the route: the anti vacuity arm."""
-        book_id = self._a_harvested_book(db)
-        res = client.patch(
-            f"/api/books/{book_id}/privacy", json={"is_private": False}, headers=admin["headers"]
-        )
-
-        assert res.status_code == 200
-        assert res.json()["is_private"] is False
-
     def test_private_books_are_excluded_from_search(self, client, admin, member, make_book):
         make_book(admin["headers"], title="Secret Dune", is_private=True)
         found = items(client.get("/api/books", params={"q": "dune"}, headers=member["headers"]))
@@ -857,26 +826,8 @@ class TestCoverUpload:
             headers=admin["headers"],
         )
         assert res.status_code == 200
-        assert covers.unversioned(res.json()["cover_url"]) == f"/covers/{book['id']}.png"
+        assert res.json()["cover_url"] == f"/covers/{book['id']}.png"
         assert (covers_dir / f"{book['id']}.png").exists()
-
-    def test_a_cover_replaced_in_the_same_format_is_given_a_new_url(
-        self, client, admin, make_book, covers_dir
-    ):
-        """The file keeps its name and a browser keeps an image for a week, so
-        an unchanged URL would show the old cover until that week ran out."""
-        book = make_book(admin["headers"])
-        urls = [
-            client.post(
-                f"/api/books/{book['id']}/cover",
-                files={"file": (name, PNG_BYTES, "image/png")},
-                headers=admin["headers"],
-            ).json()["cover_url"]
-            for name in ("a.png", "b.png")
-        ]
-
-        assert urls[0] != urls[1]
-        assert client.get(urls[1], headers=admin["headers"]).content == PNG_BYTES
 
     def test_rejects_a_disallowed_extension(self, client, admin, make_book, covers_dir):
         book = make_book(admin["headers"])
@@ -1028,7 +979,7 @@ class TestRefreshMetadata:
             headers=admin["headers"],
         )
         res = client.put(f"/api/books/{book['id']}/refresh", headers=admin["headers"])
-        assert covers.unversioned(res.json()["cover_url"]) == f"/covers/{book['id']}.png"
+        assert res.json()["cover_url"] == f"/covers/{book['id']}.png"
 
     def test_the_local_cover_rule_is_covers_own(
         self, client, admin, make_book, monkeypatch, open_library_hit

@@ -27,7 +27,7 @@ import logging
 import secrets
 from typing import Any, Final
 
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import config
@@ -35,7 +35,7 @@ import credentials
 import sources
 import targets
 from enums import CatalogueSource, Locale, SettingKey
-from models import Setting, datestamp_now
+from models import Setting
 
 logger = logging.getLogger(__name__)
 
@@ -107,33 +107,10 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     SettingKey.PUBLIC_CATALOGUE_ENABLED: "false",
     # Off, so a published catalogue is `noindex` until somebody says otherwise.
     SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED: "false",
-    # Off, so a catalogue published to people is not also served over SRU until
-    # an admin says so; the owner's decision on issue #178 is that every export
-    # protocol starts off. **A deployment already serving SRU keeps it**:
-    # revision `f73ebc9f0436` writes the row on where the catalogue was
-    # published before the switch existed, since otherwise this default would
-    # read there and withdraw it.
-    SettingKey.SRU_SERVER_ENABLED: "false",
-    # Off everywhere, fresh and upgraded alike: unlike SRU there is no endpoint
-    # an upgrade could withdraw, since none answered before the switch did.
-    SettingKey.OAI_PROVIDER_ENABLED: "false",
-    # No contact address until an admin gives one, so the switch above stays
-    # off until then: `routers/settings.py` refuses it.
-    SettingKey.OAI_ADMIN_EMAIL: "",
-    # Never served. Not a preference: no field in `SettingsUpdate`, and written
-    # by `record_oai_service` alone.
-    SettingKey.OAI_FIRST_SERVED: "",
-    # Off, with no repository: the one setting that makes this server connect
-    # where a person typed starts silent, like every sender above.
-    SettingKey.OAI_HARVEST_ENABLED: "false",
-    SettingKey.OAI_HARVEST_BASE_URL: "",
-    # Off: a public record says nothing about loans until an admin says so
-    # (owner's decision on issue #29). See `availability_is_shown`.
-    SettingKey.PUBLIC_AVAILABILITY_ENABLED: "false",
     # An empty JSON object: no sender has run yet. Not a preference, so it has
     # no field in `SettingsUpdate` and never reaches `_read_settings`.
     SettingKey.SENDER_HEALTH: "{}",
-    # The provider list. An empty object rather than the twenty one sources spelled
+    # The provider list. An empty object rather than the twenty sources spelled
     # out, because `sources.parse` already answers "absent means the defaults"
     # and writing them twice is two places for the default order to drift.
     SettingKey.CATALOGUE_SOURCES: "{}",
@@ -142,9 +119,6 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # a new local account cannot sign in until its address is verified or an
     # admin says otherwise.
     SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS: "false",
-    # Not dismissed: an installation with no copy is offered one until an
-    # admin loads a copy or says no.
-    SettingKey.VOCABULARY_OFFER_DISMISSED: "false",
 }
 
 # Settings whose value must never be sent back to a browser in full, and which are
@@ -626,7 +600,7 @@ def catalogue_sources(db: Session, state: credentials.KeyState | None = None) ->
     **One row read and one `json.loads` per request that reaches a catalogue**,
     and that is accepted rather than cached. It is the same cost
     `google_books_api_key` already pays beside it on the same call sites, a
-    populated row holds twenty one sources, and the alternative is a process local
+    populated row holds twenty sources, and the alternative is a process local
     cache that has to be invalidated on write: a second source of truth for a
     value whose whole point is that turning a source off takes effect
     immediately. If this ever shows up in a measurement, the honest fix is to
@@ -814,79 +788,6 @@ def public_catalogue_may_be_indexed(db: Session) -> bool:
     conjunction is the same shape as the one above and for the same reason.
     """
     return public_catalogue_is_published(db) and get_bool(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED)
-
-
-def sru_is_served(db: Session) -> bool:
-    """Whether the SRU server answers.
-
-    Its own switch **and** the publish state, the same shape as
-    `public_catalogue_may_be_indexed` and for the same reason: a switch that
-    could turn the protocol on while nothing is published would be a way to
-    publish the catalogue without saying so. `routers.sru` runs the public gate
-    before asking this, so the conjunction is repeated there on purpose: this
-    answer stays right for any caller that asks it alone.
-    """
-    return public_catalogue_is_published(db) and get_bool(db, SettingKey.SRU_SERVER_ENABLED)
-
-
-def oai_is_served(db: Session) -> bool:
-    """Whether the OAI-PMH provider answers: its own switch **and** the publish
-    state, for the reason `sru_is_served` gives, **and** a contact address.
-    Neither protocol's switch reads the other's, so turning one on cannot turn
-    the other on.
-
-    The address is refused empty at the write while the switch is on; it is
-    read here too because a restore or a hand edit can store the pair without
-    that write, and `Identify` must name an address."""
-    return (
-        public_catalogue_is_published(db)
-        and get_bool(db, SettingKey.OAI_PROVIDER_ENABLED)
-        and bool(get_raw(db, SettingKey.OAI_ADMIN_EMAIL).strip())
-    )
-
-
-def harvest_repository(db: Session) -> str | None:
-    """The repository address stored for the harvester, or None while it may not run.
-
-    Library mode, the harvester's own switch **and** an address that is not
-    blank, which a restore can store without passing the settings route. **The
-    address is not validated here**: `harvester.configured_repository` applies
-    `harvester.is_harvestable` to what this answers, because that rule reaches
-    `fetch` and this layer sits below it.
-    """
-    if not (get_bool(db, SettingKey.LIBRARY_MODE) and get_bool(db, SettingKey.OAI_HARVEST_ENABLED)):
-        return None
-    return get_raw(db, SettingKey.OAI_HARVEST_BASE_URL).strip() or None
-
-
-def oai_has_served(db: Session) -> bool:
-    """Whether the OAI-PMH provider has ever answered a request."""
-    return bool(get_raw(db, SettingKey.OAI_FIRST_SERVED))
-
-
-def record_oai_service(db: Session) -> None:
-    """Note the first request the OAI-PMH provider answers, once.
-
-    Two first requests at once both find the row missing; the second insert
-    then fails on the key and is dropped, since the first has recorded a moment
-    a second earlier at most.
-    """
-    if oai_has_served(db):
-        return
-    try:
-        set_value(db, SettingKey.OAI_FIRST_SERVED, datestamp_now().isoformat())
-    except IntegrityError:
-        db.rollback()
-
-
-def availability_is_shown(db: Session) -> bool:
-    """Whether a public record says if its book is on the shelf or on loan.
-
-    Its own switch **and** the publish state, for `sru_is_served`'s reason: a
-    switch that answered while nothing is published would be a way to publish
-    something without saying so.
-    """
-    return public_catalogue_is_published(db) and get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED)
 
 
 def accounts_are_open_to_outsiders(db: Session) -> bool:

@@ -33,12 +33,6 @@ export class ApiError extends Error {
      * ceiling and a file another Book holds.
      */
     readonly code?: string,
-    /**
-     * How many things the refusal is about, when the server counted: the
-     * `count` beside a `code`, so a page can word the refusal in the reader's
-     * language rather than show the server's English sentence.
-     */
-    readonly count?: number,
   ) {
     super(message);
     this.name = "ApiError";
@@ -137,31 +131,23 @@ function readable(text: unknown): text is string {
   return typeof text === "string" && SEEN.test(text);
 }
 
-/** What a failed response says, read by `errorDetail`. */
-interface ErrorDetail {
-  message: string;
-  bookId?: number;
-  code?: string;
-  count?: number;
-}
-
 /**
- * An object `detail`, read as a message, a Book it names, a code saying
- * which refusal it is and a count. A message that is not readable falls back
- * to the status text; a book id, code or count of the wrong type is dropped
- * alone.
+ * An object `detail`, read as a message, a Book it names and a code saying
+ * which refusal it is. A message that is not readable falls back to the
+ * status text; a book id or code of the wrong type is dropped alone.
  */
-function objectDetail(detail: object, statusText: string): ErrorDetail {
+function objectDetail(
+  detail: object,
+  statusText: string,
+): { message: string; bookId?: number; code?: string } {
   const {
     message,
     book_id: bookId,
     code,
-    count,
   } = detail as {
     message?: unknown;
     book_id?: unknown;
     code?: unknown;
-    count?: unknown;
   };
   // The book is kept when the sentence is blank: it is what lets the
   // reader open the copy already on the shelf.
@@ -169,7 +155,6 @@ function objectDetail(detail: object, statusText: string): ErrorDetail {
     message: readable(message) ? message : statusText,
     bookId: typeof bookId === "number" ? bookId : undefined,
     code: typeof code === "string" ? code : undefined,
-    count: Number.isInteger(count) ? (count as number) : undefined,
   };
 }
 
@@ -180,7 +165,7 @@ function objectDetail(detail: object, statusText: string): ErrorDetail {
 function detailOf(
   detail: unknown,
   statusText: string,
-): ErrorDetail | undefined {
+): { message: string; bookId?: number; code?: string } | undefined {
   if (readable(detail)) return { message: detail };
   // A list with no readable `msg` in it says nothing, and is not then read as
   // an object, which a list also is.
@@ -208,7 +193,9 @@ function fieldMessages(detail: unknown[]): { message: string } | undefined {
  * where a route wanted to say more than a sentence. A non-JSON body is
  * possible too, a reverse proxy's own error page, so all four end up here.
  */
-async function errorDetail(response: Response): Promise<ErrorDetail> {
+async function errorDetail(
+  response: Response,
+): Promise<{ message: string; bookId?: number; code?: string }> {
   try {
     const body: unknown = await response.json();
     const read = detailOf(
@@ -527,7 +514,6 @@ export const customFetch = async <T>(
       response.status,
       detail.bookId,
       detail.code,
-      detail.count,
     );
   }
 

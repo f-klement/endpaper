@@ -61,7 +61,6 @@ export const de: Messages = {
   "nav.loans": "Ausleihen",
   "nav.stats": "Statistik",
   "nav.settings": "Einstellungen",
-  "nav.patrons": "Benutzer:innen",
   "nav.menu": "Menü",
   "nav.menuFor": "Menü für {name}",
   "nav.switchAccount": "Konto wechseln",
@@ -126,13 +125,6 @@ export const de: Messages = {
   "library.channelBroken":
     "Erinnerungen an überfällige Bücher kommen über {channels} nicht an.",
   "library.channelBrokenAction": "Einstellungen prüfen",
-  "library.vocabularyOffer":
-    "Noch ist kein Schlagwortvokabular hier kopiert, daher fragt jede Schlagwortsuche die Quelle. Eine Kopie lässt sich in den Einstellungen unter Schlagwortvokabulare herunterladen.",
-  "library.vocabularyOfferAction": "Einstellungen öffnen",
-  "library.vocabularyOfferDismiss": "Ausblenden",
-  "library.vocabularyLoading":
-    "Ein Schlagwortvokabular wird gerade hierher kopiert. Der Fortschritt steht in den Einstellungen unter Schlagwortvokabulare.",
-  "library.vocabularyLoadingAction": "Fortschritt anzeigen",
 
   // ── Bibliothek ──────────────────────────────────────────────────────────
   "library.title": "Bibliothek",
@@ -154,11 +146,6 @@ export const de: Messages = {
   "library.viewTable": "Tabelle",
   "library.viewList": "Liste",
   "library.loaned": "Verliehen",
-  "library.originLabel": "Woher die Bücher kommen",
-  "library.originAll": "Übernommen oder hinzugefügt",
-  "library.originHarvested": "Übernommen",
-  "library.originAdded": "Hier hinzugefügt",
-  "library.harvestRun": "Übernahmelauf",
 
   "sort.title_asc": "Titel A bis Z",
   "sort.title_desc": "Titel Z bis A",
@@ -181,16 +168,6 @@ export const de: Messages = {
   "classification.scheme.lcsh": "Schlagwort",
   "classification.kind.content": "Inhaltstyp",
   "classification.kind.carrier": "Datenträgertyp",
-  "pendingHeadings.section": "Von einer Übernahme vorgeschlagen",
-  "pendingHeadings.explain":
-    "Ein übernommener Datensatz schlägt diese vor. Keiner davon gehört zum Buch, bevor er bestätigt ist.",
-  "pendingHeadings.confirm": "Alle {count} bestätigen",
-  "pendingHeadings.confirmOne": "Bestätigen",
-  "pendingHeadings.discard": "Verwerfen",
-  "pendingHeadings.discardConfirm":
-    "Diese Vorschläge verwerfen? Eine spätere Übernahme desselben Datensatzes schlägt sie nicht noch einmal vor.",
-  "pendingHeadings.discardConfirmOne":
-    "Diesen Vorschlag verwerfen? Eine spätere Übernahme desselben Datensatzes schlägt ihn nicht noch einmal vor.",
   "onlineLinks.section": "Verweise im Netz",
   "onlineLinks.relation.resource": "Die Ressource selbst",
   "onlineLinks.relation.version": "Eine Fassung davon",
@@ -303,25 +280,6 @@ export const de: Messages = {
     "Es wird nichts aufgezeichnet, die Kamera bleibt geschlossen, bis sie gestartet wird.",
   "scan.notABook":
     "{code} gelesen, das ist kein Buch-Barcode. Der gesuchte Code steht über der ISBN.",
-  "scan.printed.open":
-    "Barcode lässt sich nicht scannen? Die gedruckte Nummer lesen",
-  "scan.printed.close": "Stattdessen den Barcode scannen",
-  "scan.printed.aim":
-    "Die ISBN-Zeile oder die Ziffern unter dem Barcode in den Rahmen bringen",
-  "scan.printed.loading": "Texterkennung wird geladen...",
-  "scan.printed.read": "Nummer lesen",
-  "scan.printed.reading": "Wird gelesen...",
-  "scan.printed.confirm":
-    "Vor dem Nachschlagen mit der Nummer im Buch vergleichen.",
-  "scan.printed.found": "ISBN {isbn} gelesen",
-  "scan.printed.lookUp": "Nachschlagen",
-  "scan.printed.misread":
-    "{code} gelesen, aber die Prüfziffer stimmt nicht, also wurde eine Ziffer falsch gelesen. Das Buch ruhig und näher am Licht halten und erneut lesen.",
-  "scan.printed.nothing":
-    "Keine ISBN im Rahmen. Die Nummer im Rahmen ausrichten und erneut lesen.",
-  "scan.printed.again": "Erneut lesen",
-  "scan.printed.unavailable":
-    "Die Texterkennung startet in diesem Browser nicht. Die ISBN bitte unten eintippen.",
   "scan.tryAgain": "Erneut versuchen",
   "scan.cameraUnavailable": "Kamera nicht verfügbar",
   "scan.orEnterManually": "Oder ISBN von Hand eingeben:",
@@ -374,16 +332,6 @@ export const de: Messages = {
     "Es läuft immer nur eine lange Suche gleichzeitig. Bitte gleich noch einmal versuchen.",
   "search.slow.nothingAsked":
     "Es wurde nichts durchsucht. Jeder Katalog, den diese Bibliothek eingeschaltet hat, ist ein langsamer.",
-  "search.source.from": "Quelle: {names}",
-  "search.narrow.title": "Nur einige Kataloge fragen",
-  "search.narrow.chosen": "Es werden nur {names} gefragt",
-  "search.narrow.lookupHint":
-    "Für die nächste gescannte oder eingegebene ISBN. Ist nichts angekreuzt, wird jeder Katalog gefragt.",
-  "search.narrow.searchHint":
-    "Nur für die nächste Suche. Ist nichts angekreuzt, wird jeder Katalog gefragt.",
-  "search.narrow.asked": "Es wurden nur {names} gefragt.",
-  "search.narrow.refused":
-    "Die Kataloge, die diese Bibliothek fragt, haben sich geändert, daher wurde nichts gefragt. Die angebotene Auswahl ist jetzt aktuell.",
 
   // ── Ausleihen ───────────────────────────────────────────────────────────
   "loans.title": "Ausleihen",
@@ -444,52 +392,6 @@ export const de: Messages = {
   "customFields.editButton": "Angaben bearbeiten",
   "customFields.valuePlaceholder": "Leer lassen, um zu löschen",
   "customFields.opensElsewhere": "Öffnet in einem neuen Tab",
-
-  // ── Klassifikationen ────────────────────────────────────────────────────
-  "schemes.title": "Klassifikationen",
-  "schemes.explain":
-    "Die Klassifikationen, aus denen die Einordnung eines Buches stammen kann. Eine eigene lässt sich hinzufügen, um nach einer Klassifikation zu katalogisieren, die Endpaper nicht kennt; wie deren Nummern sortiert werden, wird dabei einmal festgelegt.",
-  "schemes.codeLabel": "Kürzel",
-  "schemes.nameLabel": "Name",
-  "schemes.ruleLabel": "Sortiert wie",
-  "schemes.ruleGeneric": "Einfacher Text",
-  "schemes.ruleDewey": "Dewey",
-  "schemes.ruleLcc": "Library of Congress",
-  "schemes.addButton": "Klassifikation hinzufügen",
-  "schemes.renameLabel": "Neuer Name für {name}",
-  "schemes.deleteConfirm":
-    "{name} löschen? Das lässt sich nicht rückgängig machen.",
-  "schemes.inUse":
-    "{count} sichtbare Bücher verwenden diese Klassifikation noch, daher lässt sie sich nicht löschen.",
-  "schemes.inUseOne":
-    "1 sichtbares Buch verwendet diese Klassifikation noch, daher lässt sie sich nicht löschen.",
-  "schemes.inUseUnseen":
-    "Nicht sichtbare Bücher verwenden diese Klassifikation noch, daher lässt sie sich nicht löschen.",
-
-  // ── Schlagwortvokabulare ────────────────────────────────────────────────
-  "vocabularies.title": "Schlagwortvokabulare",
-  "vocabularies.explain":
-    "Eine lokale Kopie eines Vokabulars beantwortet Schlagwortsuchen, ohne jedes Mal die Quelle zu fragen. Bis eine Kopie heruntergeladen ist, und während des Herunterladens, fragen Suchen die Quelle direkt.",
-  "vocabularies.download": "Herunterladen",
-  "vocabularies.refresh": "Aktualisieren",
-  "vocabularies.licence": "Lizenz: {licence}",
-  "vocabularies.licenceNone": "Keine Lizenz angegeben",
-  "vocabularies.notCopyable":
-    "Die Lizenz erlaubt keine lokale Kopie, daher fragen Suchen immer die Quelle direkt.",
-  "vocabularies.notLoaded":
-    "Noch nicht heruntergeladen. Suchen fragen die Quelle direkt.",
-  "vocabularies.fetched": "Abgerufen am {date}, {count} Einträge.",
-  "vocabularies.released": "Von der Quelle veröffentlicht am {date}.",
-  "vocabularies.releasedUnknown":
-    "Die Quelle nennt kein Veröffentlichungsdatum.",
-  "vocabularies.phaseQueued": "Wartet auf den Start",
-  "vocabularies.phaseFetching": "Wird heruntergeladen",
-  "vocabularies.phaseConverting": "Wird umgewandelt",
-  "vocabularies.phaseLoading": "Wird geladen",
-  "vocabularies.phaseFailed": "Das letzte Herunterladen ist fehlgeschlagen.",
-  "vocabularies.phasePercent": "{phase}: {percent} %",
-  "vocabularies.failedBecause":
-    "Das letzte Herunterladen ist fehlgeschlagen: {error}",
 
   // ── Zitate ──────────────────────────────────────────────────────────────
   "quotes.title": "Zitate",
@@ -669,30 +571,6 @@ export const de: Messages = {
   "settings.public.confirmIndexing":
     "Suchmaschinen wird gesagt, dass sie fernbleiben sollen, bis sie eigens zugelassen werden.",
   "settings.public.confirmAction": "Veröffentlichen",
-  "settings.protocols.title": "Protokolle für andere Bibliotheken",
-  "settings.protocols.sruLabel": "Diesen Katalog über SRU anbieten",
-  "settings.protocols.sruHint":
-    "Die Software einer anderen Bibliothek kann den veröffentlichten Katalog unter /sru durchsuchen und seine Datensätze als MARCXML lesen. Die Software sieht genau das, was ein Besucher sieht.",
-  "settings.protocols.sruNeedsPublishing":
-    "Zuerst den Katalog veröffentlichen. SRU bietet nur einen veröffentlichten Katalog an.",
-  "settings.protocols.oaiLabel":
-    "Aggregatoren diesen Katalog über OAI-PMH einsammeln lassen",
-  "settings.protocols.oaiHint":
-    "Ein Verbundkatalog oder Aggregator kann die veröffentlichten Datensätze unter /oai einsammeln. Er sieht dieselben Datensätze wie ein Besucher, dazu den Tag, an dem sich jeder zuletzt geändert hat, und welche den Katalog verlassen haben.",
-  "settings.protocols.oaiNeedsPublishing":
-    "Zuerst den Katalog veröffentlichen. OAI-PMH bietet nur einen veröffentlichten Katalog an.",
-  "settings.protocols.oaiNeedsAddress":
-    "Zuerst unten eine Kontaktadresse eintragen. OAI-PMH zeigt sie jedem Aggregator.",
-  "settings.protocols.oaiAddressLabel": "Kontaktadresse des Katalogs",
-  "settings.protocols.oaiAddressHint":
-    "Jeder Aggregator sieht diese Adresse. Am besten eine Funktionsadresse, keine persönliche.",
-  "settings.protocols.oaiAddressSave": "Adresse speichern",
-  "settings.availability.label":
-    "Zeigen, ob ein Buch im Regal steht oder ausgeliehen ist",
-  "settings.availability.hint":
-    "Jede veröffentlichte Aufnahme sagt, ob das Buch im Regal steht oder ausgeliehen ist. Wer es hat und wann es zurückkommt, sieht ein Besucher nie.",
-  "settings.availability.confirmShown":
-    "Außerdem sichtbar: ob ein Buch im Regal steht oder ausgeliehen ist, nie wer es hat oder wann es zurückkommt.",
   "settings.lending.title": "Ausleihe",
   "settings.lending.summary":
     "Erinnerungen an überfällige Bücher, und wohin sie gehen.",
@@ -834,10 +712,6 @@ export const de: Messages = {
     "Die Farbwelten unten stehen unter der MIT-Lizenz, ihre Werte stammen aus dem jeweils eigenen Repository. Keines dieser Projekte unterstützt dieses hier.",
   "appearance.licencesMorris":
     "Die Morris-Musternamen bezeichnen die historischen Entwürfe, denen die Zeichnungen folgen. Dieses Projekt steht in keiner Verbindung zu Morris & Co und wird von dort nicht unterstützt.",
-  "appearance.licencesSoftware":
-    "Endpaper baut auf quelloffener Software anderer auf und liefert deren Lizenzen mit:",
-  "appearance.licencesThirdParty": "Hinweise zu Software von Dritten",
-  "appearance.licencesEngine": "Die Texterkennung zum Lesen gedruckter ISBN",
   "settings.language": "Sprache",
   "settings.languageHint": "Gilt nur auf diesem Gerät.",
   "settings.defaultLanguage": "Standardsprache für neue Besucher",
@@ -1210,61 +1084,6 @@ export const de: Messages = {
   "collections.couldNotLoad": "Die Sammlungen konnten nicht geladen werden.",
   "collections.saving": "Wird einsortiert...",
 
-  // ── Benutzer:innen ──────────────────────────────────────────────────────
-  // Die Wörter einer Bibliothek: Benutzer:in, Anmeldung, Neuanmeldung,
-  // Benutzerkonto suchen. Nie "Kunde".
-  "patrons.title": "Benutzer:innen",
-  "patrons.explain":
-    "Die Menschen, die hier ausleihen, ohne ein Konto in dieser Bibliothek zu haben. Nur Admins sehen diese Seite.",
-  "patrons.search": "Benutzerkonto suchen",
-  "patrons.searchPlaceholder": "Name, E-Mail oder Ausweisnummer",
-  "patrons.searchHint":
-    "Benutzer:innen lassen sich über Name, E-Mail oder Ausweisnummer finden.",
-  "patrons.noMatch": "Kein Benutzerkonto passt zu dieser Suche.",
-  "patrons.capped":
-    "Die ersten {count} Treffer. Eine genauere Suche findet den Rest.",
-  "patrons.couldNotLoad": "Die Suche nach Benutzer:innen ist fehlgeschlagen.",
-  "patrons.couldNotSave": "Das Benutzerkonto konnte nicht gespeichert werden.",
-  "patrons.couldNotDelete": "Das Benutzerkonto konnte nicht gelöscht werden.",
-  "patrons.new": "Neuanmeldung",
-  "patrons.newTitle": "Neuanmeldung",
-  "patrons.editTitle": "{name} bearbeiten",
-  "patrons.register": "Neu anmelden",
-  "patrons.registering": "Wird angemeldet...",
-  "patrons.name": "Name",
-  "patrons.cardNumber": "Ausweisnummer",
-  "patrons.cardNumberHint":
-    "Buchstaben und Ziffern, verbunden höchstens durch Punkt, Schrägstrich oder Bindestrich. Buchstaben werden groß gespeichert.",
-  "patrons.contact": "Kontakt",
-  "patrons.email": "E-Mail",
-  "patrons.phone": "Telefon",
-  "patrons.address": "Adresse",
-  "patrons.street": "Straße",
-  "patrons.houseNumber": "Hausnummer",
-  "patrons.postcode": "Postleitzahl",
-  "patrons.city": "Ort",
-  "patrons.expiresOn": "Anmeldung gültig bis",
-  "patrons.card": "Ausweis {number}",
-  "patrons.expiredOn": "Anmeldung abgelaufen am {date}",
-  "patrons.validUntil": "Angemeldet bis {date}",
-  "patrons.noExpiry": "Ohne Ablaufdatum",
-  "patrons.deleteConfirm":
-    "{name} löschen? Der Eintrag wird gelöscht, und das lässt sich nicht rückgängig machen. Die Ausleihen behalten, wann jedes Buch ausgeliehen und zurückgegeben wurde, nennen die Person aber nicht mehr. Ein Buch, das diese Person noch ausgeliehen hat, bleibt als ausgeliehen verzeichnet, dann ohne Entleiher:in.",
-
-  // ── Ausleihe an angemeldete Personen ────────────────────────────────────
-  "loans.borrowerPatron": "Eine angemeldete Person",
-  "loans.patronExisting": "Bereits angemeldet",
-  "loans.patronNew": "Neuanmeldung",
-  "loans.patronFindTitle": "Angemeldete Person suchen",
-  "loans.patronChange": "Andere Person wählen",
-  "loans.badgePatron": "Verliehen an eine angemeldete Person",
-  "loans.loanedToPatronBy": "Verliehen an eine angemeldete Person von {by}",
-  "loans.badgeNamedPatron": "Verliehen an {name}, Ausweis {card}",
-  "loans.loanedToNamedPatronBy":
-    "Verliehen an {name}, Ausweis {card}, von {by}",
-  "patrons.openLoans": "Ausgeliehene Bücher",
-  "patrons.outSince": "Ausgeliehen seit {date}",
-
   // ── Autorinnen und Autoren ──────────────────────────────────────────────
   "authors.title": "Autorinnen und Autoren",
   "authors.label": "Autor",
@@ -1362,7 +1181,6 @@ export const de: Messages = {
   "rapid.explain":
     "Einfach weiterscannen. Jedes Buch wird nachgeschlagen und gesammelt, bestätigt wird am Ende alles zusammen.",
   "rapid.queued": "{count} in der Liste",
-  "rapid.listed": "Wartet auf das Nachschlagen: {isbn}",
   "rapid.lookingUp": "Wird nachgeschlagen...",
   "rapid.reading": "{name} wird gelesen...",
   "rapid.notFound": "Nicht gefunden: {isbn}",
@@ -1394,26 +1212,6 @@ export const de: Messages = {
   "rapid.nothingScanned": "Noch nichts gescannt",
 
   // ── Bücher aus ihren Dateien hinzufügen ─────────────────────────────────
-  "isbnList.title": "Aus einer ISBN-Liste hinzufügen",
-  "isbnList.explain":
-    "ISBNs einfügen oder eine Textdatei mit ISBNs wählen, getrennt durch Zeilen, Leerzeichen oder Kommas; eine ISBN-Liste darf die Einträge, die in der Liste auf das Nachschlagen warten, auf bis zu {limit} bringen, gewählte und noch nicht nachgeschlagene Dateien eingeschlossen. Jede wird im selben Tempo wie gewählte Dateien in den Katalogen nachgeschlagen, und die Bücher warten in der Liste auf eine Prüfung, bevor etwas hinzugefügt wird.",
-  "isbnList.pasteLabel": "ISBNs",
-  "isbnList.submit": "Nachschlagen",
-  "isbnList.fileLabel": "Oder eine Text- oder CSV-Datei wählen",
-  "isbnList.queued": "Zum Nachschlagen eingereihte ISBNs: {count}",
-  "isbnList.invalid":
-    "Keine ISBNs, weil die Prüfziffer nicht stimmt, daher nicht nachgeschlagen: {count}",
-  "isbnList.repeated": "Mehrfach geschrieben, einmal eingereiht: {count}",
-  "isbnList.ignored":
-    "Wörter und Zahlen, die nicht wie eine ISBN aussehen, übergangen: {count}",
-  "isbnList.tooMany":
-    "Diese Liste enthält {count} ISBNs, eine Liste darf {limit} enthalten. Teile sie und gib sie in Teilen ein.",
-  "isbnList.invalidMore": "Und {count} weitere, nicht angezeigt.",
-  "isbnList.noRoom":
-    "Diese Liste enthält {count} ISBNs, und jetzt können noch {room} hinzukommen: was in der Liste auf das Nachschlagen wartet, gewählte Dateien eingeschlossen, darf bis zu {limit} erreichen. Gib weniger ein, oder den Rest, sobald die Liste nachgeschlagen ist.",
-  "isbnList.fileTooLarge": "Diese Datei ist zu groß für eine ISBN-Liste.",
-  "isbnList.fileUnreadable": "Diese Datei konnte nicht gelesen werden.",
-
   "file.title": "Aus einer Datei hinzufügen",
   "file.explain":
     "Buchdateien oder einen ganzen Ordner auswählen, dann liest Endpaper heraus, was in den Dateien steht. Was eine Datei nicht sagt, wird über den Dateinamen gesucht, und eine Datei, die eine ISBN nennt, lässt sich darüber nachschlagen wie ein gescannter Barcode. Die Dateien werden hier im Browser gelesen und niemals hochgeladen. Bei einem Ordner wird für ein Buch aus einer einzigen Datei auch deren Name samt der Ordner darüber und ein Fingerabdruck der Datei beim Buch gespeichert, damit die Datei wiederzufinden ist, und alle, die das Buch sehen, sehen auch das. Der Fingerabdruck wird hier aus bis zu 12 KiB der Datei berechnet. Auch die Schlagwörter aus der Datei werden beim Buch gespeichert: bei einem einzelnen Buch lassen sie sich vorher entfernen, bei einem ganzen Ordner geht das hinterher nur noch, indem das Buch entfernt wird. Ein Ordner, in dem oben die metadata.db einer Calibre-Bibliothek liegt, wird stattdessen über diesen Index gelesen: ein Buch für jedes Buch der Bibliothek, mit jeder seiner Dateien. Lässt sich der Index nicht lesen, wird der Ordner Datei für Datei gelesen, und diese Seite sagt das. Wird ein Ordner erneut gewählt, werden die aus jedem Ordner dieses Namens gespeicherten Dateien geprüft, gleich wer sie gespeichert hat: eine noch vorhandene gilt als gefunden, die nicht gefundenen werden aufgeführt, jeweils mit dem Buch verknüpft, und erst auf Knopfdruck als fehlend markiert. Ein Ordner, der keine davon enthält, gilt als anderer Ordner mit demselben Namen.",
@@ -1444,11 +1242,10 @@ export const de: Messages = {
     "{count} übersprungen, weil Endpaper kein Format davon liest.",
   "fallback.lookUp": "{count} in den Katalogen nachschlagen",
   "fallback.pace":
-    "Die Dateinamen, jede ISBN, die eine Datei nennt, Titel und Autor aus den Tags eines Hörbuchs (ohne Tags der Name seines Ordners), die ISBN jedes gescannten Barcodes, der keinen Katalog erreicht hat, und jede ISBN aus einer Liste gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
+    "Die Dateinamen, jede ISBN, die eine Datei nennt, Titel und Autor aus den Tags eines Hörbuchs (ohne Tags der Name seines Ordners) und die ISBN jedes gescannten Barcodes, der keinen Katalog erreicht hat, gehen an die Kataloge, in denen Endpaper sucht, die Dateien selbst nicht. Zeitlich gestreckt, damit ein einzelner Ordner nicht das ganze Budget einer Bibliothek auf einmal verbraucht. Ungefähr {minutes} min.",
   "fallback.paceAgain":
     "Dieselben Dateinamen, Hörbuchtags und Hörbuchordnernamen gehen ein zweites Mal an dieselben Kataloge, die Dateien selbst weiterhin nicht. Genauso zeitlich gestreckt. Ungefähr {minutes} min.",
   "fallback.stop": "Suche beenden",
-  "fallback.progress": "{done} von {total} gefragt",
   "fallback.searching": "Die Kataloge werden gefragt...",
   "fallback.fromTheName": "Aus dem Dateinamen",
   "fallback.notInCatalogues":
@@ -1569,23 +1366,6 @@ export const de: Messages = {
   "copies.loadFailed":
     "Die anderen Exemplare dieses Buchs konnten nicht geladen werden.",
   "copies.badge": "{count} Exemplare",
-
-  // ── Weitere Bilder dieses Exemplars ─────────────────────────────────────
-  "coverImages.title": "Weitere Bilder",
-  "coverImages.hint":
-    "Die Rückseite, der Buchrücken, ein Schutzumschlag: Bilder dieses Exemplars neben dem Titelbild, das das Regal zeigt.",
-  "coverImages.alt": "Bild {number} von {title}",
-  "coverImages.add": "Bild hinzufügen",
-  "coverImages.adding": "Wird hinzugefügt...",
-  "coverImages.shelve": "Als Titelbild verwenden",
-  "coverImages.shelveFor": "Bild {number} als Titelbild verwenden",
-  "coverImages.remove": "Entfernen",
-  "coverImages.removeFor": "Bild {number} entfernen",
-  "coverImages.removeConfirm":
-    "Dieses Bild entfernen? Ein hochgeladenes Bild lässt sich nicht zurückholen.",
-  "coverImages.loadFailed":
-    "Die Bilder dieses Exemplars konnten nicht geladen werden.",
-  "coverImages.failed": "Die Bilder konnten nicht geändert werden.",
 
   // ── Where this copy's files are, and a file held in another format ──────
   // The Files panel on the book page and the copy offer on the scan queue.
@@ -2059,8 +1839,6 @@ export const de: Messages = {
   "public.fact.pages": "Seiten",
   "public.fact.format": "Ausgabeform",
   "public.fact.series": "Reihe",
-  "public.availability.on_shelf": "Im Regal",
-  "public.availability.on_loan": "Ausgeliehen",
   "origin.label": "Herkunft der Aufnahme",
   "origin.unknown": "Unbekannt",
   "origin.manual": "Von Hand erfasst",
@@ -2101,7 +1879,6 @@ export const de: Messages = {
   "providers.name.sbn": "Italienischer Nationaler Bibliotheksdienst",
   "providers.name.porbase": "PORBASE",
   "providers.name.oszk": "Ungarische Nationalbibliothek",
-  "providers.name.snk": "Slowakische Nationalbibliothek",
   "providers.name.bnf": "Französische Nationalbibliothek",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":
@@ -2125,24 +1902,6 @@ export const de: Messages = {
     "Zu langsam für eine schnelle Suche. Wird nur gefragt, wenn jemand gründlicher sucht.",
   "providers.slowLegend":
     "Ein als langsam markierter Katalog kann eine Titelsuche nicht innerhalb der Frist beantworten, die die schnelle Suche zulässt. Er bleibt deshalb bei dieser außen vor und wird nur gefragt, wenn jemand danach verlangt. Einen Scan beantwortet er genauso wie die anderen.",
-  "providers.how.sru": "SRU {version}",
-  "providers.how.z3950": "Z39.50",
-  "providers.how.bespoke": "Eigene JSON-Schnittstelle",
-  "providers.how.schema": "Datensatzschema: {schema}",
-  "providers.how.noSchema": "Kein Datensatzschema angegeben",
-  "providers.how.encrypted": "Verschlüsselt",
-  "providers.how.unencrypted": "Nicht verschlüsselt",
-  "providers.how.apiKey": "Braucht einen API-Schlüssel",
-  "providers.how.login": "Braucht eine Anmeldung",
-  "providers.how.supplies": "Liefert {schemes}",
-  "providers.scheme.ddc": "Dewey",
-  "providers.scheme.lcc": "Library of Congress Classification",
-  "providers.scheme.gnd": "GND",
-  "providers.scheme.lcsh": "Library of Congress Subject Headings",
-  "providers.confirm.lastSupplier":
-    "Von den Katalogen, die antworten können, liefert nur {name} {schemes}. Bücher, die ab jetzt nachgeschlagen werden, bekommen sie nicht mehr. Trotzdem ausschalten?",
-  "providers.confirm.allOff":
-    "Danach ist kein Katalog mehr eingeschaltet, der antworten kann. Das Nachschlagen eines Buchs findet dann nichts, und jedes Buch wird von Hand katalogisiert. Trotzdem ausschalten?",
   // ── Highlights: marked on a reading device, imported from KOReader ──────
   "highlights.title": "Markierungen",
   "highlights.private": "Nur für mich sichtbar",
@@ -2172,59 +1931,4 @@ export const de: Messages = {
     "Die Datei enthält keinen Fingerabdruck des Buchs und kann daher nicht zugeordnet werden.",
   "highlights.outcomeEmpty": "Die Datei enthält keine Markierungen.",
   "highlights.outcomeFailed": "Der Import dieser Datei ist fehlgeschlagen.",
-  "harvest.title": "Einen anderen Katalog übernehmen",
-  "harvest.explain":
-    "Liest die Datensätze eines anderen Bibliothekssystems über OAI-PMH in diesen Katalog. Ein übernommenes Buch gehört niemandem und ist immer öffentlich; seine Schlagwörter kommen unbestätigt an, als Vorschläge.",
-  "harvest.switchLabel": "Aus dem Repository unten übernehmen",
-  "harvest.switchHint":
-    "Ausschalten verhindert die nächste Übernahme. Bereits übernommene Bücher bleiben.",
-  "harvest.needsAddress": "Zuerst unten die Adresse des Repositorys eingeben.",
-  "harvest.addressLabel": "Adresse des Repositorys",
-  "harvest.addressHint":
-    "Dies ist die einzige Einstellung, mit der sich der Server mit einer eingetippten Adresse verbindet. Die Adresse darf im eigenen Netz liegen, über http oder https, ohne Benutzernamen, Passwort, Abfrage oder Fragment.",
-  "harvest.addressSave": "Adresse speichern",
-  "origin.oai_harvest": "OAI-PMH-Abruf",
-  "harvestRun.title": "Jetzt übernehmen",
-  "harvestRun.explain":
-    "Liest das oben genannte Repository und zeigt, was eine Übernahme anlegen und ergänzen würde. Geschrieben wird erst nach der Bestätigung.",
-  "harvestRun.setLabel": "Teilmenge (optional)",
-  "harvestRun.setHint":
-    "Nur diese Teilmenge übernehmen, so geschrieben, wie das Repository sie nennt. Leer lassen für das ganze Repository.",
-  "harvestRun.read": "Repository lesen",
-  "harvestRun.reading": "Repository wird gelesen...",
-  "harvestRun.repository": "Repository: {name}",
-  "harvestRun.previewTitle":
-    "{seen} Datensätze gelesen, {readable} davon kann diese App speichern.",
-  "harvestRun.wouldAdd": "{count} davon sind hier neu und werden angelegt.",
-  "harvestRun.deleted":
-    "{count} Datensätze sind im Repository als gelöscht markiert. Für sie wird kein Buch entfernt.",
-  "harvestRun.headingsPreview":
-    "Die unten aufgeführten Datensätze enthalten {count} Schlagwörter und Notationen. Eine Übernahme schreibt keine davon. Vorgeschlagen werden sie an den Büchern, die diese Übernahme aus den Datensätzen anlegt, und an Büchern, die eine frühere Übernahme aus denselben Datensätzen angelegt hat; ein Admin bestätigt oder verwirft sie dort. Ein Buch, das über die ISBN oder über Autor und Titel erkannt wird, bekommt keine Vorschläge.",
-  "harvestRun.addedBooks":
-    "Die Bücher zeigen, die diese Übernahme angelegt hat",
-  "harvestRun.readDublinCore":
-    "Als Dublin Core gelesen, weil das Repository kein MARCXML anbietet, das diese App abfragen kann. Dublin Core enthält weniger: keine Schlagwörter oder Notationen, keine Reihe und keine Rollen der genannten Personen. Die angelegten Bücher enthalten also weniger Angaben.",
-  "harvestRun.truncatedPreview":
-    "Der Lauf hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war, diese Zahlen umfassen also nur einen Teil davon. Ist dies übernommen, kann der nächste Lauf dort weitermachen, wo dieser angehalten hat.",
-  "harvestRun.confirm": "{count} Datensätze übernehmen",
-  "harvestRun.importing": "Wird übernommen...",
-  "harvestRun.resultHeadings":
-    "Vorgeschlagene Schlagwörter und Notationen, die an den Büchern darauf warten, dass ein Admin sie bestätigt oder verwirft: {count}.",
-  "harvestRun.truncatedResult":
-    "Die Übernahme hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war. Was gelesen wurde, bleibt erhalten, und der nächste Lauf kann dort weitermachen, wo dieser angehalten hat.",
-  "harvestRun.off":
-    "Die Übernahme ist ausgeschaltet, oder es ist keine Adresse eines Repositorys gespeichert. Bitte oben einschalten und die Adresse speichern.",
-  "harvestRun.running":
-    "Es läuft bereits eine Übernahme. Bitte warten, bis sie abgeschlossen ist, und es dann erneut versuchen.",
-  "harvestRun.lostRace":
-    "Eine andere Änderung an denselben Büchern kam dieser Übernahme dazwischen, und es wurde nichts übernommen. Bitte erneut übernehmen.",
-  "harvestRun.resumable":
-    "Die Übernahme vom {date} hat vor dem Ende des Repositorys angehalten, nachdem sie in diesem Lauf {count} Datensätze gelesen hatte. Der nächste Lauf kann dort weitermachen, wo sie angehalten hat.",
-  "harvestRun.resumableSet":
-    "Die Teilmenge {set} wurde gelesen, und das Weitermachen liest dieselbe Teilmenge.",
-  "harvestRun.carryOn": "Dort weitermachen, wo sie angehalten hat",
-  "harvestRun.notResumable":
-    "Dieser Lauf kann nicht mehr fortgesetzt werden: Das Repository wurde seitdem erneut übernommen, oder der Lauf wurde nicht vorzeitig beendet. Es wurde nichts übernommen.",
-  "harvestRun.repositoryChanged":
-    "Das gespeicherte Repository ist nicht das, das diese Seite gelesen hat, und es wurde nichts übernommen. Bitte das Repository erneut lesen.",
 };

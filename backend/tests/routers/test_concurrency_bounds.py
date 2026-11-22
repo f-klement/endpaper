@@ -194,17 +194,6 @@ EXCLUDED: Final[dict[str, str]] = {
         "a lock has no capacity: it orders one holder's own tasks rather than "
         "rationing anything the pod owns, so a per request one is correct"
     ),
-    "Thread": (
-        "a thread is work, not a ration of it: `vocabulary_copy.start` builds one "
-        "per request and refuses a second for a vocabulary while the first lives, "
-        "so there are never more than the declared vocabularies, and the bound on "
-        "what they do at once is its `_ONE_LOAD` lock"
-    ),
-    "Event": (
-        "an event is a flag with no capacity: `vocabulary_copy._A_RESTORE_HOLDS` "
-        "only says whether a restore or a load holds `_ONE_LOAD`, so a refusal "
-        "names the right one"
-    ),
 }
 
 

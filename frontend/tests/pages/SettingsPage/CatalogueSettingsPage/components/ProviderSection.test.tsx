@@ -29,35 +29,17 @@ import { renderLocalised } from "../../../../utils";
 
 /** The seeded roster, in the order a new install asks it. */
 const ROSTER: CatalogueSourceOut[] = [
-  row("dnb", {
-    asked_first: true,
-    record_schema: "MARC21-xml",
-    classification_schemes: ["ddc", "gnd"],
-  }),
-  row("k10plus", { asked_first: true, classification_schemes: ["ddc"] }),
+  row("dnb", { asked_first: true }),
+  row("k10plus", { asked_first: true }),
   row("oenb"),
-  row("open_library", {
-    protocol: "bespoke",
-    protocol_version: "",
-    record_schema: "",
-    classification_schemes: ["ddc", "lcc"],
-  }),
+  row("open_library"),
   row("google_books", {
     needs_a_key: true,
     has_key: false,
     ready: false,
-    protocol: "bespoke",
-    protocol_version: "",
-    record_schema: "",
-    credential: "api_key",
   }),
-  row("bnf", { answers_lookup: false, record_schema: "dublincore" }),
-  row("loc", {
-    answers_lookup: false,
-    record_schema: "mods",
-    encrypted: false,
-    classification_schemes: ["ddc", "lcc", "lcsh"],
-  }),
+  row("bnf", { answers_lookup: false }),
+  row("loc", { answers_lookup: false }),
 ];
 
 function row(
@@ -75,12 +57,6 @@ function row(
     has_key: true,
     ready: true,
     serves_groups: [],
-    protocol: "sru",
-    protocol_version: "1.1",
-    record_schema: "marcxml",
-    encrypted: true,
-    credential: "none",
-    classification_schemes: [],
     ...over,
   };
 }
@@ -559,170 +535,5 @@ describe("a reorder still inside its debounce window", () => {
       .getAllByRole("listitem")
       .map((item) => item.textContent ?? "");
     expect(listed[1]).toContain("Austrian National Library");
-  });
-});
-
-/**
- * The text of the row a catalogue's name opens. By its start, because another
- * row can name it too: Open Library supplies Library of Congress Classification.
- */
-function howAsked(name: string): string {
-  const item = screen
-    .getAllByRole("listitem")
-    .find((each) => each.textContent?.startsWith(name));
-  if (item === undefined) throw new Error(`no row for ${name}`);
-  return item.textContent ?? "";
-}
-
-describe("how each catalogue is asked", () => {
-  it("says the Library of Congress is reached without encryption", () => {
-    draw();
-    const line = howAsked("Library of Congress");
-    expect(line).toContain("SRU 1.1");
-    expect(line).toContain("Record schema: mods");
-    expect(line).toContain("Not encrypted");
-  });
-
-  it("says an encrypted catalogue is encrypted", () => {
-    draw();
-    const line = howAsked("German National Library");
-    expect(line).toContain("Encrypted");
-    expect(line).not.toContain("Not encrypted");
-  });
-
-  it("says Google Books is its own API and needs a key", () => {
-    draw();
-    const line = howAsked("Google Books");
-    expect(line).toContain("Its own JSON API");
-    expect(line).toContain("Needs an API key");
-    expect(line).toContain("No record schema named");
-  });
-
-  it("says a catalogue wanting a login needs a login", () => {
-    draw([row("bna", { credential: "login" })]);
-    expect(howAsked("Argentine National Library")).toContain("Needs a login");
-  });
-
-  it("names the schemes a catalogue supplies, joined with and", () => {
-    draw();
-    expect(howAsked("German National Library")).toContain(
-      "Supplies Dewey and GND",
-    );
-  });
-
-  it("says it in German", () => {
-    renderLocalised(
-      <ProviderSection
-        settings={{ catalogue_sources: ROSTER } as SettingsOut}
-        onSave={vi.fn<(data: SettingsUpdate) => void>()}
-      />,
-      { locale: "de" },
-    );
-    expect(howAsked("Library of Congress")).toContain("Nicht verschlüsselt");
-  });
-});
-
-describe("switching a source off", () => {
-  it("asks first when it is the only one supplying a scheme", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    draw();
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    expect(confirm).toHaveBeenCalledWith(
-      "Of the catalogues that can answer, only German National Library supplies GND. Books looked up from now on will not get them. Switch it off?",
-    );
-  });
-
-  it("leaves the source on when the question is refused", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    const onSave = draw();
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    settle();
-    expect(onSave).not.toHaveBeenCalled();
-    expect(screen.getByLabelText("German National Library")).toBeChecked();
-  });
-
-  it("switches it off when the question is accepted", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    const onSave = draw();
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    settle();
-    expect(
-      sentRoster(onSave).find((entry) => entry.source === "dnb")?.enabled,
-    ).toBe(false);
-  });
-
-  it("names only the schemes no other enabled source supplies", () => {
-    // Open Library supplies Dewey and LCC too, so switching the Library of
-    // Congress off loses its subject headings alone.
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    draw();
-    fireEvent.click(screen.getByLabelText("Library of Congress"));
-    expect(confirm.mock.calls[0]?.[0]).toContain(
-      "supplies Library of Congress Subject Headings.",
-    );
-  });
-
-  it("does not ask when another enabled source supplies every scheme", () => {
-    const confirm = vi.spyOn(window, "confirm");
-    const onSave = draw();
-    fireEvent.click(screen.getByLabelText("K10plus"));
-    settle();
-    expect(confirm).not.toHaveBeenCalled();
-    expect(onSave).toHaveBeenCalledTimes(1);
-  });
-
-  it("counts a supplier that is switched off as no supplier", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    draw([
-      row("dnb", { classification_schemes: ["ddc"] }),
-      row("k10plus", { enabled: false, classification_schemes: ["ddc"] }),
-    ]);
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    expect(confirm).toHaveBeenCalledTimes(1);
-  });
-
-  it("counts a catalogue that cannot answer as no catalogue at all", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    draw([row("dnb"), row("google_books", { ready: false })]);
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    expect(confirm.mock.calls[0]?.[0]).toContain(
-      "no catalogue that can answer is left switched on",
-    );
-  });
-
-  it("asks nothing when a catalogue that cannot answer is switched off", () => {
-    const confirm = vi.spyOn(window, "confirm");
-    draw([
-      row("dnb"),
-      row("k10plus", { ready: false, classification_schemes: ["ddc"] }),
-    ]);
-    fireEvent.click(screen.getByLabelText("K10plus"));
-    expect(confirm).not.toHaveBeenCalled();
-  });
-
-  it("asks before switching the last catalogue off", () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const onSave = draw([row("dnb"), row("k10plus", { enabled: false })]);
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    settle();
-    expect(confirm).toHaveBeenCalledWith(
-      "After this, no catalogue that can answer is left switched on, so looking up a book will find nothing and every book is catalogued by hand. Switch it off?",
-    );
-    expect(onSave).not.toHaveBeenCalled();
-  });
-
-  it("switches every catalogue off once that is confirmed", () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    const onSave = draw([row("dnb"), row("k10plus", { enabled: false })]);
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    settle();
-    expect(sentRoster(onSave).every((entry) => !entry.enabled)).toBe(true);
-  });
-
-  it("asks nothing when a source is switched on", () => {
-    const confirm = vi.spyOn(window, "confirm");
-    draw([row("dnb", { enabled: false }), row("k10plus", { enabled: false })]);
-    fireEvent.click(screen.getByLabelText("German National Library"));
-    expect(confirm).not.toHaveBeenCalled();
   });
 });

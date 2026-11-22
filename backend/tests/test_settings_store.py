@@ -153,70 +153,6 @@ class TestLibraryModeAndThePublicCatalogue:
         different decisions, and the default answer to the second is no."""
         assert settings_store.DEFAULTS[SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED] == "false"
 
-    def test_the_sru_server_starts_off(self):
-        """Every export protocol starts off: a catalogue published to people is
-        not also served to software until an admin says so."""
-        assert settings_store.DEFAULTS[SettingKey.SRU_SERVER_ENABLED] == "false"
-
-    def test_availability_starts_off(self):
-        """Owner's decision on issue #29: a public record says nothing about
-        loans until an admin turns it on."""
-        assert settings_store.DEFAULTS[SettingKey.PUBLIC_AVAILABILITY_ENABLED] == "false"
-
-    def test_availability_needs_a_published_catalogue_as_well(self, db):
-        """The switch on its own shows nothing to anybody."""
-        settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        assert settings_store.availability_is_shown(db) is False
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.availability_is_shown(db) is True
-
-    def test_sru_needs_a_published_catalogue_as_well(self, db):
-        """The switch on its own cannot publish a catalogue."""
-        settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        assert settings_store.sru_is_served(db) is False
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.sru_is_served(db) is True
-
-    def test_a_published_catalogue_is_not_served_over_sru_by_default(self, db):
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.sru_is_served(db) is False
-
-    def test_the_oai_provider_starts_off(self):
-        """Owner's decision: off on a fresh install and on an upgrade alike."""
-        assert settings_store.DEFAULTS[SettingKey.OAI_PROVIDER_ENABLED] == "false"
-
-    def test_oai_needs_a_published_catalogue_as_well(self, db):
-        settings_store.set_value(db, SettingKey.OAI_PROVIDER_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.OAI_ADMIN_EMAIL, "catalogue@library.example")
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        assert settings_store.oai_is_served(db) is False
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.oai_is_served(db) is True
-
-    def test_oai_needs_a_contact_address_as_well(self, db):
-        """A restore can store the switch on without the write that refuses it."""
-        for key in (
-            SettingKey.OAI_PROVIDER_ENABLED,
-            SettingKey.LIBRARY_MODE,
-            SettingKey.PUBLIC_CATALOGUE_ENABLED,
-        ):
-            settings_store.set_value(db, key, "true")
-        assert settings_store.oai_is_served(db) is False
-
-    def test_the_first_service_is_recorded_once(self, db):
-        settings_store.set_value(db, SettingKey.OAI_FIRST_SERVED, "2026-01-02T03:04:05")
-        settings_store.record_oai_service(db)
-        assert settings_store.get_raw(db, SettingKey.OAI_FIRST_SERVED) == "2026-01-02T03:04:05"
-
-    def test_the_sru_switch_does_not_serve_oai(self, db):
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
-        assert settings_store.oai_is_served(db) is False
-
     def test_a_fresh_database_publishes_nothing(self, db):
         """The default read through the accessor, not off the table: a default
         that is never consulted is not a default."""
@@ -259,7 +195,7 @@ class TestLibraryModeAndThePublicCatalogue:
         settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true")
         assert settings_store.public_catalogue_may_be_indexed(db) is True
 
-    def test_the_publishing_switches_are_not_pinnable_from_the_environment(self):
+    def test_the_three_switches_are_not_pinnable_from_the_environment(self):
         """Settings rather than environment variables, and pinned as a decision
         rather than left as an accident of an unedited table.
 
@@ -276,8 +212,6 @@ class TestLibraryModeAndThePublicCatalogue:
                 SettingKey.LIBRARY_MODE,
                 SettingKey.PUBLIC_CATALOGUE_ENABLED,
                 SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
-                SettingKey.SRU_SERVER_ENABLED,
-                SettingKey.PUBLIC_AVAILABILITY_ENABLED,
             )
             if config.env_variable_name(key)
         ]
@@ -286,42 +220,6 @@ class TestLibraryModeAndThePublicCatalogue:
             "a catalogue has to stay a runtime decision an admin can undo without "
             "a redeploy."
         )
-
-
-class TestTheHarvesterReadsOneRepository:
-    """`harvest_repository`: library mode, the switch, and an address that is
-    not blank, or None. `harvester.configured_repository` validates the address."""
-
-    _REPOSITORY: Final = "http://10.0.0.10/oai"
-
-    def _switch_on(self, db, address: str = _REPOSITORY) -> None:
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, address)
-
-    def test_the_harvester_starts_off_with_no_repository(self, db):
-        assert settings_store.DEFAULTS[SettingKey.OAI_HARVEST_ENABLED] == "false"
-        assert settings_store.DEFAULTS[SettingKey.OAI_HARVEST_BASE_URL] == ""
-        assert settings_store.harvest_repository(db) is None
-
-    def test_the_repository_is_named_once_everything_is_on(self, db):
-        self._switch_on(db)
-        assert settings_store.harvest_repository(db) == self._REPOSITORY
-
-    def test_outside_library_mode_there_is_no_repository(self, db):
-        self._switch_on(db)
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "false")
-        assert settings_store.harvest_repository(db) is None
-
-    def test_with_the_switch_off_there_is_no_repository(self, db):
-        self._switch_on(db)
-        settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "false")
-        assert settings_store.harvest_repository(db) is None
-
-    def test_a_blank_stored_address_names_no_repository(self, db):
-        """A restore stores the rows without passing the settings route."""
-        self._switch_on(db, "   ")
-        assert settings_store.harvest_repository(db) is None
 
 
 class TestACredentialMakesASourceReady:

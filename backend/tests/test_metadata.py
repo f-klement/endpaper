@@ -263,9 +263,6 @@ PORTUGUESE_ISBN = "9789720042651"
 #: A real Hungarian registration group, 978-963, for the reason above. One of
 #: the ISBNs the OSZK answered on 2026-11-17.
 HUNGARIAN_ISBN = "9789632765211"
-#: A real Czech and Slovak registration group, 978-80, for the reason above. One
-#: of the ISBNs the SNK answered on 2026-11-17, a Slovak novel.
-SLOVAK_ISBN = "9788097393106"
 
 #: One DNB MARC21 record, in the shape the live endpoint returns since the
 #: switch away from Dublin Core. Copied from ISBN 9783446249974's real response
@@ -1146,43 +1143,24 @@ class TestCache:
 
         assert route.call_count == 2
 
-    @pytest.mark.asyncio
-    async def test_a_lookup_asking_a_different_chain_is_not_served_the_cached_record(self):
-        """A narrowed lookup is its own question, so its own entry.
-
-        Keyed on the ISBN alone, the second lookup below answered from the first one's
-        record and asked the DNB nothing.
-        """
-        dnb_only = sources.in_force(ALL_SOURCES, frozenset({CatalogueSource.DNB}))
-        with respx.mock(assert_all_called=False) as mock:
-            silence_covers(mock)
-            mock.get(url__startswith=K10PLUS).mock(return_value=_xml(K10PLUS_EMPTY))
-            route = mock.get(url__startswith=DNB).mock(return_value=_xml(DNB_RECORD))
-            await lookup(GERMAN_ISBN)
-            await lookup(GERMAN_ISBN, plan=dnb_only)
-
-        assert route.call_count == 2
-
     def test_an_answer_past_its_lifetime_is_forgotten(self):
-        key = (GERMAN_ISBN, ALL_SOURCES.lookup_chain)
-        metadata._cache[key] = (-1.0, metadata.Lookup(Outcome.NOT_FOUND, source="dnb"))
+        metadata._cache[GERMAN_ISBN] = (-1.0, metadata.Lookup(Outcome.NOT_FOUND, source="dnb"))
 
-        assert metadata._cached(key) is None
-        assert key not in metadata._cache
+        assert metadata._cached(GERMAN_ISBN) is None
+        assert GERMAN_ISBN not in metadata._cache
 
     def test_a_full_cache_forgets_its_oldest_quarter_to_make_room(self):
         answer = metadata.Lookup(Outcome.NOT_FOUND, source="dnb")
-        chain = ALL_SOURCES.lookup_chain
         for n in range(metadata._MAX_ENTRIES):
-            metadata._cache[(f"older {n}", chain)] = (math.inf, answer)
+            metadata._cache[f"older {n}"] = (math.inf, answer)
 
-        metadata._remember((GERMAN_ISBN, chain), answer)
+        metadata._remember(GERMAN_ISBN, answer)
 
         quarter = metadata._MAX_ENTRIES // 4
-        assert ("older 0", chain) not in metadata._cache
-        assert (f"older {quarter - 1}", chain) not in metadata._cache
-        assert (f"older {quarter}", chain) in metadata._cache
-        assert (GERMAN_ISBN, chain) in metadata._cache
+        assert "older 0" not in metadata._cache
+        assert f"older {quarter - 1}" not in metadata._cache
+        assert f"older {quarter}" in metadata._cache
+        assert GERMAN_ISBN in metadata._cache
 
 
 class TestDnbRecord:
@@ -1776,25 +1754,14 @@ class TestASubjectCarriesTheVocabularyTheRecordDeclared:
         ) == [Subject("Kochbuch", None, None)]
 
     def test_an_identifier_with_no_vocabulary_beside_it_is_still_kept(self):
-        """K10plus writes a ZBW house number, `655 $0 (DE-206)34`, with no
-        `$2`, and that prefix names no vocabulary. The ticket asks for the
-        identifier *whatever* the scheme, and a missing `$2` is not a reason
-        to drop one."""
-        assert self._subjects(
-            '<datafield tag="655" ind1=" " ind2="4">'
-            '<subfield code="0">(DE-206)34</subfield>'
-            '<subfield code="a">Graue Literatur</subfield></datafield>'
-        ) == [Subject("Graue Literatur", None, "(DE-206)34")]
-
-    def test_an_identifier_naming_its_vocabulary_names_it_where_no_dollar_two_does(self):
-        """K10plus writes `$0 (OCoLC)fst…` with no `$2` on 3 of 133 live `650`
-        fields. The prefix decides on the catalogue path as on an upload
-        (option AC, owner's ruling 2026-11-20), and the identifier is kept."""
+        """K10plus writes `$0 (OCoLC)fst…` with no `$2` at all, on 3 of 133
+        live `650` fields. The ticket asks for the identifier *whatever* the
+        scheme, and a missing `$2` is not a reason to drop one."""
         assert self._subjects(
             '<datafield tag="650" ind1=" " ind2=" ">'
             '<subfield code="a">Psychology</subfield>'
             '<subfield code="0">(OCoLC)fst01081447</subfield></datafield>'
-        ) == [Subject("Psychology", "fast", "(OCoLC)fst01081447")]
+        ) == [Subject("Psychology", None, "(OCoLC)fst01081447")]
 
     def test_a_vocabulary_with_no_identifier_beside_it_is_still_kept(self):
         """The OENB's `655 $2 bellobv`, which carries no `$0`."""
@@ -6097,7 +6064,7 @@ class TestTheCzechNationalLibrary:
     def test_the_shared_online_rule_is_left_alone(self):
         """The Czech phrasing is this source's constant and not a widening of
         `bibliographic._NOT_A_BOOK`, which every other source is filtered by. Widening that on
-        a phrase measured in one catalogue would change what eighteen other sources
+        a phrase measured in one catalogue would change what seventeen other sources
         refuse."""
         assert bibliographic.is_physical_book("1 online zdroj (106 pages) :", "Kniha")
         assert metadata._NKP_ONLINE.search("1 online zdroj (106 pages) :")
@@ -7000,7 +6967,7 @@ def z3950_asked(row: targets.Target, rendered: tuple[z3950.Record, ...]) -> meta
     """
     client = FakeClient(session=FakeSession(hits=len(rendered), records=list(rendered)))
     with mock.patch.object(z3950, "_default_client", return_value=client):
-        return asyncio.run(metadata._z3950_lookup(row, "9789722040801", deadline=None))
+        return asyncio.run(metadata._z3950_lookup(row, "9789722040801"))
 
 
 def _parses(response: fetch.Fetched) -> bool:
@@ -7025,8 +6992,8 @@ def asked(
         return response
 
     with mock.patch.object(fetch, "get_once", get_once):
-        lookup = asyncio.run(metadata._sru_lookup(looked_up, "9783161484100", None, deadline=None))
-        found = asyncio.run(metadata._sru_search(searched, "der zauberberg", 5, None, deadline=None))
+        lookup = asyncio.run(metadata._sru_lookup(looked_up, "9783161484100", None))
+        found = asyncio.run(metadata._sru_search(searched, "der zauberberg", 5, None))
     return lookup, found
 
 
@@ -7398,7 +7365,6 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
         return {
             "sbn": z3950.Record(syntax=z3950.Syntax.MARC21, reported="USmarc", raw=marc21.encode()),
             "oszk": z3950.Record(syntax=z3950.Syntax.MARC21, reported="USmarc", raw=marc21.encode()),
-            "snk": z3950.Record(syntax=z3950.Syntax.MARC21, reported="USmarc", raw=marc21.encode()),
             "porbase": z3950.Record(syntax=z3950.Syntax.UNIMARC, reported="Unimarc", raw=unimarc.encode()),
         }
 
@@ -7459,26 +7425,25 @@ class TestEverySourceSetsTheIsbnItWasAskedFor:
 #:
 #: **One property of its own, and breadth beyond it.** The rotations carry
 #: position and precedence; what this buys and they cannot is adjacency. The
-#: rotations are one circular arrangement cut twenty one ways, so all twenty one
-#: put the same pairs **next to each other in the lookup chain**: one adjacency
-#: per source, so 19 of the 342 ordered pairs, and the sample takes that to 342
-#: of 342.
+#: rotations are one circular arrangement cut twenty ways, so all twenty put the
+#: same pairs **next to each other in the lookup chain**: one adjacency per
+#: source, so 18 of the 306 ordered pairs, and the sample takes that to 306 of 306.
 #:
 #: **"Next to each other" means in the chain and never in the roster**, and the
 #: two are different numbers: `bnf` and `loc` sit side by side at the end of
 #: `DEFAULT_ORDER` and are never asked, so counting roster adjacencies with both
-#: endpoints a lookup source gives 18 rather than 19. The chain is what `lookup`
+#: endpoints a lookup source gives 17 rather than 18. The chain is what `lookup`
 #: walks, and it is what both tests below collect.
 #:
 #: Neither figure is left stated.
-#: `test_the_rotations_are_one_circular_arrangement` recomputes the 19 from the
-#: roster and `test_every_source_is_tried_next_to_every_other` the 342, so lowering
+#: `test_the_rotations_are_one_circular_arrangement` recomputes the 18 from the
+#: roster and `test_every_source_is_tried_next_to_every_other` the 306, so lowering
 #: this constant fails rather than quietly staling the figures below.
 #:
 #: **It is not a coverage figure and must not be read as one**, and the unit is
-#: the trap in it. The 221 orders reach 219 of the **121,645,100,408,832,000
-#: distinct lookup chains** the nineteen lookup sources can be put in, which is
-#: 0.0000000000002%. Measured
+#: the trap in it. The 220 orders reach 218 of the **6,402,373,705,728,000
+#: distinct lookup chains** the eighteen lookup sources can be put in, which is
+#: 0.000000000003%. Measured
 #: 2026-11-17; the figure that stood here quoted a denominator whose unit no
 #: reader could reconstruct, and it was stale in both numbers besides.
 _SAMPLED_ORDERS = 200
@@ -7504,7 +7469,7 @@ def _rotations[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
     **Its own function so the claim can be tested on it alone.** The claims held
     for the whole set with this deleted, because 200 sampled orders happen to
     cover every cell and every pair on their own, so a test over the whole set
-    left this family at "a docstring says so". Re-measured at twenty one sources on
+    left this family at "a docstring says so". Re-measured at twenty sources on
     2026-11-17 through `Plan.lookup_chain` and it still holds, which is a reason
     to keep this function rather than a reason to trust the sampling: the
     sample reaches every cell and every ordered pair well inside
@@ -7527,11 +7492,11 @@ def _orders_worth_asking[T](roster: tuple[T, ...]) -> tuple[tuple[T, ...], ...]:
 
     **The reversed roster and its rotations were here and were measured out.**
     They cover no cell and no pair the rotations do not, and their only
-    contribution, the 19 mirrored **chain** adjacencies, is inside what the sample
+    contribution, the 18 mirrored **chain** adjacencies, is inside what the sample
     already reaches. The unit is named because this is the one adjacency figure
     in this module no test can recompute: the family it counts is gone. In the
-    roster the same figure reads 18, which is the collision `_SAMPLED_ORDERS`
-    describes. Both re-derived on 2026-11-17 at the twenty one sources the roster
+    roster the same figure reads 17, which is the collision `_SAMPLED_ORDERS`
+    describes. Both re-derived on 2026-11-17 at the twenty sources the roster
     now holds, and both had gone stale unnoticed, which is the reading to take
     from a figure whose family no longer exists. A family kept for a property
     another family already carries is a reason a reviewer agrees with and a hole
@@ -7571,9 +7536,9 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     **This enumerated the roster's permutations and no longer does.** Enumeration
     is factorial in the roster and the roster grows: a ninth source multiplied the
     work ninefold overnight and a tenth would have multiplied it again, with the
-    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is **221**
-    orders where `itertools.permutations` over twenty one sources is
-    **51,090,942,171,709,440,000**,
+    enumeration on the suite's critical path. `ORDERS_UNDER_TEST` is **220**
+    orders where `itertools.permutations` over twenty sources is
+    **2,432,902,008,176,640,000**,
     and it grows by one per source rather than by a factor of it.
 
     **Both figures are recomputed by
@@ -7627,7 +7592,6 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         CatalogueSource.SBN: ITALIAN_ISBN,
         CatalogueSource.PORBASE: PORTUGUESE_ISBN,
         CatalogueSource.OSZK: HUNGARIAN_ISBN,
-        CatalogueSource.SNK: SLOVAK_ISBN,
     }
 
     def _plan(self, order: tuple[CatalogueSource, ...]) -> sources.Plan:
@@ -7755,7 +7719,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         one was copied under two readings at once.
 
         The unit is adjacency **in the lookup chain**. In the roster the answer
-        is 18, because `bnf` and `loc` are adjacent and neither is ever asked, and
+        is 17, because `bnf` and `loc` are adjacent and neither is ever asked, and
         that reading is the one to refuse: it counts positions `lookup` cannot
         see.
         """
@@ -7769,17 +7733,17 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
     def test_every_source_is_tried_next_to_every_other(self):
         """The sample's one purchase, recomputed rather than stated.
 
-        The rotations are one circular arrangement cut twenty one ways, so all
-        twenty one put the same 19 of the 342 ordered pairs next to each other in
+        The rotations are one circular arrangement cut twenty ways, so all
+        twenty put the same 18 of the 306 ordered pairs next to each other in
         the chain, which `test_the_rotations_are_one_circular_arrangement` is
-        what says; the other 323 come from the sample. Nothing else here notices
+        what says; the other 288 come from the sample. Nothing else here notices
         `_SAMPLED_ORDERS` being lowered, and three figures in this module move
         with it.
 
         **A red here means the sample is too small for a roster that grew, not
         that the chain is broken**, and that is the one thing to know before
         chasing it: this is the only property the construction reaches
-        statistically rather than by construction. At seed 0 and twenty one sources
+        statistically rather than by construction. At seed 0 and twenty sources
         the sample reaches every adjacency inside `_SAMPLED_ORDERS`; re-derive the
         margin before lowering it, since no figure for it is kept.
         """
@@ -7815,7 +7779,7 @@ class TestNoOrderOfTheRosterFindsMoreBooks:
         flat = " ".join((TestNoOrderOfTheRosterFindsMoreBooks.__doc__ or "").split())
         stated = re.search(
             r"is \*\*([\d,]+)\*\* orders where `itertools.permutations` over "
-            r"\w+(?: \w+)? sources is \*\*([\d,]+)\*\*",
+            r"\w+ sources is \*\*([\d,]+)\*\*",
             flat,
         )
         assert stated is not None, "the docstring no longer states the pair"
@@ -8269,14 +8233,14 @@ class TestThePlaintextSourcesAreCounted:
                 index = flat.find(phrase, index + 1)
         return True
 
-    def test_the_set_is_the_nine_this_repository_has_accepted(self):
+    def test_the_set_is_the_eight_this_repository_has_accepted(self):
         """The guard's own subject, pinned.
 
         Without this the test passes on an empty set, which is what it would
         compute if every endpoint moved to HTTPS or was renamed.
 
         **The BNA and the BNU are the ones that carry a login**, which is a
-        different exposure from the other seven rather than more of the same: a plaintext
+        different exposure from the other six rather than more of the same: a plaintext
         request that authenticates puts an `Authorization` header on the wire.
         `targets.SEEDED[CatalogueSource.BNA]` carries what that costs and why the
         library offers nothing else.
@@ -8290,7 +8254,6 @@ class TestThePlaintextSourcesAreCounted:
             "sbn.base_url",
             "porbase.base_url",
             "oszk.base_url",
-            "snk.base_url",
         }
 
     def test_the_legend_states_the_current_count(self):
@@ -9295,7 +9258,7 @@ class TestTheIsbn10RetryMovesOnFromAMissOnly:
     async def _asked(self, *bodies: str) -> tuple[metadata.Lookup, list[str]]:
         with respx.mock(assert_all_called=False) as mock:
             route = mock.get(url__startswith=K10PLUS).mock(side_effect=[_xml(body) for body in bodies])
-            result = await metadata._sru_lookup(self._row(), self.ISBN, None, deadline=None)
+            result = await metadata._sru_lookup(self._row(), self.ISBN, None)
             sent = [str(call.request.url) for call in route.calls]
         return result, sent
 
@@ -9528,133 +9491,6 @@ class TestTheZ3950DoorIsBehindTheSameDispatch:
 
         with pytest.raises(ValueError, match="answers a lookup"):
             metadata.resolve(z3950_row())
-
-
-class TestEachSourceIsBoundedByItsOwnRow:
-    """`Target.timeout_seconds` ends one source's answer at the seam every door sits behind.
-
-    The first three arms run on a door that sleeps, so they hold the seam and not
-    a protocol; the last two hold that each protocol door is handed the same moment.
-    """
-
-    _BOUND = 0.5
-    _SLOWER_THAN_THE_BOUND = 3.0
-
-    @staticmethod
-    def _door(monkeypatch, door) -> None:
-        doors = dict(metadata._DOORS)
-        doors[targets.Transport.Z3950] = dataclasses.replace(
-            doors[targets.Transport.Z3950], lookup=door, search=door
-        )
-        monkeypatch.setattr(metadata, "_DOORS", doors)
-
-    def test_a_search_past_its_own_bound_costs_its_own_rows_and_none_of_the_wait(self, monkeypatch):
-        """Red before the bound was read: the search waited 3.0s and kept the slow rows."""
-        clock = VirtualClock()
-        monkeypatch.setattr(deadline, "time", clock)
-        quick = z3950_row(source=CatalogueSource.LOC)
-        slow = z3950_row(source=CatalogueSource.SBN, timeout_seconds=self._BOUND)
-        delays = {quick.source: 0.1, slow.source: self._SLOWER_THAN_THE_BOUND}
-
-        async def door(target, *_rest):
-            await asyncio.sleep(delays[target.source])
-            return [Record(title=target.source.value)]
-
-        self._door(monkeypatch, door)
-
-        async def fan_out():
-            asked = [metadata._search_one(row, "gatsby", 5, "", credential=None) for row in (quick, slow)]
-            return await metadata._within_deadline(asked, metadata.SEARCH_DEADLINE_SECONDS), clock.now
-
-        tiers, elapsed = asyncio.run(fan_out(), loop_factory=clock.loop)
-
-        assert tiers == [[Record(title="loc")], []]
-        assert elapsed == pytest.approx(self._BOUND)
-
-    def test_the_fan_outs_deadline_still_ends_a_search_whose_own_bound_is_longer(self, monkeypatch):
-        """The ceiling half: a door that swallowed the fan out's cancellation would wait 6.0s here."""
-        clock = VirtualClock()
-        monkeypatch.setattr(deadline, "time", clock)
-        row = z3950_row(timeout_seconds=10.0)
-
-        async def door(target, *_rest):
-            await asyncio.sleep(6.0)
-            return [Record(title=target.source.value)]
-
-        self._door(monkeypatch, door)
-
-        async def fan_out():
-            asked = [metadata._search_one(row, "gatsby", 5, "", credential=None)]
-            return await metadata._within_deadline(asked, metadata.SEARCH_DEADLINE_SECONDS), clock.now
-
-        tiers, elapsed = asyncio.run(fan_out(), loop_factory=clock.loop)
-
-        assert tiers == []
-        assert elapsed == pytest.approx(metadata.SEARCH_DEADLINE_SECONDS)
-
-    def test_a_lookup_past_its_own_bound_is_unavailable(self, monkeypatch):
-        clock = VirtualClock()
-        monkeypatch.setattr(deadline, "time", clock)
-
-        async def door(target, *_rest):
-            await asyncio.sleep(self._SLOWER_THAN_THE_BOUND)
-            return metadata.Lookup(Outcome.FOUND, source=target.source.value)
-
-        self._door(monkeypatch, door)
-        row = z3950_row(timeout_seconds=self._BOUND)
-
-        async def ask():
-            return await metadata._lookup_one(row, "9780743273565", "", credential=None), clock.now
-
-        answer, elapsed = asyncio.run(ask(), loop_factory=clock.loop)
-
-        assert answer.outcome is Outcome.UNAVAILABLE
-        assert elapsed == pytest.approx(self._BOUND)
-
-    def test_a_timeout_error_that_is_not_the_bounds_own_is_raised_rather_than_read_as_a_miss(
-        self, monkeypatch
-    ):
-        async def door(*_args):
-            raise TimeoutError("somebody else's clock")
-
-        self._door(monkeypatch, door)
-
-        with pytest.raises(TimeoutError, match="somebody else's clock"):
-            asyncio.run(
-                metadata._lookup_one(
-                    z3950_row(timeout_seconds=self._BOUND), "9780743273565", "", credential=None
-                )
-            )
-
-    def test_the_z3950_door_opens_its_association_under_the_rows_bound(self, monkeypatch):
-        """Red before: the client was opened under `z3950.TIMEOUT_SECONDS`, 10.0s."""
-        monkeypatch.setattr(deadline, "time", VirtualClock())
-        client = FakeClient(session=FakeSession(hits=0, records=[]))
-        monkeypatch.setattr(z3950, "_default_client", lambda: client)
-
-        asyncio.run(
-            metadata._lookup_one(z3950_row(timeout_seconds=2.0), "9780743273565", "", credential=None)
-        )
-
-        assert [timeout for _target, timeout in client.opens] == [2.0]
-
-    def test_the_sru_door_hands_every_form_the_same_deadline(self, monkeypatch):
-        """One bound over the question: the ISBN-10 retry does not start a fresh one."""
-        monkeypatch.setattr(deadline, "time", VirtualClock())
-        handed: list[float | None] = []
-
-        async def get_once(*_args: object, deadline: float | None, **_kwargs: object) -> httpx.Response:
-            handed.append(deadline)
-            return sru_response()
-
-        monkeypatch.setattr(fetch, "get_once", get_once)
-        row = dataclasses.replace(
-            targets.SEEDED[CatalogueSource.K10PLUS], timeout_seconds=2.0, retries_as_isbn10=True
-        )
-
-        asyncio.run(metadata._lookup_one(row, "9780743273565", "", credential=None))
-
-        assert handed == [2.0, 2.0]
 
 
 class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
@@ -10257,45 +10093,3 @@ class TestAUnimarcRecordIsReadThroughTheCrosswalk:
         found = metadata._SEARCH_READERS[decoders.Reader.UNIMARC](root, _UNIMARC)
 
         assert [record.isbn for record in found] == ["9788842080510", "9788845926839"]
-
-
-class TestTheDublinCoreCataloguesReadTheSharedFreeListRules:
-    """The BnF reads `identifier`, `date` and `language` by `bibliographic`'s
-    rules, the ones the harvester reads; the NKP reads `date` and `language` by
-    them and stamps the ISBN it was asked for."""
-
-    @staticmethod
-    def _bnf(*elements: str) -> Any:
-        return metadata._bnf_record(
-            ElementTree.fromstring(
-                '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
-                "<dc:title>Un livre</dc:title><dc:type>text</dc:type>"
-                "<dc:format>200 p.</dc:format>" + "".join(elements) + "</record>"
-            ),
-            source="bnf",
-        )
-
-    def test_a_bare_ten_digits_is_not_the_bnf_record_s_isbn(self):
-        record = self._bnf("<dc:identifier>0441172717</dc:identifier>")
-
-        assert record is not None
-        assert record.isbn is None
-
-    def test_the_nkp_record_s_year_is_its_earliest_date(self):
-        record = metadata._nkp_record(
-            ElementTree.fromstring(
-                "<dc-record><title>Kniha</title><type>text</type><format>200 s.</format>"
-                "<date>2003</date><date>©2002</date></dc-record>"
-            ),
-            "9788072033034",
-            source="nkp",
-        )
-
-        assert record is not None
-        assert record.year == 2002
-
-    def test_a_language_tag_is_read_from_a_bnf_record(self):
-        record = self._bnf("<dc:language>en-GB</dc:language>")
-
-        assert record is not None
-        assert record.language == "en"

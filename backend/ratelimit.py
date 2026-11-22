@@ -100,27 +100,21 @@ RECOVERY_CODE_LIMIT = RateLimit(max_attempts=10, window_seconds=3600)
 IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
 # A metadata search asks eight public catalogues at once, and a lookup can reach
-# any of nineteen catalogues, the first two at once and the rest in turn until one
-# answers. Nine of them are asked only about ISBNs in their own registration
+# any of eighteen catalogues, the first two at once and the rest in turn until one
+# answers. Eight of them are asked only about ISBNs in their own registration
 # groups, all `978` groups and no group in two remits. So in the default order a
 # `978` ISBN whose group this build can name reaches eleven at most, while a `979`
-# ISBN, or one whose group it cannot name, can reach all nineteen. Each of the
-# four Z39.50 catalogues a lookup reaches puts a search again at most twice
-# when the catalogue refuses it as a temporary error, and three of them search a
-# second time, with the ten digit form, when the first search misses, so one of
-# them takes at most six searches on one connection. These count catalogues, not
+# ISBN, or one whose group it cannot name, can reach all eighteen. Each of the
+# three Z39.50 catalogues a lookup reaches searches a second time, with the ten
+# digit form, when the first search misses, and puts a search again at most
+# twice when the catalogue refuses it as a temporary error, so one of them takes
+# at most six searches on one connection. These count catalogues, not
 # requests: a catalogue may take more than one request to answer. The library
 # runs or pays for none of them. One member holding the scan page open with a
 # script behind it would spend somebody else's quota and put this deployment's
 # address in front of their rate limiter, which is a way to lose metadata for
 # everyone. Sixty a minute is far above scanning a shelf by hand and far below
-# what would be noticed upstream, with one exception: the Slovak National
-# Library closes a connection once about eight have arrived from one address
-# within a minute. That is per address, not per member, so every member and
-# every lookup, refresh and enrichment counts towards it together: it is met by
-# `978-80` books, and by `979` ones or any whose group cannot be named, that the
-# leading pair misses, and past it the SNK is reported unavailable for some of
-# them. `metadata`'s block for it measures it.
+# what would be noticed upstream.
 METADATA_LIMIT = RateLimit(max_attempts=60, window_seconds=60)
 
 # The authority files are not the catalogues and their published budget is much

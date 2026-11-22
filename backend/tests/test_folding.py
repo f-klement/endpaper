@@ -342,7 +342,7 @@ def _unbounded_reads(source: str) -> list[int]:
 #: refuses a shape and asks nobody to look, so the looking is this number's job.
 #:
 #: Eleven: five queries, two `Session.delete`s of a row in hand, the
-#: `Session.expire` of each Book after its lock, and three `flush`es. The fifth
+#: `Session.expire` of the keeper after its lock and three `flush`es. The fifth
 #: query is `_carry_highlights`, bounded to the losers' ids.
 READ_ROOTS = 11
 

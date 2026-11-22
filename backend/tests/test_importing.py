@@ -802,25 +802,22 @@ class TestTheCatalogueIsReadOnce:
 
     def test_the_per_row_cost_is_one_select(self, db, member):
         db.add_all(
-            Book(title=f"Book {n}", isbn=f"978044101{n:04d}", added_by_user_id=member.id) for n in range(21)
+            Book(title=f"Book {n}", isbn=f"978044101{n:04d}", added_by_user_id=member.id) for n in range(12)
         )
         db.commit()
         member_id = member.id
 
-        def run(numbers):
+        def run(count):
             def work():
                 Import.for_member(db, member_id).apply(
-                    parse(*(row(f"Book {n}", isbn=f"978044101{n:04d}") for n in numbers))
+                    parse(*(row(f"Book {n}", isbn=f"978044101{n:04d}") for n in range(count)))
                 )
 
             return work
 
-        # Three disjoint sets, so every measured row is applied for the first
-        # time and writes, as a real import's rows do: the write path stays
-        # inside the slope, and whatever a flush costs once cancels.
-        run(range(10))()  # warm up outside the measurement
-        for_one = len(selects(run(range(10, 11))))
-        for_ten = len(selects(run(range(11, 21))))
+        run(1)()  # warm up outside the measurement
+        for_one = len(selects(run(1)))
+        for_ten = len(selects(run(10)))
 
         # **One SELECT per extra row.** The index does not make the cost flat
         # and does not claim to: `find` still issues a `db.get` for a row it
@@ -3465,13 +3462,3 @@ class TestTheLinkCapCountsWhatThisImportAlreadyAdded:
         assert db.query(OnlineLink).filter(OnlineLink.book_id == book.id).count() == (
             MAX_ONLINE_LINKS_PER_BOOK
         )
-
-
-class TestHarvestKeysAnswer:
-    """What a key answers, from the identifiers it holds; reading them is
-    `tests/routers/test_imports_harvest.py`'s."""
-
-    def test_two_books_under_one_identifier_are_tied(self):
-        keys = importing.HarvestKeys({"oai:x:1": {3, 4}}, {})
-
-        assert keys.answer("oai:x:1") == recognition.Tied(frozenset({3, 4}))

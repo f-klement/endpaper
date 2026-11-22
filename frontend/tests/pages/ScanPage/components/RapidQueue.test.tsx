@@ -90,7 +90,6 @@ function renderQueue(
     onStopAdding: vi.fn<RapidQueueProps["onStopAdding"]>(),
     figures,
     isLookingUp: false,
-    lookUpProgress: null,
     onLookUp: vi.fn<RapidQueueProps["onLookUp"]>(),
     onStopLookUp: vi.fn<RapidQueueProps["onStopLookUp"]>(),
     onChoose: vi.fn<RapidQueueProps["onChoose"]>(),
@@ -103,7 +102,6 @@ function renderQueue(
     onDropSubject: vi.fn<RapidQueueProps["onDropSubject"]>(),
     onAddAsCopy: vi.fn<RapidQueueProps["onAddAsCopy"]>(),
     isAddingCopy: false,
-    libraryMode: false,
     ...rest,
   };
   const { container, rerender } = renderLocalised(<RapidQueue {...props} />, {
@@ -1317,26 +1315,6 @@ describe("RapidQueue and a book taken from its file name", () => {
       "The Dispossessed.pdf",
     );
 
-  it("names the catalogues an offered record came from in library mode", () => {
-    renderQueue({
-      entries: [offering({ ...MATCH, source: "dnb+open_library" })],
-      libraryMode: true,
-    });
-
-    expect(
-      screen.getByText("Source: German National Library and Open Library"),
-    ).toBeInTheDocument();
-  });
-
-  it("names no catalogue for an offered record in a household", () => {
-    renderQueue({
-      entries: [offering({ ...MATCH, source: "dnb" })],
-      libraryMode: false,
-    });
-
-    expect(screen.queryByText(/^Source:/)).not.toBeInTheDocument();
-  });
-
   it("shows the title the name gave and says where it came from", () => {
     renderQueue({ entries: [derived] });
 
@@ -1383,35 +1361,6 @@ describe("RapidQueue and a book taken from its file name", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Stop looking up" }),
-    ).toBeInTheDocument();
-  });
-
-  it("says how far a run has got beside its stop", () => {
-    renderQueue({
-      entries: [derived],
-      isLookingUp: true,
-      lookUpProgress: { done: 3, total: 40 },
-    });
-
-    expect(screen.getByText("Asked 3 of 40")).toBeInTheDocument();
-  });
-
-  it("says a listed ISBN is waiting for the paced lookup", () => {
-    renderQueue({
-      entries: [
-        {
-          key: "isbn:9780441013593",
-          label: "9780441013593",
-          isbn: "9780441013593",
-          format: "",
-          state: "listed",
-          draft: null,
-        },
-      ],
-    });
-
-    expect(
-      screen.getByText("Waiting for the lookup: 9780441013593"),
     ).toBeInTheDocument();
   });
 

@@ -44,7 +44,6 @@ import type {
   BackfillCoversParams,
   BackfillFromIdentifiersParams,
   BodyUploadCover,
-  BodyUploadCoverImage,
   BookCreate,
   BookDetailsUpdate,
   BookDiscussUpdate,
@@ -58,12 +57,10 @@ import type {
   BulkRequest,
   BulkResult,
   ClassificationFacets,
-  ClassificationOut,
   CollectionAssign,
   ConfirmedIdentifierOut,
   CopyCreate,
   CoverBackfillOut,
-  CoverImageOut,
   CustomFieldCreate,
   CustomFieldOut,
   CustomFieldRename,
@@ -91,7 +88,6 @@ import type {
   LocationOut,
   LookupIsbnParams,
   MergeRequest,
-  NarrowableCatalogue,
   NoteCreate,
   NoteOut,
   OwnershipUpdate,
@@ -117,36 +113,6 @@ import type {
 import { customFetch } from "../../../mutator.ts";
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
-
-const getHeaders = (
-  ...sources: (RequestInit["headers"] | Record<string, string | undefined>)[]
-) => {
-  const seen = new Set<string>();
-  const layers: [string, string | readonly string[]][][] = [];
-  for (const source of sources.reverse()) {
-    if (!source) continue;
-    const entries =
-      source instanceof Headers
-        ? source.entries()
-        : Symbol.iterator in source
-          ? Array.from(
-              source as Iterable<Iterable<string>>,
-              (entry) => Array.from(entry) as [string, string],
-            )
-          : Object.entries<string | readonly string[] | undefined>(source);
-    const layer: [string, string | readonly string[]][] = [];
-    for (const [name, value] of entries) {
-      if (value !== undefined && !seen.has(name.toLowerCase()))
-        layer.push([name, value]);
-    }
-    for (const [name] of layer) seen.add(name.toLowerCase());
-    layers.push(layer);
-  }
-  return Object.fromEntries(layers.reverse().flat()) as Extract<
-    RequestInit["headers"],
-    Record<string, unknown>
-  >;
-};
 
 const withQueryKey = <T extends object, K>(
   query: T,
@@ -525,13 +491,34 @@ export const addBook = async (
   bookCreate: BookCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getAddBookUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookCreate),
   });
 };
@@ -1132,9 +1119,9 @@ export const getAuthorAuthorityUrl = (params: AuthorAuthorityParams) => {
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and in
- * library mode of ORCID where both find nobody. A name is not a key. Two
- * people are spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and of
+ * ORCID only where both find nobody. A name is not a key. Two people are
+ * spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1221,9 +1208,9 @@ export type AuthorAuthorityQueryError = Refusal | HTTPValidationError;
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and in
- * library mode of ORCID where both find nobody. A name is not a key. Two
- * people are spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and of
+ * ORCID only where both find nobody. A name is not a key. Two people are
+ * spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1287,9 +1274,9 @@ export function useAuthorAuthority<
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and in
- * library mode of ORCID where both find nobody. A name is not a key. Two
- * people are spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and of
+ * ORCID only where both find nobody. A name is not a key. Two people are
+ * spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1353,9 +1340,9 @@ export function useAuthorAuthority<
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and in
- * library mode of ORCID where both find nobody. A name is not a key. Two
- * people are spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and of
+ * ORCID only where both find nobody. A name is not a key. Two people are
+ * spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1411,9 +1398,9 @@ export function useAuthorAuthority<
  * number, or failing both a confirmed ORCID iD, that number is a key: it
  * resolves to exactly one record, and the spelling on it is the suggestion
  * this feature exists to offer. Where it holds none, the author's name is put
- * to a name search of the GND and the LCNAF, the GND's people first, and in
- * library mode of ORCID where both find nobody. A name is not a key. Two
- * people are spelled `Stevenson, Robert Louis` in the GND.
+ * to a name search of the GND and the LCNAF, the GND's people first, and of
+ * ORCID only where both find nobody. A name is not a key. Two people are
+ * spelled `Stevenson, Robert Louis` in the GND.
  *
  * **`q` steers that search and forces it.** Without it the query is the
  * author's own display name, which is exactly wrong when the shelf spells
@@ -1484,9 +1471,8 @@ export const getConfirmAuthorIdentifierUrl = () => {
  * request is well formed and the state refuses it.
  *
  * **Confirming a GND number stores the cross references that came with it**,
- * and the six national numbers, which cost the extra requests; a Portuguese
- * one is kept only where the BNP's record names the person. A confirmation
- * is up to nine outbound calls, which is why it is a deliberate action rather
+ * and the six national numbers, which cost the extra requests. A confirmation
+ * is up to eight outbound calls, which is why it is a deliberate action rather
  * than something a lookup does on the way past.
  *
  * **The cross references only for `gnd`.** An LCNAF or ORCID record is
@@ -1501,13 +1487,34 @@ export const confirmAuthorIdentifier = async (
   authorIdentifierRequest: AuthorIdentifierRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<ConfirmedIdentifierOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<ConfirmedIdentifierOut>(getConfirmAuthorIdentifierUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(authorIdentifierRequest),
   });
 };
@@ -1574,9 +1581,8 @@ export type ConfirmAuthorIdentifierMutationVariables = {
  * request is well formed and the state refuses it.
  *
  * **Confirming a GND number stores the cross references that came with it**,
- * and the six national numbers, which cost the extra requests; a Portuguese
- * one is kept only where the BNP's record names the person. A confirmation
- * is up to nine outbound calls, which is why it is a deliberate action rather
+ * and the six national numbers, which cost the extra requests. A confirmation
+ * is up to eight outbound calls, which is why it is a deliberate action rather
  * than something a lookup does on the way past.
  *
  * **The cross references only for `gnd`.** An LCNAF or ORCID record is
@@ -1761,13 +1767,34 @@ export const mergeAuthors = async (
   authorMergeRequest: AuthorMergeRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AuthorOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<AuthorOut>(getMergeAuthorsUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(authorMergeRequest),
   });
 };
@@ -1894,13 +1921,34 @@ export const mergeAuthorsBatch = async (
   authorMergeBatchRequest: AuthorMergeBatchRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AuthorBatchMergeOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<AuthorBatchMergeOut>(getMergeAuthorsBatchUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(authorMergeBatchRequest),
   });
 };
@@ -2545,13 +2593,34 @@ export const bulkAction = async (
   bulkRequest: BulkRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BulkResult> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BulkResult>(getBulkActionUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bulkRequest),
   });
 };
@@ -3474,13 +3543,34 @@ export const defineCustomField = async (
   customFieldCreate: CustomFieldCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<CustomFieldOut>(getDefineCustomFieldUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(customFieldCreate),
   });
 };
@@ -3791,13 +3881,34 @@ export const renameCustomField = async (
   customFieldRename: CustomFieldRename,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<CustomFieldOut>(getRenameCustomFieldUrl(fieldId), {
     ...options,
     method: "PATCH",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(customFieldRename),
   });
 };
@@ -4656,13 +4767,34 @@ export const sweepDigitalReferences = async (
   sweepIn: SweepIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<SweepOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<SweepOut>(getSweepDigitalReferencesUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(sweepIn),
   });
 };
@@ -5402,13 +5534,34 @@ export const findFileHolders = async (
   holdersIn: HoldersIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<HoldersOut[]> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<HoldersOut[]>(getFindFileHoldersUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(holdersIn),
   });
 };
@@ -5875,15 +6028,6 @@ export const getLookupIsbnUrl = (params: LookupIsbnParams) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
-    const explodeParameters = ["only"];
-
-    if (Array.isArray(value) && explodeParameters.includes(key)) {
-      value.forEach((v) => {
-        normalizedParams.append(key, v === null ? "null" : String(v));
-      });
-      return;
-    }
-
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? "null" : String(value));
     }
@@ -6035,210 +6179,6 @@ export function useLookupIsbn<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-export const getListNarrowableCataloguesUrl = () => {
-  return `/api/books/lookup/catalogues`;
-};
-
-/**
- * The catalogues a cataloguer may narrow one lookup or search to.
- *
- * **Library mode only, refused with the narrowing's own 403**, because a
- * household is never offered the narrowing and this list exists to offer it.
- * Read off the plan in force rather than the stored one, so a source with no
- * key is not offered: naming it would be refused.
- *
- * Declared before `/{book_id}`, like `/export`.
- * @summary List Narrowable Catalogues
- */
-export const listNarrowableCatalogues = async (
-  options?: Parameters<typeof customFetch>[1],
-): Promise<NarrowableCatalogue[]> => {
-  return customFetch<NarrowableCatalogue[]>(getListNarrowableCataloguesUrl(), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getListNarrowableCataloguesQueryKey = () => {
-  return [`/api/books/lookup/catalogues`] as const;
-};
-
-export const getListNarrowableCataloguesQueryOptions = <
-  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-  TError = Refusal,
->(options?: {
-  query?: Partial<
-    UseQueryOptions<
-      Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-      TError,
-      TData
-    >
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getListNarrowableCataloguesQueryKey();
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof listNarrowableCatalogues>>
-  > = ({ signal }) => listNarrowableCatalogues({ signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type ListNarrowableCataloguesQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listNarrowableCatalogues>>
->;
-export type ListNarrowableCataloguesQueryError = Refusal;
-
-/**
- * The catalogues a cataloguer may narrow one lookup or search to.
- *
- * **Library mode only, refused with the narrowing's own 403**, because a
- * household is never offered the narrowing and this list exists to offer it.
- * Read off the plan in force rather than the stored one, so a source with no
- * key is not offered: naming it would be refused.
- *
- * Declared before `/{book_id}`, like `/export`.
- * @summary List Narrowable Catalogues
- */
-export function useListNarrowableCatalogues<
-  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-  TError = Refusal,
->(
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-          TError,
-          Awaited<ReturnType<typeof listNarrowableCatalogues>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The catalogues a cataloguer may narrow one lookup or search to.
- *
- * **Library mode only, refused with the narrowing's own 403**, because a
- * household is never offered the narrowing and this list exists to offer it.
- * Read off the plan in force rather than the stored one, so a source with no
- * key is not offered: naming it would be refused.
- *
- * Declared before `/{book_id}`, like `/export`.
- * @summary List Narrowable Catalogues
- */
-export function useListNarrowableCatalogues<
-  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-          TError,
-          Awaited<ReturnType<typeof listNarrowableCatalogues>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The catalogues a cataloguer may narrow one lookup or search to.
- *
- * **Library mode only, refused with the narrowing's own 403**, because a
- * household is never offered the narrowing and this list exists to offer it.
- * Read off the plan in force rather than the stored one, so a source with no
- * key is not offered: naming it would be refused.
- *
- * Declared before `/{book_id}`, like `/export`.
- * @summary List Narrowable Catalogues
- */
-export function useListNarrowableCatalogues<
-  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The catalogues a cataloguer may narrow one lookup or search to.
- *
- * **Library mode only, refused with the narrowing's own 403**, because a
- * household is never offered the narrowing and this list exists to offer it.
- * Read off the plan in force rather than the stored one, so a source with no
- * key is not offered: naming it would be refused.
- *
- * Declared before `/{book_id}`, like `/export`.
- * @summary List Narrowable Catalogues
- */
-export function useListNarrowableCatalogues<
-  TData = Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listNarrowableCatalogues>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getListNarrowableCataloguesQueryOptions(options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
 export const getMergeBooksUrl = () => {
   return `/api/books/merge`;
 };
@@ -6265,13 +6205,34 @@ export const mergeBooks = async (
   mergeRequest: MergeRequest,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getMergeBooksUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(mergeRequest),
   });
 };
@@ -6669,13 +6630,34 @@ export const scanAdd = async (
   bookCreate: BookCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getScanAddUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookCreate),
   });
 };
@@ -6758,15 +6740,6 @@ export const getSearchBooksUrl = (params: SearchBooksParams) => {
   const normalizedParams = new URLSearchParams();
 
   Object.entries(params || {}).forEach(([key, value]) => {
-    const explodeParameters = ["only"];
-
-    if (Array.isArray(value) && explodeParameters.includes(key)) {
-      value.forEach((v) => {
-        normalizedParams.append(key, v === null ? "null" : String(v));
-      });
-      return;
-    }
-
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? "null" : String(value));
     }
@@ -7485,13 +7458,34 @@ export const createTag = async (
   tagCreate: TagCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<TagOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<TagOut>(getCreateTagUrl(), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(tagCreate),
   });
 };
@@ -8286,13 +8280,34 @@ export const updateBookDetails = async (
   bookDetailsUpdate: BookDetailsUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getUpdateBookDetailsUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookDetailsUpdate),
   });
 };
@@ -8703,13 +8718,34 @@ export const decideAccess = async (
   accessDecision: AccessDecision,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<AccessRequestOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<AccessRequestOut>(getDecideAccessUrl(bookId, requestId), {
     ...options,
     method: "PUT",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(accessDecision),
   });
 };
@@ -8816,13 +8852,34 @@ export const setCollection = async (
   collectionAssign: CollectionAssign,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getSetCollectionUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(collectionAssign),
   });
 };
@@ -9142,13 +9199,34 @@ export const addCopy = async (
   copyCreate: CopyCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getAddCopyUrl(bookId), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(copyCreate),
   });
 };
@@ -9336,529 +9414,6 @@ export const useUploadCover = <
   TContext
 > => {
   return useMutation(getUploadCoverMutationOptions(options), queryClient);
-};
-export const getListCoverImagesUrl = (bookId: number) => {
-  return `/api/books/${bookId}/cover-images`;
-};
-
-/**
- * The further images kept of this book, oldest first. Not the shelf cover.
- *
- * **Served here rather than on `BookOut`**, like notes: no listing shows
- * them, and putting them on every card would cost every page a query.
- * `BookForRead` is the whole privacy check, as it is for quotes.
- * @summary List Cover Images
- */
-export const listCoverImages = async (
-  bookId: number,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<CoverImageOut[]> => {
-  return customFetch<CoverImageOut[]>(getListCoverImagesUrl(bookId), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getListCoverImagesQueryKey = (bookId: number) => {
-  return [`/api/books/${bookId}/cover-images`] as const;
-};
-
-export const getListCoverImagesQueryOptions = <
-  TData = Awaited<ReturnType<typeof listCoverImages>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listCoverImages>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getListCoverImagesQueryKey(bookId);
-
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof listCoverImages>>> = ({
-    signal,
-  }) => listCoverImages(bookId, { signal, ...requestOptions });
-
-  return {
-    queryKey,
-    queryFn,
-    enabled: bookId !== null && bookId !== undefined,
-    ...queryOptions,
-  } as UseQueryOptions<
-    Awaited<ReturnType<typeof listCoverImages>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type ListCoverImagesQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listCoverImages>>
->;
-export type ListCoverImagesQueryError = Refusal | HTTPValidationError;
-
-/**
- * The further images kept of this book, oldest first. Not the shelf cover.
- *
- * **Served here rather than on `BookOut`**, like notes: no listing shows
- * them, and putting them on every card would cost every page a query.
- * `BookForRead` is the whole privacy check, as it is for quotes.
- * @summary List Cover Images
- */
-export function useListCoverImages<
-  TData = Awaited<ReturnType<typeof listCoverImages>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listCoverImages>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listCoverImages>>,
-          TError,
-          Awaited<ReturnType<typeof listCoverImages>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The further images kept of this book, oldest first. Not the shelf cover.
- *
- * **Served here rather than on `BookOut`**, like notes: no listing shows
- * them, and putting them on every card would cost every page a query.
- * `BookForRead` is the whole privacy check, as it is for quotes.
- * @summary List Cover Images
- */
-export function useListCoverImages<
-  TData = Awaited<ReturnType<typeof listCoverImages>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listCoverImages>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listCoverImages>>,
-          TError,
-          Awaited<ReturnType<typeof listCoverImages>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The further images kept of this book, oldest first. Not the shelf cover.
- *
- * **Served here rather than on `BookOut`**, like notes: no listing shows
- * them, and putting them on every card would cost every page a query.
- * `BookForRead` is the whole privacy check, as it is for quotes.
- * @summary List Cover Images
- */
-export function useListCoverImages<
-  TData = Awaited<ReturnType<typeof listCoverImages>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listCoverImages>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The further images kept of this book, oldest first. Not the shelf cover.
- *
- * **Served here rather than on `BookOut`**, like notes: no listing shows
- * them, and putting them on every card would cost every page a query.
- * `BookForRead` is the whole privacy check, as it is for quotes.
- * @summary List Cover Images
- */
-export function useListCoverImages<
-  TData = Awaited<ReturnType<typeof listCoverImages>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listCoverImages>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getListCoverImagesQueryOptions(bookId, options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-export const getUploadCoverImageUrl = (bookId: number) => {
-  return `/api/books/${bookId}/cover-images`;
-};
-
-/**
- * Keep one more image of this book. Answers with the whole list.
- *
- * The bounds of the shelf cover's upload, through the same reader: 413 past
- * the size cap and 400 for anything but a JPEG, PNG or WebP image.
- *
- * **409 `cover_image_ceiling` past `MAX_COVER_IMAGES_PER_BOOK`**, counted
- * after the insert and under the lock a merge onto the book takes, the rule
- * the file reference ceiling keeps, so two uploads at once cannot both pass.
- * A refused upload's file goes with its rollback.
- * @summary Upload Cover Image
- */
-export const uploadCoverImage = async (
-  bookId: number,
-  bodyUploadCoverImage: BodyUploadCoverImage,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<CoverImageOut[]> => {
-  const formData = new FormData();
-  formData.append(`file`, bodyUploadCoverImage.file);
-
-  return customFetch<CoverImageOut[]>(getUploadCoverImageUrl(bookId), {
-    ...options,
-    method: "POST",
-    body: formData,
-  });
-};
-
-export const getUploadCoverImageMutationKey = () =>
-  ["uploadCoverImage"] as const;
-
-export const getUploadCoverImageMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof uploadCoverImage>>,
-    TError,
-    UploadCoverImageMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof uploadCoverImage>>,
-  TError,
-  UploadCoverImageMutationVariables,
-  TContext
-> => {
-  const mutationKey = getUploadCoverImageMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof uploadCoverImage>>,
-    UploadCoverImageMutationVariables
-  > = (props) => {
-    const { bookId, data } = props ?? {};
-
-    return uploadCoverImage(bookId, data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type UploadCoverImageMutationResult = NonNullable<
-  Awaited<ReturnType<typeof uploadCoverImage>>
->;
-export type UploadCoverImageMutationBody = BodyUploadCoverImage;
-export type UploadCoverImageMutationError = Refusal | HTTPValidationError;
-export type UploadCoverImageMutationVariables = {
-  bookId: number;
-  data: BodyUploadCoverImage;
-};
-
-/**
- * Keep one more image of this book. Answers with the whole list.
- *
- * The bounds of the shelf cover's upload, through the same reader: 413 past
- * the size cap and 400 for anything but a JPEG, PNG or WebP image.
- *
- * **409 `cover_image_ceiling` past `MAX_COVER_IMAGES_PER_BOOK`**, counted
- * after the insert and under the lock a merge onto the book takes, the rule
- * the file reference ceiling keeps, so two uploads at once cannot both pass.
- * A refused upload's file goes with its rollback.
- * @summary Upload Cover Image
- */
-export const useUploadCoverImage = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof uploadCoverImage>>,
-      TError,
-      UploadCoverImageMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof uploadCoverImage>>,
-  TError,
-  UploadCoverImageMutationVariables,
-  TContext
-> => {
-  return useMutation(getUploadCoverImageMutationOptions(options), queryClient);
-};
-export const getDeleteCoverImageUrl = (bookId: number, imageId: number) => {
-  return `/api/books/${bookId}/cover-images/${imageId}`;
-};
-
-/**
- * Let one further image go. The file goes once the delete commits.
- * @summary Delete Cover Image
- */
-export const deleteCoverImage = async (
-  bookId: number,
-  imageId: number,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<void> => {
-  return customFetch<void>(getDeleteCoverImageUrl(bookId, imageId), {
-    ...options,
-    method: "DELETE",
-  });
-};
-
-export const getDeleteCoverImageMutationKey = () =>
-  ["deleteCoverImage"] as const;
-
-export const getDeleteCoverImageMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof deleteCoverImage>>,
-    TError,
-    DeleteCoverImageMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof deleteCoverImage>>,
-  TError,
-  DeleteCoverImageMutationVariables,
-  TContext
-> => {
-  const mutationKey = getDeleteCoverImageMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof deleteCoverImage>>,
-    DeleteCoverImageMutationVariables
-  > = (props) => {
-    const { bookId, imageId } = props ?? {};
-
-    return deleteCoverImage(bookId, imageId, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DeleteCoverImageMutationResult = NonNullable<
-  Awaited<ReturnType<typeof deleteCoverImage>>
->;
-
-export type DeleteCoverImageMutationError = Refusal | HTTPValidationError;
-export type DeleteCoverImageMutationVariables = {
-  bookId: number;
-  imageId: number;
-};
-
-/**
- * Let one further image go. The file goes once the delete commits.
- * @summary Delete Cover Image
- */
-export const useDeleteCoverImage = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof deleteCoverImage>>,
-      TError,
-      DeleteCoverImageMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof deleteCoverImage>>,
-  TError,
-  DeleteCoverImageMutationVariables,
-  TContext
-> => {
-  return useMutation(getDeleteCoverImageMutationOptions(options), queryClient);
-};
-export const getShelveCoverImageUrl = (bookId: number, imageId: number) => {
-  return `/api/books/${bookId}/cover-images/${imageId}/shelf`;
-};
-
-/**
- * Make one further image the cover the shelf shows. A swap, not a copy.
- *
- * The image becomes the book's stored cover, written through the same store
- * door an upload is, and its row goes. **The cover it replaces becomes a
- * further image in its place**, so the count is unchanged and nothing a
- * member kept is lost. A cover that is only a catalogue's link, with no file
- * behind it, is let go rather than kept: a slot holds a file, and refreshing
- * the metadata asks the catalogue for it again. Answers with the book.
- * @summary Shelve Cover Image
- */
-export const shelveCoverImage = async (
-  bookId: number,
-  imageId: number,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<BookOut> => {
-  return customFetch<BookOut>(getShelveCoverImageUrl(bookId, imageId), {
-    ...options,
-    method: "PUT",
-  });
-};
-
-export const getShelveCoverImageMutationKey = () =>
-  ["shelveCoverImage"] as const;
-
-export const getShelveCoverImageMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof shelveCoverImage>>,
-    TError,
-    ShelveCoverImageMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof shelveCoverImage>>,
-  TError,
-  ShelveCoverImageMutationVariables,
-  TContext
-> => {
-  const mutationKey = getShelveCoverImageMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof shelveCoverImage>>,
-    ShelveCoverImageMutationVariables
-  > = (props) => {
-    const { bookId, imageId } = props ?? {};
-
-    return shelveCoverImage(bookId, imageId, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type ShelveCoverImageMutationResult = NonNullable<
-  Awaited<ReturnType<typeof shelveCoverImage>>
->;
-
-export type ShelveCoverImageMutationError = Refusal | HTTPValidationError;
-export type ShelveCoverImageMutationVariables = {
-  bookId: number;
-  imageId: number;
-};
-
-/**
- * Make one further image the cover the shelf shows. A swap, not a copy.
- *
- * The image becomes the book's stored cover, written through the same store
- * door an upload is, and its row goes. **The cover it replaces becomes a
- * further image in its place**, so the count is unchanged and nothing a
- * member kept is lost. A cover that is only a catalogue's link, with no file
- * behind it, is let go rather than kept: a slot holds a file, and refreshing
- * the metadata asks the catalogue for it again. Answers with the book.
- * @summary Shelve Cover Image
- */
-export const useShelveCoverImage = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof shelveCoverImage>>,
-      TError,
-      ShelveCoverImageMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof shelveCoverImage>>,
-  TError,
-  ShelveCoverImageMutationVariables,
-  TContext
-> => {
-  return useMutation(getShelveCoverImageMutationOptions(options), queryClient);
 };
 export const getGetCustomFieldsUrl = (bookId: number) => {
   return `/api/books/${bookId}/custom-fields`;
@@ -10096,15 +9651,36 @@ export const setCustomField = async (
   customFieldValueUpdate: CustomFieldValueUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CustomFieldValueOut[]> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<CustomFieldValueOut[]>(
     getSetCustomFieldUrl(bookId, fieldId),
     {
       ...options,
       method: "PUT",
-      headers: getHeaders(
-        { "Content-Type": "application/json" },
-        options?.headers,
-      ),
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
       body: JSON.stringify(customFieldValueUpdate),
     },
   );
@@ -10480,15 +10056,36 @@ export const reportDigitalReference = async (
   digitalReferenceIn: DigitalReferenceIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<DigitalReferenceOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<DigitalReferenceOut>(
     getReportDigitalReferenceUrl(bookId),
     {
       ...options,
       method: "POST",
-      headers: getHeaders(
-        { "Content-Type": "application/json" },
-        options?.headers,
-      ),
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
       body: JSON.stringify(digitalReferenceIn),
     },
   );
@@ -10879,13 +10476,34 @@ export const setDiscuss = async (
   bookDiscussUpdate: BookDiscussUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getSetDiscussUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookDiscussUpdate),
   });
 };
@@ -11004,7 +10622,7 @@ export const getEnrichBookUrl = (bookId: number, params?: EnrichBookParams) => {
  * without that middle step it is matched by its title, which is the weakest
  * instrument here. **Which
  * catalogues either of those asks is the library's own provider list**, set
- * in Settings: the roster holds nineteen lookup sources that answer an ISBN and
+ * in Settings: the roster holds eighteen lookup sources that answer an ISBN and
  * eight search sources that answer a title, the leading pair is asked together
  * and the rest one at a time, and a source switched off is not asked on either
  * path. Google Books answers only when its own section is on and a key is in
@@ -11099,7 +10717,7 @@ export type EnrichBookMutationVariables = {
  * without that middle step it is matched by its title, which is the weakest
  * instrument here. **Which
  * catalogues either of those asks is the library's own provider list**, set
- * in Settings: the roster holds nineteen lookup sources that answer an ISBN and
+ * in Settings: the roster holds eighteen lookup sources that answer an ISBN and
  * eight search sources that answer a title, the leading pair is asked together
  * and the rest one at a time, and a source switched off is not asked on either
  * path. Google Books answers only when its own section is on and a key is in
@@ -11188,13 +10806,34 @@ export const applyEnrichment = async (
   params?: ApplyEnrichmentParams,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookEnrichmentOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookEnrichmentOut>(getApplyEnrichmentUrl(bookId, params), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookMatch),
   });
 };
@@ -11709,15 +11348,36 @@ export const importKoreaderHighlights = async (
   koreaderImportIn: KoreaderImportIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<HighlightImportOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<HighlightImportOut>(
     getImportKoreaderHighlightsUrl(bookId),
     {
       ...options,
       method: "POST",
-      headers: getHeaders(
-        { "Content-Type": "application/json" },
-        options?.headers,
-      ),
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
       body: JSON.stringify(koreaderImportIn),
     },
   );
@@ -11944,15 +11604,36 @@ export const setHighlightSharing = async (
   highlightSharingIn: HighlightSharingIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<HighlightOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<HighlightOut>(
     getSetHighlightSharingUrl(bookId, highlightId),
     {
       ...options,
       method: "PUT",
-      headers: getHeaders(
-        { "Content-Type": "application/json" },
-        options?.headers,
-      ),
+      headers: {
+        "Content-Type": "application/json",
+        ...getHeaders(options?.headers),
+      },
       body: JSON.stringify(highlightSharingIn),
     },
   );
@@ -12403,13 +12084,34 @@ export const addNote = async (
   noteCreate: NoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<NoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<NoteOut>(getAddNoteUrl(bookId), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(noteCreate),
   });
 };
@@ -12585,13 +12287,34 @@ export const editNote = async (
   noteCreate: NoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<NoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<NoteOut>(getEditNoteUrl(bookId, noteId), {
     ...options,
     method: "PUT",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(noteCreate),
   });
 };
@@ -12798,13 +12521,34 @@ export const setOwnership = async (
   ownershipUpdate: OwnershipUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getSetOwnershipUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(ownershipUpdate),
   });
 };
@@ -12881,418 +12625,6 @@ export const useSetOwnership = <
   TContext
 > => {
   return useMutation(getSetOwnershipMutationOptions(options), queryClient);
-};
-export const getListPendingHeadingsUrl = (bookId: number) => {
-  return `/api/books/${bookId}/pending-headings`;
-};
-
-/**
- * The headings a harvest raised on this Book and nobody has settled.
- *
- * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
- * 403 for a member. Empty for a Book no harvest raised any on, and for one
- * whose set was confirmed or discarded. `models.PendingHeading` says why a
- * harvest suggests rather than writes.
- * @summary List Pending Headings
- */
-export const listPendingHeadings = async (
-  bookId: number,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<ClassificationOut[]> => {
-  return customFetch<ClassificationOut[]>(getListPendingHeadingsUrl(bookId), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getListPendingHeadingsQueryKey = (bookId: number) => {
-  return [`/api/books/${bookId}/pending-headings`] as const;
-};
-
-export const getListPendingHeadingsQueryOptions = <
-  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listPendingHeadings>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getListPendingHeadingsQueryKey(bookId);
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof listPendingHeadings>>
-  > = ({ signal }) =>
-    listPendingHeadings(bookId, { signal, ...requestOptions });
-
-  return {
-    queryKey,
-    queryFn,
-    enabled: bookId !== null && bookId !== undefined,
-    ...queryOptions,
-  } as UseQueryOptions<
-    Awaited<ReturnType<typeof listPendingHeadings>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type ListPendingHeadingsQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listPendingHeadings>>
->;
-export type ListPendingHeadingsQueryError = Refusal | HTTPValidationError;
-
-/**
- * The headings a harvest raised on this Book and nobody has settled.
- *
- * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
- * 403 for a member. Empty for a Book no harvest raised any on, and for one
- * whose set was confirmed or discarded. `models.PendingHeading` says why a
- * harvest suggests rather than writes.
- * @summary List Pending Headings
- */
-export function useListPendingHeadings<
-  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listPendingHeadings>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listPendingHeadings>>,
-          TError,
-          Awaited<ReturnType<typeof listPendingHeadings>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The headings a harvest raised on this Book and nobody has settled.
- *
- * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
- * 403 for a member. Empty for a Book no harvest raised any on, and for one
- * whose set was confirmed or discarded. `models.PendingHeading` says why a
- * harvest suggests rather than writes.
- * @summary List Pending Headings
- */
-export function useListPendingHeadings<
-  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listPendingHeadings>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listPendingHeadings>>,
-          TError,
-          Awaited<ReturnType<typeof listPendingHeadings>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The headings a harvest raised on this Book and nobody has settled.
- *
- * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
- * 403 for a member. Empty for a Book no harvest raised any on, and for one
- * whose set was confirmed or discarded. `models.PendingHeading` says why a
- * harvest suggests rather than writes.
- * @summary List Pending Headings
- */
-export function useListPendingHeadings<
-  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listPendingHeadings>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The headings a harvest raised on this Book and nobody has settled.
- *
- * Admin only, as the harvest is: 404 for a Book the caller cannot see, then
- * 403 for a member. Empty for a Book no harvest raised any on, and for one
- * whose set was confirmed or discarded. `models.PendingHeading` says why a
- * harvest suggests rather than writes.
- * @summary List Pending Headings
- */
-export function useListPendingHeadings<
-  TData = Awaited<ReturnType<typeof listPendingHeadings>>,
-  TError = Refusal | HTTPValidationError,
->(
-  bookId: number,
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listPendingHeadings>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getListPendingHeadingsQueryOptions(bookId, options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-export const getConfirmPendingHeadingsUrl = (bookId: number) => {
-  return `/api/books/${bookId}/pending-headings/confirm`;
-};
-
-/**
- * Write the Book's whole pending set as its headings, and answer the Book.
- *
- * The whole set, as selecting a picker row confirms a whole record (ADR
- * 0006). A heading past the ceiling, or under a scheme deleted since, is
- * dropped as a catalogue's is. Confirming an empty set changes nothing.
- * @summary Confirm Pending Headings
- */
-export const confirmPendingHeadings = async (
-  bookId: number,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<BookOut> => {
-  return customFetch<BookOut>(getConfirmPendingHeadingsUrl(bookId), {
-    ...options,
-    method: "POST",
-  });
-};
-
-export const getConfirmPendingHeadingsMutationKey = () =>
-  ["confirmPendingHeadings"] as const;
-
-export const getConfirmPendingHeadingsMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof confirmPendingHeadings>>,
-    TError,
-    ConfirmPendingHeadingsMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof confirmPendingHeadings>>,
-  TError,
-  ConfirmPendingHeadingsMutationVariables,
-  TContext
-> => {
-  const mutationKey = getConfirmPendingHeadingsMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof confirmPendingHeadings>>,
-    ConfirmPendingHeadingsMutationVariables
-  > = (props) => {
-    const { bookId } = props ?? {};
-
-    return confirmPendingHeadings(bookId, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type ConfirmPendingHeadingsMutationResult = NonNullable<
-  Awaited<ReturnType<typeof confirmPendingHeadings>>
->;
-
-export type ConfirmPendingHeadingsMutationError = Refusal | HTTPValidationError;
-export type ConfirmPendingHeadingsMutationVariables = { bookId: number };
-
-/**
- * Write the Book's whole pending set as its headings, and answer the Book.
- *
- * The whole set, as selecting a picker row confirms a whole record (ADR
- * 0006). A heading past the ceiling, or under a scheme deleted since, is
- * dropped as a catalogue's is. Confirming an empty set changes nothing.
- * @summary Confirm Pending Headings
- */
-export const useConfirmPendingHeadings = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof confirmPendingHeadings>>,
-      TError,
-      ConfirmPendingHeadingsMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof confirmPendingHeadings>>,
-  TError,
-  ConfirmPendingHeadingsMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getConfirmPendingHeadingsMutationOptions(options),
-    queryClient,
-  );
-};
-export const getDiscardPendingHeadingsUrl = (bookId: number) => {
-  return `/api/books/${bookId}/pending-headings/discard`;
-};
-
-/**
- * Drop the Book's whole pending set without writing it.
- *
- * Remembered: a later harvest of the same record does not raise these
- * headings again, while one the record newly carries is raised.
- * @summary Discard Pending Headings
- */
-export const discardPendingHeadings = async (
-  bookId: number,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<void> => {
-  return customFetch<void>(getDiscardPendingHeadingsUrl(bookId), {
-    ...options,
-    method: "POST",
-  });
-};
-
-export const getDiscardPendingHeadingsMutationKey = () =>
-  ["discardPendingHeadings"] as const;
-
-export const getDiscardPendingHeadingsMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof discardPendingHeadings>>,
-    TError,
-    DiscardPendingHeadingsMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof discardPendingHeadings>>,
-  TError,
-  DiscardPendingHeadingsMutationVariables,
-  TContext
-> => {
-  const mutationKey = getDiscardPendingHeadingsMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof discardPendingHeadings>>,
-    DiscardPendingHeadingsMutationVariables
-  > = (props) => {
-    const { bookId } = props ?? {};
-
-    return discardPendingHeadings(bookId, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DiscardPendingHeadingsMutationResult = NonNullable<
-  Awaited<ReturnType<typeof discardPendingHeadings>>
->;
-
-export type DiscardPendingHeadingsMutationError = Refusal | HTTPValidationError;
-export type DiscardPendingHeadingsMutationVariables = { bookId: number };
-
-/**
- * Drop the Book's whole pending set without writing it.
- *
- * Remembered: a later harvest of the same record does not raise these
- * headings again, while one the record newly carries is raised.
- * @summary Discard Pending Headings
- */
-export const useDiscardPendingHeadings = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof discardPendingHeadings>>,
-      TError,
-      DiscardPendingHeadingsMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof discardPendingHeadings>>,
-  TError,
-  DiscardPendingHeadingsMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getDiscardPendingHeadingsMutationOptions(options),
-    queryClient,
-  );
 };
 export const getPurgeBookUrl = (bookId: number) => {
   return `/api/books/${bookId}/permanent`;
@@ -13400,14 +12732,6 @@ export const getSetPrivacyUrl = (bookId: number) => {
 };
 
 /**
- * Make a Book private or public.
- *
- * **A harvested Book cannot be made private, and the refusal is a 409 here
- * rather than the database's.** It has no adder, so private it would be seen
- * by nobody, the admin who pressed the switch included, and
- * `ck_books_harvested_is_nobodys_and_public` refuses the row: without this
- * check that refusal surfaces as a 500. Only an admin reaches a harvested Book
- * through `BookForOwner`, so the refusal says what to do instead.
  * @summary Set Privacy
  */
 export const setPrivacy = async (
@@ -13415,13 +12739,34 @@ export const setPrivacy = async (
   privacyUpdate: PrivacyUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getSetPrivacyUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(privacyUpdate),
   });
 };
@@ -13476,17 +12821,7 @@ export type SetPrivacyMutationVariables = {
   data: PrivacyUpdate;
 };
 
-/**
- * Make a Book private or public.
- *
- * **A harvested Book cannot be made private, and the refusal is a 409 here
- * rather than the database's.** It has no adder, so private it would be seen
- * by nobody, the admin who pressed the switch included, and
- * `ck_books_harvested_is_nobodys_and_public` refuses the row: without this
- * check that refusal surfaces as a 500. Only an admin reaches a harvested Book
- * through `BookForOwner`, so the refusal says what to do instead.
- * @summary Set Privacy
- */
+/** @summary Set Privacy */
 export const useSetPrivacy = <
   TError = Refusal | HTTPValidationError,
   TContext = unknown,
@@ -13714,13 +13049,34 @@ export const addProgress = async (
   progressCreate: ProgressCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<ProgressOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<ProgressOut>(getAddProgressUrl(bookId), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(progressCreate),
   });
 };
@@ -14121,13 +13477,34 @@ export const addQuote = async (
   quoteCreate: QuoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<QuoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<QuoteOut>(getAddQuoteUrl(bookId), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(quoteCreate),
   });
 };
@@ -14303,13 +13680,34 @@ export const editQuote = async (
   quoteCreate: QuoteCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<QuoteOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<QuoteOut>(getEditQuoteUrl(bookId, quoteId), {
     ...options,
     method: "PUT",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(quoteCreate),
   });
 };
@@ -14406,13 +13804,34 @@ export const setRating = async (
   bookRatingUpdate: BookRatingUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getSetRatingUrl(bookId), {
     ...options,
     method: "PATCH",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookRatingUpdate),
   });
 };
@@ -14700,13 +14119,34 @@ export const updateStatus = async (
   bookStatusUpdate: BookStatusUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getUpdateStatusUrl(bookId), {
     ...options,
     method: "PUT",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(bookStatusUpdate),
   });
 };
@@ -14820,13 +14260,34 @@ export const addBookTagByName = async (
   tagCreate: TagCreate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<BookOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<BookOut>(getAddBookTagByNameUrl(bookId), {
     ...options,
     method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(tagCreate),
   });
 };

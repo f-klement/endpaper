@@ -19,13 +19,6 @@ nothing, each for the reason at its own site, and a caller with fallback paths a
 `refuse_if_nothing_is_asked` instead. What is uniform is the limiter: it is charged by the
 constructor, so no method can be reached without it.
 
-**A cataloguer may narrow one request, and only narrow it.** The two narrowed constructors
-take a set of catalogues and keep the standing plan's order, so the leading tier and the
-fallback are the leading enabled sources of what remains, through the same `Plan` every
-other request reads. The narrowing is checked against the plan in force, which is the
-institution's policy, and a name outside it is refused rather than dropped: a dropped name
-would turn "ask only these" into "ask these, or whatever is left".
-
 **Two types, and the second one is why this is not one class with two constructors.**
 `Enquiry` holds a resolved `metadata.Access`, logins included. `GoogleVolumes` holds a
 plan and a key and no logins at all, because its single door sends none. A single class
@@ -59,7 +52,6 @@ credential properties above is that it is only that one.
 
 import dataclasses
 import logging
-from collections.abc import Callable
 from typing import Final, Self
 
 from fastapi import HTTPException, status
@@ -122,12 +114,6 @@ NOTHING_IS_SWITCHED_ON: Final[str] = (
 #: accession number and nothing else in the world resolves one, so naming any other
 #: catalogue would be useless. Two things have to hold, the section being on and a key
 #: being in force, and the sentence names both because either one missing produces this.
-#:
-#: **Safe to tell any member only because `GET /api/settings/features` tells anybody**,
-#: as `google_books_ready`, which is public deliberately. Narrowing that flag makes this
-#: refusal the disclosure, so the two move together: narrowing the flag fails
-#: `tests/test_catalogue_access.py::TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`,
-#: and that test goes with this refusal.
 GOOGLE_BOOKS_IS_NOT_ASKED: Final[str] = (
     "This Library does not ask Google Books, so a Google volume id cannot be "
     "resolved. An administrator can switch Google Books on in Settings and add an "
@@ -135,38 +121,12 @@ GOOGLE_BOOKS_IS_NOT_ASKED: Final[str] = (
 )
 
 
-#: Narrowing a request is a library mode feature.
-#:
-#: **403 rather than a silent full search**, the status the MARCXML export answers a
-#: household with: a client sending a narrowing outside library mode is out of step with
-#: the server, and asking every catalogue instead would answer a question it did not ask.
-NARROWING_NEEDS_LIBRARY_MODE: Final[str] = "Asking only some catalogues is a library mode feature."
-
-#: A narrowed lookup named a catalogue this Library does not ask for an ISBN.
-#:
-#: **A refusal, never an intersection that drops the name.** The standing list is
-#: the institution's policy, and a narrowing can only take sources away from it. Naming a
-#: switched off source, or one that cannot answer an ISBN, is a request the policy does
-#: not permit, and dropping it quietly would also answer a narrowing to that source alone
-#: with every other source asked.
-NARROWED_PAST_THE_ISBN_ROSTER: Final[str] = (
-    "Only catalogues this Library asks for an ISBN can be chosen. At least one named here "
-    "is switched off or cannot look up an ISBN."
-)
-
-#: The same refusal for a narrowed title search, with its own roster and its own words.
-NARROWED_PAST_THE_TITLE_SEARCH_ROSTER: Final[str] = (
-    "Only catalogues this Library asks in a title search can be chosen. At least one named "
-    "here is switched off or cannot answer a title search."
-)
-
-
 def _refused(detail: str) -> HTTPException:
     """One of the constants above as the refusal it earns.
 
     Takes a constant rather than building a sentence, which is what keeps the rule in
-    this module's docstring checkable: every `HTTPException` built here takes one of
-    those names as its detail.
+    this module's docstring checkable: there is one `HTTPException` construction here
+    and its argument is always a name.
     """
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
@@ -211,38 +171,6 @@ def _resolved_access(db: Session) -> metadata.Access:
     )
     _warn_about_any_source_asked_with_no_login(access)
     return access
-
-
-def _narrowed_access(
-    db: Session,
-    only: frozenset[CatalogueSource],
-    roster: Callable[[sources.Plan], tuple[CatalogueSource, ...]],
-    refusal: str,
-) -> metadata.Access:
-    """The access this request may use, narrowed to `only`, or the refusal it earns.
-
-    **Refuses before anything is charged**, so a narrowing the policy does not permit
-    spends none of a Member's allowance: the same order `lookup_isbn` keeps for a
-    malformed ISBN.
-
-    **`sources.in_force` does the narrowing**, because it is already the one function
-    that switches sources off in a plan while keeping its order. What it leaves is a plan
-    like any other, so `lookup_together`, `lookup_in_turn` and the search rosters take
-    the leading enabled sources of what remains with no second mechanism.
-
-    **`roster` is the path's own**, `lookup_chain` or `searched_harder`. Checking
-    against `asked` alone admitted a source that cannot answer this path, and the
-    narrowed plan then refused with the 409 telling an administrator to switch a
-    catalogue back on, for a library that had switched nothing off.
-    """
-    if not settings_store.library_mode(db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NARROWING_NEEDS_LIBRARY_MODE)
-    access = _resolved_access(db)
-    if not only or not only <= frozenset(roster(access.plan)):
-        raise _refused(refusal)
-    return metadata.Access(
-        plan=sources.in_force(access.plan, only), api_key=access.api_key, logins=access.logins
-    )
 
 
 def _warn_about_any_source_asked_with_no_login(access: metadata.Access) -> None:
@@ -320,32 +248,6 @@ class Enquiry:
         """
         metadata_limiter.check(member)
         return cls(_access=_resolved_access(db))
-
-    @classmethod
-    def for_a_narrowed_lookup(cls, db: Session, *, member: str, only: frozenset[CatalogueSource]) -> Self:
-        """`for_a_member_request` for one ISBN lookup that asks only `only`.
-
-        A cataloguer's judgement about one book, never a setting: nothing here is
-        stored, so the next request asks the standing plan again.
-        """
-        access = _narrowed_access(db, only, lambda plan: plan.lookup_chain, NARROWED_PAST_THE_ISBN_ROSTER)
-        metadata_limiter.check(member)
-        return cls(_access=access)
-
-    @classmethod
-    def for_a_narrowed_title_search(
-        cls, db: Session, *, member: str, only: frozenset[CatalogueSource]
-    ) -> Self:
-        """`for_a_member_request` for one title search that asks only `only`.
-
-        Checked against `searched_harder`, every search catalogue this Library asks,
-        so a slow one may be named; whether it is asked is still `harder`'s decision.
-        """
-        access = _narrowed_access(
-            db, only, lambda plan: plan.searched_harder, NARROWED_PAST_THE_TITLE_SEARCH_ROSTER
-        )
-        metadata_limiter.check(member)
-        return cls(_access=access)
 
     def __str__(self) -> str:
         return f"<enquiry of {len(self._access.plan.asked)} catalogue(s)>"

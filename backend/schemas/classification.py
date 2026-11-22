@@ -3,13 +3,8 @@ import unicodedata
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 import filing
-from enums import ClassificationScheme, FilingRuleName, HeadingKind
-from models import (
-    CLASSIFICATION_LABEL_MAX,
-    CLASSIFICATION_NUMBER_MAX,
-    CLASSIFICATION_SCHEME_CODE_MAX,
-    CLASSIFICATION_SCHEME_NAME_MAX,
-)
+from enums import ClassificationScheme, HeadingKind
+from models import CLASSIFICATION_LABEL_MAX, CLASSIFICATION_NUMBER_MAX
 from schemas.common import one_line
 
 #: The most headings one book may carry, full stop.
@@ -75,15 +70,10 @@ class ClassificationIn(BaseModel):
     Accepted from the client rather than re-fetched, because the lookup that
     produced it is the expensive part and the member may sit on the confirm
     screen for a while. Nothing here is trusted beyond its own bounds: the
-    scheme is a bounded code, and both strings are bounded and stripped.
-
-    **Whether the scheme has a row is not asked here**, because a model has no
-    session. The routes taking this from a client refuse one with a 422
-    (`routers.books._refuse_unknown_schemes`), and `classifications.add_headings`
-    drops one from a record, before `fk_classifications_scheme` would refuse it.
+    scheme is a closed enum, and both strings are bounded and stripped.
     """
 
-    scheme: str = Field(min_length=1, max_length=CLASSIFICATION_SCHEME_CODE_MAX)
+    scheme: ClassificationScheme
     number: str = Field(min_length=1, max_length=CLASSIFICATION_NUMBER_MAX)
     label: str | None = Field(default=None, max_length=CLASSIFICATION_LABEL_MAX)
     #: What the record said it was asserting, where it said. A closed enum, so
@@ -198,11 +188,11 @@ class ClassificationIn(BaseModel):
         """
         # Through the rule rather than through `ddc.notation` directly, so
         # "what is a Dewey number" is asked in one place. `filing.DEWEY` is
-        # named rather than the scheme's own rule: every rule can
+        # named rather than `filing.rule_for(self.scheme)`: every rule can
         # answer, and asking each one here would newly refuse a Library of
         # Congress call number this app cannot parse, which loses a
         # catalogue's assertion where mis-filing it only mis-files it.
-        if self.scheme == ClassificationScheme.DDC and not filing.DEWEY.recognises(self.number):
+        if self.scheme is ClassificationScheme.DDC and not filing.DEWEY.recognises(self.number):
             raise ValueError(
                 f"{self.number!r} is not a Dewey number: three digits, optionally a decimal fraction."
             )
@@ -229,9 +219,7 @@ class ClassificationIn(BaseModel):
 
 
 class ClassificationOut(BaseModel):
-    #: A scheme's code, as `GET /api/settings/classification-schemes` lists
-    #: them. A string rather than a closed union, since a library adds its own.
-    scheme: str
+    scheme: ClassificationScheme
     number: str
     #: Absent where the source carried the number alone, which is every MARC
     #: 082. A client showing a heading has to be ready for the number by itself.
@@ -250,7 +238,7 @@ class HeadingFacetOut(BaseModel):
     plus the count, so a client can render both with one component.
     """
 
-    scheme: str
+    scheme: ClassificationScheme
     number: str
     label: str | None = None
     #: What this heading asserts, absent where no record ever said. The same
@@ -301,59 +289,3 @@ class ClassificationFacets(BaseModel):
 
     headings: list[HeadingFacetOut]
     divisions: list[DivisionFacetOut]
-
-
-#: What a new scheme's code may be: lower case letters, digits, `_` and `-`,
-#: starting with a letter or a digit. Narrow because a code is what a filter
-#: link carries (`?classification=udc:004`), so it has to read back exactly.
-SCHEME_CODE_PATTERN = r"^[a-z0-9][a-z0-9_-]*$"
-
-
-class ClassificationSchemeOut(BaseModel):
-    """One scheme a heading may quote.
-
-    **`scheme` is the code a heading's own `scheme` carries**, and is named for
-    that field rather than for the column: a field named `code` reads as a one
-    time code to `TestAOneTimeCodeIsServedOnlyWhereItIsNamed`, and is one word
-    from being one.
-    """
-
-    scheme: str
-    name: str
-    filing: FilingRuleName
-    #: Whether this application's code names this scheme, which locks its row: see
-    #: `classification_schemes.BUILT_IN`. A client offers no rename or delete
-    #: for one, and its name is the client's own translation.
-    built_in: bool
-
-
-class ClassificationSchemeCreate(BaseModel):
-    """A scheme a library adds. Its code and its filing rule are fixed from here on."""
-
-    scheme: str = Field(min_length=1, max_length=CLASSIFICATION_SCHEME_CODE_MAX, pattern=SCHEME_CODE_PATTERN)
-    name: str = Field(min_length=1, max_length=CLASSIFICATION_SCHEME_NAME_MAX)
-    filing: FilingRuleName = FilingRuleName.GENERIC
-
-    @field_validator("name")
-    @classmethod
-    def tidy_name(cls, value: str) -> str:
-        """Whitespace collapsed, and a name of only spaces refused."""
-        return _scheme_name(value)
-
-
-class ClassificationSchemeRename(BaseModel):
-    name: str = Field(min_length=1, max_length=CLASSIFICATION_SCHEME_NAME_MAX)
-
-    @field_validator("name")
-    @classmethod
-    def tidy_name(cls, value: str) -> str:
-        """Whitespace collapsed, and a name of only spaces refused."""
-        return _scheme_name(value)
-
-
-def _scheme_name(value: str) -> str:
-    """One scheme name, collapsed to one line, refused where nothing is left."""
-    cleaned = one_line(value)
-    if not cleaned:
-        raise ValueError("A scheme needs a name.")
-    return cleaned

@@ -11,9 +11,6 @@ This produces a **zip** holding two things:
     endpaper.json    every row of every table, in dependency order
     covers/          the uploaded cover images, byte for byte
 
-and a third for a table too large to hold whole, `_LINES`: its rows as JSON
-Lines in an entry of its own, which the manifest names in that table's place.
-
 JSON rather than a copy of the SQLite file, for one reason that matters: a file
 copy taken while the application is running is only consistent if it goes
 through SQLite's backup API, and a file restored underneath a running process
@@ -27,37 +24,30 @@ otherwise (merging, skipping conflicts) produces a database in a state neither
 the backup nor the original describes. It is admin-only and asks.
 """
 
-import itertools
 import json
 import logging
 import zipfile
-from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import IO, Any, Final
+from typing import Any
 
 from sqlalchemy import (
-    Column,
     Date,
     DateTime,
     String,
     Table,
     delete,
-    func,
     select,
-    text,
     type_coerce,
     update,
 )
 from sqlalchemy.orm import Session
 
-import classification_schemes
 import cover_store
 import covers
 import credentials
 import filing
-import harvest
 import settings_store
 from config import ALLOWED_IMAGE_EXTENSIONS
 from database import Base
@@ -73,26 +63,20 @@ from models import (
     CatalogueCredential,
     CatalogueTarget,
     Classification,
-    ClassificationSchemeRow,
     Collection,
-    CoverImage,
     CustomField,
     CustomFieldValue,
     DegradingEnum,
     DeletedHighlight,
     DigitalReference,
-    Harvest,
     Highlight,
     KosyncDocument,
     Loan,
     MemberLogin,
     Note,
-    OaiTombstone,
     OnlineLink,
     OpdsServer,
     PasswordResetRequest,
-    Patron,
-    PendingHeading,
     Quote,
     ReadingProgress,
     ReadwiseBook,
@@ -100,8 +84,6 @@ from models import (
     Tag,
     User,
     UserBook,
-    VocabularyCopy,
-    VocabularyLabel,
     blank_as_none,
     book_tags,
     fold_collection_name,
@@ -147,16 +129,7 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # existed restores with none, which is exactly the state it was
         # written in.
         ("collections", Collection),
-        # Before books, which carry a foreign key into it, and after users,
-        # whom a run names. Absent from `_REQUIRED_TABLES`: an archive taken
-        # before harvests existed restores with none.
-        ("harvests", Harvest),
         ("books", Book),
-        # Before the headings, which carry a foreign key into it. Absent from
-        # `_REQUIRED_TABLES`, and an archive taken before it existed still
-        # restores its headings: `classification_schemes.restorable` supplies
-        # the rows they quote.
-        ("classification_schemes", ClassificationSchemeRow),
         # Straight after the books they hang off, and deliberately absent from
         # `_REQUIRED_TABLES`: an archive taken before classifications existed
         # restores with none, which is the state it was written in.
@@ -181,11 +154,6 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # Absent from `_REQUIRED_TABLES`, like every table added after
         # `FORMAT_VERSION` 1.
         ("readwise_books", ReadwiseBook),
-        # Before the loans, which carry a foreign key into it. The archive is
-        # the one place a patron's record leaves the database, and it is admin
-        # only like the patron routes. Absent from `_REQUIRED_TABLES`: an
-        # archive taken before patrons existed restores with none.
-        ("patrons", Patron),
         ("loans", Loan),
         # After the loans it replaces for a digital copy. Both parents are
         # inserted by here. Absent from `_REQUIRED_TABLES` for the reason
@@ -245,16 +213,6 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # Absent from `_REQUIRED_TABLES` for their reason: an archive taken
         # before this table existed restores with none.
         ("online_links", OnlineLink),
-        # The rows naming a book's further images. The files ride in the
-        # archive's covers beside the shelf covers (`cover_store.files` lists
-        # both), so a restore writes each back under the name its row gives.
-        # Absent from `_REQUIRED_TABLES` for the links' reason: an archive taken
-        # before this table existed restores with none.
-        ("cover_images", CoverImage),
-        # A harvest's suggestions, settled ones included, since those are what
-        # stops the next run raising them again. After both parents, `books`
-        # and `harvests`. Absent from `_REQUIRED_TABLES` for the links' reason.
-        ("pending_headings", PendingHeading),
         # The author merge decisions. Its only foreign key is `users`, which is
         # first in this tuple, so it could sit anywhere after that; it is here
         # beside the other tables that hold what members decided rather than
@@ -387,26 +345,6 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
         # and its member enters it again on their account page. Absent from
         # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1.
         ("member_logins", MemberLogin),
-        # The records a harvester was told have gone. No foreign key, by design:
-        # a tombstone outlives its Book. Carried so a restore keeps telling a
-        # harvester what it told it before, and `harvest.wholesale` adds one for
-        # every record the restore itself takes away. Absent from
-        # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1.
-        ("oai_tombstones", OaiTombstone),
-        # The local copy of each subject vocabulary, which could be fetched
-        # again and is carried anyway (owner, 2026-11-20): a restore onto a
-        # machine with no route to the DNB or id.loc.gov still answers every
-        # lookup, and the copy is the release the library catalogued against
-        # rather than whatever the source publishes on the day of the restore.
-        #
-        # **What it costs is size**: both vocabularies loaded are of the order
-        # of a million label rows, so `vocabulary_labels` is in `_LINES` and is
-        # never held whole. Rows of a load in progress ride too, and the next
-        # load of that vocabulary removes them. No foreign key either way, so
-        # the position is free. Absent from `_REQUIRED_TABLES`, like every table
-        # added after `FORMAT_VERSION` 1.
-        ("vocabulary_copies", VocabularyCopy),
-        ("vocabulary_labels", VocabularyLabel),
         ("settings", Setting),
     )
 )
@@ -427,30 +365,6 @@ _TABLES: tuple[tuple[str, Any, Table], ...] = tuple(
 _REQUIRED_TABLES: frozenset[str] = frozenset(
     {"users", "tags", "books", "user_books", "loans", "notes", "settings"}
 )
-
-#: Tables whose rows are an entry of their own, one JSON object a line, rather
-#: than a list in the manifest; the manifest holds `{"lines": <entry>}` in the
-#: table's place. Read in batches on the way out and inserted in batches on the
-#: way back, so neither direction holds the table whole.
-#:
-#: **Measured 2026-11-20 over a million synthetic `vocabulary_labels` rows**
-#: (identifiers of 48 characters, labels of 25 to 40), tracemalloc peak and
-#: `ru_maxrss` in a pod: in the manifest, `build_archive` peaked at 915.5 and
-#: 1664.5 MiB and `restore` at 1133.3 and 2468.9 MiB, each an OOMKill in a pod
-#: limited to 512Mi. The figures as lines are beside `_write_lines`.
-#:
-#: The envelope is still `FORMAT_VERSION` 1: an older build reads such an
-#: archive and restores this table empty, which for a vocabulary copy is a
-#: download away, and no archive ever carried these tables in the manifest.
-_LINES: Final[dict[str, str]] = {"vocabulary_labels": "tables/vocabulary_labels.jsonl"}
-
-#: Rows read, and rows inserted, per statement for a table in `_LINES`.
-_LINES_BATCH: Final = 5000
-
-#: The longest line a restore reads, in bytes. A label row is under 2 KB at its
-#: widest (`ck_vocabulary_labels_bounds`); a line past this is refused rather
-#: than buffered to the end of an entry that may hold no newline at all.
-_LINE_MAX: Final = 64 * 1024
 
 #: A cover named anything else is not one of ours. Guards against a crafted
 #: archive writing outside the covers directory, which is what makes a zip a
@@ -509,7 +423,6 @@ def _parse_row(
     row: dict[str, Any],
     parsers: dict[str, type[date] | type[datetime]],
     table: Table,
-    filed_under: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     parsed = dict(row)
     _drop_nuls(parsed, table)
@@ -519,7 +432,7 @@ def _parse_row(
     _blank_currency_is_null(parsed, table)
     _fold_name(parsed, table)
     _blank_tag_key(parsed, table)
-    _file_classification(parsed, table, filed_under or {})
+    _file_classification(parsed, table)
     _refuse_a_bad_credential(parsed, table)
     return parsed
 
@@ -695,14 +608,13 @@ def _blank_tag_key(parsed: dict[str, Any], table: Table) -> None:
         parsed["key"] = None
 
 
-def _file_classification(parsed: dict[str, Any], table: Table, filed_under: dict[str, Any]) -> None:
+def _file_classification(parsed: dict[str, Any], table: Table) -> None:
     """A classification's `sort_key`, recomputed from its number rather than trusted.
 
     The fourth derived column, and the one whose failure is silent rather
     than loud. `classifications.sort_key` is written by
-    `models._file_the_numbers`, an ORM flush hook, which never fires
-    here. `filed_under` is each restored scheme's rule, by code, since the
-    rule is a column of the scheme's row. Left to the archive it would restore whatever an
+    `Classification._file_the_number`, which is a `@validates` hook and so
+    never fires here. Left to the archive it would restore whatever an
     archive happened to hold, and a wrong key is not visible anywhere: the
     row is there, the number is right, and the book stands in the wrong place
     on one shelf order.
@@ -748,7 +660,7 @@ def _file_classification(parsed: dict[str, Any], table: Table, filed_under: dict
         # definition not a `str`.
         if not isinstance(number, str):
             raise RestoreError(f"A row in {table.name!r} has a number that is not text: {repr(number)[:120]}")
-        parsed["sort_key"] = filing.sort_key_under(filed_under.get(parsed.get("scheme") or ""), number)
+        parsed["sort_key"] = filing.sort_key_for(parsed.get("scheme"), number)
 
 
 def _refuse_a_bad_credential(parsed: dict[str, Any], table: Table) -> None:
@@ -810,33 +722,14 @@ def _stored_values(db: Session, table: Table) -> list[dict[str, Any]]:
     wrong, which is exactly the moment a backup is opened". A value this build's
     enum does not know may be one the next build adds.
     """
-    return [
-        {name: _serialise(value) for name, value in row._mapping.items()}
-        for row in db.execute(select(*_stored_columns(table)))
-    ]
-
-
-def _stored_columns(table: Table) -> list[Any]:
-    """A table's columns as `_stored_values` reads them, `DegradingEnum` read past."""
-    return [
+    columns = [
         type_coerce(column, String).label(column.name) if isinstance(column.type, DegradingEnum) else column
         for column in table.columns
     ]
-
-
-def _write_lines(db: Session, table: Table, archive: zipfile.ZipFile, entry: str) -> None:
-    """One table into its `_LINES` entry, `_LINES_BATCH` rows at a time.
-
-    Measured 2026-11-20 over the rows the `_LINES` comment describes, each
-    phase its own process in a pod of one CPU: `build_archive` peaked at 140.5
-    MiB `ru_maxrss` (35.7 MiB traced) and `restore` at 196.1 MiB (26.6 MiB
-    traced), under the 512Mi limit those figures were an OOMKill against.
-    """
-    rows = db.execute(select(*_stored_columns(table)).execution_options(yield_per=_LINES_BATCH))
-    with archive.open(entry, "w", force_zip64=True) as out:
-        for row in rows:
-            line = json.dumps({name: _serialise(value) for name, value in row._mapping.items()})
-            out.write(line.encode() + b"\n")
+    return [
+        {name: _serialise(value) for name, value in row._mapping.items()}
+        for row in db.execute(select(*columns))
+    ]
 
 
 def build_archive(db: Session) -> bytes:
@@ -861,7 +754,7 @@ def build_archive(db: Session) -> bytes:
     }
 
     for name, _model, table in _TABLES:
-        manifest["tables"][name] = {"lines": _LINES[name]} if name in _LINES else _stored_values(db, table)
+        manifest["tables"][name] = _stored_values(db, table)
 
     # The tag association carries no model of its own, so it is read straight
     # from the table. Forgetting it loses every book's tags while looking like
@@ -871,8 +764,6 @@ def build_archive(db: Session) -> bytes:
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr(MANIFEST_NAME, json.dumps(manifest, indent=1))
-        for name, entry in _LINES.items():
-            _write_lines(db, Base.metadata.tables[name], archive, entry)
         for cover in cover_store.files():
             archive.write(cover, f"{COVERS_PREFIX}{cover.name}")
 
@@ -886,13 +777,9 @@ class RestoreError(Exception):
 def read_manifest(data: bytes) -> dict[str, Any]:
     """Validate the archive and return its manifest.
 
-    Every check here happens **before** the database is touched. The rows
-    themselves, and each line of a `_LINES` entry, are read as `restore`
-    inserts them, after the deletes; a refusal there leaves the library whole
-    only because `restore` commits once, after every table is in. A restore
-    that failed halfway would leave a library that is neither the backup nor
-    what was there before, which is worse than either, so a commit between
-    tables would break this.
+    Every check happens **before** the database is touched. A restore that
+    fails halfway leaves a library that is neither the backup nor what was
+    there before, which is worse than either.
 
     **Every failure to read the archive is the archive's, and is a refusal.**
     The bytes are the caller's, so anything the zip reader, its three
@@ -1209,20 +1096,14 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     archive = zipfile.ZipFile(BytesIO(data))
 
     _refuse_a_colliding_pair(tables)
-    lines = _lines_entries(tables, archive)
 
-    # `wholesale` because this replaces every record a harvester reads: it
-    # stamps them all and tombstones what the archive does not publish, once,
-    # rather than following each statement. See `harvest.py`.
-    with harvest.wholesale(db):
-        # Children first. The association table holds foreign keys into books
-        # and tags, so it has to go before either of them.
-        db.execute(delete(book_tags))
-        for _name, _model, table in reversed(_TABLES):
-            db.execute(delete(table))
+    # Children first. The association table holds foreign keys into books and
+    # tags, so it has to go before either of them.
+    db.execute(delete(book_tags))
+    for _name, _model, table in reversed(_TABLES):
+        db.execute(delete(table))
 
-        restored = _insert_rows(db, tables, lines, archive)
-        _raise_the_id_counters(db)
+    restored = _insert_rows(db, tables)
 
     # After the new settings rows, not before: the archive carries its own
     # value for this key and would otherwise restore an older epoch, which is
@@ -1268,127 +1149,24 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
     return restored
 
 
-def _insert_rows(
-    db: Session, tables: dict[str, Any], lines: dict[str, str], archive: zipfile.ZipFile
-) -> dict[str, int]:
+def _insert_rows(db: Session, tables: dict[str, Any]) -> dict[str, int]:
     """Every table's rows from the archive, inserted into the emptied database,
-    with a count per table. A table in `lines` is read from its entry."""
+    with a count per table."""
     restored: dict[str, int] = {}
-    filed_under: dict[str, Any] = {}
     for name, _model, table in _TABLES:
-        if name in lines:
-            restored[name] = _insert_lines(db, table, archive, lines[name])
-            continue
         rows = tables.get(name) or []
         if name == "catalogue_credentials":
             rows = _without_household_logins(rows)
-        if name == "classification_schemes":
-            rows = classification_schemes.restorable(rows, tables.get("classifications") or [])
-            filed_under = {row["code"]: row.get("filing") for row in rows}
         if rows:
             parsers = _temporal_columns(table)
-            db.execute(table.insert(), [_parse_row(row, parsers, table, filed_under) for row in rows])
+            db.execute(table.insert(), [_parse_row(row, parsers, table) for row in rows])
         restored[name] = len(rows)
 
-    restored["book_tags"] = _insert_associations(db, tables)
-    return restored
-
-
-def _insert_associations(db: Session, tables: dict[str, Any]) -> int:
-    """The archive's book to tag links, inserted after every table they point
-    into, with their count. An archive carrying none executes no insert."""
     associations = tables.get("book_tags") or []
     if associations:
         db.execute(book_tags.insert(), associations)
-    return len(associations)
-
-
-def _lines_entries(tables: dict[str, Any], archive: zipfile.ZipFile) -> dict[str, str]:
-    """Each `_LINES` table the manifest names, to its entry; refused, before
-    anything is deleted, where the manifest names another entry or one the
-    archive does not hold. A table the manifest omits restores empty."""
-    found: dict[str, str] = {}
-    for name, entry in _LINES.items():
-        if name not in tables:
-            continue
-        if tables[name] != {"lines": entry} or entry not in archive.namelist():
-            raise RestoreError(f"The backup does not hold {name!r} where its manifest says.")
-        found[name] = entry
-    return found
-
-
-def _insert_lines(db: Session, table: Table, archive: zipfile.ZipFile, entry: str) -> int:
-    """A `_LINES` table's rows from its entry, `_LINES_BATCH` to a statement;
-    the count inserted. A refusal part way is the whole restore's, since
-    nothing is committed before every table is in."""
-    parsers = _temporal_columns(table)
-    count = 0
-    for batch in itertools.batched(_read_lines(archive, entry), _LINES_BATCH, strict=False):
-        db.execute(table.insert(), [_parse_row(row, parsers, table) for row in batch])
-        count += len(batch)
-    return count
-
-
-def _read_lines(archive: zipfile.ZipFile, entry: str) -> Iterator[dict[str, Any]]:
-    """Each line of `entry` as a row, refused where one is not a JSON object or
-    runs past `_LINE_MAX`."""
-    with archive.open(entry) as lines:
-        while line := _one_line(lines, entry):
-            try:
-                row: object = json.loads(line)
-            except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
-                raise RestoreError(f"A line of {entry!r} in the backup could not be read.") from error
-            if not isinstance(row, dict):
-                raise RestoreError(f"A line of {entry!r} in the backup is not a row.")
-            yield row
-
-
-def _one_line(lines: IO[bytes], entry: str) -> bytes:
-    """The next line of an entry, or empty at its end."""
-    try:
-        line = lines.readline(_LINE_MAX + 1)
-    except Exception as error:
-        # Blind, for the reason at the second arm of `_manifest_bytes`: an
-        # entry's decompressor raises types that share no base but this one.
-        raise RestoreError(f"{entry!r} in the backup could not be read.") from error
-    if len(line) > _LINE_MAX:
-        raise RestoreError(f"A line of {entry!r} in the backup runs past {_LINE_MAX} bytes.")
-    return line
-
-
-#: Raise one table's id sequence to at least `:highest`, never lowering it.
-_RAISE_A_SEQUENCE = (
-    "SELECT setval(pg_get_serial_sequence(:table, :column), GREATEST(:highest, "
-    "COALESCE(pg_sequence_last_value(pg_get_serial_sequence(:table, :column)::regclass), 0)))"
-)
-
-
-def _raise_the_id_counters(db: Session) -> None:
-    """Every restored table's id counter above its highest restored row.
-
-    The rows arrive with their ids and no counter, and Postgres moves a sequence
-    only when it issues the id, so on a fresh database the next insert into any
-    table would take a restored row's id and fail. SQLite needs nothing: it issues
-    above the highest row, and an `AUTOINCREMENT` table's counter follows an
-    explicit id.
-    """
-    if db.get_bind().dialect.name != "postgresql":
-        return
-    for _name, _model, table in _TABLES:
-        _raise_one_id_counter(db, table)
-
-
-def _raise_one_id_counter(db: Session, table: Table) -> None:
-    """`table`'s id counter above its highest row, where it has a counter."""
-    column = table.autoincrement_column
-    if column is not None:
-        _raise_a_counter_to(db, table, column, db.execute(select(func.max(column))).scalar())
-
-
-def _raise_a_counter_to(db: Session, table: Table, column: Column[Any], highest: int | None) -> None:
-    """Raise it past `highest`; an empty table, with None, keeps its counter."""
-    if highest is not None:
-        db.execute(text(_RAISE_A_SEQUENCE), {"table": table.name, "column": column.name, "highest": highest})
+    restored["book_tags"] = len(associations)
+    return restored
 
 
 def _restore_covers(archive: zipfile.ZipFile) -> None:

@@ -47,18 +47,6 @@ class TestPerUser:
         make_book(admin["headers"], title="A")
         assert [row["username"] for row in stats()["per_user"]] == ["admin"]
 
-    def test_a_book_nobody_added_is_in_the_total_and_in_no_members_row(self, admin, make_book, db, stats):
-        """A harvested Book has no adder: it is the total minus the rows, as an
-        unfiled Book is for the collections."""
-        make_book(admin["headers"], title="A")
-        ownerless = make_book(admin["headers"], title="B")
-        db.execute(update(Book).where(Book.id == ownerless["id"]).values(added_by_user_id=None))
-        db.commit()
-
-        body = stats()
-        assert body["total"] == 2
-        assert body["per_user"] == [{"username": "admin", "count": 1}]
-
 
 class TestByTag:
     def test_counts_books_per_tag(self, client, admin, make_book, db, stats):

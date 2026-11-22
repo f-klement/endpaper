@@ -13,7 +13,6 @@ export { default as LoanRow } from "./LoanRow";
 export { default as LoanRowSkeleton } from "./LoanRowSkeleton";
 export { default as LocationField } from "./LocationField";
 export { Page, PageHeader, PageCount } from "./Page";
-export { default as PatronForm } from "./PatronForm";
 export {
   default as SearchBar,
   DEBOUNCE_MS,

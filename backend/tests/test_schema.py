@@ -15,7 +15,6 @@ import sys
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -23,17 +22,14 @@ from typing import Any, Final
 import pytest
 from alembic.script import ScriptDirectory
 from pydantic import BaseModel
-from sqlalchemy import CheckConstraint, DateTime, String, create_engine, inspect, text
+from sqlalchemy import CheckConstraint, String, create_engine, inspect, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import IntegrityError
 
-import classification_schemes
 import credentials
 import filing
-import marc_fields
 import models  # registers the tables on Base.metadata
 import schema
-import settings_store
 import targets
 from database import Base, engine
 from dialect import AddedRule, SwappedRule
@@ -41,7 +37,6 @@ from enums import (
     AuthorityScheme,
     BookFormat,
     BookIdentifierScheme,
-    CatalogueSource,
     ClassificationScheme,
 )
 from migrations.versions import (
@@ -57,19 +52,11 @@ from migrations.versions import (
     c7b0a3e5d281_what_a_store_calls_a_book as what_a_store_calls_a_book,
 )
 from migrations.versions import (
-    c2015421927e_an_lcsh_heading_drops_its_closing_full_stop as drops_its_closing_full_stop,
-)
-from migrations.versions import (
     f1c30ab27d84_store_the_shelf_key_beside_the_number as revision,
 )
 from migrations.versions import (
     f4a1c62d0b97_bind_every_text_ceiling_on_bytes_too as bind_every_text_ceiling,
 )
-from migrations.versions import (
-    f73ebc9f0436_a_published_catalogue_keeps_its_sru_server as keeps_its_sru_server,
-)
-from routers.oai import OAI_PREFIX
-from routers.sru import SRU_PREFIX
 from schemas.opds import OpdsServerIn
 from tests import sqlite_only
 from tests.corpus import BACKEND, application_modules
@@ -80,11 +67,6 @@ from tests.test_filing import CORPUS
 TREE_GUARDS = {
     "TestTheBoundsThisRevisionPutOnBytes": ("application_modules",),
 }
-
-
-def _built_in_key(scheme: str, number: str) -> str:
-    """The key a built in scheme's row stores, under the rule its seed row names."""
-    return filing.sort_key_under(classification_schemes.BUILT_IN[ClassificationScheme(scheme)].filing, number)
 
 
 def drop_everything() -> None:
@@ -1060,7 +1042,7 @@ class TestWideningTheClassificationNumber:
         with engine.connect() as connection:
             # `sort_key` by hand, because this is raw SQL rather than the ORM:
             # `f1c30ab27d84` made the column NOT NULL and
-            # `models._file_the_numbers` is what fills it everywhere else.
+            # `Classification._file_the_number` is what fills it everywhere else.
             connection.execute(
                 text(
                     "INSERT INTO classifications "
@@ -1069,7 +1051,7 @@ class TestWideningTheClassificationNumber:
                 ),
                 {
                     "number": self.HEADING,
-                    "sort_key": _built_in_key("lcsh", self.HEADING),
+                    "sort_key": filing.sort_key_for("lcsh", self.HEADING),
                 },
             )
             connection.commit()
@@ -1109,7 +1091,7 @@ class TestWideningTheClassificationNumber:
         with engine.connect() as connection:
             # `sort_key` by hand, because this is raw SQL rather than the ORM:
             # `f1c30ab27d84` made the column NOT NULL and
-            # `models._file_the_numbers` is what fills it everywhere else.
+            # `Classification._file_the_number` is what fills it everywhere else.
             connection.execute(
                 text(
                     "INSERT INTO classifications "
@@ -1118,7 +1100,7 @@ class TestWideningTheClassificationNumber:
                 ),
                 {
                     "number": self.HEADING,
-                    "sort_key": _built_in_key("lcsh", self.HEADING),
+                    "sort_key": filing.sort_key_for("lcsh", self.HEADING),
                 },
             )
             connection.commit()
@@ -2859,522 +2841,6 @@ class TestTheSeededCatalogueTargetsMatchTheCode:
             connection.commit()
 
 
-class TestEachCatalogueCarriesItsOwnBound:
-    """Revision `e59cee46d754`: the seeded bounds, and the rule a restored row meets.
-
-    The class is in the pipeline's Postgres selection, because it is the one
-    test that upgrades this revision over existing rows on that engine."""
-
-    PREVIOUS = "8a7989a3fab0"
-    REVISION = "e59cee46d754"
-
-    @staticmethod
-    def _bound(source: str) -> object:
-        with engine.connect() as connection:
-            return connection.execute(
-                text("SELECT timeout_seconds FROM catalogue_targets WHERE source = :source"),
-                {"source": source},
-            ).scalar()
-
-    @pytest.mark.parametrize("seconds", [0.0, -1.0, 10.5])
-    def test_a_restore_cannot_write_a_bound_the_dataclass_would_refuse(self, seconds: float) -> None:
-        at_head()
-        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
-            connection.execute(
-                text("UPDATE catalogue_targets SET timeout_seconds = :seconds WHERE source = 'oenb'"),
-                {"seconds": seconds},
-            )
-
-        assert "ck_catalogue_targets_timeout" in str(refusal.value)
-
-    @pytest.mark.parametrize("seconds", [10.0, None])
-    def test_the_ceiling_and_no_bound_are_written(self, seconds: float | None) -> None:
-        """The control for the arm above, so a rule refusing every value fails here."""
-        at_head()
-        with engine.connect() as connection:
-            connection.execute(
-                text("UPDATE catalogue_targets SET timeout_seconds = :seconds WHERE source = 'oenb'"),
-                {"seconds": seconds},
-            )
-            connection.commit()
-
-        assert self._bound("oenb") == seconds
-
-    def test_the_upgrade_clears_a_bound_out_of_range_rather_than_failing_on_it(self) -> None:
-        """A hand edited archive restored before this revision does not stop the upgrade.
-
-        The DNB because its seed is NULL, so what it ends with is the clear's
-        work and not a seed written over it. Without the clear, adding the rule
-        refuses the row on both engines and the boot fails.
-        """
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            connection.execute(
-                text("UPDATE catalogue_targets SET timeout_seconds = 30.0 WHERE source = 'dnb'")
-            )
-            connection.commit()
-
-        schema.upgrade_to(self.REVISION)
-
-        assert self._bound("dnb") is None
-
-    def test_the_upgrade_writes_the_seed_over_whatever_a_row_held(self) -> None:
-        """By source alone, so a restored row and the constant agree before the first boot."""
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            connection.execute(
-                text("UPDATE catalogue_targets SET timeout_seconds = 9.0 WHERE source = 'loc'")
-            )
-            connection.commit()
-
-        schema.upgrade_to(self.REVISION)
-
-        seeded = targets.SEEDED[CatalogueSource.LOC].timeout_seconds
-        assert seeded != 9.0
-        assert self._bound("loc") == seeded
-
-    def test_the_downgrade_clears_every_bound_and_drops_the_rule(self) -> None:
-        from alembic import command
-
-        at_revision(self.REVISION)
-        command.downgrade(schema._alembic_config(), self.PREVIOUS)
-        with engine.connect() as connection:
-            bounds = connection.execute(text("SELECT timeout_seconds FROM catalogue_targets")).scalars().all()
-            connection.execute(
-                text("UPDATE catalogue_targets SET timeout_seconds = 30.0 WHERE source = 'oenb'")
-            )
-            connection.commit()
-
-        assert set(bounds) == {None}
-        assert self._bound("oenb") == 30.0
-
-
-class TestAPublishedCatalogueKeepsItsSruServer:
-    """Revision `f73ebc9f0436`: a deployment publishing its catalogue before the
-    SRU switch existed keeps answering on `/sru`; any other stays at the default.
-
-    The class is in the pipeline's Postgres selection, because it is the one
-    test that upgrades this revision over existing rows on that engine."""
-
-    PREVIOUS = "e59cee46d754"
-    REVISION = "f73ebc9f0436"
-
-    @staticmethod
-    def _write(rows: dict[str, str]) -> None:
-        with engine.connect() as connection:
-            for key, value in rows.items():
-                connection.execute(
-                    text("INSERT INTO settings (key, value) VALUES (:key, :value)"),
-                    {"key": key, "value": value},
-                )
-            connection.commit()
-
-    @staticmethod
-    def _switch() -> object:
-        with engine.connect() as connection:
-            return connection.execute(
-                text("SELECT value FROM settings WHERE key = 'sru_server_enabled'")
-            ).scalar()
-
-    def _upgrade_over(self, rows: dict[str, str]) -> None:
-        at_revision(self.PREVIOUS)
-        self._write(rows)
-        schema.upgrade_to(self.REVISION)
-
-    @pytest.mark.parametrize("truthy", ["true", "1", " Yes\n", "ON"])
-    def test_a_published_deployment_upgrading_still_answers_on_sru(self, client, truthy: str) -> None:
-        """Every spelling `settings_store` reads as true, so a row stored as `1`
-        reads published here as it does in the app."""
-        self._upgrade_over({"library_mode": truthy, "public_catalogue_enabled": truthy})
-
-        assert client.get(SRU_PREFIX).status_code == 200
-
-    @pytest.mark.parametrize(
-        "rows",
-        [
-            {},
-            {"library_mode": "true", "public_catalogue_enabled": "false"},
-            {"library_mode": "false", "public_catalogue_enabled": "true"},
-            {"public_catalogue_enabled": "true"},
-            {"library_mode": "true", "public_catalogue_enabled": "maybe"},
-        ],
-        ids=["nothing", "unpublished", "library-mode-off", "library-mode-default", "not-a-truthy-value"],
-    )
-    def test_an_unpublished_deployment_upgrading_gets_no_switch(self, rows: dict[str, str]) -> None:
-        self._upgrade_over(rows)
-
-        assert self._switch() is None
-
-    def test_a_fresh_install_that_publishes_serves_no_sru(self, client) -> None:
-        at_head()
-        self._write({"library_mode": "true", "public_catalogue_enabled": "true"})
-
-        assert client.get(SRU_PREFIX).status_code == 404
-
-    def test_a_row_an_admin_already_wrote_is_untouched(self, client) -> None:
-        self._upgrade_over(
-            {"library_mode": "true", "public_catalogue_enabled": "true", "sru_server_enabled": "false"}
-        )
-
-        assert self._switch() == "false"
-        assert client.get(SRU_PREFIX).status_code == 404
-
-    def test_the_downgrade_removes_the_written_row_and_keeps_an_admins_off(self) -> None:
-        from alembic import command
-
-        self._upgrade_over({"library_mode": "true", "public_catalogue_enabled": "true"})
-        command.downgrade(schema._alembic_config(), self.PREVIOUS)
-        removed = self._switch()
-        self._write({"sru_server_enabled": "false"})
-        schema.upgrade_to(self.REVISION)
-        command.downgrade(schema._alembic_config(), self.PREVIOUS)
-
-        assert removed is None
-        assert self._switch() == "false"
-
-    def test_the_revision_reads_true_as_the_settings_store_does_at_head(self) -> None:
-        assert keeps_its_sru_server._TRUE_VALUES == settings_store._TRUE_VALUES
-
-
-class TestAHarvestedRecordHasADatestamp:
-    """Revision `205abd150aeb`: every existing Book gets the one datestamp of the
-    upgrade, never its `added_at`, and the OAI-PMH switch is written by nobody, so a
-    published deployment upgrading serves no OAI-PMH until an admin says so.
-
-    In the pipeline's Postgres selection: the one test that upgrades this
-    revision over existing rows on that engine."""
-
-    PREVIOUS = "f73ebc9f0436"
-    REVISION = "205abd150aeb"
-
-    def test_no_existing_book_is_stamped_with_when_it_was_added(self) -> None:
-        """`added_at` is withheld from the public catalogue, and a header would
-        publish it."""
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            for title, added in (("Solaris", "2003-04-05 06:07:08"), ("Ubik", "1999-09-09 09:09:09")):
-                connection.execute(
-                    text("INSERT INTO books (title, added_at) VALUES (:title, :added)"),
-                    {"title": title, "added": added},
-                )
-            connection.commit()
-        schema.upgrade_to(self.REVISION)
-        with engine.connect() as connection:
-            stamped = {
-                str(value) for value in connection.execute(text("SELECT oai_datestamp FROM books")).scalars()
-            }
-
-        assert len(stamped) == 1
-        assert not any(value.startswith(("2003-04-05", "1999-09-09")) for value in stamped)
-
-    def test_a_published_deployment_upgrading_serves_no_oai(self, client) -> None:
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            for key in ("library_mode", "public_catalogue_enabled"):
-                connection.execute(
-                    text("INSERT INTO settings (key, value) VALUES (:key, 'true')"), {"key": key}
-                )
-            connection.commit()
-        schema.upgrade_to(self.REVISION)
-
-        assert client.get(f"{OAI_PREFIX}?verb=Identify").status_code == 404
-
-    def test_the_downgrade_removes_the_column_and_the_table(self) -> None:
-        from alembic import command
-
-        at_revision(self.PREVIOUS)
-        schema.upgrade_to(self.REVISION)
-        command.downgrade(schema._alembic_config(), self.PREVIOUS)
-        inspector = inspect(engine)
-
-        assert "oai_datestamp" not in {column["name"] for column in inspector.get_columns("books")}
-        assert "oai_tombstones" not in inspector.get_table_names()
-
-
-class TestClassificationSchemesBecomeRows:
-    """Revision 8cfb39d1d900, which adds `classification_schemes` and points
-    `classifications.scheme` at it."""
-
-    PREVIOUS = "205abd150aeb"
-    REVISION = "8cfb39d1d900"
-
-    def test_the_seeded_rows_are_the_built_in_table(self) -> None:
-        """The revision's frozen copy against `classification_schemes.BUILT_IN`."""
-        at_revision(self.PREVIOUS)
-        schema.upgrade_to(self.REVISION)
-        with engine.connect() as connection:
-            seeded = set(connection.execute(text("SELECT code, name, filing FROM classification_schemes")))
-
-        assert seeded == {
-            (row["code"], row["name"], row["filing"]) for row in classification_schemes.seed_rows()
-        }
-
-    def test_a_code_already_stored_gets_a_row_of_its_own(self) -> None:
-        """Without it the foreign key would refuse the upgrade over a heading
-        `backup.restore` let in."""
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            connection.execute(text("INSERT INTO books (title) VALUES ('Docker')"))
-            connection.execute(
-                text(
-                    "INSERT INTO classifications (book_id, scheme, number, sort_key) "
-                    "VALUES (1, 'udc', '004', '004')"
-                )
-            )
-            connection.commit()
-        schema.upgrade_to(self.REVISION)
-        with engine.connect() as connection:
-            row = connection.execute(
-                text("SELECT name, filing FROM classification_schemes WHERE code = 'udc'")
-            ).one()
-
-        assert tuple(row) == ("udc", "generic")
-
-
-class TestAPatronIsAThirdKindOfBorrower:
-    """Revision f009f139047c, which adds `patrons` and rewrites `ck_loans_one_borrower`."""
-
-    PREVIOUS = "c2015421927e"
-    REVISION = "f009f139047c"
-
-    _COLUMNS = (
-        "id, book_id, loaned_to_user_id, loaned_to_name, loaned_by_user_id, "
-        "loaned_at, returned_at, due_at, notified_at"
-    )
-
-    def _with_two_loans(self) -> None:
-        """A returned loan to a member and an open one to a typed name, every date set."""
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim', 'x', TRUE)")
-            )
-            connection.execute(text("INSERT INTO books (title) VALUES ('Dune'), ('Emma')"))
-            connection.execute(
-                text(
-                    "INSERT INTO loans (book_id, loaned_to_user_id, loaned_by_user_id, loaned_at, "
-                    "returned_at, due_at, notified_at) VALUES (1, 1, 1, '2026-01-02 03:04:05', "
-                    "'2026-02-03 04:05:06', '2026-01-30 00:00:00', '2026-01-31 08:00:00')"
-                )
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO loans (book_id, loaned_to_name, loaned_by_user_id, loaned_at, due_at) "
-                    "VALUES (2, 'the neighbour', 1, '2026-03-04 05:06:07', '2026-04-01 00:00:00')"
-                )
-            )
-            connection.commit()
-
-    def _loans(self) -> list[tuple]:
-        with engine.connect() as connection:
-            return [
-                tuple(row)
-                for row in connection.execute(text(f"SELECT {self._COLUMNS} FROM loans ORDER BY id"))
-            ]
-
-    def test_existing_loans_survive_unchanged(self) -> None:
-        self._with_two_loans()
-        before = self._loans()
-
-        schema.upgrade_to(self.REVISION)
-
-        assert self._loans() == before
-        with engine.connect() as connection:
-            added = connection.execute(
-                text("SELECT loaned_to_patron_id, borrower_anonymised_at FROM loans")
-            ).all()
-        assert [tuple(row) for row in added] == [(None, None), (None, None)]
-
-    def test_the_downgrade_drops_the_loans_it_cannot_represent(self) -> None:
-        from alembic import command
-
-        self._with_two_loans()
-        schema.upgrade_to(self.REVISION)
-        with engine.connect() as connection:
-            connection.execute(text("INSERT INTO patrons (card_number, name) VALUES ('C1', 'Pat')"))
-            connection.execute(text("UPDATE loans SET returned_at = '2026-03-05 00:00:00' WHERE id = 2"))
-            connection.execute(
-                text(
-                    "INSERT INTO loans (book_id, loaned_to_patron_id, loaned_by_user_id, loaned_at) "
-                    "VALUES (2, 1, 1, '2026-04-04 00:00:00')"
-                )
-            )
-            connection.commit()
-
-        command.downgrade(schema._alembic_config(), self.PREVIOUS)
-
-        with engine.connect() as connection:
-            remaining = connection.execute(text("SELECT id FROM loans ORDER BY id")).scalars().all()
-        assert remaining == [1, 2]
-
-
-class TestAHarvestedBookIsNobodysAndPublic:
-    """Revision 4121a6f9c8d7, which adds `harvests` and `books.harvest_id` under
-    `ck_books_harvested_is_nobodys_and_public`.
-
-    Engine neutral, so the gate runs it under `backend-pg` as well: the CHECK
-    is one spelling, and these arms are where it is seen holding on each engine.
-    """
-
-    PREVIOUS = "f009f139047c"
-    REVISION = "4121a6f9c8d7"
-
-    _COLUMNS = "id, title, added_by_user_id, is_private"
-
-    def _with_three_books(self) -> None:
-        """A member's private Book, a member's public one and an ownerless one."""
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            connection.execute(
-                text("INSERT INTO users (username, password_hash, is_admin) VALUES ('kim', 'x', TRUE)")
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO books (title, added_by_user_id, is_private) VALUES "
-                    "('Dune', 1, TRUE), ('Emma', 1, FALSE), ('Kim', NULL, FALSE)"
-                )
-            )
-            connection.commit()
-
-    def _books(self) -> list[tuple]:
-        with engine.connect() as connection:
-            return [
-                tuple(row)
-                for row in connection.execute(text(f"SELECT {self._COLUMNS} FROM books ORDER BY id"))
-            ]
-
-    def _a_harvest(self) -> None:
-        with engine.connect() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO harvests (base_url, metadata_prefix) "
-                    "VALUES ('http://10.0.0.10/oai', 'marc21')"
-                )
-            )
-            connection.commit()
-
-    def _insert_harvested(self, owner: str, private: str) -> None:
-        with engine.connect() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO books (title, added_by_user_id, is_private, harvest_id) "
-                    f"VALUES ('Harvested', {owner}, {private}, 1)"
-                )
-            )
-            connection.commit()
-
-    def test_existing_books_survive_unchanged(self) -> None:
-        self._with_three_books()
-        before = self._books()
-
-        schema.upgrade_to(self.REVISION)
-
-        assert self._books() == before
-        with engine.connect() as connection:
-            added = connection.execute(text("SELECT harvest_id FROM books")).scalars().all()
-        assert added == [None, None, None]
-
-    def test_an_ownerless_public_book_may_name_its_harvest(self) -> None:
-        """The anti vacuity arm: the refusals below are the CHECK, not a
-        harvested row being refused whatever it holds."""
-        self._with_three_books()
-        schema.upgrade_to(self.REVISION)
-        self._a_harvest()
-
-        self._insert_harvested("NULL", "FALSE")
-
-        with engine.connect() as connection:
-            harvested = connection.execute(text("SELECT harvest_id FROM books WHERE id = 4")).scalar_one()
-        assert harvested == 1
-
-    @pytest.mark.parametrize(
-        ("owner", "private"),
-        [("NULL", "TRUE"), ("1", "FALSE"), ("1", "TRUE")],
-        ids=["private", "owned", "owned-and-private"],
-    )
-    def test_the_check_refuses_a_harvested_book_with_an_owner_or_privacy(self, owner, private) -> None:
-        self._with_three_books()
-        schema.upgrade_to(self.REVISION)
-        self._a_harvest()
-
-        with pytest.raises(IntegrityError, match=r"ck_books_harvested_is_nobodys_and_public"):
-            self._insert_harvested(owner, private)
-
-    def test_the_downgrade_keeps_a_harvested_book_as_an_ownerless_public_one(self) -> None:
-        from alembic import command
-
-        self._with_three_books()
-        schema.upgrade_to(self.REVISION)
-        self._a_harvest()
-        self._insert_harvested("NULL", "FALSE")
-
-        command.downgrade(schema._alembic_config(), self.PREVIOUS)
-
-        assert self._books()[-1] == (4, "Harvested", None, False)
-        tables = inspect(engine).get_table_names()
-        assert "harvests" not in tables
-        assert "harvest_id" not in {column["name"] for column in inspect(engine).get_columns("books")}
-
-
-class TestAHarvestedBookKeepsItsRecordIdentifier:
-    """Revision 6dac941f868b, which adds `books.harvested_identifier`.
-
-    Engine neutral, so the gate runs it under `backend-pg` as well.
-    """
-
-    PREVIOUS = "4121a6f9c8d7"
-    REVISION = "6dac941f868b"
-
-    def _with_a_harvested_book(self) -> None:
-        at_revision(self.PREVIOUS)
-        with engine.connect() as connection:
-            connection.execute(
-                text(
-                    "INSERT INTO harvests (base_url, metadata_prefix) "
-                    "VALUES ('http://10.0.0.10/oai', 'marc21')"
-                )
-            )
-            connection.execute(
-                text("INSERT INTO books (title, is_private, harvest_id) VALUES ('Kim', FALSE, 1)")
-            )
-            connection.commit()
-
-    def _rows(self) -> list[tuple]:
-        with engine.connect() as connection:
-            return [tuple(row) for row in connection.execute(text("SELECT id, title, harvest_id FROM books"))]
-
-    def test_an_existing_book_survives_with_no_identifier(self) -> None:
-        self._with_a_harvested_book()
-        before = self._rows()
-
-        schema.upgrade_to(self.REVISION)
-
-        assert self._rows() == before
-        with engine.connect() as connection:
-            kept = connection.execute(text("SELECT harvested_identifier FROM books")).scalars().all()
-        assert kept == [None]
-        assert "ix_books_harvested_identifier" in {
-            index["name"] for index in inspect(engine).get_indexes("books")
-        }
-
-    def test_the_downgrade_drops_the_identifier_and_keeps_the_book(self) -> None:
-        from alembic import command
-
-        self._with_a_harvested_book()
-        schema.upgrade_to(self.REVISION)
-        with engine.connect() as connection:
-            connection.execute(text("UPDATE books SET harvested_identifier = 'oai:x:1'"))
-            connection.commit()
-        before = self._rows()
-
-        command.downgrade(schema._alembic_config(), self.PREVIOUS)
-
-        assert self._rows() == before
-        assert "harvested_identifier" not in {
-            column["name"] for column in inspect(engine).get_columns("books")
-        }
-
-
 class TestTheStoredShelfKey:
     """Revision f1c30ab27d84, which adds `classifications.sort_key` and fills it.
 
@@ -3442,7 +2908,7 @@ class TestTheStoredShelfKey:
         schema.upgrade_to_head()
 
         assert self.stored() == [
-            (scheme, number, _built_in_key(scheme, number)) for scheme, number in self.FILED
+            (scheme, number, filing.sort_key_for(scheme, number)) for scheme, number in self.FILED
         ]
 
     def test_the_column_refuses_a_row_with_no_key(self):
@@ -3503,9 +2969,9 @@ class TestTheStoredShelfKey:
         would notice if that stopped being right.
         """
         mismatches = [
-            (number, revision._sort_key(scheme, number), _built_in_key(scheme, number))
+            (number, revision._sort_key(scheme, number), filing.sort_key_for(scheme, number))
             for number in CORPUS
-            if revision._sort_key(scheme, number) != _built_in_key(scheme, number)
+            if revision._sort_key(scheme, number) != filing.sort_key_for(scheme, number)
         ]
 
         assert mismatches == []
@@ -3525,136 +2991,7 @@ class TestTheStoredShelfKey:
         ]
 
         mismatches = [
-            value for value in values if revision._sort_key("lcc", value) != _built_in_key("lcc", value)
-        ]
-
-        assert mismatches == []
-
-
-class TestAnLcshHeadingDropsItsClosingFullStop:
-    """Revision c2015421927e, which rewrites every stored LCSH number into
-    `Subfields.heading_label`'s form and merges the twins that makes."""
-
-    PREVIOUS = "ae3dd7d65835"
-    REVISION = "c2015421927e"
-    STAMPED = datetime(2001, 2, 3, 4, 5, 6)
-
-    @staticmethod
-    def _store(*rows: tuple[int, str, str, str | None, str | None]) -> None:
-        """Two books stamped `STAMPED`, then each `(book_id, scheme, number,
-        label, kind)` in order."""
-        at_revision(TestAnLcshHeadingDropsItsClosingFullStop.PREVIOUS)
-        with engine.connect() as connection:
-            for title in ("Docker", "Stoner"):
-                connection.execute(
-                    text(
-                        "INSERT INTO books (title, is_private, added_at, ownership, oai_datestamp) "
-                        "VALUES (:title, FALSE, CURRENT_TIMESTAMP, 'owned', :stamped)"
-                    ).bindparams(stamped=TestAnLcshHeadingDropsItsClosingFullStop.STAMPED),
-                    {"title": title},
-                )
-            for book_id, scheme, number, label, kind in rows:
-                connection.execute(
-                    text(
-                        "INSERT INTO classifications (book_id, scheme, number, label, kind, sort_key) "
-                        "VALUES (:book_id, :scheme, :number, :label, :kind, :number)"
-                    ),
-                    {"book_id": book_id, "scheme": scheme, "number": number, "label": label, "kind": kind},
-                )
-            connection.commit()
-        schema.upgrade_to(TestAnLcshHeadingDropsItsClosingFullStop.REVISION)
-
-    @staticmethod
-    def _stored() -> list[tuple[Any, ...]]:
-        with engine.connect() as connection:
-            return [
-                tuple(row)
-                for row in connection.execute(
-                    text(
-                        "SELECT id, book_id, scheme, number, label, kind, sort_key "
-                        "FROM classifications ORDER BY id"
-                    )
-                )
-            ]
-
-    @staticmethod
-    def _stamps() -> list[datetime]:
-        with engine.connect() as connection:
-            return list(
-                connection.execute(
-                    text("SELECT oai_datestamp FROM books ORDER BY id").columns(oai_datestamp=DateTime)
-                ).scalars()
-            )
-
-    @pytest.mark.parametrize(
-        "first",
-        [
-            pytest.param([(1, "lcsh", "Toxicology.", None, None)], id="rewritten"),
-            pytest.param(
-                [(1, "lcsh", "Toxicology", None, None), (1, "lcsh", "Toxicology.", None, None)], id="merged"
-            ),
-        ],
-    )
-    def test_a_book_whose_headings_changed_is_restamped_and_one_left_alone_is_not(
-        self, first: list[tuple[int, str, str, str | None, str | None]]
-    ) -> None:
-        """A harvester asking `from` reads the new headings only if the stamp
-        moves, and a stamp moved for nothing tells it something changed. The
-        second book's own `Toxicology` is already in the form."""
-        before = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
-        self._store(*first, (2, "lcsh", "Toxicology", None, None))
-        after = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
-
-        restamped, kept = self._stamps()
-
-        assert before <= restamped <= after
-        assert kept == self.STAMPED
-
-    def test_a_heading_stored_with_its_full_stop_loses_it_and_files_by_the_new_number(self) -> None:
-        self._store((1, "lcsh", "Psychology, Industrial.", None, None))
-
-        heading = "Psychology, Industrial"
-
-        assert self._stored() == [(1, 1, "lcsh", heading, None, None, _built_in_key("lcsh", heading))]
-
-    def test_two_forms_of_one_heading_on_one_book_become_the_first_row_with_what_the_second_filled_in(
-        self,
-    ) -> None:
-        """Without the merge the update meets the unique index; without the
-        absorb the caption and the kind go with the deleted row."""
-        self._store(
-            (1, "lcsh", "Psychology, Industrial.", None, None),
-            (1, "lcsh", "Psychology, Industrial", "Industrial psychology", "content"),
-        )
-
-        heading = "Psychology, Industrial"
-
-        assert self._stored() == [(1, 1, "lcsh", heading, "Industrial psychology", "content", heading)]
-
-    def test_one_heading_on_two_books_stays_one_row_each(self) -> None:
-        self._store((1, "lcsh", "Toxicology.", None, None), (2, "lcsh", "Toxicology", None, None))
-
-        assert [(row[1], row[3]) for row in self._stored()] == [(1, "Toxicology"), (2, "Toxicology")]
-
-    def test_another_scheme_and_a_heading_the_transform_would_empty_are_left_alone(self) -> None:
-        self._store((1, "gnd", "Toxikologie.", None, None), (1, "lcsh", ".", None, None))
-
-        assert [row[3] for row in self._stored()] == ["Toxikologie.", "."]
-
-    def test_the_frozen_transform_is_heading_label_today(self) -> None:
-        """The revision's copy against `Subfields.heading_label`, over values
-        built from the characters the expression strips and some it keeps."""
-        generator = random.Random(1964)
-        alphabet = "Aa .,;:/=-()"
-        values = [
-            "".join(generator.choice(alphabet) for _ in range(generator.randint(0, 12))) for _ in range(400)
-        ]
-
-        mismatches = [
-            value
-            for value in values
-            if drops_its_closing_full_stop.heading_label(value)
-            != marc_fields.Subfields([("a", value)]).heading_label()
+            value for value in values if revision._sort_key("lcc", value) != filing.sort_key_for("lcc", value)
         ]
 
         assert mismatches == []
@@ -4088,18 +3425,6 @@ _TEXT_CEILINGS: tuple[tuple[str, str, dict[str, object]], ...] = (
     ),
     ("readwise_books", "title", {"user_id": 1, "user_book_id": 1}),
     ("online_links", "label", {"book_id": 1, "url": "https://a.example/"}),
-    # Both columns of the one constraint: a vocabulary label and its entry's
-    # identifier each carry a byte arm.
-    (
-        "vocabulary_labels",
-        "label",
-        {"scheme": "gnd", "generation": 1, "identifier": "(DE-588)1", "preferred": True},
-    ),
-    (
-        "vocabulary_labels",
-        "identifier",
-        {"scheme": "gnd", "generation": 1, "label": "Abfall", "preferred": True},
-    ),
     (
         "member_logins",
         "resume_cursor",
@@ -4123,8 +3448,6 @@ _CEILING_CONSTRAINTS: dict[tuple[str, str], str] = {
     ("readwise_books", "title"): "ck_readwise_books_bounds",
     ("online_links", "label"): "ck_online_links_bounds",
     ("member_logins", "resume_cursor"): "ck_member_logins_resume_cursor",
-    ("vocabulary_labels", "label"): "ck_vocabulary_labels_bounds",
-    ("vocabulary_labels", "identifier"): "ck_vocabulary_labels_bounds",
 }
 
 
@@ -6875,7 +6198,7 @@ class TestABlankTextColumnIsNull:
     is `btrim` on PostgreSQL and could disagree with SQLite's about a character
     outside ASCII. CI runs this class on PostgreSQL 18 in the nightly whole
     suite run; the `test:postgres` selection on the release paths does not
-    include this class.
+    include this file.
     """
 
     PREVIOUS = "c7b41e92f80a"
@@ -7092,8 +6415,6 @@ class TestADeletedBooksIdIsNeverReused:
         self.build_database_with_three_books()
         before = self.books_shape()
 
-        # To the rebuild and no further: a later revision adding an index to
-        # `books` is a change of shape this test is not about.
-        schema.upgrade_to("0850786d1753")
+        schema.upgrade_to_head()
 
         assert self.books_shape() == before

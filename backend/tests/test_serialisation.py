@@ -125,7 +125,7 @@ class TestLoanSummary:
         db.add(loan)
         db.commit()
 
-        assert loan_summary(loan, {}).book is None
+        assert loan_summary(loan).book is None
 
     def test_it_carries_an_external_borrower_name(self, db, admin, two_books):
         """Without this the badge on a book lent to a neighbour reads "Loaned
@@ -138,7 +138,7 @@ class TestLoanSummary:
         db.add(loan)
         db.commit()
 
-        summary = loan_summary(loan, {})
+        summary = loan_summary(loan)
         assert summary.loaned_to_name == "the neighbour"
         assert summary.loaned_to is None
 

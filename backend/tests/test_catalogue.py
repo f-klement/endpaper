@@ -1426,12 +1426,10 @@ class TestARecordFromAnUploadedFile:
         assert set(catalogue._TEXT_CEILINGS) == catalogue._CUT_ON_UPLOAD | catalogue._KEPT_WHOLE_ON_UPLOAD
         assert not catalogue._CUT_ON_UPLOAD & catalogue._KEPT_WHOLE_ON_UPLOAD
 
-    def test_no_module_but_the_two_upload_readers_opens_this_door(self):
-        """The containment, not the behaviour. A third producer truncating a
+    def test_no_module_but_the_marc_reader_opens_this_door(self):
+        """The containment, not the behaviour. A second producer truncating a
         catalogue's assertion would undo the split above without any test
-        failing, so the call site is counted rather than trusted. The two are
-        `marc.py` and the harvester's Dublin Core reader, which is the same
-        upload profile in the other serialisation.
+        failing, so the call site is counted rather than trusted.
 
         **A call, not the spelling.** The first version of this searched for the
         substring and would have been tripped by `importing.py`, which names
@@ -1453,7 +1451,7 @@ class TestARecordFromAnUploadedFile:
             if relative != "catalogue.py" and _opens_the_upload_door(path.read_text())
         ]
 
-        assert sorted(callers) == ["harvester.py", "marc.py"]
+        assert callers == ["marc.py"]
 
     def test_that_guard_can_tell_a_call_from_a_mention(self):
         """The diagonal for the guard above, driving the same predicate rather

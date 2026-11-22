@@ -6,27 +6,23 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { BookColumns } from "./bookColumns.ts";
-import type { LoanPatronOut } from "./loanPatronOut.ts";
 import type { UserOut } from "./userOut.ts";
 
 export interface LoanOut {
-  book: BookColumns | null;
+  book?: BookColumns | null;
   book_id: number;
   /** @minimum 0 */
-  days_out: number;
+  days_out?: number;
   /** @minimum 0 */
-  days_overdue: number;
-  due_at: string | null;
+  days_overdue?: number;
+  due_at?: string | null;
   id: number;
-  is_overdue: boolean;
+  is_overdue?: boolean;
   loaned_at: string;
-  loaned_by: UserOut | null;
+  loaned_by?: UserOut | null;
   loaned_by_user_id: number;
-  loaned_to: UserOut | null;
-  loaned_to_name: string | null;
+  loaned_to?: UserOut | null;
+  loaned_to_name?: string | null;
   loaned_to_user_id: number | null;
-  patron: LoanPatronOut | null;
   returned_at: string | null;
-  /** Whether the borrower is a registered patron. A flag and not the id, so a member learns that a patron has the book and never which one. Without it a patron's loan and an erased borrower's would read alike, both naming nobody. */
-  to_patron: boolean;
 }

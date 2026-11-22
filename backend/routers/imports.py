@@ -24,46 +24,31 @@ than a pre-pass. A row the file marks as deleted is dropped by every one of
 them, so that is not what choosing a reader decides.
 """
 
-import functools
 import logging
 from collections import Counter
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
-from datetime import UTC, datetime
-from itertools import chain, repeat
-from typing import Annotated, Final
+from typing import Annotated
 
-import anyio.to_thread
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 import csv_import
-import harvester
 import marc
 import recognition
 import settings_store
-import vocabulary_copy
-from auth import require_admin
 from classifications import bounded_headings
 from config import MAX_UPLOAD_BYTES
 from dependencies import CurrentUser, DbSession
 from errors import a_lost_race_answers_409
 from import_readers import ImportReader
-from importing import HarvestKeys, Import, MarcImport, recognise_stored, stored_record
-from models import HARVEST_BASE_URL_MAX, HARVEST_SET_SPEC_MAX, Harvest, User
+from importing import Import, MarcImport, recognise_stored, stored_record
 from ratelimit import import_limiter
 from refusals import refuses
 from schemas import (
-    MAX_ROW_ID,
-    HarvestPreviewOut,
-    HarvestResultOut,
     ImportPreviewOut,
     ImportPreviewRow,
     ImportResultOut,
     MarcPreviewOut,
     MarcPreviewRow,
-    ResumableHarvestOut,
 )
 
 logger = logging.getLogger("endpaper.imports")
@@ -288,11 +273,9 @@ def _require_library_mode(db: Session) -> None:
         raise HTTPException(status_code=403, detail="MARC import is a library mode feature.")
 
 
-def _read_marc(db: Session, content: bytes) -> marc.ParsedMarc:
-    """The file read with the local copies confirming a second indicator on a
-    record the Library of Congress did not catalogue, asked once for the file."""
+def _read_marc(content: bytes) -> marc.ParsedMarc:
     try:
-        return marc.read(content, functools.partial(vocabulary_copy.held_preferred_labels, db))
+        return marc.read(content)
     except marc.MarcError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -349,18 +332,8 @@ def preview_marc(
     _require_library_mode(db)
     import_limiter.check(current_user.username)
 
-    return _previewed(db, current_user.id, _read_marc(db, _read_upload(file)))
-
-
-def _previewed(
-    db: Session, viewer_id: int, parsed: marc.ParsedMarc, keyed: Sequence[recognition.Answer | None] = ()
-) -> MarcPreviewOut:
-    """`preview_marc`'s counts and rows over records already read, as `viewer_id`
-    sees the shelf. The harvest preview asks through here too, so a file and a
-    harvest cannot disagree about one record. `keyed` is a harvest's
-    `HarvestKeys` answer per record, asked before the ladder as the apply asks
-    it; a file has none."""
-    index = recognition.Index.build(db, viewer_id, recognition.Source.CATALOGUE)
+    parsed = _read_marc(_read_upload(file))
+    index = recognition.Index.build(db, current_user.id, recognition.Source.CATALOGUE)
     # The same stored view the import matches on. Matching the raw record here
     # and the truncated one there would make the two screens disagree about the
     # records the bound acts on, which is exactly what the counts are for.
@@ -372,10 +345,7 @@ def _previewed(
     stored = [stored_record(record) for record in parsed.records]
     # Asked once per record and kept, so the four counts read one answer each.
     # No statement per record: the index answers ids and nothing is loaded.
-    answers = Counter(
-        type(known or recognise_stored(index, record))
-        for record, known in zip(stored, chain(keyed, repeat(None)), strict=False)
-    )
+    answers = Counter(type(recognise_stored(index, record)) for record in stored)
 
     return MarcPreviewOut(
         total_records=parsed.total,
@@ -391,7 +361,8 @@ def _previewed(
                 author=record.author,
                 isbn=record.isbn,
                 classifications=[
-                    f"{heading.scheme}:{heading.number}" for heading in bounded_headings(record.headings)
+                    f"{heading.scheme.value}:{heading.number}"
+                    for heading in bounded_headings(record.headings)
                 ],
             )
             for record in stored[:_PREVIEW_RECORDS]
@@ -437,7 +408,7 @@ def import_marc(
     _require_library_mode(db)
     import_limiter.check(current_user.username)
 
-    parsed = _read_marc(db, _read_upload(file))
+    parsed = _read_marc(_read_upload(file))
 
     # **A merge over the same Books can deadlock with the import**, and Postgres
     # then aborts one of the two. The import locks each Book it adds a link or a
@@ -457,344 +428,3 @@ def import_marc(
 _MET_ANOTHER_CHANGE = (
     "Another change to the same books met this import, and nothing was imported. Import the file again."
 )
-
-
-# ── OAI-PMH harvest ───────────────────────────────────────────────────────────
-#
-# Another repository read in as a MARC import (ticket 177): `harvester.py`
-# fetches, in MARCXML or else Dublin Core, and `MarcImport.for_harvest`
-# applies. A preview then an apply, as for a file, and the two fetch the
-# repository each, since nothing is kept between. Either may carry on where
-# a truncated run stopped (ticket 818): `continues` names that run.
-
-
-#: The `detail.code` on the 409 a harvest meets while another runs, preview or
-#: apply. The apply's other 409, a lost race with another change to the same
-#: books, carries none, and the card words the two apart by it:
-#: `frontend/src/pages/SettingsPage/LibrarySettingsPage/components/HarvestImport.tsx`.
-HARVEST_RUNNING: Final = "harvest_running"
-
-#: The `detail.code` on the apply's 409 when the repository it names is not the
-#: one stored. The client names the address its settings held when it read the
-#: preview, which the preview route never echoes, so an address saved in another
-#: tab, before that read or after it, is refused here: the preview may have
-#: counted the stored repository under the old label. The card words it by this
-#: code, and `frontend/src/pages/SettingsPage/LibrarySettingsPage/hooks.ts` drops
-#: the read on it.
-REPOSITORY_CHANGED: Final = "repository_changed"
-
-#: The `detail.code` on the 409 a continuation meets when the run it names is no
-#: longer the one to carry on from: a later run of the repository has been made
-#: since, in this tab or another, or the run was not cut short. The card words
-#: it by this code and asks again which run it may continue.
-NOT_RESUMABLE: Final = "not_resumable"
-
-
-def _harvest_repository(db: Session) -> str:
-    """The repository an admin may harvest, or 404.
-
-    **404 rather than the MARC routes' 403**, the house rule for a feature that
-    is off: `harvester.configured_repository` answers None in a household, with
-    the switch off, or with no usable address, and the route then does not
-    exist.
-    """
-    address = harvester.configured_repository(db)
-    if address is None:
-        raise HTTPException(status_code=404, detail="Not Found")
-    return address
-
-
-async def _harvested(
-    base_url: str, set_spec: str | None, continuing: harvester.Continuation | None
-) -> tuple[harvester.Identity, harvester.Harvested]:
-    """One run over the repository, or a 502 naming what went wrong.
-
-    502 for `opds.py`'s reason: the repository answered, or refused to, and it is
-    not this application that is broken. The message never names the address.
-    A continuation whose token the repository has forgotten is one of these,
-    worded by `harvester.FORGOTTEN_POINT`.
-    """
-    try:
-        return await harvester.harvest(base_url, set_spec=set_spec, continuing=continuing)
-    except harvester.HarvestError as failure:
-        raise HTTPException(status_code=502, detail=str(failure)) from None
-
-
-def _resumable(db: Session, base_url: str) -> tuple[Harvest, harvester.Continuation] | None:
-    """The run of `base_url` a harvest may carry on from, and where it stopped, or None.
-
-    **The latest run of the repository, and only that one**: a continuation is
-    itself a run, so once one is made the run it carried on from is no longer
-    latest and is not offered twice, and a run from the start since replaces
-    whatever an older one left. Any set, since the latest run is what the admin
-    last did. A run recorded before the format was kept has no point to resume.
-    """
-    latest = db.scalars(
-        select(Harvest).where(Harvest.base_url == base_url).order_by(Harvest.id.desc()).limit(1)
-    ).first()
-    if latest is None or latest.resume_skip is None or latest.metadata_format is None:
-        return None
-    return latest, harvester.Continuation(
-        chosen=harvester.Chosen(latest.metadata_prefix, latest.metadata_format),
-        set_spec=latest.set_spec,
-        start=harvester.Resume(latest.resume_token, latest.resume_skip),
-    )
-
-
-def _continuation(
-    db: Session, base_url: str, continues: int | None, set_spec: str | None
-) -> tuple[Harvest, harvester.Continuation] | None:
-    """The run `continues` names and where to carry on from it, or None for a
-    run from the start.
-
-    A 409 `NOT_RESUMABLE` unless it is `_resumable`'s run, and a 400 for a set
-    named beside it: a continuation reads the set its run read, since the token
-    is the repository's position in that list and in no other.
-    """
-    if continues is None:
-        return None
-    if set_spec is not None:
-        raise HTTPException(
-            status_code=400, detail="A continued run reads the set its run read; name no set."
-        )
-    found = _resumable(db, base_url)
-    if found is None or found[0].id != continues:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": (
-                    "That run can no longer be carried on: the repository has been harvested since, or the"
-                    " run was not cut short. Nothing was harvested."
-                ),
-                "code": NOT_RESUMABLE,
-            },
-        )
-    return found
-
-
-@contextmanager
-def _the_only_harvest() -> Iterator[None]:
-    """`harvester.one_run`, a second run answered 409 as a second vocabulary
-    download is (`routers/settings.py::download_vocabulary`)."""
-    try:
-        with harvester.one_run():
-            yield
-    except harvester.AlreadyRunning as running:
-        raise HTTPException(
-            status_code=409, detail={"message": str(running), "code": HARVEST_RUNNING}
-        ) from None
-
-
-#: A set to harvest, as the repository names it: `harvests.set_spec`'s width.
-_SetSpec = Annotated[
-    str | None,
-    Query(max_length=HARVEST_SET_SPEC_MAX, description="Harvest only this set of the repository"),
-]
-
-#: The truncated run to carry on from, as `resumable_harvest` names it.
-_Continues = Annotated[
-    int | None,
-    Query(
-        ge=1,
-        le=MAX_ROW_ID,
-        description=(
-            "Carry on where this truncated run stopped, in its format and set, rather than from the start"
-        ),
-    ),
-]
-
-
-@router.get("/harvest/resumable", response_model=ResumableHarvestOut | None)
-@refuses(404)
-def resumable_harvest(
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> ResumableHarvestOut | None:
-    """The run of the stored repository a harvest may carry on from, or null.
-
-    Admin only, library mode and the harvester's switch required. The latest
-    run of the repository, offered only while a cap, the deadline or a busy
-    repository cut it short: pass its id as `continues` to the preview and the
-    apply. Reads the database alone; the repository is not asked.
-    """
-    found = _resumable(db, _harvest_repository(db))
-    if found is None:
-        return None
-    run, continuing = found
-    return ResumableHarvestOut(
-        harvest_id=run.id,
-        started_at=run.started_at,
-        set_spec=run.set_spec,
-        metadata_format=continuing.chosen.read_as,
-        records_seen=run.records_seen,
-    )
-
-
-@router.post("/harvest/preview", response_model=HarvestPreviewOut)
-@refuses(404)
-async def preview_harvest(
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-    set_spec: _SetSpec = None,
-    continues: _Continues = None,
-) -> HarvestPreviewOut:
-    """Harvest the configured repository and report what an apply would do, writing nothing.
-
-    Admin only, library mode and the harvester's switch required. The counts are
-    `preview_marc`'s, over the harvested records, with a record an earlier
-    harvest of this repository created counted as already held, as the apply
-    matches it; `deleted` and `truncated` are the run's own. Rate limited with
-    the imports, and a 409 while another harvest, preview or apply, is running.
-    With `continues`, it reads on from where that truncated run stopped, and a
-    409 `not_resumable` when that run is not `resumable_harvest`'s.
-
-    **`async`, unlike the file routes**, because the wait is the network: the
-    fetch runs on the event loop through `fetch.py`, and the counting, which
-    blocks on the database, runs in a thread, as `routers/opds.py::sync` does.
-    """
-    base_url = _harvest_repository(db)
-    import_limiter.check(current_user.username)
-
-    with _the_only_harvest():
-        continued = _continuation(db, base_url, continues, set_spec)
-        identity, run = await _harvested(base_url, set_spec, continued[1] if continued else None)
-        previewed = await anyio.to_thread.run_sync(
-            lambda: _previewed_harvest(db, current_user.id, base_url, run)
-        )
-    return HarvestPreviewOut.model_validate(
-        previewed.model_dump() | {"repository_name": identity.name} | _run_counts(run)
-    )
-
-
-def _previewed_harvest(
-    db: Session, viewer_id: int, base_url: str, run: harvester.Harvested
-) -> MarcPreviewOut:
-    """`_previewed` over a run, each record asked by its identifier first."""
-    keys = HarvestKeys.from_repository(db, viewer_id, base_url)
-    return _previewed(db, viewer_id, run.parsed, [keys.answer(identifier) for identifier in run.identifiers])
-
-
-def _the_previewed_repository(stored: str, previewed: str) -> None:
-    """A 409 unless the apply names the repository stored now.
-
-    **The address, not a fingerprint of it**: the admin reads it in the
-    settings, so sending it back discloses nothing, and the refusal's message
-    never names it. Trimmed, as `configured_repository` trims what is stored
-    and the settings read does not.
-    """
-    if previewed.strip() != stored:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": (
-                    "The stored repository is not the one this page read, and nothing was"
-                    " harvested. Read the repository again."
-                ),
-                "code": REPOSITORY_CHANGED,
-            },
-        )
-
-
-@router.post("/harvest", response_model=HarvestResultOut)
-@refuses(404)
-async def apply_harvest(
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-    repository: Annotated[
-        str,
-        Query(
-            max_length=HARVEST_BASE_URL_MAX,
-            description="The address held when the preview was read; refused unless it is the one stored",
-        ),
-    ],
-    set_spec: _SetSpec = None,
-    continues: _Continues = None,
-) -> HarvestResultOut:
-    """Harvest the configured repository into the catalogue.
-
-    Matching asks first for the Book an earlier harvest of this repository
-    created from the same record, by its OAI identifier, so a Book corrected
-    here since that run is still found. Then it is `import_marc`'s, as this admin sees
-    the shelf: ISBN, then author and title together, so a record crediting
-    somebody never matches on its title alone, while a record crediting nobody
-    matches a Book crediting nobody by its title. A matched Book has its gaps
-    filled and nothing overwritten. **A created Book is nobody's, public, keeps
-    its record's identifier and points at the run** this records in `harvests`.
-    **No heading is written**: a harvest confirms no record (owner, 2026-11-20),
-    so a created Book's headings, and those of a Book keyed by the same
-    identifier, wait as suggestions an admin confirms or discards on the Book,
-    counted in `headings_pending`. A Book matched by ISBN or by author and
-    title gets none, and a run read in Dublin Core, whose subjects name no
-    scheme, raises none at all. A deleted record is counted
-    and deletes nothing. A 409 while another harvest is running, and one when
-    `repository` is not the address stored now: the client held another when it
-    read the preview, whether the stored one was saved before that read or after
-    it, so the preview it showed was labelled with an address this would not
-    harvest.
-
-    **A truncated run records where it stopped**, and `continues` carries on
-    from there as a new run, which records where it stopped in turn: the
-    preview's `not_resumable` 409 applies here too, checked again under the
-    one run lock, so two tabs cannot both continue one run.
-    """
-    base_url = _harvest_repository(db)
-    _the_previewed_repository(base_url, repository)
-    import_limiter.check(current_user.username)
-
-    with _the_only_harvest():
-        continued = _continuation(db, base_url, continues, set_spec)
-        if continued is None:
-            return await _applied(db, current_user.id, base_url, set_spec)
-        return await _applied(db, current_user.id, base_url, continued[1].set_spec, continued)
-
-
-async def _applied(
-    db: Session,
-    admin_id: int,
-    base_url: str,
-    set_spec: str | None,
-    continued: tuple[Harvest, harvester.Continuation] | None = None,
-) -> HarvestResultOut:
-    """`apply_harvest`'s run and its one transaction, under `_the_only_harvest`."""
-    started = datetime.now(UTC).replace(tzinfo=None)
-    _, run = await _harvested(base_url, set_spec, continued[1] if continued else None)
-
-    def apply() -> HarvestResultOut:
-        row = Harvest(
-            base_url=base_url,
-            set_spec=set_spec,
-            metadata_prefix=run.prefix,
-            metadata_format=run.read_as,
-            run_by_user_id=admin_id,
-            started_at=started,
-            records_seen=run.seen,
-            resume_token=run.resume.token if run.resume else None,
-            resume_skip=run.resume.skip if run.resume else None,
-            continues_harvest_id=continued[0].id if continued else None,
-        )
-        db.add(row)
-        db.flush()
-        importer = MarcImport.for_harvest(db, admin_id, row)
-        applied = importer.apply(run.parsed, identifiers=run.identifiers)
-        return HarvestResultOut.model_validate(
-            applied.model_dump()
-            | {"harvest_id": row.id, "headings_pending": importer.headings_raised}
-            | _run_counts(run)
-        )
-
-    # The same one transaction as a file import, and the same deadlock with a
-    # merge through its gap fills: `import_marc` says why 409.
-    with a_lost_race_answers_409(db, _MET_ANOTHER_CHANGE):
-        return await anyio.to_thread.run_sync(apply)
-
-
-def _run_counts(run: harvester.Harvested) -> dict[str, object]:
-    """The fields of `_HarvestRun`, which both answers carry."""
-    return {
-        "metadata_prefix": run.prefix,
-        "metadata_format": run.read_as,
-        "pages_read": run.pages_read,
-        "records_seen": run.seen,
-        "deleted": run.deleted,
-        "truncated": run.truncated,
-    }

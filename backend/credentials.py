@@ -109,7 +109,6 @@ sharper of the two because an archive carries the ciphertext and never the key.
 """
 
 import hmac
-import ipaddress
 import logging
 import os
 import re
@@ -121,7 +120,6 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import urlsplit
 
 import httpx
 from cryptography.exceptions import InvalidTag
@@ -131,7 +129,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import config
-import fetch
 import targets
 from enums import CatalogueSource, CredentialProvenance, SettingKey
 from models import CatalogueCredential, Setting
@@ -1302,55 +1299,6 @@ def _is_stranded(value: str | None, material: bytes | None) -> bool:
         return False
     parts = value.split(".")
     return material is None or parts[0] != VERSION or parts[1] != generation_of_key(material)
-
-
-def typed_address_host(url: str) -> str | None:
-    """The host of an address an admin typed for this server to fetch, or None
-    where its form is refused.
-
-    **The one rule for every door an admin points by typing.** `opds.is_fetchable`
-    is this rule alone, and `harvester.is_harvestable` adds its own clauses
-    to it. It lives here because both import this module, and neither door
-    owns the other.
-
-    Refused, in this order: an address that cannot be parsed at all, a scheme
-    that is not http or https, a port that is not a number or is out of range,
-    an address carrying credentials, and an address with no host.
-
-    **The parse is inside the `try`** for `covers.is_fetchable`'s measured
-    reason: `urlsplit` raises on an unterminated IPv6 literal, and `.port` is a
-    lazy property that raises on a port that is not a number or is out of range.
-    A stored `http://host:99999/opds` would otherwise 500 every read of that
-    row, for good, with nothing naming the cause.
-    """
-    try:
-        parsed = urlsplit(url)
-        port = parsed.port
-    except ValueError:
-        return None
-    if parsed.scheme not in ("http", "https") or parsed.username or parsed.password:
-        return None
-    if port is not None and not 0 < port < 65536:
-        # `urlsplit.port` raises for most of these rather than returning them,
-        # so this arm is the belt: a parser that starts answering instead of
-        # raising must not widen what is admitted.
-        return None
-    return parsed.hostname or None
-
-
-def household_admits(host: str) -> bool:
-    """Whether a host is a name, or an address literal `fetch.HOUSEHOLD_ADDRESSES`
-    admits.
-
-    **A name is not resolved here.** The pin at the connection is the guard; a
-    resolution at the write would be a second answer an attacker controls the
-    timing of. This refuses the literal, which guards the accident.
-    """
-    try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return True
-    return fetch.HOUSEHOLD_ADDRESSES.permits(host)
 
 
 def origin_of(url: str) -> str:

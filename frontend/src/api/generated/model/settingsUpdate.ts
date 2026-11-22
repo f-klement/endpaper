@@ -30,10 +30,6 @@ export interface SettingsUpdate {
   mail_use_ssl?: boolean | null;
   mail_use_tls?: boolean | null;
   mail_username?: string | null;
-  oai_admin_email?: string | null;
-  oai_harvest_base_url?: string | null;
-  oai_harvest_enabled?: boolean | null;
-  oai_provider_enabled?: boolean | null;
   overdue_in_app_enabled?: boolean | null;
   overdue_mail_enabled?: boolean | null;
   overdue_mail_to?: string | null;
@@ -42,11 +38,8 @@ export interface SettingsUpdate {
   overdue_webhook_enabled?: boolean | null;
   overdue_webhook_secret?: string | null;
   overdue_webhook_url?: string | null;
-  public_availability_enabled?: boolean | null;
   public_catalogue_enabled?: boolean | null;
   public_catalogue_indexing_enabled?: boolean | null;
-  sru_server_enabled?: boolean | null;
   telegram_bot_token?: string | null;
   telegram_chat_id?: string | null;
-  vocabulary_offer_dismissed?: boolean | null;
 }

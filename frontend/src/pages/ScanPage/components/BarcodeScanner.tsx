@@ -78,7 +78,7 @@ const SCAN_INTERVAL_MS = 150;
  * on a laptop with only a front camera, and a front camera that works beats a
  * rear camera that does not exist.
  */
-export const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
+const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
   video: {
     facingMode: { ideal: "environment" },
     width: { ideal: 1920 },
