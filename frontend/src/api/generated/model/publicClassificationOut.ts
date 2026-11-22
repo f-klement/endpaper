@@ -5,7 +5,6 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
-import type { ClassificationScheme } from "./classificationScheme.ts";
 import type { HeadingKind } from "./headingKind.ts";
 
 /**
@@ -27,5 +26,5 @@ export interface PublicClassificationOut {
   kind?: HeadingKind | null;
   label?: string | null;
   number: string;
-  scheme: ClassificationScheme;
+  scheme: string;
 }

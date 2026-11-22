@@ -420,9 +420,10 @@ def build_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
                 "loan_id": loan.id,
                 "book_id": loan.book_id,
                 "title": loan.book.title if loan.book else "",
-                # A member's username, or the free-text name of somebody with
-                # no account. Exactly one of the two is set; see
-                # `ck_loans_one_borrower`.
+                # A member's username, the free-text name of somebody with no
+                # account, or null for a patron or an erased borrower: a
+                # patron's record never leaves for a channel, which is a third
+                # party. See `ck_loans_one_borrower`.
                 "borrower": (loan.loaned_to.username if loan.loaned_to else loan.loaned_to_name),
                 "due_at": loan.due_at.isoformat() if loan.due_at else None,
                 # `lending.days_overdue`, not the subtraction that was inline
@@ -476,7 +477,8 @@ def render_text(digest: dict[str, Any], *, limit: int | None = None) -> str:
     count = digest["count"]
     header = f"{count} overdue {'book' if count == 1 else 'books'}."
     lines = [
-        f"{entry['title'] or 'Untitled'}: {entry['borrower']}, {entry['days_overdue']} days overdue"
+        f"{entry['title'] or 'Untitled'}: {entry['borrower'] or 'no name sent'}, "
+        f"{entry['days_overdue']} days overdue"
         for entry in digest["loans"]
     ]
 

@@ -26,6 +26,7 @@ import type {
   HTTPValidationError,
   ListPublicBooksParams,
   PagePublicBookOut,
+  PublicAvailabilityOut,
   PublicBookOut,
   Refusal,
 } from "../../model";
@@ -824,6 +825,227 @@ export function useGetPublicBook<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getGetPublicBookQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetPublicAvailabilityUrl = (bookId: number) => {
+  return `/api/public/books/${bookId}/availability`;
+};
+
+/**
+ * On the shelf or on loan, for the title this record is a copy of.
+ *
+ * **Never a due date, a borrower or when the loan began**: the payload has
+ * one field and `PublicAvailability` has two values. What a book with
+ * several copies answers, and why a private copy counts for nothing, is
+ * `PublicAvailabilityOut`'s docstring.
+ *
+ * 404 for every reason `get_public_book` gives one, and for the switch off.
+ * @summary Whether a published record is on the shelf or on loan
+ */
+export const getPublicAvailability = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PublicAvailabilityOut> => {
+  return customFetch<PublicAvailabilityOut>(
+    getGetPublicAvailabilityUrl(bookId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetPublicAvailabilityQueryKey = (bookId: number) => {
+  return [`/api/public/books/${bookId}/availability`] as const;
+};
+
+export const getGetPublicAvailabilityQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPublicAvailability>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getPublicAvailability>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPublicAvailabilityQueryKey(bookId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPublicAvailability>>
+  > = ({ signal }) =>
+    getPublicAvailability(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPublicAvailability>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetPublicAvailabilityQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPublicAvailability>>
+>;
+export type GetPublicAvailabilityQueryError = Refusal | HTTPValidationError;
+
+/**
+ * On the shelf or on loan, for the title this record is a copy of.
+ *
+ * **Never a due date, a borrower or when the loan began**: the payload has
+ * one field and `PublicAvailability` has two values. What a book with
+ * several copies answers, and why a private copy counts for nothing, is
+ * `PublicAvailabilityOut`'s docstring.
+ *
+ * 404 for every reason `get_public_book` gives one, and for the switch off.
+ * @summary Whether a published record is on the shelf or on loan
+ */
+export function useGetPublicAvailability<
+  TData = Awaited<ReturnType<typeof getPublicAvailability>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getPublicAvailability>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublicAvailability>>,
+          TError,
+          Awaited<ReturnType<typeof getPublicAvailability>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * On the shelf or on loan, for the title this record is a copy of.
+ *
+ * **Never a due date, a borrower or when the loan began**: the payload has
+ * one field and `PublicAvailability` has two values. What a book with
+ * several copies answers, and why a private copy counts for nothing, is
+ * `PublicAvailabilityOut`'s docstring.
+ *
+ * 404 for every reason `get_public_book` gives one, and for the switch off.
+ * @summary Whether a published record is on the shelf or on loan
+ */
+export function useGetPublicAvailability<
+  TData = Awaited<ReturnType<typeof getPublicAvailability>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getPublicAvailability>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPublicAvailability>>,
+          TError,
+          Awaited<ReturnType<typeof getPublicAvailability>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * On the shelf or on loan, for the title this record is a copy of.
+ *
+ * **Never a due date, a borrower or when the loan began**: the payload has
+ * one field and `PublicAvailability` has two values. What a book with
+ * several copies answers, and why a private copy counts for nothing, is
+ * `PublicAvailabilityOut`'s docstring.
+ *
+ * 404 for every reason `get_public_book` gives one, and for the switch off.
+ * @summary Whether a published record is on the shelf or on loan
+ */
+export function useGetPublicAvailability<
+  TData = Awaited<ReturnType<typeof getPublicAvailability>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getPublicAvailability>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * On the shelf or on loan, for the title this record is a copy of.
+ *
+ * **Never a due date, a borrower or when the loan began**: the payload has
+ * one field and `PublicAvailability` has two values. What a book with
+ * several copies answers, and why a private copy counts for nothing, is
+ * `PublicAvailabilityOut`'s docstring.
+ *
+ * 404 for every reason `get_public_book` gives one, and for the switch off.
+ * @summary Whether a published record is on the shelf or on loan
+ */
+export function useGetPublicAvailability<
+  TData = Awaited<ReturnType<typeof getPublicAvailability>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getPublicAvailability>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetPublicAvailabilityQueryOptions(bookId, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,

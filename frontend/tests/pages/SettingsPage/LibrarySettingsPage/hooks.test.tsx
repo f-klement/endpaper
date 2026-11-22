@@ -27,20 +27,37 @@
 import { act, waitFor, type RenderHookResult } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import type {
   CustomFieldOut,
   CustomFieldValueOut,
+  HarvestPreviewOut,
+  HarvestResultOut,
   ImportPreviewOut,
   ImportResultOut,
   MarcPreviewOut,
+  ResumableHarvestOut,
+  VocabularyOut,
 } from "../../../../src/api/generated/model";
 import { ApiError } from "../../../../src/api/mutator";
-import { useBookCustomFields } from "../../../../src/pages/BookDetail/hooks";
+import {
+  useBookCustomFields,
+  useBookPendingHeadings,
+} from "../../../../src/pages/BookDetail/hooks";
+import { useSettings } from "../../../../src/pages/SettingsPage/hooks";
 import {
   useCalibreImport,
   useCustomFields,
+  useHarvestImport,
   BYTES_PER_REQUEST,
   HIGHLIGHTS_PER_REQUEST,
   requestChunks,
@@ -48,11 +65,17 @@ import {
   useLibraryImport,
   useMarcImport,
   useStoreImport,
+  useVocabularies,
   type UseTwoStepImportResult,
 } from "../../../../src/pages/SettingsPage/LibrarySettingsPage/hooks";
 import { boundOf, propertiesOf } from "../../../committedSchema";
 import { CALIBRE_SCHEMA, databaseOf } from "../../../lib/sqliteFixtures";
-import { mockApi, renderHookWithProviders, type MockApi } from "../../../utils";
+import {
+  heldOpen,
+  mockApi,
+  renderHookWithProviders,
+  type MockApi,
+} from "../../../utils";
 import { sourceText } from "../../../sourceModules";
 import {
   lazyImportsOf,
@@ -1845,5 +1868,406 @@ describe("importing KOReader highlights", () => {
     expect(
       api.calls.filter((call) => call.url.includes("/highlights/")),
     ).toEqual([]);
+  });
+});
+
+/**
+ * Let a state that must not change have its chance to. TanStack tells its
+ * observers on a timer rather than at once, so reading straight after the
+ * event would pass whatever the hook does next.
+ */
+function letObserversHear(): Promise<void> {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+}
+
+/** How many times the vocabularies list was asked for. */
+function listCalls(api: MockApi): number {
+  return api.calls.filter(
+    (call) =>
+      call.method === "GET" && call.url.endsWith("/api/settings/vocabularies"),
+  ).length;
+}
+
+describe("useVocabularies", () => {
+  const IDLE: VocabularyOut = {
+    scheme: "gnd",
+    name: "GND subjects",
+    licence: "CC0-1.0",
+    copyable: true,
+    entries: 5,
+    fetched_at: "2026-11-20T10:00:00",
+    released: "2026-11-01T00:00:00",
+    progress: null,
+  };
+  const LOADING: VocabularyOut = {
+    ...IDLE,
+    progress: { phase: "loading", done: 1, total: 4, error: null },
+  };
+
+  afterEach(() => vi.useRealTimers());
+
+  it("asks for the list again while a load runs, and stops once it ends", async () => {
+    // Only the interval the poll runs on; `vi.waitFor` keeps real timers.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const api = mockApi();
+    const lists = [LOADING, IDLE];
+    api.on(
+      "/api/settings/vocabularies",
+      () => ({ body: [lists.shift() ?? IDLE] }),
+      "GET",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await vi.waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress?.phase).toBe("loading"),
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(2000);
+    });
+    await vi.waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress).toBeNull(),
+    );
+    act(() => {
+      vi.advanceTimersByTime(10000);
+    });
+
+    expect(listCalls(api)).toBe(2);
+  });
+
+  it("starts a download and reads the list again to show it queued", async () => {
+    const api = mockApi();
+    let started = false;
+    api.on(
+      "/api/settings/vocabularies",
+      () => ({
+        body: [
+          started
+            ? {
+                ...IDLE,
+                progress: {
+                  phase: "queued",
+                  done: 0,
+                  total: null,
+                  error: null,
+                },
+              }
+            : IDLE,
+        ],
+      }),
+      "GET",
+    );
+    api.on(
+      "/api/settings/vocabularies/gnd/download",
+      () => {
+        started = true;
+        return { status: 202, body: IDLE };
+      },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await waitFor(() => expect(result.current.vocabularies).toHaveLength(1));
+
+    act(() => result.current.download("gnd"));
+
+    await waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress?.phase).toBe("queued"),
+    );
+  });
+
+  it("stays starting until the list answers with the load queued", async () => {
+    const api = mockApi();
+    const queued: VocabularyOut = {
+      ...IDLE,
+      progress: { phase: "queued", done: 0, total: null, error: null },
+    };
+    const held = heldOpen();
+    api.on(
+      "/api/settings/vocabularies",
+      () => (listCalls(api) === 1 ? { body: [IDLE] } : held.respond()),
+      "GET",
+    );
+    api.on(
+      "/api/settings/vocabularies/gnd/download",
+      { status: 202, body: queued },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await waitFor(() => expect(result.current.vocabularies).toHaveLength(1));
+
+    act(() => result.current.download("gnd"));
+    await waitFor(() => expect(listCalls(api)).toBe(2));
+    await letObserversHear();
+    expect(result.current.isStarting).toBe(true);
+
+    held.release({ body: [queued] });
+    await waitFor(() => expect(result.current.isStarting).toBe(false));
+    expect(result.current.vocabularies[0]?.progress?.phase).toBe("queued");
+  });
+
+  it("drops a refused start once the list shows that vocabulary loading", async () => {
+    const api = mockApi();
+    const lists = [IDLE, LOADING];
+    api.on(
+      "/api/settings/vocabularies",
+      () => ({ body: [lists.shift() ?? LOADING] }),
+      "GET",
+    );
+    api.on(
+      "/api/settings/vocabularies/gnd/download",
+      {
+        status: 409,
+        body: { detail: "gnd: a download is already under way" },
+      },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => useVocabularies(true));
+    await waitFor(() => expect(result.current.vocabularies).toHaveLength(1));
+
+    act(() => result.current.download("gnd"));
+    await waitFor(() =>
+      expect(result.current.vocabularies[0]?.progress?.phase).toBe("loading"),
+    );
+    await letObserversHear();
+
+    expect(result.current.error).toBeNull();
+  });
+
+  it("asks nothing of a member, for whom both routes are refused", () => {
+    const api = mockApi();
+    renderHookWithProviders(() => useVocabularies(false));
+    expect(listCalls(api)).toBe(0);
+  });
+});
+
+/**
+ * `useHarvestImport`'s one rule a card test cannot see: the apply harvests the
+ * set the preview read, and a blank set is no set at all.
+ */
+describe("which set a harvest asks the repository for", () => {
+  const HARVEST_PREVIEW: HarvestPreviewOut = {
+    already_held: 0,
+    deleted: 0,
+    metadata_format: "marcxml",
+    metadata_prefix: "marc21",
+    pages_read: 1,
+    readable: 2,
+    records_seen: 2,
+    repository_name: null,
+    skipped: 0,
+    total_records: 2,
+    truncated: false,
+  };
+  const HARVESTED: HarvestResultOut = {
+    created: 2,
+    deleted: 0,
+    harvest_id: 1,
+    headings_pending: 0,
+    matched: 0,
+    metadata_format: "marcxml",
+    metadata_prefix: "marc21",
+    pages_read: 1,
+    records_seen: 2,
+    rows_read: 2,
+    skipped: 0,
+    statuses_updated: 0,
+    truncated: false,
+  };
+
+  const REPOSITORY = "https://repository.example/oai";
+
+  const CUT_SHORT: ResumableHarvestOut = {
+    harvest_id: 4,
+    started_at: "2026-11-20T10:00:00",
+    set_spec: "theses",
+    metadata_format: "marcxml",
+    records_seen: 10000,
+  };
+
+  /** A repository whose last run was `resumable`: none by default. */
+  function stubHarvest(resumable: ResumableHarvestOut | null = null): MockApi {
+    const api = mockApi();
+    api.on("/api/imports/harvest", { body: HARVESTED }, "POST");
+    api.on("/api/imports/harvest/preview", { body: HARVEST_PREVIEW }, "POST");
+    api.on("/api/imports/harvest/resumable", { body: resumable }, "GET");
+    return api;
+  }
+
+  it("carries on from the run cut short in the preview, naming no set", async () => {
+    // The run's own set is read again server side; one sent beside it is refused.
+    const api = stubHarvest(CUT_SHORT);
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+    await waitFor(() => expect(result.current.resumable).not.toBeNull());
+
+    await act(async () => result.current.carryOn());
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest/preview")).toEqual({
+      continues: "4",
+    });
+  });
+
+  it("carries on from the run cut short in the apply as well, naming no set", async () => {
+    const api = stubHarvest(CUT_SHORT);
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+    await waitFor(() => expect(result.current.resumable).not.toBeNull());
+
+    await act(async () => result.current.carryOn());
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest")).toEqual({
+      repository: REPOSITORY,
+      continues: "4",
+    });
+  });
+
+  it("asks for the typed set, trimmed, in the preview and the apply", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.read("  theses "));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest/preview")).toEqual({
+      set_spec: "theses",
+    });
+    expect(queryOf(api, "/api/imports/harvest")).toEqual({
+      repository: REPOSITORY,
+      set_spec: "theses",
+    });
+  });
+
+  it("reads every book's suggested headings again once the harvest lands", async () => {
+    // A harvest raises suggestions on books it does not name to this tab, and
+    // no catalogue write moves them, so a book page an admin saw within the
+    // cache's half minute would otherwise still say it had none.
+    const api = stubHarvest();
+    api.on("/api/books/7/pending-headings", { body: [] }, "GET");
+    const pendingReads = () =>
+      api.calls.filter((call) => call.url.endsWith("/pending-headings")).length;
+    const { result } = renderHookWithProviders(() => ({
+      harvest: useHarvestImport(REPOSITORY),
+      book: useBookPendingHeadings(7, true),
+    }));
+    await waitFor(() => expect(pendingReads()).toBe(1));
+
+    await act(async () => result.current.harvest.read(""));
+    await waitFor(() => expect(result.current.harvest.preview).not.toBeNull());
+    await act(async () => result.current.harvest.confirm());
+    await waitFor(() => expect(result.current.harvest.result).not.toBeNull());
+
+    await waitFor(() => expect(pendingReads()).toBe(2));
+  });
+
+  it("sends no set at all when the field is blank", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.read("   "));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest/preview")).toEqual({});
+  });
+
+  it("harvests nothing before a preview", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.confirm());
+
+    expect(lastTo(api, "/api/imports/harvest")).toBeUndefined();
+  });
+
+  it("discards a preview when the stored address changes, and harvests nothing", async () => {
+    const api = stubHarvest();
+    let repository: string | null = REPOSITORY;
+    const { result, rerender } = renderHookWithProviders(() =>
+      useHarvestImport(repository),
+    );
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    repository = "https://another.example/oai";
+    rerender();
+    await act(async () => result.current.confirm());
+
+    expect(result.current.preview).toBeNull();
+    expect(lastTo(api, "/api/imports/harvest")).toBeUndefined();
+  });
+
+  it("names the address the preview was read under in the apply", async () => {
+    const api = stubHarvest();
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest")).toEqual({
+      repository: REPOSITORY,
+    });
+  });
+
+  it("drops the preview and asks the settings again when another repository is stored", async () => {
+    const api = stubHarvest();
+    api.on("/api/settings", { body: {} }, "GET");
+    api.on(
+      /\/api\/imports\/harvest(\?|$)/,
+      {
+        status: 409,
+        body: { detail: { message: "changed", code: "repository_changed" } },
+      },
+      "POST",
+    );
+    const { result } = renderHookWithProviders(() => {
+      useSettings();
+      return useHarvestImport(REPOSITORY);
+    });
+    const settingsReads = () =>
+      api.calls.filter(
+        (call) => call.method === "GET" && call.url.endsWith("/api/settings"),
+      ).length;
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    const before = settingsReads();
+
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.harvestError).not.toBeNull());
+
+    expect(result.current.preview).toBeNull();
+    await waitFor(() => expect(settingsReads()).toBeGreaterThan(before));
+  });
+
+  it("discards a preview when the switch is turned off and on again", async () => {
+    stubHarvest();
+    let repository: string | null = REPOSITORY;
+    const { result, rerender } = renderHookWithProviders(() =>
+      useHarvestImport(repository),
+    );
+    await act(async () => result.current.read(""));
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    repository = null;
+    rerender();
+    repository = REPOSITORY;
+    rerender();
+
+    expect(result.current.preview).toBeNull();
   });
 });

@@ -59,10 +59,11 @@ prop rather than reaching for a replacement.
 
 ## What is here
 
-| Double      | Replaces                 | Why                                                                                                                     |
-| ----------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `zxing.ts`  | `@zxing/library`         | There is no camera, and the decoder is not what the scanner's tests are about.                                          |
-| `camera.ts` | `navigator.mediaDevices` | Same, one layer down. Not an alias: a global rather than a module, installed per test and restored by `tests/setup.ts`. |
+| Double               | Replaces                     | Why                                                                                                                       |
+| -------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `zxing.ts`           | `@zxing/library`             | There is no camera, and the decoder is not what the scanner's tests are about.                                            |
+| `camera.ts`          | `navigator.mediaDevices`     | Same, one layer down. Not an alias: a global rather than a module, installed per test and restored by `tests/setup.ts`.   |
+| `textRecognition.ts` | `src/lib/textRecognition.ts` | No worker, canvas or WebAssembly engine in a test DOM. Keyed by specifier, as a module of this app rather than a package. |
 
 ## The stub that used to be here
 

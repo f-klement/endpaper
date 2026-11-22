@@ -5,7 +5,7 @@
  * spends running: measured across the suite, `environment` was 168s of a 245s
  * run, paid once per file.
  */
-/** Tests for src/pages/types.ts: the shared tag grouping and constants. */
+/** Tests for src/pages/types.ts: the shared tag grouping, constants and the patron draft. */
 
 import { readFileSync } from "node:fs";
 
@@ -18,6 +18,7 @@ import {
   Locale,
   ReadStatus,
   TagCategory,
+  type PatronOut,
 } from "../../src/api/generated/model";
 import {
   CONDITION_ORDER,
@@ -29,8 +30,12 @@ import {
   TAG_CHIP_CLASSES,
   TAG_CHIP_SELECTED,
   TAG_PILL_CLASSES,
+  BLANK_DRAFT,
+  calendarToday,
+  draftOf,
   everyOneOf,
   groupTagsByCategory,
+  hasExpired,
 } from "../../src/pages/types";
 import type { ThemePreference } from "../../src/theme";
 import { makeTag, makeTagSet, resetIds } from "../factories";
@@ -411,5 +416,65 @@ describe("the lending willingness", () => {
     expect(LENDING_ORDER[LENDING_ORDER.length - 1]).toBe(
       LendingWillingness.never,
     );
+  });
+});
+
+const withExpiry = (expires_on: string | null) => ({ expires_on }) as PatronOut;
+
+const recorded = {
+  name: "Ada Lovelace",
+  card_number: "0042",
+  email: "ada@example.org",
+  phone: "020 7946 0000",
+  street: "St James's Square",
+  house_number: "12",
+  postcode: "SW1Y 4JH",
+  city: "London",
+  expires_on: "2027-03-01",
+};
+
+describe("draftOf", () => {
+  it("opens the form on every field the patron has recorded", () => {
+    expect(draftOf({ ...recorded } as PatronOut)).toEqual(recorded);
+  });
+
+  it("opens an empty box for every optional field recorded as nothing", () => {
+    const patron = {
+      ...recorded,
+      email: null,
+      phone: null,
+      street: null,
+      house_number: null,
+      postcode: null,
+      city: null,
+      expires_on: null,
+    } as PatronOut;
+    expect(draftOf(patron)).toEqual({
+      ...BLANK_DRAFT,
+      name: "Ada Lovelace",
+      card_number: "0042",
+    });
+  });
+});
+
+describe("calendarToday", () => {
+  it("names the reader's own calendar day, not the UTC one", () => {
+    // Built from local fields, so this holds in any time zone the suite runs in.
+    const late = new Date(2026, 0, 31, 23, 59);
+    expect(calendarToday(late)).toBe("2026-01-31");
+  });
+});
+
+describe("hasExpired", () => {
+  it("still holds a registration on its expiry date", () => {
+    expect(hasExpired(withExpiry("2026-05-04"), "2026-05-04")).toBe(false);
+  });
+
+  it("lapses a registration the day after its expiry date", () => {
+    expect(hasExpired(withExpiry("2026-05-04"), "2026-05-05")).toBe(true);
+  });
+
+  it("never lapses a registration with no expiry date", () => {
+    expect(hasExpired(withExpiry(null), "2999-01-01")).toBe(false);
   });
 });

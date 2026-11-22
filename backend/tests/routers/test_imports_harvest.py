@@ -1,0 +1,717 @@
+"""Tests for the harvest half of backend/routers/imports.py, and `MarcImport.for_harvest`.
+
+The repository is `respx` at an address literal behind `fetch.pinned_client`, as in
+`tests/test_harvester.py`, which holds the client's own paging and bounds. What is
+here needs a database: the gates, the matching, what a created Book is, and the run.
+"""
+
+import re
+
+import pytest
+import respx
+from sqlalchemy import select
+
+import harvester
+import settings_store
+from enums import HarvestFormat, OwnershipStatus, RecordOrigin, SettingKey
+from models import Book, Classification, Harvest, PendingHeading
+from routers.imports import HARVEST_RUNNING, NOT_RESUMABLE, REPOSITORY_CHANGED
+from tests.corpus import REPO
+from tests.test_harvester import BASE, MARC, list_records, oai_dc_record, oai_record, response
+
+PREVIEW = "/api/imports/harvest/preview"
+#: The apply names the repository its preview read, as the card sends it.
+APPLY = f"/api/imports/harvest?repository={BASE}"
+
+#: The two client modules that read the harvester's 409 codes: the card words
+#: both, and the hook drops its read on `REPOSITORY_CHANGED`.
+SETTINGS = REPO / "frontend/src/pages/SettingsPage/LibrarySettingsPage"
+CARD = SETTINGS / "components/HarvestImport.tsx"
+HOOKS = SETTINGS / "hooks.ts"
+
+
+def switched_on(db, *, library: bool = True, harvester: bool = True) -> None:
+    settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true" if library else "false")
+    settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, BASE)
+    settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "true" if harvester else "false")
+
+
+def a_repository(*records: str, prefix: str = "marcxml", namespace: str = MARC) -> None:
+    """The three requests a run makes, the last answering `records` on one page,
+    from a repository offering one format: MARCXML by default."""
+    respx.get(BASE, params={"verb": "Identify"}).respond(
+        text=response("<Identify><repositoryName>Old Catalogue</repositoryName></Identify>")
+    )
+    respx.get(BASE, params={"verb": "ListMetadataFormats"}).respond(
+        text=response(
+            f"<ListMetadataFormats><metadataFormat><metadataPrefix>{prefix}</metadataPrefix>"
+            f"<metadataNamespace>{namespace}</metadataNamespace></metadataFormat></ListMetadataFormats>"
+        )
+    )
+    respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": prefix}).respond(
+        text=list_records(*records)
+    )
+
+
+def a_dublin_core_repository(*records: str) -> None:
+    """`a_repository`, offering Dublin Core alone."""
+    a_repository(*records, prefix="oai_dc", namespace=harvester.OAI_DC)
+
+
+def with_a_heading(title: str, *numbers: str, isbn: str | None = None) -> str:
+    """A record carrying Dewey headings, `004` alone by default, which a file import would confirm."""
+    dewey = "".join(
+        f'<datafield tag="082" ind1="0" ind2="4"><subfield code="a">{number}</subfield></datafield>'
+        for number in numbers or ("004",)
+    )
+    return oai_record(title, isbn=isbn).replace("</record></metadata>", f"{dewey}</record></metadata>")
+
+
+def pending(db, book_id: int) -> list[tuple[str, bool]]:
+    """A Book's raised headings by number, and whether each is settled, re-read."""
+    db.expire_all()
+    rows = db.scalars(
+        select(PendingHeading).where(PendingHeading.book_id == book_id).order_by(PendingHeading.id)
+    )
+    return [(row.number, row.settled_at is not None) for row in rows]
+
+
+@pytest.fixture
+def harvesting(db):
+    switched_on(db)
+
+
+class TestTheGates:
+    @pytest.mark.parametrize("path", [PREVIEW, APPLY])
+    def test_a_member_is_refused(self, client, member, harvesting, path):
+        assert client.post(path, headers=member["headers"]).status_code == 403
+
+    @pytest.mark.parametrize("path", [PREVIEW, APPLY])
+    def test_the_route_is_404_with_the_switch_off(self, client, admin, db, path):
+        switched_on(db, harvester=False)
+        assert client.post(path, headers=admin["headers"]).status_code == 404
+
+    @pytest.mark.parametrize("path", [PREVIEW, APPLY])
+    def test_the_route_is_404_outside_library_mode(self, client, admin, db, path):
+        switched_on(db, library=False)
+        assert client.post(path, headers=admin["headers"]).status_code == 404
+
+    @respx.mock
+    def test_the_route_answers_with_both_on(self, client, admin, harvesting):
+        """Anti vacuity for the 404s."""
+        a_repository(oai_record("One"))
+        assert client.post(PREVIEW, headers=admin["headers"]).status_code == 200
+
+    @respx.mock
+    def test_a_repository_failure_is_a_502_that_names_no_address(self, client, admin, harvesting):
+        respx.get(BASE, params={"verb": "Identify"}).respond(status_code=500)
+
+        res = client.post(PREVIEW, headers=admin["headers"])
+
+        assert res.status_code == 502
+        assert "10.0.9.9" not in res.text
+
+    @pytest.mark.parametrize("path", [PREVIEW, APPLY])
+    @respx.mock
+    def test_a_harvest_while_another_runs_is_a_409_that_fetches_nothing(
+        self, client, admin, harvesting, db, path
+    ):
+        """A retry behind a proxy that timed the first out would otherwise
+        import every record with no ISBN twice."""
+        with harvester.one_run():
+            res = client.post(path, headers=admin["headers"])
+
+        assert res.status_code == 409
+        assert res.json()["detail"]["code"] == HARVEST_RUNNING
+        assert respx.calls.call_count == 0
+        assert db.scalars(select(Harvest)).all() == []
+
+    @respx.mock
+    def test_an_apply_naming_another_repository_is_a_409_that_fetches_nothing(
+        self, client, admin, harvesting, db
+    ):
+        """A tab that read the address before another tab saved a new one
+        previewed a repository this would not harvest."""
+        res = client.post(
+            "/api/imports/harvest",
+            params={"repository": "http://10.0.9.10/oai"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 409
+        assert res.json()["detail"]["code"] == REPOSITORY_CHANGED
+        assert "10.0.9" not in res.json()["detail"]["message"]
+        assert respx.calls.call_count == 0
+        assert db.scalars(select(Harvest)).all() == []
+
+    @respx.mock
+    def test_an_apply_naming_the_stored_repository_with_spaces_around_it_runs(
+        self, client, admin, harvesting
+    ):
+        """Anti vacuity for the refusal above, and the settings read does not trim."""
+        a_repository(oai_record("One"))
+
+        res = client.post(
+            "/api/imports/harvest", params={"repository": f" {BASE} "}, headers=admin["headers"]
+        )
+
+        assert res.status_code == 200
+
+    @respx.mock
+    def test_a_refused_apply_spends_none_of_the_import_limit(self, client, admin, harvesting):
+        """The refusal reads before `import_limiter`, so a tab refused for a stale
+        address may read again and harvest at once."""
+        a_repository(oai_record("One"))
+        stale = {"repository": "http://10.0.9.10/oai"}
+
+        refused = [
+            client.post("/api/imports/harvest", params=stale, headers=admin["headers"]).status_code
+            for _ in range(4)
+        ]
+
+        assert refused == [409] * 4
+        assert client.post(APPLY, headers=admin["headers"]).status_code == 200
+
+    def test_the_card_words_every_code_as_the_route_spells_it(self):
+        """Each side's tests spell the codes with their own literal, so a code
+        respelt on one side stays green on both while the card reads a running
+        harvest as a lost race. This holds the keys of `REFUSAL_BY_CODE`."""
+        body = re.search(r"\bconst REFUSAL_BY_CODE\b[^{]*\{([^}]*)\}", CARD.read_text(encoding="utf-8"))
+
+        assert body is not None
+        assert sorted(re.findall(r"^\s*(\w+):", body.group(1), re.MULTILINE)) == sorted(
+            [HARVEST_RUNNING, NOT_RESUMABLE, REPOSITORY_CHANGED]
+        )
+
+    def test_the_hook_drops_its_read_on_the_code_the_route_spells(self):
+        declared = re.findall(r'error\.code === "([^"]*)"', HOOKS.read_text(encoding="utf-8"))
+
+        assert declared == [REPOSITORY_CHANGED]
+
+
+class TestThePreview:
+    @respx.mock
+    def test_it_counts_what_is_held_and_writes_nothing(self, client, admin, harvesting, make_book, db):
+        make_book(admin["headers"], title="Held", author="An Author")
+        a_repository(
+            oai_record("Held").replace("</datafield>", "</datafield>" + _author("An Author"), 1),
+            oai_record("New"),
+            oai_record("Gone", deleted=True),
+        )
+
+        body = client.post(PREVIEW, headers=admin["headers"]).json()
+
+        assert (body["readable"], body["already_held"], body["deleted"], body["records_seen"]) == (2, 1, 1, 3)
+        assert body["repository_name"] == "Old Catalogue"
+        assert db.scalar(select(Harvest.id)) is None
+        assert db.scalars(select(Book.title)).all() == ["Held"]
+
+
+def _author(name: str) -> str:
+    return f'<datafield tag="100" ind1="1" ind2=" "><subfield code="a">{name}</subfield></datafield>'
+
+
+class TestTheApply:
+    @respx.mock
+    def test_a_created_book_is_nobodys_public_and_points_at_its_run(self, client, admin, harvesting, db):
+        a_repository(oai_record("New"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        book = db.scalars(select(Book)).one()
+        assert (book.added_by_user_id, book.is_private, book.harvest_id) == (None, False, body["harvest_id"])
+        assert (book.record_origin, book.ownership) == (RecordOrigin.OAI_HARVEST, OwnershipStatus.UNKNOWN)
+
+    @respx.mock
+    def test_the_run_records_its_counts_and_who_ran_it(self, client, admin, harvesting, db):
+        a_repository(oai_record("One"), oai_record("Two"), oai_record("Gone", deleted=True))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        run = db.get_one(Harvest, body["harvest_id"])
+        assert (run.base_url, run.metadata_prefix, run.run_by_user_id) == (
+            BASE,
+            "marcxml",
+            admin["user"]["id"],
+        )
+        assert (run.records_seen, run.records_added, run.finished_at is not None) == (3, 2, True)
+        assert (body["created"], body["deleted"]) == (2, 1)
+
+    @respx.mock
+    def test_a_book_matched_by_isbn_is_filled_and_not_overwritten(
+        self, client, admin, harvesting, make_book, db
+    ):
+        held = make_book(admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441172719")
+        record = oai_record("Dune, retitled", isbn="9780441172719").replace(
+            "</record></metadata>",
+            '<datafield tag="260" ind1=" " ind2=" "><subfield code="b">Ace</subfield></datafield>'
+            "</record></metadata>",
+        )
+        a_repository(record)
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        book = db.get_one(Book, held["id"])
+        assert (body["matched"], body["created"]) == (1, 0)
+        assert (book.title, book.publisher, book.harvest_id) == ("Dune", "Ace", None)
+
+    @respx.mock
+    def test_a_record_crediting_nobody_never_matches_a_credited_book(
+        self, client, admin, harvesting, make_book, db
+    ):
+        make_book(admin["headers"], title="Collected Poems", author="Somebody Else")
+        a_repository(oai_record("Collected Poems"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["created"]) == (0, 1)
+
+    @respx.mock
+    def test_a_created_books_headings_wait_as_suggestions(self, client, admin, harvesting, db):
+        a_repository(with_a_heading("Computing"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        book = db.scalars(select(Book)).one()
+        assert db.scalar(select(Classification.id)) is None
+        assert pending(db, book.id) == [("004", False)]
+        assert body["headings_pending"] == 1
+
+    @respx.mock
+    def test_a_book_matched_by_isbn_gets_no_heading_and_no_suggestion(
+        self, client, admin, harvesting, make_book, db
+    ):
+        """The record is some other Book's, whose headings it has no say over."""
+        held = make_book(admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441172719")
+        a_repository(with_a_heading("Dune", isbn="9780441172719"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["headings_pending"]) == (1, 0)
+        assert db.scalar(select(Classification.id)) is None
+        assert pending(db, held["id"]) == []
+
+    @respx.mock
+    def test_a_book_matched_by_author_and_title_gets_no_heading_and_no_suggestion(
+        self, client, admin, harvesting, make_book, db
+    ):
+        """The ladder's second rung is another record's Book as much as the first."""
+        held = make_book(admin["headers"], title="Dune", author="Frank Herbert")
+        credited = "</datafield>" + _author("Frank Herbert")
+        a_repository(with_a_heading("Dune").replace("</datafield>", credited, 1))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["created"], body["headings_pending"]) == (1, 0, 0)
+        assert db.scalar(select(Classification.id)) is None
+        assert pending(db, held["id"]) == []
+
+    @respx.mock
+    def test_a_member_private_book_is_neither_matched_nor_named(self, client, admin, member, harvesting, db):
+        res = client.post(
+            "/api/books",
+            json={
+                "title": "Private Diary",
+                "author": "A Member",
+                "isbn": "9780441172719",
+                "is_private": True,
+            },
+            headers=member["headers"],
+        )
+        assert res.status_code == 201, res.text
+        a_repository(oai_record("Public Record", isbn="9780441172719"))
+
+        res = client.post(APPLY, headers=admin["headers"])
+
+        assert (res.json()["matched"], res.json()["created"], res.json()["skipped"]) == (0, 0, 1)
+        assert "Private Diary" not in res.text
+        private = db.scalars(select(Book).where(Book.title == "Private Diary")).one()
+        assert (private.harvest_id, private.added_by_user_id) == (None, member["user"]["id"])
+
+
+class TestARerunMatchesByRecordIdentifier:
+    """A record with no ISBN matches only on its title and author, so a Book a
+    cataloguer corrected after the first run matched nothing on the ladder and
+    a re-run, the natural answer to `truncated`, created it again. The
+    identifier it was created from is what holds it now."""
+
+    @staticmethod
+    def _corrected(db, harvest_id: int) -> Book:
+        """The harvested Book, its title corrected here after the run."""
+        book = db.scalars(select(Book).where(Book.harvest_id == harvest_id)).one()
+        book.title = "One, corrected"
+        db.commit()
+        return book
+
+    @respx.mock
+    def test_a_second_run_matches_a_corrected_book_and_creates_nothing(self, client, admin, harvesting, db):
+        a_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()
+        book = self._corrected(db, first["harvest_id"])
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (again["matched"], again["created"]) == (1, 0)
+        assert db.scalars(select(Book.id)).all() == [book.id]
+        assert (book.harvested_identifier, book.title) == ("oai:x:One", "One, corrected")
+
+    @respx.mock
+    def test_a_second_run_raises_only_the_headings_the_record_newly_carries(
+        self, client, admin, harvesting, db
+    ):
+        a_repository(with_a_heading("One", "004"))
+        book = self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+        a_repository(with_a_heading("One", "004", "510"))
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert again["headings_pending"] == 1
+        assert pending(db, book.id) == [("004", False), ("510", False)]
+
+    @respx.mock
+    def test_a_discarded_set_is_not_raised_again(self, client, admin, harvesting, db):
+        a_repository(with_a_heading("One", "004"))
+        book = self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+        discarded = client.post(f"/api/books/{book.id}/pending-headings/discard", headers=admin["headers"])
+        assert discarded.status_code == 204
+        a_repository(with_a_heading("One", "004", "510"))
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert again["headings_pending"] == 1
+        assert pending(db, book.id) == [("004", True), ("510", False)]
+
+    @respx.mock
+    def test_a_confirmed_heading_is_not_raised_again(self, client, admin, harvesting, db):
+        a_repository(with_a_heading("One", "004"))
+        book = self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+        confirmed = client.post(f"/api/books/{book.id}/pending-headings/confirm", headers=admin["headers"])
+        assert confirmed.status_code == 200, confirmed.text
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert again["headings_pending"] == 0
+        assert pending(db, book.id) == [("004", True)]
+
+    @respx.mock
+    def test_the_preview_of_a_second_run_counts_it_held(self, client, admin, harvesting, db):
+        a_repository(oai_record("One"))
+        self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+
+        body = client.post(PREVIEW, headers=admin["headers"]).json()
+
+        assert (body["readable"], body["already_held"]) == (1, 1)
+
+    @respx.mock
+    def test_the_same_identifier_from_another_repository_is_not_matched(self, client, admin, harvesting, db):
+        """An OAI identifier is unique within its repository only."""
+        elsewhere = Harvest(base_url="http://10.0.0.1/oai", metadata_prefix="marc21")
+        db.add(elsewhere)
+        db.flush()
+        db.add(Book(title="Another book", harvest_id=elsewhere.id, harvested_identifier="oai:x:One"))
+        db.commit()
+        a_repository(oai_record("One"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["created"]) == (0, 1)
+
+    @respx.mock
+    def test_a_record_whose_book_is_in_the_trash_is_left_there(self, client, admin, harvesting, db):
+        a_repository(oai_record("One"))
+        book = self._corrected(db, client.post(APPLY, headers=admin["headers"]).json()["harvest_id"])
+        assert client.delete(f"/api/books/{book.id}", headers=admin["headers"]).status_code == 204
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (again["created"], again["in_trash"]) == (0, 1)
+
+
+class TestADublinCoreRun:
+    """A repository offering no MARCXML, read in `oai_dc` through the same
+    apply and the same ladder."""
+
+    @respx.mock
+    def test_the_preview_says_it_read_dublin_core(self, client, admin, harvesting):
+        a_dublin_core_repository(oai_dc_record("One"))
+
+        body = client.post(PREVIEW, headers=admin["headers"]).json()
+
+        assert (body["metadata_format"], body["metadata_prefix"], body["readable"]) == (
+            "dublin_core",
+            "oai_dc",
+            1,
+        )
+
+    @respx.mock
+    def test_a_marc_run_says_it_read_marcxml(self, client, admin, harvesting):
+        a_repository(oai_record("One"))
+
+        assert client.post(PREVIEW, headers=admin["headers"]).json()["metadata_format"] == "marcxml"
+
+    @respx.mock
+    def test_a_created_book_carries_the_records_values_and_waits_on_no_heading(
+        self, client, admin, harvesting, db
+    ):
+        a_dublin_core_repository(
+            oai_dc_record(
+                "Dune : a novel",
+                "<dc:creator>Herbert, Frank</dc:creator>",
+                "<dc:subject>ddc:813</dc:subject>",
+                "<dc:date>1965</dc:date>",
+                "<dc:identifier>urn:isbn:9780441172719</dc:identifier>",
+                key="dune",
+            )
+        )
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        book = db.scalars(select(Book)).one()
+        assert (book.title, book.subtitle, book.author, book.year, book.isbn) == (
+            "Dune",
+            "a novel",
+            "Frank Herbert",
+            1965,
+            "9780441172719",
+        )
+        assert (book.harvest_id, book.harvested_identifier, book.is_private) == (
+            body["harvest_id"],
+            "oai:x:dune",
+            False,
+        )
+        assert (body["metadata_format"], body["headings_pending"]) == ("dublin_core", 0)
+        assert pending(db, book.id) == []
+
+    @respx.mock
+    def test_a_book_is_matched_by_isbn_and_filled_not_overwritten(
+        self, client, admin, harvesting, make_book, db
+    ):
+        held = make_book(admin["headers"], title="Dune", author="Frank Herbert", isbn="9780441172719")
+        a_dublin_core_repository(
+            oai_dc_record(
+                "Dune, retitled",
+                "<dc:publisher>Ace</dc:publisher>",
+                "<dc:identifier>ISBN 0441172717</dc:identifier>",
+            )
+        )
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        book = db.get_one(Book, held["id"])
+        assert (body["matched"], body["created"]) == (1, 0)
+        assert (book.title, book.publisher, book.harvest_id) == ("Dune", "Ace", None)
+
+    @respx.mock
+    def test_a_book_is_matched_by_author_and_title(self, client, admin, harvesting, make_book, db):
+        make_book(admin["headers"], title="Dune", author="Frank Herbert")
+        a_dublin_core_repository(oai_dc_record("Dune", "<dc:creator>Herbert, Frank</dc:creator>"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["matched"], body["created"]) == (1, 0)
+
+    @respx.mock
+    def test_a_second_run_matches_by_the_record_identifier_and_creates_nothing(
+        self, client, admin, harvesting, db
+    ):
+        a_dublin_core_repository(oai_dc_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()
+        book = db.scalars(select(Book).where(Book.harvest_id == first["harvest_id"])).one()
+        book.title = "One, corrected"
+        db.commit()
+
+        again = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (again["matched"], again["created"]) == (1, 0)
+        assert db.scalars(select(Book.id)).all() == [book.id]
+
+    @respx.mock
+    def test_a_deleted_record_is_counted_and_deletes_nothing(self, client, admin, harvesting, db):
+        a_dublin_core_repository(oai_dc_record("Kept"), oai_record("Gone", deleted=True))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        assert (body["created"], body["deleted"], body["records_seen"]) == (1, 1, 2)
+
+
+RESUMABLE = "/api/imports/harvest/resumable"
+
+
+def a_busy_repository(*records: str, prefix: str = "marcxml") -> None:
+    """`a_repository` whose one page hands back token `t1`, and which answers
+    503 for it: every run of it stops after its first page."""
+    a_repository(*records, prefix=prefix)
+    respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": prefix}).respond(
+        text=list_records(*records, token="t1")
+    )
+    respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(status_code=503)
+
+
+def continuing(harvest_id: int, path: str = APPLY) -> str:
+    return f"{path}{'&' if '?' in path else '?'}continues={harvest_id}"
+
+
+class TestATruncatedRunIsKept:
+    @respx.mock
+    def test_the_run_records_where_it_stopped_and_the_format_it_read(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        run = db.get_one(Harvest, body["harvest_id"])
+        assert body["truncated"] is True
+        assert (run.metadata_format, run.resume_token, run.resume_skip) == (HarvestFormat.MARCXML, "t1", 0)
+        assert run.continues_harvest_id is None
+
+    @respx.mock
+    def test_a_run_read_to_the_end_records_nowhere_to_resume(self, client, admin, harvesting, db):
+        """Anti vacuity for the above."""
+        a_repository(oai_record("One"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        run = db.get_one(Harvest, body["harvest_id"])
+        assert (run.metadata_format, run.resume_token, run.resume_skip) == (HarvestFormat.MARCXML, None, None)
+
+    @respx.mock
+    def test_it_is_offered_for_continuing(self, client, admin, harvesting):
+        a_busy_repository(oai_record("One"))
+        harvest_id = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+
+        body = client.get(RESUMABLE, headers=admin["headers"]).json()
+
+        assert (body["harvest_id"], body["metadata_format"]) == (harvest_id, "marcxml")
+        assert body["records_seen"] == 1
+
+    @respx.mock
+    def test_a_run_read_to_the_end_offers_nothing(self, client, admin, harvesting):
+        a_repository(oai_record("One"))
+        client.post(APPLY, headers=admin["headers"])
+
+        res = client.get(RESUMABLE, headers=admin["headers"])
+
+        assert (res.status_code, res.json()) == (200, None)
+
+    def test_the_offer_is_refused_to_a_member_and_absent_with_the_switch_off(self, client, admin, member, db):
+        switched_on(db, harvester=False)
+        assert client.get(RESUMABLE, headers=admin["headers"]).status_code == 404
+        switched_on(db)
+        assert client.get(RESUMABLE, headers=member["headers"]).status_code == 403
+
+
+class TestCarryingOnATruncatedRun:
+    @respx.mock
+    def test_it_reads_on_from_the_stored_token_as_a_new_run_pointing_at_the_old(
+        self, client, admin, harvesting, db
+    ):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"))
+        )
+
+        body = client.post(continuing(first), headers=admin["headers"]).json()
+
+        run = db.get_one(Harvest, body["harvest_id"])
+        assert (body["created"], body["truncated"]) == (1, False)
+        assert (run.continues_harvest_id, run.resume_skip) == (first, None)
+        assert db.scalars(select(Book.title).where(Book.harvest_id == run.id)).all() == ["Two"]
+
+    @respx.mock
+    def test_the_preview_reads_on_from_the_stored_token_and_writes_nothing(
+        self, client, admin, harvesting, db
+    ):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"), oai_record("Three"))
+        )
+
+        body = client.post(continuing(first, PREVIEW), headers=admin["headers"]).json()
+
+        assert (body["records_seen"], body["readable"]) == (2, 2)
+        assert db.scalars(select(Harvest.id)).all() == [first]
+
+    @respx.mock
+    def test_a_continued_run_is_no_longer_offered(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"))
+        )
+        client.post(continuing(first), headers=admin["headers"])
+
+        again = client.post(continuing(first), headers=admin["headers"])
+
+        assert again.status_code == 409
+        assert again.json()["detail"]["code"] == NOT_RESUMABLE
+        assert client.get(RESUMABLE, headers=admin["headers"]).json() is None
+
+    @respx.mock
+    def test_a_run_that_was_not_cut_short_is_refused_and_nothing_is_fetched(
+        self, client, admin, harvesting, db
+    ):
+        a_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        asked = respx.calls.call_count
+
+        res = client.post(continuing(first, PREVIEW), headers=admin["headers"])
+
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, NOT_RESUMABLE)
+        assert respx.calls.call_count == asked
+
+    @respx.mock
+    def test_a_set_named_beside_a_continuation_is_refused(self, client, admin, harvesting):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+
+        res = client.post(f"{continuing(first)}&set_spec=theses", headers=admin["headers"])
+
+        assert res.status_code == 400
+
+    @respx.mock
+    def test_a_continuation_reads_the_set_its_run_read(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(f"{APPLY}&set_spec=theses", headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"))
+        )
+
+        body = client.post(continuing(first), headers=admin["headers"]).json()
+
+        assert db.get_one(Harvest, body["harvest_id"]).set_spec == "theses"
+
+    @respx.mock
+    def test_a_forgotten_token_is_a_502_telling_the_admin_to_start_over(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=response('<error code="badResumptionToken">gone</error>')
+        )
+
+        res = client.post(continuing(first), headers=admin["headers"])
+
+        assert (res.status_code, res.json()["detail"]) == (502, harvester.FORGOTTEN_POINT)
+        assert db.scalars(select(Harvest.id)).all() == [first]
+
+
+class TestTheOfferIsBoundToTheStoredAddress:
+    """A token is one repository's position in its own list. Replayed to
+    another, it would disclose that position to a host that never issued it and
+    read nonsense, so a run is offered only under the address it read."""
+
+    OTHER = "http://10.0.9.10:8080/oai"
+
+    @respx.mock
+    def test_a_run_of_another_address_is_neither_offered_nor_carried_on(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, self.OTHER)
+        asked = respx.calls.call_count
+
+        offered = client.get(RESUMABLE, headers=admin["headers"])
+        res = client.post(continuing(first, PREVIEW), headers=admin["headers"])
+
+        assert (offered.status_code, offered.json()) == (200, None)
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, NOT_RESUMABLE)
+        assert respx.calls.call_count == asked

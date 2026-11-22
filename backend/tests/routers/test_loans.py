@@ -15,7 +15,7 @@ import lending
 import notifications
 import settings_store
 from enums import SettingKey
-from models import Book, Loan
+from models import Book, Loan, Patron, User
 from routers import loans as loans_module
 from tests.conftest import _make_account
 from tests.helpers import items, selects_for
@@ -719,6 +719,205 @@ class TestLendingToSomeoneWithoutAnAccount:
             headers=admin["headers"],
         )
         assert items(client.get("/api/loans", headers=member["headers"])) == []
+
+
+def _register_patron(client, admin, **overrides) -> dict:
+    """A patron registered as the desk registers one, through the patron route."""
+    body = {"card_number": "C1", "name": "Pat Lee"} | overrides
+    res = client.post("/api/patrons", json=body, headers=admin["headers"])
+    assert res.status_code == 201, res.text
+    return res.json()
+
+
+def _lend_to_patron(client, headers, book_id: int, patron_id: int):
+    return client.post(
+        "/api/loans", json={"book_id": book_id, "loaned_to_patron_id": patron_id}, headers=headers
+    )
+
+
+class TestLendingToAPatron:
+    """A registered patron is the third kind of borrower, and naming one is an admin's act."""
+
+    def test_an_admin_lends_to_a_patron(self, client, admin, book):
+        patron = _register_patron(client, admin)
+
+        res = _lend_to_patron(client, admin["headers"], book["id"], patron["id"])
+
+        assert res.status_code == 201, res.text
+        assert res.json()["to_patron"] is True
+
+    def test_the_loan_names_neither_a_member_nor_a_typed_name(self, client, db, admin, book):
+        patron = _register_patron(client, admin)
+
+        _lend_to_patron(client, admin["headers"], book["id"], patron["id"])
+
+        loan = db.query(Loan).one()
+        assert (loan.loaned_to_patron_id, loan.loaned_to_user_id, loan.loaned_to_name) == (
+            patron["id"],
+            None,
+            None,
+        )
+
+    def test_the_response_carries_no_patron_id(self, client, admin, book):
+        """A flag says a patron has the book; the id would say which one to anybody who sees it."""
+        patron = _register_patron(client, admin)
+
+        body = _lend_to_patron(client, admin["headers"], book["id"], patron["id"]).json()
+
+        assert "loaned_to_patron_id" not in body
+
+    def test_the_book_says_a_patron_has_it(self, client, admin, book):
+        patron = _register_patron(client, admin)
+        _lend_to_patron(client, admin["headers"], book["id"], patron["id"])
+
+        fetched = client.get(f"/api/books/{book['id']}", headers=admin["headers"]).json()
+
+        assert fetched["active_loan"]["to_patron"] is True
+
+    def test_a_loan_to_a_member_is_not_to_a_patron(self, loan):
+        assert loan["to_patron"] is False
+
+    def test_a_member_naming_a_patron_is_a_403(self, client, admin, member, book):
+        patron = _register_patron(client, admin)
+
+        assert _lend_to_patron(client, member["headers"], book["id"], patron["id"]).status_code == 403
+
+    def test_a_member_learns_nothing_about_a_patron_id_that_does_not_exist(self, client, member, book):
+        """403 before the lookup, as on the patron routes, so no id answers differently."""
+        assert _lend_to_patron(client, member["headers"], book["id"], 999).status_code == 403
+
+    def test_a_patron_that_does_not_exist_is_a_404_to_an_admin(self, client, admin, book):
+        res = _lend_to_patron(client, admin["headers"], book["id"], 999)
+
+        assert (res.status_code, res.json()["detail"]) == (404, "Patron not found")
+
+    def test_naming_a_patron_and_a_typed_name_is_422(self, client, admin, book):
+        patron = _register_patron(client, admin)
+
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_patron_id": patron["id"], "loaned_to_name": "Pat"},
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+
+    def test_naming_a_patron_and_a_member_is_422(self, client, admin, member, book):
+        patron = _register_patron(client, admin)
+
+        res = client.post(
+            "/api/loans",
+            json={
+                "book_id": book["id"],
+                "loaned_to_patron_id": patron["id"],
+                "loaned_to_user_id": member["user"]["id"],
+            },
+            headers=admin["headers"],
+        )
+
+        assert res.status_code == 422
+
+    def test_an_expired_registration_still_lends(self, client, admin, book):
+        """No circulation policy: the form shows the expiry and the desk decides."""
+        patron = _register_patron(client, admin, expires_on="2001-02-03")
+
+        assert _lend_to_patron(client, admin["headers"], book["id"], patron["id"]).status_code == 201
+
+    def test_lending_twice_to_a_registered_patron_registers_nobody_twice(self, client, db, admin, book):
+        """The ticket's flow: register at the first loan, then find and lend again."""
+        patron = _register_patron(client, admin)
+        first = _lend_to_patron(client, admin["headers"], book["id"], patron["id"]).json()
+        client.put(f"/api/loans/{first['id']}/return", headers=admin["headers"])
+
+        again = _lend_to_patron(client, admin["headers"], book["id"], patron["id"])
+
+        assert again.status_code == 201, again.text
+        assert (db.query(Patron).count(), db.query(Loan).count()) == (1, 2)
+
+
+#: A name and a card no other text in a response could contain, so a body
+#: holding either is caught by a substring test.
+_PATRON = {"name": "Quillon Vanderspeck", "card_number": "QV-7731"}
+
+
+def _loan_on(client, reader, book_id: int, surface: str) -> dict:
+    """The patron's loan as one surface serves it to this reader."""
+    if surface == "book":
+        return client.get(f"/api/books/{book_id}", headers=reader["headers"]).json()["active_loan"]
+    path = {"loans": "/api/loans", "overdue": "/api/loans/overdue"}[surface]
+    [row] = items(client.get(path, headers=reader["headers"]))
+    return row
+
+
+#: Each surface a member reads a loan on, under each mode it lists one in.
+_MEMBER_SURFACES = [("book", False), ("book", True), ("loans", False), ("loans", True), ("overdue", True)]
+
+
+class TestOnlyAnAdminLearnsWhichPatron:
+    """An admin reads the patron's name and card on every loan surface (owner,
+    2026-11-20); a member reads that a registered patron has the book, and no more.
+
+    A member's overdue arm runs in library mode alone, the one mode where that
+    page lists a loan somebody else made; outside it the page is empty and the
+    arm would pass on nothing. The book and the loans list run in both modes,
+    since a leak on either mode's path is one.
+    """
+
+    @pytest.fixture
+    def lent(self, client, admin, book) -> dict:
+        patron = _register_patron(client, admin, **_PATRON)
+        past = (datetime.now(UTC) - timedelta(days=3)).replace(tzinfo=None).isoformat()
+        res = client.post(
+            "/api/loans",
+            json={"book_id": book["id"], "loaned_to_patron_id": patron["id"], "due_at": past},
+            headers=admin["headers"],
+        )
+        assert res.status_code == 201, res.text
+        return res.json()
+
+    def test_the_admin_who_lent_it_reads_the_patron(self, lent):
+        assert lent["patron"] == _PATRON
+
+    @pytest.mark.parametrize("surface", ["book", "loans", "overdue"])
+    def test_an_admin_reads_the_patron_on_every_surface(self, client, admin, book, lent, surface):
+        assert _loan_on(client, admin, book["id"], surface)["patron"] == _PATRON
+
+    @pytest.mark.parametrize(("surface", "library"), _MEMBER_SURFACES)
+    def test_a_member_reads_that_a_patron_has_it_and_not_who(
+        self, client, db, member, book, lent, surface, library
+    ):
+        library_mode(db, library)
+        loan = _loan_on(client, member, book["id"], surface)
+
+        assert (loan["to_patron"], loan["patron"]) == (True, None)
+
+    @pytest.mark.parametrize(("surface", "library"), _MEMBER_SURFACES)
+    def test_no_member_response_carries_the_name_or_the_card(
+        self, client, db, member, book, lent, surface, library
+    ):
+        library_mode(db, library)
+        path = {"book": "/api/books/{id}", "loans": "/api/loans", "overdue": "/api/loans/overdue"}[surface]
+        res = client.get(path.format(id=book["id"]), headers=member["headers"])
+
+        assert res.status_code == 200, res.text
+        # Its own precondition, so the arm does not pass on a body with no loan
+        # in it should its sibling ever stop running this surface.
+        assert '"to_patron":true' in res.text
+        assert [value for value in _PATRON.values() if value in res.text] == []
+
+    def test_a_member_returning_the_book_is_not_told_who_had_it(self, client, member, lent):
+        res = client.put(f"/api/loans/{lent['id']}/return", headers=member["headers"])
+
+        assert res.status_code == 200, res.text
+        assert [value for value in _PATRON.values() if value in res.text] == []
+
+    @pytest.mark.parametrize("fmt", ["csv", "txt", "html"])
+    def test_an_admins_export_names_no_patron(self, client, admin, lent, fmt):
+        """The export is the admin's own catalogue, and a loan is not part of it."""
+        res = client.get("/api/books/export", params={"format": fmt}, headers=admin["headers"])
+
+        assert res.status_code == 200, res.text
+        assert [value for value in _PATRON.values() if value in res.text] == []
 
 
 class TestOverdueNotify:
@@ -1526,7 +1725,7 @@ class TestTheSingleLoanHelperIsScoped:
 
         with pytest.raises(HTTPException) as refusal:
             loans_module._loan_with_relations(
-                loan["id"], db, admin["user"]["id"], datetime.now(UTC).replace(tzinfo=None)
+                loan["id"], db, db.get(User, admin["user"]["id"]), datetime.now(UTC).replace(tzinfo=None)
             )
 
         assert refusal.value.status_code == 404
@@ -1537,7 +1736,7 @@ class TestTheSingleLoanHelperIsScoped:
         loan = self._private_loan(client, make_book, member, other_user)
 
         out = loans_module._loan_with_relations(
-            loan["id"], db, member["user"]["id"], datetime.now(UTC).replace(tzinfo=None)
+            loan["id"], db, db.get(User, member["user"]["id"]), datetime.now(UTC).replace(tzinfo=None)
         )
 
         assert out.id == loan["id"]
@@ -1550,7 +1749,7 @@ class TestTheSingleLoanHelperIsScoped:
         from confirming the id."""
         with pytest.raises(HTTPException) as refusal:
             loans_module._loan_with_relations(
-                999999, db, admin["user"]["id"], datetime.now(UTC).replace(tzinfo=None)
+                999999, db, db.get(User, admin["user"]["id"]), datetime.now(UTC).replace(tzinfo=None)
             )
 
         assert refusal.value.status_code == 404
@@ -1573,6 +1772,7 @@ class TestTheSingleLoanHelperIsScoped:
         loan = self._private_loan(client, make_book, member, other_user)
         db.expire_all()
         now = datetime.now(UTC).replace(tzinfo=None)
+        viewer = db.get(User, member["user"]["id"])
 
         engine = db.get_bind()
         seen: list[str] = []
@@ -1582,7 +1782,7 @@ class TestTheSingleLoanHelperIsScoped:
 
         event.listen(engine, "before_cursor_execute", record)
         try:
-            loans_module._loan_with_relations(loan["id"], db, member["user"]["id"], now)
+            loans_module._loan_with_relations(loan["id"], db, viewer, now)
         finally:
             event.remove(engine, "before_cursor_execute", record)
 

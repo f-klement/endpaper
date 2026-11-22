@@ -16,7 +16,7 @@
  *
  * **The server's `ORDER BY` is not removed and is not a second opinion.** It
  * makes an unordered query deterministic, which the API's other consumers (the
- * export, the docs at `/docs`) still want. What it stopped being is the order a
+ * export, a script calling the API) still want. What it stopped being is the order a
  * reader sees: a screen drawing a name list calls this rather than trusting the
  * order it was handed.
  *

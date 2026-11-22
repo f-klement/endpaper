@@ -152,9 +152,10 @@ Spell the URL with the driver named:
 DATABASE_URL=postgresql+pg8000://user:password@host/endpaper
 ```
 
-The `pg8000` driver is in the image, so nothing has to be installed. **A bare
-`postgresql://` fails**, because it asks SQLAlchemy for its default Postgres driver, which
-the image does not carry. Do not put `?sslmode=` in the URL either: this driver does not
+The `pg8000` driver is in the image, so nothing has to be installed. **Startup refuses a
+bare `postgresql://`**, and any driver but `pg8000`, with a message naming the spelling above:
+the bare scheme asks SQLAlchemy for its default Postgres driver, which the image does not
+carry. Do not put `?sslmode=` in the URL either: this driver does not
 accept it, and the first connection fails. TLS is `DATABASE_SSL_MODE`'s job.
 
 ### TLS to Postgres
@@ -366,8 +367,9 @@ Both are configured in the app: sign in as an admin and open Settings.
 
 ## ORCID
 
-An author lookup asks ORCID's public API for a name that neither the GND nor the Library of
-Congress name authority file holds. It needs no key and has no setting.
+In library mode, an author lookup asks ORCID's public API for a name that neither the GND nor
+the Library of Congress name authority file holds. Outside library mode it asks ORCID only to
+resolve an ORCID iD already stored for the author. It needs no key and has no setting of its own.
 
 **ORCID's terms make that API free for non commercial use, and they bind whoever runs the
 deployment, not Endpaper.** Its [Public APIs Terms of

@@ -79,15 +79,15 @@ join is a cartesian product: measured against a two-book database, it hands one 
 classification of another member's private book. Five successive versions of the rule tried
 to recognise a correct join and each was shown to leak by the next review round, while the
 list of statements a person had checked stayed put. So the judgement is a person's, recorded
-once in an allowlist of ten statements across four modules with a reason beside each. Two of
-those ten are correct indexes reported anyway, which is the cost of not guessing.
+once in an allowlist with a reason beside each. Some of its entries are correct indexes
+reported anyway, which is the cost of not guessing.
 
 Which tables are children of `books` is derived from the foreign keys. Which of those
 children have a viewer of their own is pinned by hand, because a foreign key to `users` is
 not the answer: three tables in this schema carry a `created_by_user_id` no query consults,
 and a fourth, `custom_fields`, carries one that is read on purpose. A new child fails a test
 until somebody classifies it, so it cannot default to unguarded. Every read is
-counted, including the two written through the Shelf, so one more statement is a decision
+counted, including those written through the Shelf, so one more statement is a decision
 rather than an edit.
 
 ### A reading record is private in a second, separate way
@@ -732,9 +732,18 @@ shelf.
 **It does not answer any of the five questions a second time.** The gate is
 `routers.public.public_reader`, imported rather than restated, so `/sru` runs the same rate
 limit and the same two switches in the same order, and is the same 404 rather than 403.
-Rows are `Shelf.seen_by_the_public`. It is not in `middleware._INDEXABLE_PATHS`, so it
-stays `noindex` even on a deployment that has invited a crawler: an SRU base URL is a
-machine interface and a search engine holding it gains nobody anything.
+**A third switch is its own**, `sru_server_enabled`, off by default and read after that gate
+by `routers.sru.sru_switch`, so probing it spends the same rate limit. Revision
+`f73ebc9f0436` writes it on only where the catalogue was published before the switch existed,
+so an upgrade neither narrows nor widens what a deployment serves. It is read together
+with the publish state (`settings_store.sru_is_served`), so it cannot publish a catalogue on
+its own. Off, it answers the gate's own 404 byte for byte rather than an SRU diagnostic: a
+diagnostic would tell a stranger that a catalogue is here and its protocol withheld, and both
+gates refuse before the query string is read, so the answer cannot depend on whether a
+matching Book exists. Rows are `Shelf.seen_by_the_public`. It is not in
+`middleware._INDEXABLE_PATHS`, so it stays `noindex` even on a deployment that has invited a
+crawler: an SRU base URL is a machine interface and a search engine holding it gains nobody
+anything.
 
 **The column boundary is `marc.py`'s field mapping, and it holds by accident until a test
 makes it hold on purpose.** MARC is a richer record than `PublicBookOut`: it has fields for
@@ -807,15 +816,16 @@ weight of eight is the dearest expensive index against the dearest cheap one, so
 worst legal query in either class lands in the same place, about 91 to 141 ms against that
 catalogue.
 
-**The table above is measured at a point and not over a space, and one of the dimensions it
-holds fixed matters.** Every row was taken at **one tag per book**. `dc.subject` is a
-correlated `EXISTS` over `book_tags`, so its cost scales with that: measured separately,
-eight `dc.subject` comparisons are 126 to 138 ms at one tag per book and 1,579 to 1,660 ms
-at forty, while `dc.description` and `dc.title` are flat across the same sweep. The weight
-is therefore right at one tag and under-prices `dc.subject` at libraries that tag heavily,
-and tags per book is the one input a library sets with no limit. Recorded rather than
-acted on: weighting against a dimension the server does not measure per request is a design
-change rather than a correction.
+**The table above was taken at one tag per book, and `dc.subject` is the one index that
+dimension moves.** It is a correlated `EXISTS` over `book_tags`, so it evaluates its matcher
+once per tag link: measured against 3,000 public books, eight `dc.subject` comparisons are 45
+to 56 ms at one tag per book and 624 to 644 ms at forty, while `dc.description` and `dc.title`
+stay flat. So a `dc.subject` comparison charges eight at one tag and one more unit for each tag
+per book above one, which is what one tag per book measured against a cheap comparison. The
+server counts tag links over books on the **public** shelf once per request that names the
+index, because the charge reaches the client in a refusal and a count over private books would
+publish something about them. A public shelf averaging more than 57 tags per book refuses every
+`dc.subject` query, because a single comparison there costs about the whole budget.
 
 All of it scales with the catalogue, which is why it is quoted against a named size rather
 than stated as a property of the server.
@@ -893,6 +903,82 @@ falls back to `scope["server"]`, which is the address this process is **bound** 
 a reverse proxy that is an internal listen address, and a client sending a malformed `Host`
 would be handed it in a document it can keep. Reading the header means the only two answers
 are the client's own host and `localhost`.
+
+### OAI-PMH
+
+**The third surface reachable without a session.** It answers the five questions as `/sru`
+does, by the same code: the gate is `routers.public.public_reader`, then its own switch,
+`oai_provider_enabled`, read by `routers.oai.oai_switch` with the publish state
+(`settings_store.oai_is_served`). Off by default on a fresh install and an upgrade alike: its
+revision writes no settings row. Off is the gate's own 404, byte for byte. Rows are
+`Shelf.seen_by_the_public`, the only row filter in `backend/oai.py`; `oai_dc` is built from
+`PublicBookOut` through `serialisation.books_to_public_out`, so it cannot name a withheld
+column, and `marc21` is `marc.record_element`, held by the test named under [SRU](#sru).
+`tests/test_oai.py::TestTheRecordCarriesNoColumnThePublicPayloadWithholds` renders a stored
+Book with a distinctive value in every withheld text column and looks for each in the response.
+
+**What is new is the deleted record**, because it is the one answer here about a Book that is
+not public now. The argument, to check in order:
+
+1. **A tombstone holds a Book id and a datestamp, nothing else** (`models.OaiTombstone`). A
+   deleted header carries exactly those two.
+2. **A tombstone is written only for a Book that was public immediately before the write.**
+   `harvest.py` asks `Shelf.seen_by_the_public` for the ids before and after each flush and
+   each bulk statement, rather than reading `is_private` or `deleted_at` itself, so a Book that
+   was always private never gets one, and its id answers `idDoesNotExist` exactly as a free id
+   does. `tests/test_harvest.py::TestEveryRouteOutOfThePublicViewLeavesATombstone::test_a_book_never_public_leaves_none`.
+   **Public here means not private and not trashed, whatever the publish state**, so a Book
+   could leave while nothing was published. That is why the next rule exists.
+3. **No tombstone is written before the provider first answered a request** (the
+   `oai_first_served` setting, written by `routers/oai.py` on the first request it serves, the
+   owner's decision): a Book that left before then could have been seen by no harvester.
+   After it, every departure is tombstoned, whether or not the switch is on at that moment,
+   since a harvester may still hold the record. A restore keeps the earlier of its own moment
+   and the archive's. `tests/test_harvest.py::TestNoTombstoneBeforeTheFirstRequestServed`.
+4. **A Book that returns loses its tombstone** and its datestamp moves, so the live record and
+   a deleted header for one id are never both served.
+5. **An id is never issued twice, a restore included.** A restore brings Books with their ids
+   but not the id counter, so `harvest.wholesale` raises the counter past every tombstone;
+   otherwise the next Book on a fresh database could take the id of a record purged before the
+   backup, and a harvester's record would silently become another work.
+
+**What a header says that the JSON catalogue does not: a day.** Every datestamp is served to
+the day (`Identify` advertises `YYYY-MM-DD`), the day a record last changed or left. A record
+never edited carries the day its Book was added, which `PublicBookSort` withholds from the
+JSON catalogue. The owner accepted that disclosure and chose the day over the second to
+narrow it. An upgrade stamps every existing Book with the one moment of the upgrade, never
+its `added_at`.
+
+**Every path out of the public view, and what covers it:**
+
+| Path | How it is written | Covered by |
+|---|---|---|
+| Trash | ORM, `deleted_at` set | the flush events |
+| Made private, one or in bulk | ORM, or a bulk `UPDATE` through the session | the flush events; the `do_orm_execute` event |
+| Purged from the trash | ORM delete | tombstoned already, when it was trashed |
+| A merge's losing copy | ORM delete of a public Book | the flush events |
+| A restore from backup | bulk statements under `harvest.wholesale` | public ids before against after, once |
+| Library mode, publishing or the switch off | settings | the whole endpoint is 404 |
+
+**What neither event sees**: SQL written as text, and a statement run on a bare `Connection`.
+`tests/test_harvest.py::TestNothingWritesPastBothDoors` reads the application tree for a
+literal text write to the harvested tables, for driver SQL, and for a `connection()` or
+`connect()` call outside `harvest.py`, the migration runner and the database creation
+script; it does not see a `Connection` reached by another name. Migrations are outside it, and a migration that changed published
+values would leave datestamps unmoved, never publish a row. A bulk `INSERT` into a child table
+stamps the Books its rows name, and one whose Books its parameters do not name, an `INSERT`
+from a `SELECT`, is refused.
+
+**The resumption token cannot widen a harvest.** It is base64 over the format, the window and
+the last id served, each of which a caller may ask for in a fresh request; the row filter and
+the page size are the server's and are not in it. The window travels as whole days, and the
+query compares each bound as the start of its day whatever built it, so a forged token cannot
+bisect a day to recover a datestamp to the second. Anything not exactly that shape is
+`badResumptionToken`. Every argument is read against a closed syntax, printable ASCII within
+256 characters, before anything is looked up, so `<request>` echoes only accepted values, and
+`badVerb` and `badArgument` echo none. `Identify` names the application and the repository
+contact address an admin stored for it, never a member's; the switch cannot be stored on
+without one.
 
 ### Telegram's host is a constant, and SMTP always verifies
 
@@ -1102,11 +1188,11 @@ paragraph.
 | `/auth/switch` | 10 / min | username + address | The same counter: a password check that returns a session on another account |
 | `/auth/register` | 5 / hour | address | Bounds account creation |
 | `/api/imports/*` | 3 / min | username | `/csv` writes thousands of rows in one transaction, holding the single SQLite writer against the library. `/preview` writes nothing and is limited for the other half of the cost: parsing a 5.02 MB, 20,000 row export is 3.081 seconds of CPU, measured, and `MAX_UPLOAD_BYTES` caps the body without capping the rate. One window covers both, so the ordinary flow of a preview then an import spends two of the three |
-| metadata lookup, search, refresh, enrich | 60 / min | username | A search asks eight public catalogues at once, and a lookup can reach any of eighteen catalogues, the first two at once and the rest in turn until one answers; eight are asked only about ISBNs in their own registration groups, all `978` groups and no group in two remits, so in the default order a `978` ISBN whose group this build can name reaches eleven at most, while a `979` ISBN, or one whose group it cannot name, can reach all eighteen. Each of the three Z39.50 catalogues a lookup reaches searches once more, with the ten digit form, when the first search misses, and puts a search again at most twice when the catalogue refuses it as a temporary error, so one of them takes at most six searches on one connection. These count catalogues, not requests: a catalogue may take more than one request to answer. This library runs or pays for none of them |
-| `GET /api/books/authors/authority`, `POST /api/books/authors/identifiers`, `GET /api/books/authors/wikipedia` | 10 / min | username | **Three paths, one counter**, because all three reach an authority service on a member's behalf; sharing it means a member reloading the authors page cannot also spend the confirmation budget. Sized for the search rather than the confirmation: the supplier's published figures are 6,000 simple lookups a minute and **30 complex searches**, and this counter cannot tell the two apart, so three members searching flat out at ten each are exactly at that thirty. **Which of the two is "more expensive" depends on the unit, and this row has stated it in the wrong one twice.** Since 2026-08-28 a confirmation is one lobid request, four to Wikidata and up to three to VIAF: **8 requests, about 1.08 MB, three hosts**; where VIAF produces no cluster, six more Wikidata calls replace the VIAF ones rather than joining them, so the ceiling is **14 requests** and the bytes fall, the six measuring 1,942 together. A lookup reaches three hosts and no VIAF, four on a miss, and is the **larger of the two in requests**: its name search branch is one lobid request, one to the Library of Congress name authority file (two where the gateway's session has gone cold) and 2 Wikidata requests per candidate, each file capped by `MAX_CANDIDATES`, so **23 requests and about 130 KB**, the name authority file's page measuring up to 80,603 bytes on 2026-11-16; its resolve branch is a full `resolve` per stored identifier under the same cap, so **25 requests and about 93 KB**. **ORCID is the fourth host, asked only where both files answered and found nobody**, so its people never sit beside theirs: one request, at most 1,037 bytes over four names measured 2026-11-16, plus 2 Wikidata requests per candidate, so **a miss is at most 14 requests** and the ceilings above stand; a stored ORCID resolved is one ORCID request and two Wikidata requests each, at most 15. ORCID publishes 12 requests a second and 25,000 reads a day per address for its anonymous tier. The second figure is reachable, and this counter is not sized against it: one member searching misses flat out at this ceiling spends 14,400 a day, so two do not fit, and one member resolving stored ORCID iDs flat out spends five per call, 72,000 a day, nearly three times the figure alone. ORCID refusing then reads as ORCID unavailable, which costs the fallback and nothing the two national files answer. The name authority file is on the Library of Congress catalogue's own gateway, which has no published figure this row is sized against. At ten a minute that is up to 250 outbound requests for lookups against 140 for confirmations. **In bytes the comparison inverts**: a confirmation is about 25x a name search and 12x a resolve, because the VIAF fallback record alone can be 781,687 bytes. **The third path is the one to read before re-sizing this, for two reasons this row did not previously have to state.** It is the first consumer of this counter that fires on a **page render** rather than on a deliberate act, so it is spent by navigation rather than by intent; and it spends the whole of that budget at **Wikidata**, which this row is not sized against, while the 30-complex-search figure above is lobid's. It is at most 10 requests per call (five filtered, five unfiltered), so a member with 201 or more confirmed authors reaches 100 Wikidata requests a minute at this ceiling, against a measured tolerance of roughly 50 `wbgetclaims` in two minutes from one address. The resulting 429 is not seen by the reader: it degrades to a link to the Wikidata item, and it lands on the confirmation path as well, silently, because both routes reach Wikidata from one address. The shared counter is what **bounds** the combined spend rather than what causes the collision, so splitting it raises the total and makes the collision more likely, not less. A client is expected to cache: Endpaper's own asks once an hour per locale and not at all for a library that has confirmed nobody. Totals measured live 2026-08-28; the per-call figures are in `backend/authority.py` and are not repeated here so they cannot drift against it. VIAF publishes no figure to size against, and serves no `robots.txt` |
+| metadata lookup, search, refresh, enrich | 60 / min | username | A search asks eight public catalogues at once, and a lookup can reach any of nineteen catalogues, the first two at once and the rest in turn until one answers; nine are asked only about ISBNs in their own registration groups, all `978` groups and no group in two remits, so in the default order a `978` ISBN whose group this build can name reaches eleven at most, while a `979` ISBN, or one whose group it cannot name, can reach all nineteen. Each of the four Z39.50 catalogues a lookup reaches puts a search again at most twice when the catalogue refuses it as a temporary error, and three of them search once more, with the ten digit form, when the first search misses, so one of them takes at most six searches on one connection. These count catalogues, not requests: a catalogue may take more than one request to answer. This library runs or pays for none of them. One is stricter than this limit: the Slovak National Library closes a connection once about eight have arrived from one address within a minute, and that is per address, so the members together reach it, through every lookup, refresh and enrichment of a `978-80` book, a `979` one or any whose group cannot be named, that the leading pair misses; faster than that, which this limit allows, some lookups report it unavailable rather than the book missing |
+| `GET /api/books/authors/authority`, `POST /api/books/authors/identifiers`, `GET /api/books/authors/wikipedia` | 10 / min | username | **Three paths, one counter**, because all three reach an authority service on a member's behalf; sharing it means a member reloading the authors page cannot also spend the confirmation budget. Sized for the search rather than the confirmation: the supplier's published figures are 6,000 simple lookups a minute and **30 complex searches**, and this counter cannot tell the two apart, so three members searching flat out at ten each are exactly at that thirty. **Which of the two is "more expensive" depends on the unit, and this row has stated it in the wrong one twice.** Since 2026-08-28 a confirmation is one lobid request, four to Wikidata and up to three to VIAF, and since 2026-11-18 one to the Biblioteca Nacional de Portugal where the person has a Portuguese number: **9 requests, about 1.08 MB, four hosts**; where VIAF produces no cluster, six more Wikidata calls replace the VIAF ones rather than joining them, so the ceiling is **15 requests** and the bytes fall, the six measuring 1,942 together. A lookup reaches three hosts and no VIAF, four on a library mode miss (a stored number reaches its one file and Wikidata), and is the **larger of the two in requests**: its name search branch is one lobid request, one to the Library of Congress name authority file (two where the gateway's session has gone cold) and 2 Wikidata requests per candidate, each file capped by `MAX_CANDIDATES`, so **23 requests and about 130 KB**, the name authority file's page measuring up to 80,603 bytes on 2026-11-16; its resolve branch is a full `resolve` per stored identifier under the same cap, so **25 requests and about 93 KB**. **ORCID is the fourth host, asked by name only in library mode and only where both files answered and found nobody**, so its people never sit beside theirs: one request, at most 1,037 bytes over four names measured 2026-11-16, plus 2 Wikidata requests per candidate, so **a miss is at most 14 requests** and the ceilings above stand; a stored ORCID resolved is one ORCID request and two Wikidata requests each, at most 15. **The Biblioteca Nacional de Portugal is the fifth host, asked on a lookup only for a stored PTBNP number with no GND, LCNAF or ORCID number beside it**: one request per number, at most 2,901 bytes over 20 records measured 2026-11-18 and capped at 65,536, plus two Wikidata requests each, so at most 15 and about 20 KB. The BNP publishes no figure to size against. ORCID publishes 12 requests a second and 25,000 reads a day per address for its anonymous tier. The second figure is reachable, and this counter is not sized against it: one library mode member searching misses flat out at this ceiling spends 14,400 a day, so two do not fit, and one member resolving stored ORCID iDs flat out spends five per call, 72,000 a day, nearly three times the figure alone. ORCID refusing then reads as ORCID unavailable, which costs the fallback and nothing the two national files answer. The name authority file is on the Library of Congress catalogue's own gateway, which has no published figure this row is sized against. At ten a minute that is up to 250 outbound requests for lookups against 150 for confirmations. **In bytes the comparison inverts**: a confirmation is about 25x a name search and 12x a resolve, because the VIAF fallback record alone can be 781,687 bytes. **The third path is the one to read before re-sizing this, for two reasons this row did not previously have to state.** It is the first consumer of this counter that fires on a **page render** rather than on a deliberate act, so it is spent by navigation rather than by intent; and it spends the whole of that budget at **Wikidata**, which this row is not sized against, while the 30-complex-search figure above is lobid's. It is at most 10 requests per call (five filtered, five unfiltered), so a member with 201 or more confirmed authors reaches 100 Wikidata requests a minute at this ceiling, against a measured tolerance of roughly 50 `wbgetclaims` in two minutes from one address. The resulting 429 is not seen by the reader: it degrades to a link to the Wikidata item, and it lands on the confirmation path as well, silently, because both routes reach Wikidata from one address. The shared counter is what **bounds** the combined spend rather than what causes the collision, so splitting it raises the total and makes the collision more likely, not less. A client is expected to cache: Endpaper's own asks once an hour per locale and not at all for a library that has confirmed nobody. Totals measured live 2026-08-28; the per-call figures are in `backend/authority.py` and are not repeated here so they cannot drift against it. VIAF publishes no figure to size against, and serves no `robots.txt` |
 | `POST /api/books/covers/backfill` | 6 / min | username | One run fetches up to a hundred images from the same services the metadata limit protects, and it is the call a member would press twice while the first is still running |
 | `POST /api/books/identifiers/backfill` | 6 / min | username | One run resolves up to fifty Google Books volume ids, one request each, so this is the only counter here whose ceiling is a **bill** rather than somebody else's patience, and the bill is stated rather than left as a word: `MAX_IDENTIFIER_BACKFILL` 50 x 6 a minute is **300 metered volume requests a minute per member**, five times what `METADATA_LIMIT` can spend at the same supplier, against one key the household pays for. **The set does not drain on its own**: a book Google has no volume for is written nothing, stays a candidate, and the cursor returns to 0 at the end of the library, so the run repeats indefinitely by design. **Its own counter rather than the metadata one**, because the two are different units: one metadata call is one book and one call here is fifty, so sharing the sixty a minute would let a backfill exhaust the counter scanning a barcode depends on. **Its own counter rather than the cover backfill's**, though the number is the same: that one answers to two free image services and this one to a metered key, so they would move for different reasons |
-| `GET /api/public/books`, `GET /api/public/books/{id}`, `GET /sru` | 120 / min | address | The fourth reason: this is the published catalogue, so it is the first surface a stranger can reach. **It is no longer the only counter here whose caller holds no session**, and that sentence stood in this row until account recovery arrived beneath it; it is the only one that serves catalogue rows to such a caller. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book, which is where the per query cost is and which is the path an indiscriminate crawler takes. **One counter for three paths, not three counters**, because there is one published catalogue and a harvester and a browser reading the same records should not have two budgets between them |
+| `GET /api/public/books`, `GET /api/public/books/{id}`, `GET /api/public/books/{id}/availability`, `GET /sru`, `GET /oai` | 120 / min | address | The fourth reason: this is the published catalogue, so it is the first surface a stranger can reach. **It is no longer the only counter here whose caller holds no session**, and that sentence stood in this row until account recovery arrived beneath it; it is the only one that serves catalogue rows to such a caller. **Keyed on the weakest key in the module**, because there is no username to key on and `X-Forwarded-For` is not trusted, so behind a proxy this is closer to a global cap than a per client one. 120 a minute is far above a person turning pages. **It does not stop a bulk copy of the listing and is not meant to**: `MAX_PAGE_SIZE` is 200, so a 3,000 record catalogue is 15 requests, and a published catalogue is a public document. What it bounds is the record by record read, one request per book (two where availability is shown), which is where the per query cost is and which is the path an indiscriminate crawler takes. **One counter for every public path, not one each**, because there is one published catalogue and a harvester and a browser reading the same records should not have two budgets between them. **Availability says whether a book is out now, and polling shows when that changes**: a stranger asking about one record repeatedly, which this limit allows twice a second, learns when it went out and came back, though never when it is due back or who has it. The owner accepted availability on that basis; the due date is where the line was drawn |
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | address | The fifth reason, and both of these rows are it: getting back into an account, from a caller who by definition holds no session. One budget across both routes, because they are the same act (ask for a one time code to be produced) and splitting it would let a caller spend five of each. **Charged on the address so a botnet cannot queue a hundred requests against one member** |
 | `/auth/reset/request`, `/auth/verify/request` | 5 / hour | account | The other half of the same charge, and both halves are needed: an address limit alone leaves one address free to work through the roster slowly, one member at a time. **The key is caller chosen, so this is a denial of service on recovery**, stated rather than argued away. What bounds the damage is that the thing being rationed is already bounded: at most one live request exists per account however many times it is asked for. **The wider residual, stated because it is a property of this window rather than of the key**: the limiter refuses a key it has never seen once its table is full rather than evicting a live one, so 4,096 distinct account keys held live deny recovery to every account not already tracked, for an hour. Filling them takes 4,096 requests across about 820 addresses at five each. Refusing rather than evicting is still right, because every eviction policy lets an attacker choose which key leaves |
 | `/auth/reset/redeem`, `/auth/verify` | 10 / hour | username + address | Guessing a one time code. The code is 60 bits, so the keyspace is not what is doing the work here and this is: an approved reset code lives one hour. Keyed like a sign in rather than on the account alone, because an account-only key would let anybody lock a member out of the recovery they had just been granted |
@@ -1445,15 +1531,15 @@ separator, so nothing is written outside the covers directory whatever the entry
 
 ## Catalogue requests
 
-Twenty third party catalogues are asked for records: Open Library, the DNB, K10plus, the
+Twenty one third party catalogues are asked for records: Open Library, the DNB, K10plus, the
 BnF, the Library of Congress, the Austrian National Library, the Spanish National Library,
 the National Library of Greece, the Czech National Library, the Polish National Library,
-LIBRIS, the Swedish union catalogue, the Royal Danish Library, BIBSYS, the Norwegian union catalogue, Melinda, the Finnish union catalogue, the Biblioteca Nacional Argentina, the Biblioteca Nacional de Uruguay and Google Books over HTTP, and the SBN, Italy's union catalogue, PORBASE, Portugal's, and the National Széchényi Library, Hungary's national library, over Z39.50. `backend/fetch.py` is the only place an HTTP
+LIBRIS, the Swedish union catalogue, the Royal Danish Library, BIBSYS, the Norwegian union catalogue, Melinda, the Finnish union catalogue, the Biblioteca Nacional Argentina, the Biblioteca Nacional de Uruguay and Google Books over HTTP, and the SBN, Italy's union catalogue, PORBASE, Portugal's, the National Széchényi Library, Hungary's national library, and the Slovak National Library over Z39.50. `backend/fetch.py` is the only place an HTTP
 client for them is built, and `backend/tests/test_fetch.py` enforces that with an AST pass
 over the tree, because the defect that produced the module was ten hand built clients that
 agreed on the timeout and agreed on nothing else.
 
-**There is a second transport, and three seeded sources use it.** `backend/z3950.py` speaks
+**There is a second transport, and four seeded sources use it.** `backend/z3950.py` speaks
 Z39.50 to national library catalogues, which is the only protocol several of them offer. A
 row whose transport is Z39.50 reaches it through the same dispatch as every other source,
 and `targets.Target` refuses such a row if it names a credential, because this door carries
@@ -1483,12 +1569,13 @@ generated from: the browser policy would be widened to pay for a fetch policy.
 
 ### An address a person typed is resolved once and connected to at that address
 
-**The argument above holds for a module constant and for nothing else**, and two doors'
-addresses are typed by an admin: the household OPDS server, and the webhook URL, whose own
-section is above. `fetch.pinned_client` is what the first of them goes through; the webhook
-is not wired to it, and that section says why the decision is open rather than made.
+**The argument above holds for a module constant and for nothing else**, and three doors'
+addresses are typed by an admin: the household OPDS server, the OAI-PMH repository the
+harvester reads, and the webhook URL, whose own section is above. `fetch.pinned_client` is
+what the first two go through; the webhook is not wired to it, and that section says why the
+decision is open rather than made.
 
-**What the OPDS door's client does.** `fetch.pinned_client` resolves the name, classifies
+**What the OPDS and harvester doors' client does.** `fetch.pinned_client` resolves the name, classifies
 **every** address the resolver answered with, refuses the ones its policy does not admit, and
 then makes the request to the literal address that passed, carrying the name in the `Host`
 header and as the TLS server name. That last step is the one that matters: a check on its own
@@ -1513,7 +1600,7 @@ so does a name that resolves to any of them. **One range changed.** What limits 
 unchanged and is in Known limits below. A name at a public address that proxies inward is
 refused by nothing here, and no address policy anywhere can see it.
 
-**Three of the five outbound doors are not wired to it**, and the count is worth reading
+**Three of the six outbound doors are not wired to it**, and the count is worth reading
 against the list rather than past it. The seventeen seeded catalogues are not, because their
 hosts are module constants. The webhook is not, because which policy fits it is undecided
 rather than known. Z39.50 cannot be, because pinning is done by rewriting an HTTP request and
@@ -1529,11 +1616,11 @@ send this server to a host of its choosing. `fetch.get` therefore sets
 implicit 443 and 80 filled in, at most `MAX_REDIRECTS` of them. Anything else raises
 `RedirectedOffHost`.
 
-That matters most at the eight catalogues with no TLS endpoint, where an on path attacker
+That matters most at the nine catalogues with no TLS endpoint, where an on path attacker
 could answer for the catalogue: over HTTP the Library of Congress, the National Library of
 Greece, the Czech national library, the Biblioteca Nacional Argentina and the Biblioteca
 Nacional de Uruguay, and over Z39.50, which has no redirect to follow and no TLS form here,
-the SBN, PORBASE and the OSZK:
+the SBN, PORBASE, the OSZK and the SNK:
 `docs/decisions.md`, "The Library of Congress is fetched over plaintext HTTP, knowingly"
 and "The National Library of Greece is plaintext too, and the identity check is what that
 costs". Substituting a record is still open to such an attacker; turning one request into a
@@ -2078,6 +2165,19 @@ Worth knowing before exposing this beyond a private network:
   no other setting on their list gives them. No bytes of the response are echoed, though
   its status code is, and so are the titles and authors parsed out of it, which makes the
   door a small oracle rather than a blind one.
+- **The OAI-PMH repository an admin names is fetched by this server, with no host
+  allowlist**, under the OPDS door's household policy and for its reason: migrating off
+  another system on the same network is the case the harvester exists for. So the same
+  reach follows, loopback, every ClusterIP and the router included; link local is refused
+  after resolution, and a link local literal at the write too. Unlike the OPDS door, **only
+  an admin can start a run**, one at a time. Each response is bounded by the catalogue door's
+  byte cap and timeout, a run by its page, record and wall clock caps; `backend/harvester.py`
+  holds them. What the repository sends reaches the admin and the catalogue only as the name
+  it gives itself, shown in the preview, and as the records read out of it, which become
+  public Books nobody added. Nothing else of a response is echoed but its status code and
+  an OAI-PMH error code when it is one of the protocol's own, so only a response that
+  parses as OAI-PMH and as MARCXML or Dublin Core yields its text, and against any other
+  address the door is a small oracle rather than a blind one.
 - **A login stored for a household OPDS server can travel in the clear.** http is admitted
   and https is not required, because these servers rarely carry a certificate, so a login
   stored for an `http` feed travels as `Authorization: Basic` in the clear on the

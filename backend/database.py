@@ -183,8 +183,34 @@ def _check_the_ca_file(chosen: str, ca_file: str) -> None:
         )
 
 
+def _refuse_a_driver_this_image_lacks(url: str) -> None:
+    """Refuse a Postgres URL naming any driver but pg8000, before SQLAlchemy loads it.
+
+    **A bare `postgresql://` asks SQLAlchemy for psycopg**, and this image carries
+    pg8000 alone, so left to SQLAlchemy that URL dies in `create_engine` with a
+    `ModuleNotFoundError` naming a package that is not the problem. `postgres://`
+    fails the same way under another name, and so does any other driver spelled
+    after the `+`: nothing else here is installed, and `ssl_context` and the error
+    mapping below speak pg8000 alone. Refused rather than rewritten, by the
+    owner's ruling: a URL that silently became a different URL would hide itself
+    from somebody who installed another driver on purpose.
+
+    **It must run before `create_engine`**, which imports the driver; `_connect_args`
+    is evaluated first because it is that call's argument. The message names the
+    driver and never the URL, which carries the password.
+    """
+    parsed = make_url(url)
+    if parsed.get_backend_name() in {"postgresql", "postgres"} and parsed.drivername != _PG8000:
+        raise RuntimeError(
+            f"DATABASE_URL asks for the {parsed.drivername!r} Postgres driver, and this "
+            f"image carries only pg8000. Spell the scheme `{_PG8000}://`, as in "
+            f"`{_PG8000}://user:password@host/endpaper`."
+        )
+
+
 def _connect_args(url: str, mode: str, ca_file: str) -> dict[str, Any]:
     """Everything handed to the driver that the URL cannot carry."""
+    _refuse_a_driver_this_image_lacks(url)
     args: dict[str, Any] = {}
     if "sqlite" in url:
         # SQLite guards connections against cross-thread use; FastAPI hands the
@@ -310,10 +336,10 @@ def _say_so_when_the_session_is_in_the_clear(connection: Any, _record: Any) -> N
 
 @event.listens_for(engine, "connect")
 def _sqlite_pragmas(connection: Any, _record: Any) -> None:
-    """The three settings SQLite does not give you by default.
+    """The settings SQLite does not give you by default.
 
-    Applied per connection, because that is the only scope SQLite has for two
-    of them.
+    Applied per connection, because that is the only scope SQLite has for all
+    but the journal mode.
 
     **`foreign_keys`** is off by default, which makes every `ForeignKey` in
     `models.py` and the `ON DELETE CASCADE` on `book_tags` decorative: they
@@ -330,6 +356,18 @@ def _sqlite_pragmas(connection: Any, _record: Any) -> None:
     rather than an immediate "database is locked" error. Five seconds is long
     enough for any write this app makes and short enough not to hide a
     deadlock.
+
+    **`secure_delete`** zeroes deleted content, so an erased patron's name
+    leaves the file at the next checkpoint rather than staying in free space
+    until the page is reused. Off, it stays, and a copy of the volume still
+    holds it after the erasure answered 204. The Alpine image's SQLite is
+    built with it on, so this changes nothing there; it is set so the erasure
+    does not rest on a compile flag, which the SQLite in uv's own Python
+    lacks. `ON` rather than `FAST`, which keeps the I/O but leaves traces on
+    free list pages: measured on SQLite 3.46, deleting 5000 books in one
+    transaction took 149 to 181 ms on, 42 to 52 ms fast and 13 to 33 ms off,
+    and the image already pays the first. What it leaves is in the data
+    model's patron section.
     """
     if "sqlite" not in DATABASE_URL:
         return
@@ -338,6 +376,7 @@ def _sqlite_pragmas(connection: Any, _record: Any) -> None:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA secure_delete=ON")
         cursor.execute(f"PRAGMA synchronous={_synchronous()}")
     finally:
         cursor.close()
@@ -594,13 +633,28 @@ def _month_bucket_unsupported(element: MonthBucket, compiler: Any, **kw: Any) ->
 # ── One Book's capped child tables, one writer at a time ─────────────────────
 
 
-def hold_book_ceilings(db: Session, book_id: int) -> None:
+def hold_book_ceilings(db: Session, book_id: int) -> bool:
     """Hold one Book's capped child tables until this transaction ends.
 
+    **Answers whether the Book is still there.** A merge that deleted it
+    while this waited releases the lock with no row left to hold, and a
+    writer going on regardless writes onto a dead id: a file named for it, or
+    a row its foreign key or its stale UPDATE refuses as a 500. The cover
+    writers and the merge stop on False before they write anything: a route
+    on one Book with its 404, a merge with `errors.MetAnotherChange`.
+
+    **A transaction holding several Books takes them in ascending id.** Two
+    merges with their keepers swapped otherwise each hold one Book and wait on
+    the other's, and Postgres aborts one for the deadlock. `folding.fold` keeps
+    the order; a MARC import, which holds each Book in record order until its
+    one commit, is the known exception, and its deadlock answers 409.
+
     Taken before the count by the file reference report, the heading writer
-    and a MARC import's link writer, and by the merge for its keeper before it
-    carries rows. The identifier writer takes none: its one caller writes onto
-    a Book its own transaction created, which no other transaction can see.
+    and a MARC import's link writer, by the merge for its keeper and each
+    loser before it carries rows, and by every writer of a Book's stored
+    cover or further images. The identifier writer takes none: its one caller
+    writes onto a Book its own transaction created, which no other
+    transaction can see.
     **One lock per Book for every capped table rather than one per table**,
     because a merge carries several of them in one transaction: a lock for one
     table alone leaves the merge racing the writers of every other.
@@ -617,20 +671,20 @@ def hold_book_ceilings(db: Session, book_id: int) -> None:
       waits for the holder's commit. The file reference report, the heading
       writer and the link writer therefore take it only when they would add a
       row (the last two judged from the rows they loaded); the merge takes it
-      always, for its keeper, before it reads anything.
-    * **SQLite** takes nothing here. It serialises writers from a transaction's
-      first write to its commit, which covers a writer whose count follows its
-      own insert and not one that counts before it writes.
+      always, for every Book it touches, before it reads anything.
+    * **SQLite** takes no lock here and only reads the row. It serialises
+      writers from a transaction's first write to its commit, which covers a
+      writer whose count follows its own insert and not one that counts before
+      it writes.
 
     **Whatever is counted has to be read after this call.** A collection loaded
     before it is a count the lock did not cover, so a caller expires or
     refreshes one it may already hold.
     """
+    statement = "SELECT id FROM books WHERE id = :book"
     if db.get_bind().dialect.name == "postgresql":
-        db.execute(
-            text("SELECT id FROM books WHERE id = :book FOR NO KEY UPDATE"),
-            {"book": book_id},
-        )
+        statement += " FOR NO KEY UPDATE"
+    return db.execute(text(statement), {"book": book_id}).first() is not None
 
 
 # ── What a transaction runs once it commits ──────────────────────────────────

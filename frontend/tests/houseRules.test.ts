@@ -390,44 +390,122 @@ const FILE_READERS = [
   "lib/sqlite.ts",
   "lib/stores.ts",
   "lib/takeout.ts",
+  "lib/textRecognition.ts",
+  "lib/textRecognition.worker.ts",
   "lib/zip.ts",
 ];
 
 /**
- * The one network call a reader may make, written as the expression rather than
- * as a file on an exemption list.
+ * The network requests a reader may make, each written as the expression rather
+ * than as a file on an exemption list.
  *
- * `sqlite.ts` fetches the WebAssembly asset Vite emitted, by the URL Vite
- * emitted, with no body: it carries nothing out and there is nowhere for a
- * member's database to go. Exempting the file would have exempted a second
- * `fetch` in it as well, which is the one this rule would need to catch.
+ * Each is of an asset Vite emitted, by the URL Vite emitted, with no body:
+ * `sqlite.ts` fetches its WebAssembly, and the text recogniser's worker loads
+ * its engine's script with `importScripts`, fetches its model, and hands the
+ * engine the URL of its WebAssembly through `locateFile`, which the engine
+ * fetches itself. None carries anything out. Exempting a file would have
+ * exempted a second `fetch` in it as well, which is the one this rule would
+ * need to catch.
+ *
+ * `urlImport` is where the binding has to come from, asserted beside the
+ * exemption. The exemption strips an expression, and an expression names a
+ * binding rather than a value: a local `const wasmUrl = "https://…" +
+ * btoa(theDatabase)` would make an exfiltrating GET exempt by name. This pins
+ * the binding to the build asset Vite emitted, which is the fact that makes the
+ * request carry nothing.
  */
-const ENGINE_FETCH = /fetch\(wasmUrl\)/g;
-const ENGINE_READER = "lib/sqlite.ts";
+const ENGINE_ASSETS: readonly {
+  reader: string;
+  binding: string;
+  urlImport: string;
+  /** The one expression that uses the binding, stripped by the exemption. */
+  use: string;
+}[] = [
+  {
+    reader: "lib/sqlite.ts",
+    binding: "wasmUrl",
+    urlImport: 'import wasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url"',
+    use: "fetch(wasmUrl)",
+  },
+  {
+    reader: "lib/textRecognition.worker.ts",
+    binding: "coreUrl",
+    urlImport:
+      'import coreUrl from "tesseract.js-core/tesseract-core-simd-lstm.js?url"',
+    use: "scope.importScripts(coreUrl)",
+  },
+  {
+    reader: "lib/textRecognition.worker.ts",
+    binding: "wasmUrl",
+    urlImport:
+      'import wasmUrl from "tesseract.js-core/tesseract-core-simd-lstm.wasm?url"',
+    use: "locateFile: () => wasmUrl }",
+  },
+  {
+    reader: "lib/textRecognition.worker.ts",
+    binding: "modelUrl",
+    urlImport:
+      'import modelUrl from "@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz?url"',
+    use: "fetch(modelUrl)",
+  },
+];
 
 /**
- * Where `wasmUrl` has to come from, asserted beside the exemption.
+ * What one engine's source does with an exempt binding: how often it makes the
+ * exempt use, whether the binding comes from the pinned import, and how often
+ * the binding is named. An exemption for an expression that no longer exists
+ * is an exemption waiting to cover something else; this is the half that
+ * notices.
  *
- * The exemption strips an expression, and an expression names a binding rather
- * than a value: a local `const wasmUrl = "https://…" + btoa(theDatabase)` would
- * make an exfiltrating GET exempt by name. This pins the binding to the build
- * asset Vite emitted, which is the fact that makes the call carry nothing.
+ * **The count of names, not a list of the ways a name can be rebound.** The
+ * import existing is not the same as the name at the use being it, and the
+ * first attempt at this refused `const`, `let` and `var`, which is three arms
+ * of an open set: a destructured `const { wasmUrl } = …` and a parameter named
+ * `wasmUrl` both slip past and both shadow the import. There are two
+ * occurrences of each binding, the import and the use, so a third of any
+ * spelling is what this reports.
  */
-const ENGINE_URL_IMPORT =
-  'import wasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url"';
+function exemptUseOf({
+  reader,
+  binding,
+  urlImport,
+  use,
+}: (typeof ENGINE_ASSETS)[number]) {
+  const engine = entries().find(([path]) => path.endsWith(reader));
+  if (engine === undefined) return null;
+  const code = withoutProse(engine[1], langOf(engine[0]));
+  return {
+    uses: code.split(use).length - 1,
+    importsTheAsset: code.includes(urlImport),
+    names: code.match(new RegExp(`\\b${binding}\\b`, "g"))?.length ?? 0,
+  };
+}
+
+/** One exempt use, from the pinned import, and the name used nowhere else. */
+const MADE_ONCE = { uses: 1, importsTheAsset: true, names: 2 };
+
+/** `code` with the exempt uses of the engine at `path`, if it is one, taken out. */
+function withoutEngineRequests(path: string, code: string): string {
+  return ENGINE_ASSETS.filter((one) => path.endsWith(one.reader)).reduce(
+    (left, one) => left.split(one.use).join(""),
+    code,
+  );
+}
 
 /**
  * The ways out this can see, which are fewer than the ways out there are.
  *
- * Six names and one import shape: a reader that calls `fetch`, builds an
- * `XMLHttpRequest`, opens a `WebSocket`, beacons, packs a `FormData`, or imports
- * the generated client. That is every way anything under `lib/` sends **data
- * out** today, so the rule holds. It is not why the published claim holds.
+ * Eight names and one import shape: a reader that calls `fetch`, builds an
+ * `XMLHttpRequest`, opens a `WebSocket`, beacons, packs a `FormData`, opens an
+ * `RTCPeerConnection` (WebRTC is not bound by `connect-src`), loads a script
+ * into a worker with `importScripts`, or imports the generated client.
+ * That is every way anything under `lib/` sends **data out** today, so the rule
+ * holds. It is not why the published claim holds.
  *
  * Both halves of that sentence are load bearing. Requests that carry nothing out
  * are made here and match no arm: `lib/fileReaders.ts` loads five modules with
- * `import()`, at eight sites, and `lib/sqlite.ts` fetches the wasm engine, which
- * is exempted below by its expression. And the scope is `lib/` rather than the
+ * `import()`, at eight sites; and the engine requests in `ENGINE_ASSETS` match
+ * one, and are exempted by their expressions. And the scope is `lib/` rather than the
  * tree, because `api/mutator.ts` navigates on a lost session.
  *
  * **The exclusion is a request that spells none of them, and that set is open.**
@@ -454,6 +532,10 @@ const ENGINE_URL_IMPORT =
  * the second line, and what it is good for is the accident: a reader that grows
  * a request, in the one directory where a member's own bytes are the only bytes
  * there are.
+ *
+ * **A camera frame is held by this rule only together with `ENCODES_PIXELS`.**
+ * The frame is reachable outside `lib/` and no server route refuses a picture,
+ * so this rule covers the frame only because that one keeps its encoding here.
  */
 // **The import arm excludes the generated model, and that is a widening this
 // rule pays for on purpose.** It used to refuse any import from `api/`, which
@@ -470,7 +552,7 @@ const ENGINE_URL_IMPORT =
 // the client is guarded twice and the types are guarded by neither, which is
 // the right way round.
 const REACHES_THE_NETWORK =
-  /\b(fetch|XMLHttpRequest|WebSocket|sendBeacon|FormData|navigator\.send)\b|from "[^"]*\/api\/(?!generated\/model")/;
+  /\b(fetch|XMLHttpRequest|WebSocket|sendBeacon|FormData|navigator\.send|RTCPeerConnection|importScripts)\b|from "[^"]*\/api\/(?!generated\/model")/;
 
 /** What a cell of such a table may be. See `asRow`, which is why it is named. */
 type Cell = string | number | boolean | readonly string[];
@@ -2123,9 +2205,7 @@ describe("a member's book file cannot leave the browser", () => {
       .filter(([path]) => path.startsWith("lib/") && !path.endsWith(".d.ts"))
       .filter(([path, source]) => {
         const code = withoutProse(source, langOf(path));
-        return REACHES_THE_NETWORK.test(
-          path.endsWith(ENGINE_READER) ? code.replace(ENGINE_FETCH, "") : code,
-        );
+        return REACHES_THE_NETWORK.test(withoutEngineRequests(path, code));
       })
       .map(([path]) => path);
 
@@ -2140,22 +2220,18 @@ describe("a member's book file cannot leave the browser", () => {
     expect(fileReaders()).toEqual(FILE_READERS);
   });
 
-  it("makes the one exempt call, so the exemption is not silently unused", () => {
-    // An exemption for an expression that no longer exists is an exemption
-    // waiting to cover something else. This is the half that notices.
-    const engine = entries().find(([path]) => path.endsWith(ENGINE_READER));
-    expect(engine).toBeDefined();
-    const code = withoutProse(engine![1], langOf(engine![0]));
-    expect(code.match(ENGINE_FETCH)).toHaveLength(1);
-    expect(code).toContain(ENGINE_URL_IMPORT);
-    // **The count, not a list of the ways a name can be rebound.** The import
-    // existing is not the same as the name at the fetch site being it, and the
-    // first attempt at this refused `const`, `let` and `var`, which is three
-    // arms of an open set: a destructured `const { wasmUrl } = …` and a
-    // parameter named `wasmUrl` both slip past and both shadow the import.
-    // There are two occurrences today, the import and the fetch, so a third of
-    // any spelling is what this refuses.
-    expect(code.match(/\bwasmUrl\b/g)).toHaveLength(2);
+  it("makes each exempt request once, so no exemption is silently unused", () => {
+    const made = Object.fromEntries(
+      ENGINE_ASSETS.map((one) => [
+        `${one.reader} ${one.use}`,
+        exemptUseOf(one),
+      ]),
+    );
+    expect(made).toEqual(
+      Object.fromEntries(
+        ENGINE_ASSETS.map((one) => [`${one.reader} ${one.use}`, MADE_ONCE]),
+      ),
+    );
   });
 
   it("keeps the picked file out of the value a request is built from", () => {
@@ -2458,6 +2534,52 @@ describe("a member's book file cannot leave the browser", () => {
     );
 
     expect(dead).toEqual([]);
+  });
+});
+
+/**
+ * The ways a picture becomes bytes a request could carry: a canvas encoded or
+ * read back, a frame grabbed, decoded or recorded.
+ *
+ * **It is an enumeration, and that is its bound.** WebGL's `readPixels` and a
+ * `WebCodecs` encoder are in it; a pixel read some other way is not, and a new
+ * one is a new arm. What it is for is the ordinary case: a page that draws the
+ * camera onto a canvas and encodes it spells one of these.
+ *
+ * **`RTCPeerConnection` is here though it encodes nothing by name**: handed the
+ * camera's `MediaStream` it sends frames from page code with no other name in
+ * this list, and `connect-src` does not govern it. Keeping it to the one module
+ * under the network rule, which refuses it too, means no spelling of it passes.
+ */
+const ENCODES_PIXELS =
+  /\b(convertToBlob|toBlob|toDataURL|getImageData|readPixels|captureStream|ImageCapture|createImageBitmap|transferToImageBitmap|VideoFrame|VideoEncoder|MediaRecorder|RTCPeerConnection)\b/;
+
+/**
+ * The one module allowed to turn a camera frame into bytes, which sits in
+ * `lib/` and so under the network rule above, with the worker it posts the
+ * bytes to.
+ */
+const FRAME_ENCODER = "lib/textRecognition.ts";
+
+describe("a camera frame becomes bytes in one module, which cannot reach the network", () => {
+  it("encodes a picture nowhere else under src", () => {
+    // **`docs/featurelist.md` says no picture leaves the device, and the
+    // server cannot back that the way it backs the book file claim**: the
+    // cover route accepts any image. The frame itself is reachable outside
+    // `lib/` (the scan page's reader owns the `<video>` and its hook imports
+    // the cover upload), so the network rule over `lib/` alone does not hold
+    // it. What does is that a frame carries nothing until something encodes
+    // it, and this keeps the one module that does inside that rule. A second
+    // encoding site fails here, which is the prompt to ask where its bytes go.
+    const encoders = entries()
+      .filter(([path]) => !path.endsWith(".d.ts"))
+      .filter(([path, source]) =>
+        ENCODES_PIXELS.test(withoutProse(source, langOf(path))),
+      )
+      .map(([path]) => path);
+
+    expect(encoders).toEqual([FRAME_ENCODER]);
+    expect(FRAME_ENCODER.startsWith("lib/")).toBe(true);
   });
 });
 
@@ -10489,6 +10611,10 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       .map(([path]) => path)
       .sort();
 
+  // **Thirty seconds, because this arm and the setup file arm below parse
+  // the whole test tree**: in a whole suite on a loaded node this one ran
+  // 5,902 ms against vitest's five second default, red with no assertion
+  // failed, and the other 4,181 ms.
   it("reads the committed schema in one module", () => {
     // Outside both trees, so the rule above lets it through; one reader is
     // `committedSchema.ts`'s rule, and its header says why. Seen as a glob
@@ -10514,7 +10640,7 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       .map(([path]) => path);
 
     expect(schemaReaders).toEqual(["./committedSchema.ts"]);
-  });
+  }, 30_000);
 
   it("resolves a one file pattern the way the corpus rule resolves a glob", () => {
     // **Each row is a read this tree had when the rule was written, or its
@@ -10592,7 +10718,7 @@ describe("one file of either tree is read by name from that tree's corpus", () =
       readers(),
       "the reader found nothing at all, so it has stopped reading",
     ).toContain("./setup.ts");
-  });
+  }, 30_000);
 
   it("takes the exemption from the config rather than from a list here", () => {
     // **The derivation, driven, and what it is worth is narrower than it

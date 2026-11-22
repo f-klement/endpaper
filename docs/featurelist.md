@@ -21,14 +21,26 @@ condition, and where it is shelved.
 search, by pointing at the book's own file, or by hand. ISBN lookup chains
 several sources so a European or pre-ISBN book still resolves rather than
 failing at one provider, and English, German, French, Spanish, Portuguese,
-Italian, Greek, Czech and Hungarian titles all resolve. Greek and Czech are the clearest case for
+Italian, Greek, Czech, Hungarian and Slovak titles all resolve. Greek and Czech are the clearest case for
 chaining them: of 50 Greek ISBNs the other free sources answer 8 between
 them and the Greek national catalogue answers 37, and of 50 Czech ISBNs they
 answer 10 and the Czech national catalogue answers 49.
 
+**A barcode that will not scan** (damaged, creased, or never printed) is read
+from its printed digits instead: the camera reads the ISBN line in the browser,
+so no picture leaves the device, and the number read is offered for confirmation
+before anything is looked up. A read whose check digit fails is reported as a
+misread and offered another read, never a lookup.
+
 **Rapid mode** scans a whole shelf without stopping between books. The batch is
 reviewed before anything is written, so a misread barcode is caught before it
 becomes a row.
+
+**A list of ISBNs**, pasted or picked as a text or CSV file, joins the same
+queue: each is looked up at the pace a folder of files is and waits for the same
+review. One list holds at most 500, and none is taken that would leave more than
+500 entries waiting for a lookup. An ISBN whose check digit is wrong is listed
+back rather than looked up.
 
 **Enrichment** fills a sparse record from an external catalogue on request. It is
 always a choice: nothing is fetched in the background, and a field is only
@@ -61,9 +73,9 @@ National Library and K10plus are asked together and their records merged. When n
 answers, the rest are asked in turn until one does: the National Library of Greece, the
 Polish National Library, the Royal Danish Library, the Italian National Library Service
 (SBN, Italy's union catalogue), PORBASE (Portugal's), the National Széchényi Library
-(Hungary's), Open Library, the Austrian National Library, the Czech National
+(Hungary's), the Slovak National Library, Open Library, the Austrian National Library, the Czech National
 Library, the Spanish National Library, LIBRIS (the Swedish union catalogue), Melinda
-(the Finnish union catalogue), BIBSYS (the Norwegian union catalogue), the Argentine National Library, the Uruguayan National Library and Google Books. The Greek, Polish, Danish, Italian, Portuguese, Hungarian, Austrian and Uruguayan libraries are
+(the Finnish union catalogue), BIBSYS (the Norwegian union catalogue), the Argentine National Library, the Uruguayan National Library and Google Books. The Greek, Polish, Danish, Italian, Portuguese, Hungarian, Slovak, Austrian and Uruguayan libraries are
 asked only about ISBNs in the registration
 groups they collect, so a German book does not wait on Athens, and Settings names the groups
 beside each. A title search asks the German National Library, K10plus, Open Library, the
@@ -84,6 +96,11 @@ they are protected is in [the configuration reference](configuration.md#catalogu
 checked before it is offered, so a broken link never becomes a book's cover, and
 a stored cover survives the source going away. Fetching is restricted to an
 allowlist of hosts.
+
+**More than one image of a book.** Beside the cover the shelf shows, a book keeps up
+to seven more: the back, the spine, a dust jacket variant, as evidence of which edition
+you hold. Any of them can be made the shelf cover, and the one it replaces is kept in
+its place.
 
 ## Bringing a library in
 
@@ -165,7 +182,8 @@ that a feed is a catalogue rather than a file: there is nothing to avoid
 storing, and a browser cannot fetch a self hosted server that sends no
 permissive CORS headers. **No route accepts a book file.**
 
-**Import and export** as CSV, and a full backup and restore.
+**Import and export** as CSV, export as plain text or as one web page that opens
+offline, and a full backup and restore.
 
 ## Finding things
 
@@ -363,7 +381,12 @@ whenever library mode is off, so turning library mode back off cannot leave a
 catalogue public.
 
 What a reader with no account gets is **search and one item record, and nothing
-else**. The record names its source, the catalogue it came from or how it was
+else**, unless an admin turns on a switch of its own, off by default, that adds
+one thing to the record: whether the book is **on the shelf or on loan**. A
+title with several copies reads as on the shelf while any public copy is in. A
+stranger sees whether it is out now, and somebody who keeps checking can tell
+when that changes; nobody sees when it is due back or who has it, and a
+private copy counts for nothing either way. The record names its source, the catalogue it came from or how it was
 entered; whether it was changed here is not published. Ownership, lending
 willingness, reading status, member names, notes, purchase details, the trash
 and every per member field are absent from the payload, not merely hidden by a
@@ -373,7 +396,7 @@ catalogue is `noindex` until indexing is separately allowed, because
 publishing a catalogue and inviting a search engine to crawl it are different
 decisions.
 
-**An SRU server, on the same two switches.** A published catalogue can be
+**An SRU server, on the same two switches and one of its own.** A published catalogue can be
 searched by a person; being searched by another institution's software needs a
 protocol, and the one this domain uses is SRU. `/sru` takes a CQL query and
 answers MARCXML, and `operation=explain` tells a client which indexes exist
@@ -382,7 +405,24 @@ catalogue exposes and not one row more: the same gate, the same rows, the same
 rate limit, and records built by the same MARC writer the export uses. A hostile
 query is bounded five ways on the parse and once more on what it costs to run,
 and refused as an SRU diagnostic rather than as an error a client cannot read.
-With library mode off the endpoint does not exist.
+Publishing the catalogue and serving it over SRU are separate decisions, so the
+protocol has its own switch, off on a new installation until an admin turns it on, and
+on after an upgrade where the catalogue was already published. With library mode,
+publishing or that switch off, the endpoint does not exist.
+
+**An OAI-PMH provider, on the same two switches and one of its own.** Searching is one
+question another institution asks; collecting is the other, and union catalogues and
+aggregators collect over OAI-PMH. `/oai` answers the six verbs with Dublin Core or MARCXML,
+pages a harvest with a resumption token, and stamps every record with the day it last changed,
+so an aggregator coming back asks only for what is new. A record that leaves the published
+catalogue, by the trash, by being made private, by a merge or by a restore, answers as
+deleted from then on, so an aggregator learns to drop it. It serves the same records the
+public catalogue does, through the same gate, the same rows and the same rate limit, with
+Dublin Core built from the same public record the JSON catalogue sends, **plus** the day each
+record last changed and which records have left. A record never edited carries the day its
+book was added, which the JSON catalogue does not show. Its switch is off on every
+installation, new or upgraded, until an admin gives a repository contact address and turns
+it on. With library mode, publishing or that switch off, the endpoint does not exist.
 
 ## Deliberately not built
 
@@ -401,8 +441,9 @@ screen here.
 **No library circulation.** No queue positions, no pickup notifications, no
 fines. Koha exists and is better at all of it. MARC21 itself is read and
 written, which is the exchange format rather than the circulation system: see
-*MARC21 import and export* under The interface. No catalogue is asked over
-Z39.50 yet: see *The Z39.50 client library* in `docs/architecture.md`.
+*MARC21 import and export* under The interface. Z39.50 is used as a client
+only, to ask the Italian, Portuguese, Hungarian and Slovak catalogues about a
+book: see *The Z39.50 client library* in `docs/architecture.md`.
 
 **No Z39.50 server.** SRU is served and this is not: Z39.50 is a binary
 protocol over raw TCP, normally served through YAZ, and is not a shape this
@@ -418,10 +459,25 @@ national library numbers for Brazil, Argentina, Spain, Portugal, Italy and
 Chile**, which the GND record does not carry and the VIAF cluster it names does.
 That is what lets an author be looked up outside German. Dates and a one line
 description are shown while you tell two same named writers apart, and are not
-kept. An author stays a derived fact rather than a second thing to maintain.
+kept. In library mode, a name neither the GND nor the Library of Congress holds
+is also put to ORCID, which registers researchers; a household is not offered
+its answers to a name, because for the authors of a household shelf they are
+mostly other people with the same name. An author stays a derived fact rather
+than a second thing to maintain.
 
-Those six are **stored and not resolved**, and the difference is honest rather
-than a limitation being dressed up: Brazil's and Argentina's catalogues refuse
-every request, and the rest speak a protocol this app has no client for. The
-identifier arrives free with a confirmation, which is what would make an adapter
-for one of them cheap on the day it becomes possible.
+**Portugal's is checked and resolved.** Confirming a GND number asks the
+Biblioteca Nacional de Portugal's authority file for the Portuguese number the
+VIAF cluster names, and keeps it only where that record gives the person one
+of the names the GND record does, or links that same cluster; where the
+library cannot be reached, the number is kept as the cluster names it. An author whose only number is a
+Portuguese one is looked up in that file by the number, over plain HTTPS.
+**The other five are stored and not resolved**,
+because none of them serves its authority file to a number lookup this app
+could make: Spain's open SRU serves book records only and its Z39.50 refuses
+without a login; Italy's union catalogue serves no authority database
+over Z39.50 and no SRU; Argentina's authority file answers Z39.50 with the
+published login but no index takes the number, only a name; Brazil's
+catalogue refuses every request; and Chile's accepts no connection, and VIAF
+writes its numbers in a longer form than Wikidata records for it. The
+identifier arrives free with a confirmation, which is what would make an
+adapter for one of them cheap on the day it becomes possible.

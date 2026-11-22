@@ -1,0 +1,533 @@
+[
+  [
+    {
+      "@id": "_:node1k0rml8akx134586350",
+      "http://purl.org/dc/terms/description": [
+        {
+          "@value": "(Vorlage)"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "Fehlformen des Glaubens"
+        }
+      ]
+    },
+    {
+      "@id": "_:node1k0rml8akx134586351",
+      "http://purl.org/dc/terms/description": [
+        {
+          "@value": "(Quasisynonym, B 1996)"
+        }
+      ],
+      "http://www.w3.org/2000/01/rdf-schema#label": [
+        {
+          "@value": "Abfallentsorgung"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000030-8",
+      "@type": [
+        "https://d-nb.info/standards/elementset/gnd#SubjectHeadingSensoStricto"
+      ],
+      "http://www.w3.org/2002/07/owl#sameAs": [
+        {
+          "@id": "http://www.wikidata.org/entity/Q12806"
+        }
+      ],
+      "http://www.w3.org/2004/02/skos/core#closeMatch": [
+        {
+          "@id": "http://id.loc.gov/authorities/subjects/sh85000041"
+        },
+        {
+          "@id": "https://data.bnf.fr/ark:/12148/cb11958604v"
+        },
+        {
+          "@id": "http://purl.org/bncf/tid/51214"
+        },
+        {
+          "@id": "https://datos.bne.es/resource/XX533850"
+        }
+      ],
+      "http://www.w3.org/2007/05/powder-s#describedby": [
+        {
+          "@id": "https://d-nb.info/gnd/4000030-8/about"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#broaderTermGeneral": [
+        {
+          "@id": "https://d-nb.info/gnd/4132595-3"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndIdentifier": [
+        {
+          "@value": "4000030-8"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndSubjectCategory": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/gnd-sc#28"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#oldAuthorityNumber": [
+        {
+          "@value": "(DE-588c)4000030-8"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#preferredNameForTheSubjectHeading": [
+        {
+          "@value": "Abakus"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedDdcWithDegreeOfDeterminacy3": [
+        {
+          "@id": "http://dewey.info/class/513.0284/"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#variantNameForTheSubjectHeading": [
+        {
+          "@value": "Abacus"
+        },
+        {
+          "@value": "Rechenbrett"
+        },
+        {
+          "@value": "Rechentisch"
+        },
+        {
+          "@value": "Rechentuch"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000030-8/about",
+      "http://dcat-ap.de/def/dcatde/maintainer": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/created": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#date",
+          "@value": "1988-07-01"
+        }
+      ],
+      "http://purl.org/dc/terms/creator": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/license": [
+        {
+          "@id": "http://creativecommons.org/publicdomain/zero/1.0/"
+        }
+      ],
+      "http://purl.org/dc/terms/modified": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+          "@value": "2024-03-21T18:53:51.000"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#descriptionLevel": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/description-level#1"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000056-4",
+      "@type": [
+        "https://d-nb.info/standards/elementset/gnd#SubjectHeadingSensoStricto"
+      ],
+      "http://www.w3.org/2004/02/skos/core#closeMatch": [
+        {
+          "@id": "http://uri.gbv.de/terminology/etiras/800607888"
+        }
+      ],
+      "http://www.w3.org/2007/05/powder-s#describedby": [
+        {
+          "@id": "https://d-nb.info/gnd/4000056-4/about"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#broaderTermGeneric": [
+        {
+          "@id": "https://d-nb.info/gnd/4064228-8"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndIdentifier": [
+        {
+          "@value": "4000056-4"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndSubjectCategory": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/gnd-sc#8.4"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#oldAuthorityNumber": [
+        {
+          "@value": "(DE-588c)4000056-4"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#preferredNameForTheSubjectHeading": [
+        {
+          "@value": "ABC-Waffen"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedDdcWithDegreeOfDeterminacy2": [
+        {
+          "@id": "http://dewey.info/class/623.4516/"
+        },
+        {
+          "@id": "http://dewey.info/class/327.1745/"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedDdcWithDegreeOfDeterminacy3": [
+        {
+          "@id": "http://dewey.info/class/358.3/"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedTerm": [
+        {
+          "@id": "https://d-nb.info/gnd/4197222-3"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#variantNameForTheSubjectHeading": [
+        {
+          "@value": "Kampfstoff"
+        },
+        {
+          "@value": "ABC-Waffe"
+        },
+        {
+          "@value": "CBRN-Waffe"
+        },
+        {
+          "@value": "CBRN-Waffen"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000056-4/about",
+      "http://dcat-ap.de/def/dcatde/maintainer": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/created": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#date",
+          "@value": "1988-07-01"
+        }
+      ],
+      "http://purl.org/dc/terms/creator": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/license": [
+        {
+          "@id": "http://creativecommons.org/publicdomain/zero/1.0/"
+        }
+      ],
+      "http://purl.org/dc/terms/modified": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+          "@value": "2025-08-21T16:23:27.000"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#descriptionLevel": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/description-level#1"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000002-3",
+      "@type": [
+        "https://d-nb.info/standards/elementset/gnd#ProductNameOrBrandName"
+      ],
+      "http://www.w3.org/2007/05/powder-s#describedby": [
+        {
+          "@id": "https://d-nb.info/gnd/4000002-3/about"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#broaderTermGeneral": [
+        {
+          "@id": "https://d-nb.info/gnd/4027242-4"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndIdentifier": [
+        {
+          "@value": "4000002-3"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndSubjectCategory": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/gnd-sc#31.9b"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#oldAuthorityNumber": [
+        {
+          "@value": "(DE-588c)4000002-3"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#preferredNameForTheSubjectHeading": [
+        {
+          "@value": "A 302 D"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedDdcWithDegreeOfDeterminacy2": [
+        {
+          "@id": "http://dewey.info/class/621.381537/"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000002-3/about",
+      "http://dcat-ap.de/def/dcatde/maintainer": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/created": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#date",
+          "@value": "1988-07-01"
+        }
+      ],
+      "http://purl.org/dc/terms/creator": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/license": [
+        {
+          "@id": "http://creativecommons.org/publicdomain/zero/1.0/"
+        }
+      ],
+      "http://purl.org/dc/terms/modified": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+          "@value": "2025-04-15T16:56:04.000"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#descriptionLevel": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/description-level#1"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000098-9",
+      "@type": [
+        "https://d-nb.info/standards/elementset/gnd#SubjectHeadingSensoStricto"
+      ],
+      "http://www.w3.org/2002/07/owl#sameAs": [
+        {
+          "@id": "http://www.wikidata.org/entity/Q45701"
+        }
+      ],
+      "http://www.w3.org/2004/02/skos/core#closeMatch": [
+        {
+          "@id": "http://id.loc.gov/authorities/subjects/sh85145424"
+        },
+        {
+          "@id": "https://data.bnf.fr/ark:/12148/cb119587284"
+        }
+      ],
+      "http://www.w3.org/2004/02/skos/core#exactMatch": [
+        {
+          "@id": "http://zbw.eu/stw/descriptor/15009-0"
+        },
+        {
+          "@id": "http://aims.fao.org/aos/agrovoc/c_8307"
+        },
+        {
+          "@id": "https://data.gesis.org/thesoz/concept_10034323"
+        },
+        {
+          "@id": "http://uri.gbv.de/terminology/etiras/800634925"
+        }
+      ],
+      "http://www.w3.org/2007/05/powder-s#describedby": [
+        {
+          "@id": "https://d-nb.info/gnd/4000098-9/about"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#definition": [
+        {
+          "@language": "de",
+          "@value": "Unter Abfall bzw. Müll versteht man Reste, die bei der Zubereitung oder Herstellung von etwas entstehen (Überrest) im festen Zustand, was Flüssigkeiten und Gase in Behältern einschließt. Chemische Rückstände werden auch als Abfallstoffe bezeichnet."
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndIdentifier": [
+        {
+          "@value": "4000098-9"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndSubjectCategory": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/gnd-sc#31.2"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#oldAuthorityNumber": [
+        {
+          "@value": "(DE-588c)4000098-9"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#preferredNameForTheSubjectHeading": [
+        {
+          "@value": "Abfall"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedDdcWithDegreeOfDeterminacy1": [
+        {
+          "@id": "http://dewey.info/class/623.754/"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedDdcWithDegreeOfDeterminacy2": [
+        {
+          "@id": "http://dewey.info/class/628.44/"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedDdcWithDegreeOfDeterminacy3": [
+        {
+          "@id": "http://dewey.info/class/363.728/"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#variantNameForTheSubjectHeading": [
+        {
+          "@value": "Waste"
+        },
+        {
+          "@value": "Müll"
+        },
+        {
+          "@value": "Abfallstoff"
+        },
+        {
+          "@value": "Abfälle"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000098-9/about",
+      "http://dcat-ap.de/def/dcatde/maintainer": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/created": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#date",
+          "@value": "1988-07-01"
+        }
+      ],
+      "http://purl.org/dc/terms/creator": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/license": [
+        {
+          "@id": "http://creativecommons.org/publicdomain/zero/1.0/"
+        }
+      ],
+      "http://purl.org/dc/terms/modified": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+          "@value": "2025-03-28T15:06:31.000"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#descriptionLevel": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/description-level#1"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000023-0",
+      "@type": [
+        "https://d-nb.info/standards/elementset/gnd#EthnographicName"
+      ],
+      "http://www.w3.org/2007/05/powder-s#describedby": [
+        {
+          "@id": "https://d-nb.info/gnd/4000023-0/about"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#geographicAreaCode": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/geographic-area-code#XA-CH-AG"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndIdentifier": [
+        {
+          "@value": "4000023-0"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#gndSubjectCategory": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/gnd-sc#17.1"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#oldAuthorityNumber": [
+        {
+          "@value": "(DE-588c)4000023-0"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#preferredNameForTheSubjectHeading": [
+        {
+          "@value": "Aargauer"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#relatedTerm": [
+        {
+          "@id": "https://d-nb.info/gnd/4000022-9"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#usingInstructions": [
+        {
+          "@language": "de",
+          "@value": "Benutzt für Aargauer ausserhalb des Aargaus"
+        }
+      ]
+    },
+    {
+      "@id": "https://d-nb.info/gnd/4000023-0/about",
+      "http://dcat-ap.de/def/dcatde/maintainer": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/created": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#date",
+          "@value": "1988-07-01"
+        }
+      ],
+      "http://purl.org/dc/terms/creator": [
+        {
+          "@id": "https://ld.zdb-services.de/resource/organisations/DE-101"
+        }
+      ],
+      "http://purl.org/dc/terms/license": [
+        {
+          "@id": "http://creativecommons.org/publicdomain/zero/1.0/"
+        }
+      ],
+      "http://purl.org/dc/terms/modified": [
+        {
+          "@type": "http://www.w3.org/2001/XMLSchema#dateTime",
+          "@value": "2013-09-17T12:07:01.000"
+        }
+      ],
+      "https://d-nb.info/standards/elementset/gnd#descriptionLevel": [
+        {
+          "@id": "https://d-nb.info/standards/vocab/gnd/description-level#1"
+        }
+      ]
+    }
+  ]
+]

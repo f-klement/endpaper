@@ -8,7 +8,7 @@ not answer any of them a second, different way:
 
 | Question | Answered by |
 |---|---|
-| Is anything published at all? | `public_catalogue_is_published`, through `public_reader` |
+| Is anything published at all? | `public_catalogue_is_published` in `public_reader`, then `sru_switch` |
 | Which **rows** may be shown? | `Shelf.seen_by_the_public` |
 | Which **columns** may be shown? | `marc.py`'s field mapping, pinned against `schemas/public.py` |
 | May these rows leave the instance? | `shelf.Outbound`, from `Shelf.outbound_page` |
@@ -50,21 +50,23 @@ untrusted path at all.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
+from functools import partial
 from typing import Any, Final, NoReturn
 from urllib.parse import parse_qs
 from xml.etree import ElementTree
 
-from sqlalchemy import and_, not_, or_
+from sqlalchemy import and_, distinct, func, not_, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 import marc
 from enums import BookSort
-from models import Book, Tag
+from models import Book, Tag, book_tags
 from shelf import Loading, Outbound, Shelf, order_for
 
 # ── The diagnostic register ───────────────────────────────────────────────────
@@ -918,28 +920,46 @@ class Cost(Enum):
     `MAX_COMPARISON_BUDGET` when it is not: move the budget to 100 and the
     divisibility evaporates while 8 stays right.
 
-    ## What the table holds fixed, which is the honest limit of it
+    ## Tags per book, which the table holds at one and the charge does not
 
-    **Tags per book.** `dc.subject` is a correlated `EXISTS` over `book_tags`,
-    so its cost scales with how many tags a book carries, and every row above
-    was taken at one. Measured independently by a review seat on its own corpus,
-    eight `dc.subject` comparisons cost 126 to 138 ms at one tag per book and
-    1,579 to 1,660 ms at forty, roughly linear in between, while
-    `dc.description` and `dc.title` are flat across the same sweep. So this
-    weight is correct at one tag and under-prices `dc.subject` by about five
-    times at forty, and tags per book is the one input a library sets with no
-    limit.
+    `dc.subject` is a correlated `EXISTS` over `book_tags`, so it evaluates its
+    matcher once per tag of every book, and its cost grows with tags per book
+    while every other index stays flat. Every row above was taken at one tag. So
+    `dc.subject` charges its class at one tag and `SUBJECT_CHARGE_PER_TAG` more
+    for each tag per book above one, measured on the public shelf once per
+    request that names the index: see `_subject_weight`.
 
-    That also explains a disagreement between two independent measurements that
-    neither could explain alone: one has `dc.subject` roughly equal to
-    `dc.description` and the other has it at 40% of it. **The equality is a
-    property of a corpus rather than of the index.**
+    Calibrated on `builder` against 3,000 public books, 2,000 character
+    descriptions and a vocabulary of 400 tags, warm, two runs of three, min to
+    max, rounded outward. Each cell is eight comparisons through `any` over
+    eight words that match nothing, except `dc.title`, which is sixty four:
 
-    Recorded rather than acted on, and it has its own ticket: reweighting on a
-    dimension the server does not measure at request time is a design change
-    rather than a correction, and doing it on this evidence would swap a bound
-    correct at one tag per book for one correct at forty and wrong at one,
-    against no measured distribution of how libraries actually tag.
+    | tags per book | `dc.subject` | `dc.description` | `dc.title` |
+    |---|---|---|---|
+    | 1 | 45 to 56 ms | 129 to 133 ms | 109 to 115 ms |
+    | 5 | 104 to 117 ms | 129 to 133 ms | 104 to 110 ms |
+    | 10 | 178 to 194 ms | 129 to 133 ms | 104 to 107 ms |
+    | 20 | 325 to 349 ms | 129 to 131 ms | 102 to 107 ms |
+    | 40 | 624 to 644 ms | 129 to 134 ms | 102 to 106 ms |
+
+    From one tag to forty, `dc.subject` rises 569 to 598 ms over 39 tags and
+    eight comparisons: 1.82 to 1.92 ms per tag per comparison. A cheap
+    comparison is 1.60 to 1.79 ms, so one tag per book costs 1.02 to 1.20 cheap
+    comparisons, and the charge per tag is 1. At forty tags that charges 47 a
+    comparison against a measured 43 to 51. A vocabulary of 40 tags and one of
+    30,000, both at ten tags per book, measure the same, so the dimension is tags
+    per book and not the size of the vocabulary.
+
+    **Below forty tags the charge is high rather than low**, because it keeps
+    the class the reference corpus measured at one tag, where this corpus puts
+    one comparison at 3.2 to 4.3 cheap ones. Which of the two a library resembles is
+    a property of its catalogue, and erring high is the safe direction.
+
+    **A public shelf averaging more than 57 tags per book refuses every
+    `dc.subject` query**, because one comparison then charges more than the
+    budget. The slope above puts one comparison at 58 tags at 109 to 117 ms,
+    and the whole budget spent on `dc.title` is 102 to 115 ms, so the refusal
+    is the bound doing its job rather than a side effect of it.
 
     ## The shape of the enum
 
@@ -986,6 +1006,23 @@ class Cost(Enum):
 #: named size rather than stated as a property of the server.
 MAX_COMPARISON_BUDGET: Final = 64
 
+#: What `dc.subject` charges a comparison for each tag per book above one, in
+#: `Cost` units. Calibrated in `Cost`'s docstring, and
+#: `tests/test_sru.py::TestTheSubjectChargeFollowsTagsPerBook` fails when the
+#: premise under it moves.
+SUBJECT_CHARGE_PER_TAG: Final = 1
+
+
+def _subject_weight(tags_per_book: float) -> int:
+    """What one `dc.subject` comparison costs on a shelf this densely tagged.
+
+    **Rounded up, so a shelf at 1.1 tags per book is charged as two.** A shelf
+    with no tags, or no books, still pays the class: the floor is the weight
+    measured at one tag rather than nothing.
+    """
+    above_one = max(0.0, tags_per_book - 1)
+    return Cost.EXPENSIVE.value + math.ceil(SUBJECT_CHARGE_PER_TAG * above_one)
+
 
 @dataclass(slots=True)
 class _Budget:
@@ -996,11 +1033,23 @@ class _Budget:
     the fact off the compiled SQL was the previous arrangement and it counted
     the wrong unit; counting during construction is exact and refuses before the
     statement is executed rather than after it is built.
+
+    **Tags per book is measured lazily and at most once**, on the first
+    `dc.subject` comparison, because the measurement is a statement of its own
+    and a query naming no subject should not pay for it.
     """
 
     left: int
+    tags_per_book: Callable[[], float]
+    _subject: int | None = field(default=None, init=False)
 
-    def spend(self, comparisons: int, cost: Cost, index: Index) -> None:
+    def subject_weight(self) -> int:
+        """The weight of one `dc.subject` comparison in this request."""
+        if self._subject is None:
+            self._subject = _subject_weight(self.tags_per_book())
+        return self._subject
+
+    def spend(self, comparisons: int, weight: int, index: Index) -> None:
         """Charge one comparison of a term against an index, or refuse.
 
         **The details name the index and what it actually costs**, which the
@@ -1009,8 +1058,8 @@ class _Budget:
         and still not know what to send instead. Every other bound says "at most
         16 search clauses", which is a number the client counted itself.
 
-        **The charge is `comparisons * cost.value` and the first version of this
-        message rendered `cost.value` alone.** They differ exactly where it
+        **The charge is `comparisons * weight` and the first version of this
+        message rendered the weight alone.** They differ exactly where it
         matters: `cql.serverChoice` compares three columns at weight one, so it
         was told it cost 1 when it costs 3, and a client believing that sends 64
         terms and is refused at 22. That is the outcome this message exists to
@@ -1031,7 +1080,7 @@ class _Budget:
         truncated at all, because pinning a length is how the next edit lands
         back on the limit.
         """
-        charge = comparisons * cost.value
+        charge = comparisons * weight
         self.left -= charge
         if self.left < 0:
             raise SruError(
@@ -1138,6 +1187,7 @@ INDEXES: Final = (
         TEXT_RELATIONS,
         # A correlated EXISTS over a join, which measures the same as scanning
         # the unbounded column above even though its own column is String(100).
+        # This is its class at one tag per book; `_subject_weight` adds the rest.
         Cost.EXPENSIVE,
     ),
     Index("dc", "date", Field.DATE, "Year of publication", NUMERIC_RELATIONS, Cost.CHEAP),
@@ -1317,11 +1367,11 @@ def _clause_criteria(clause: Clause, budget: _Budget) -> ColumnElement[bool]:
         )
 
     if index.field is Field.RECORD_ID:
-        budget.spend(1, index.cost, index)
+        budget.spend(1, index.cost.value, index)
         return Book.id == _integer(clause.term, index)
 
     if index.field is Field.DATE:
-        budget.spend(1, index.cost, index)
+        budget.spend(1, index.cost.value, index)
         value = _integer(clause.term, index)
         comparison = _COMPARISONS.get(clause.relation)
         if comparison is None:
@@ -1345,20 +1395,25 @@ def _field_criteria(index: Index, term: Term, budget: _Budget, *, exact: bool) -
     `any` or `all` arrives here once per word.
     """
     if index.field is Field.ANYWHERE:
-        budget.spend(len(_ANYWHERE_COLUMNS), index.cost, index)
+        budget.spend(len(_ANYWHERE_COLUMNS), index.cost.value, index)
         return or_(*(_matches(column, term, contains=not exact) for column in _ANYWHERE_COLUMNS))
     if index.field is Field.SUBJECT:
-        budget.spend(1, index.cost, index)
+        budget.spend(1, budget.subject_weight(), index)
         # A correlated exists over the tag join, which is the shape
         # `Shelf.matching` already uses for a tag filter. It needs no NULL
         # guard: `NOT EXISTS` is two valued, so `not` over it means what it says.
         return Book.tags.any(Tag.name.ilike(_pattern(term, contains=not exact), escape=_LIKE_ESCAPE))
-    budget.spend(1, index.cost, index)
+    budget.spend(1, index.cost.value, index)
     return _matches(_COLUMNS[index.field], term, contains=not exact)
 
 
-def criteria(node: Node) -> ColumnElement[bool]:
+def criteria(node: Node, tags_per_book: Callable[[], float]) -> ColumnElement[bool]:
     """A parsed query as one predicate, ready for `Shelf.where`.
+
+    `tags_per_book` is called at most once, and only if the query names
+    `dc.subject`. **It has no default**, because a default would be a tag
+    count assumed rather than measured, which is the dimension `Cost` once held
+    fixed in silence.
 
     **Nothing here decides visibility**, and there is nothing here that could:
     every predicate this builds narrows a shelf that was already narrowed by
@@ -1368,7 +1423,25 @@ def criteria(node: Node) -> ColumnElement[bool]:
     sees the whole query and knows which index each clause names. See
     `MAX_COMPARISON_BUDGET` for why the parse bounds are not that bound.
     """
-    return _criteria(node, _Budget(MAX_COMPARISON_BUDGET))
+    return _criteria(node, _Budget(MAX_COMPARISON_BUDGET, tags_per_book))
+
+
+def public_tags_per_book(db: Session) -> float:
+    """Tags per book on the public shelf: tag links over books, 0 on no books.
+
+    **The mean is the right figure and the maximum is not**: the `EXISTS`
+    evaluates once per link across the whole shelf, so one book carrying a
+    thousand tags costs what it adds to the total. **The public shelf, not the
+    library**, because the figure reaches a client in a refusal's details, and
+    a count over private books would publish something about them.
+    """
+    links, books = (
+        Shelf.seen_by_the_public(db)
+        .select(func.count(book_tags.c.tag_id), func.count(distinct(Book.id)))
+        .outerjoin(book_tags, book_tags.c.book_id == Book.id)
+        .one()
+    )
+    return links / books if books else 0.0
 
 
 def _criteria(node: Node, budget: _Budget) -> ColumnElement[bool]:
@@ -1770,7 +1843,7 @@ def _search_response(request: _Request, db: Session) -> str:
     built for a member, so a later edit that reached for a viewer to widen an
     index would fail here rather than harvest well.
     """
-    predicate = criteria(parse(request.query))
+    predicate = criteria(parse(request.query), partial(public_tags_per_book, db))
     # **`page`, never `all` and a Python slice.** The slice reads the whole
     # matching shelf into memory and then throws away all but ten rows of it,
     # which on a catalogue of any size is a request a stranger can make cheaply

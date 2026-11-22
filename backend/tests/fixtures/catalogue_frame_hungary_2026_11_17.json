@@ -16,7 +16,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -35,7 +36,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -54,7 +56,8 @@
   "melinda": "found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "found"
  },
  {
   "frame": "hungary",
@@ -73,7 +76,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -92,7 +96,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -111,7 +116,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -130,7 +136,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -149,7 +156,8 @@
   "melinda": "found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "found"
  },
  {
   "frame": "hungary",
@@ -168,7 +176,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -187,7 +196,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -206,7 +216,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -225,7 +236,8 @@
   "melinda": "found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -244,7 +256,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "found"
  },
  {
   "frame": "hungary",
@@ -263,7 +276,8 @@
   "melinda": "found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -282,7 +296,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -301,7 +316,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -320,7 +336,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -339,7 +356,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -358,7 +376,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -377,7 +396,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -396,7 +416,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -415,7 +436,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -434,7 +456,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -453,7 +476,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -472,7 +496,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -491,7 +516,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -510,7 +536,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -529,7 +556,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -548,7 +576,8 @@
   "melinda": "found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -567,7 +596,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -586,7 +616,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -605,7 +636,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -624,7 +656,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -643,7 +676,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -662,7 +696,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -681,7 +716,8 @@
   "melinda": "not_found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "found"
  },
  {
   "frame": "hungary",
@@ -700,7 +736,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -719,7 +756,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -738,7 +776,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -757,7 +796,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -776,7 +816,8 @@
   "melinda": "found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -795,7 +836,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -814,7 +856,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -833,7 +876,8 @@
   "melinda": "found",
   "sbn": "found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -852,7 +896,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -871,7 +916,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -890,7 +936,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -909,7 +956,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -928,7 +976,8 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "found"
+  "oszk": "found",
+  "snk": "not_found"
  },
  {
   "frame": "hungary",
@@ -947,6 +996,7 @@
   "melinda": "not_found",
   "sbn": "not_found",
   "porbase": "not_found",
-  "oszk": "not_found"
+  "oszk": "not_found",
+  "snk": "not_found"
  }
 ]

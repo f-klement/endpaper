@@ -42,7 +42,7 @@ import opds
 import sources
 import targets
 from catalogue import Record
-from enums import Capability, CatalogueSource, SourceFamily
+from enums import Capability, CatalogueSource, ClassificationScheme, SourceFamily
 from tests.corpus import BACKEND, shipped_modules
 from tests.strategies import Node, answer_of, field_values, marc_records, witness, xml_of
 
@@ -916,3 +916,88 @@ class TestADecoderAnswersARecordOrNoneAndNeverRaises:
             ),
             reaches=f"an element {reader} reads into a record",
         )
+
+
+# ── Which schemes a reader supplies ───────────────────────────────────────────
+
+_MARC_HEADINGS: Final = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>00000nam a22000003  4500</leader>"
+    '<datafield tag="082" ind1="0" ind2="4"><subfield code="a">004</subfield></datafield>'
+    '<datafield tag="050" ind1=" " ind2="4"><subfield code="a">QA76.73</subfield></datafield>'
+    '<datafield tag="245" ind1="1" ind2="0"><subfield code="a">Stoner</subfield></datafield>'
+    '<datafield tag="650" ind1=" " ind2="7"><subfield code="0">(DE-588)4026894-9</subfield>'
+    '<subfield code="a">Informatik</subfield><subfield code="2">gnd</subfield></datafield>'
+    "</record>"
+)
+_UNIMARC_HEADINGS: Final = (
+    '<record xmlns="http://www.loc.gov/MARC21/slim">'
+    "<leader>00000nam  2200000   4500</leader>"
+    '<datafield tag="200" ind1="1" ind2=" "><subfield code="a">Stoner</subfield></datafield>'
+    '<datafield tag="676" ind1=" " ind2=" "><subfield code="a">004</subfield></datafield>'
+    '<datafield tag="680" ind1=" " ind2=" "><subfield code="a">QA76.73</subfield></datafield>'
+    "</record>"
+)
+_MODS_HEADINGS: Final = (
+    '<mods xmlns="http://www.loc.gov/mods/v3">'
+    "<typeOfResource>text</typeOfResource>"
+    "<titleInfo><title>Clean Code</title></titleInfo>"
+    '<classification authority="lcc">QA76.76</classification>'
+    '<classification authority="ddc">005.1</classification>'
+    '<subject authority="lcsh"><topic>Computer programming</topic></subject>'
+    "</mods>"
+)
+_OPEN_LIBRARY_HEADINGS: Final = {"dewey_decimal_class": ["004"], "lc_classifications": ["QA76.73"]}
+
+
+def _schemes_decoded(reader: decoders.Reader) -> frozenset[ClassificationScheme]:
+    """What one literal carrying every scheme's field decodes to, through the
+    reader's real path. Open Library is JSON and so is not in `metadata.READERS`;
+    its classifications are the one function every Open Library record goes
+    through."""
+    if reader is decoders.Reader.OPEN_LIBRARY:
+        headings = metadata._open_library_classifications(_OPEN_LIBRARY_HEADINGS)
+        return frozenset(heading.scheme for heading in headings)
+    document = {
+        decoders.Reader.MARC_GND: _MARC_HEADINGS,
+        decoders.Reader.MARC_PLAIN: _MARC_HEADINGS,
+        decoders.Reader.UNIMARC: _UNIMARC_HEADINGS,
+        decoders.Reader.MODS: _MODS_HEADINGS,
+    }[reader]
+    record = metadata.READERS[reader](
+        ElementTree.fromstring(document), decoders.Decoding(source="a file", reader=reader)
+    )
+    assert record is not None
+    return frozenset(heading.scheme for heading in record.headings)
+
+
+class TestEveryReaderDeclaresTheSchemesItProduces:
+    """`sources.CLASSIFIES` held to the decoders from both sides.
+
+    **Too wide** makes the provider list stay silent when the last real supplier
+    of a scheme is switched off, so every declared scheme is produced from a
+    literal. **Too narrow** makes it warn about a scheme still supplied, so a
+    literal carrying every scheme's field, and a drawn record, produce nothing
+    undeclared. The literals carry fields some readers ignore, `050` on MARC and
+    `680` on UNIMARC, which is what makes the second side a test.
+
+    The readers with no scheme are left out of the witnesses: they have no
+    literal to decode here and declare the empty set, which the generated arm
+    still holds them to where a builder exists.
+    """
+
+    @pytest.mark.parametrize(
+        "reader", sorted(reader for reader, schemes in sources.CLASSIFIES.items() if schemes)
+    )
+    def test_a_reader_produces_exactly_the_schemes_it_declares(self, reader):
+        assert _schemes_decoded(reader) == sources.CLASSIFIES[reader]
+
+    @pytest.mark.property
+    @pytest.mark.parametrize("reader", sorted(metadata.READERS))
+    @given(data=st.data())
+    def test_a_drawn_record_produces_no_undeclared_scheme(self, reader, data):
+        record = metadata.READERS[reader](
+            data.draw(_ELEMENTS[reader]), decoders.Decoding(source="generated", reader=reader)
+        )
+        produced = frozenset(heading.scheme for heading in record.headings) if record else frozenset()
+        assert produced <= sources.CLASSIFIES[reader]

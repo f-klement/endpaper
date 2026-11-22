@@ -2,7 +2,8 @@
  * Data access for the Your library route.
  *
  * Bringing books in, repairing the covers they arrived without, and the field
- * definitions this household adds on top. Nothing outside this file imports
+ * definitions, classification schemes and subject vocabularies this household
+ * adds on top. Nothing outside this file imports
  * from `api/generated`, so regenerating the client cannot ripple into the
  * components.
  *
@@ -11,7 +12,7 @@
  * module, so two unrelated changes to two unrelated sections collided in it.
  */
 
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 
 import {
@@ -30,25 +31,47 @@ import {
   useScanAdd,
 } from "../../../api/generated/endpoints/books/books";
 import {
+  getResumableHarvestQueryKey,
+  useApplyHarvest,
   useImportCsv,
   useImportMarc,
+  usePreviewHarvest,
   usePreviewImport,
   usePreviewMarc,
+  useResumableHarvest,
 } from "../../../api/generated/endpoints/imports/imports";
+import {
+  getListClassificationSchemesQueryKey,
+  getGetSettingsQueryKey,
+  getListVocabulariesQueryKey,
+  useDefineClassificationScheme,
+  useDeleteClassificationScheme,
+  useDownloadVocabulary,
+  useListClassificationSchemes,
+  useListVocabularies,
+  useRenameClassificationScheme,
+} from "../../../api/generated/endpoints/settings/settings";
 import type {
   BookCreate,
+  ClassificationSchemeCreate,
+  ClassificationSchemeOut,
   CoverBackfillOut,
   IdentifierBackfillOut,
   CustomFieldKind,
   CustomFieldOut,
   DigitalReferenceIn,
+  HarvestPreviewOut,
+  HarvestResultOut,
   HighlightImportOut,
   ImportPreviewOut,
   ImportResultOut,
   KoreaderHighlightIn,
   MarcPreviewOut,
+  ResumableHarvestOut,
+  VocabularyOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
+import { ApiError } from "../../../api/mutator";
 import type {
   CalibreBook,
   CalibreFailure,
@@ -373,6 +396,23 @@ export interface UseCustomFieldsResult {
 const BOOK_CUSTOM_FIELDS = /^\/api\/books\/\d+\/custom-fields$/;
 
 /**
+ * Any one book's headings a harvest suggested, by path, as `BOOK_CUSTOM_FIELDS`
+ * is: a harvest raises them on books it does not name to this tab, and like
+ * the values they are outside `catalogue()`.
+ */
+const BOOK_PENDING_HEADINGS = /^\/api\/books\/\d+\/pending-headings$/;
+
+/** Drop one child list of every book, matched by its path. */
+function dropOnEveryBook(queryClient: QueryClient, path: RegExp) {
+  void queryClient.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey[0];
+      return typeof key === "string" && path.test(key);
+    },
+  });
+}
+
+/**
  * The library's own field definitions.
  *
  * Every write drops the list and every book's values with it: a renamed field
@@ -388,12 +428,7 @@ export function useCustomFields(): UseCustomFieldsResult {
       void queryClient.invalidateQueries({
         queryKey: getListCustomFieldsQueryKey(),
       });
-      void queryClient.invalidateQueries({
-        predicate: (query) => {
-          const path = query.queryKey[0];
-          return typeof path === "string" && BOOK_CUSTOM_FIELDS.test(path);
-        },
-      });
+      dropOnEveryBook(queryClient, BOOK_CUSTOM_FIELDS);
     },
   };
 
@@ -493,6 +528,248 @@ export function useMarcImport(): UseMarcImportResult {
       previewing.reset();
       importing.reset();
     },
+  };
+}
+
+/** What the harvest card is offered: `UseTwoStepImportResult`'s shape over a repository. */
+export interface UseHarvestImportResult {
+  /** What a run over the repository read. Null until the preview lands. */
+  preview: HarvestPreviewOut | null;
+  /** What the harvest wrote. Null until it finishes. */
+  result: HarvestResultOut | null;
+  /** Read the repository, or only the named set of it. Writes nothing. */
+  read: (setSpec: string) => void;
+  /**
+   * The last run of the repository, while it was cut short and may be carried
+   * on from. Null otherwise, and while the switch is off.
+   */
+  resumable: ResumableHarvestOut | null;
+  /** Read on from where `resumable` stopped, in its set. Writes nothing. */
+  carryOn: () => void;
+  /** Harvest what the preview read. Does nothing before a preview. */
+  confirm: () => void;
+  isPreviewing: boolean;
+  isImporting: boolean;
+  /**
+   * What the read was refused with, apart from the apply's refusal: the two
+   * steps answer 409 for different reasons, and the card words them apart.
+   */
+  readError: unknown;
+  harvestError: unknown;
+  /** Forget the preview, the result and the set. */
+  reset: () => void;
+}
+
+/**
+ * One read of the repository: the address and set it asked, the truncated run
+ * it carries on from if any, and its answer.
+ */
+interface HarvestRead {
+  repository: string | null;
+  setSpec: string | undefined;
+  continues: number | undefined;
+  preview: HarvestPreviewOut | null;
+}
+
+/**
+ * Harvesting the configured OAI-PMH repository into the catalogue.
+ *
+ * The MARC import's two steps over a repository rather than a file. **The
+ * apply harvests the set the preview read**, held here, and not whatever the
+ * field holds by then: a set typed after the preview would write records
+ * nobody saw counted. The apply reads the repository again, so its counts may
+ * differ from the preview's when the repository changed in between.
+ *
+ * **A preview answers for the repository it read, and for no other.**
+ * `repository` is the stored address as this tab's settings hold it, null
+ * while the switch is off: any change to it discards the read and the
+ * result, and a preview that lands after the change is dropped. An address
+ * saved in another tab never reaches this tab's settings, and the preview
+ * route does not say which address it read, so the apply names the address
+ * this tab held when it read and the server refuses it with
+ * `repository_changed` when another is stored, whether that one was saved
+ * before the read or after it; that refusal drops the read and asks the
+ * settings again.
+ *
+ * **A run cut short may be carried on from**, as a new run starting where it
+ * stopped: `resumable` is the server's answer to which run that is, asked
+ * again after every apply and every refusal, since either may have changed it
+ * (a run made in another tab is refused as `not_resumable`).
+ */
+export function useHarvestImport(
+  repository: string | null,
+): UseHarvestImportResult {
+  const invalidate = useInvalidate();
+  const queryClient = useQueryClient();
+  const [held, setHeld] = useState<HarvestRead | null>(null);
+  const [result, setResult] = useState<HarvestResultOut | null>(null);
+  const [seen, setSeen] = useState(repository);
+
+  // Adjusted while rendering, as React's "storing information from previous
+  // renders" does, so no render ever offers the old read under a new address.
+  // Keyed on the address and not on the read, so a result that landed after
+  // one change is cleared by the next.
+  if (seen !== repository) {
+    setSeen(repository);
+    setHeld(null);
+    setResult(null);
+  }
+
+  const resumable = useResumableHarvest({
+    query: { enabled: repository !== null },
+  });
+  const askResumableAgain = () =>
+    void queryClient.invalidateQueries({
+      queryKey: getResumableHarvestQueryKey(),
+    });
+
+  const previewing = usePreviewHarvest({
+    mutation: { onError: askResumableAgain },
+  });
+  const harvesting = useApplyHarvest({
+    mutation: {
+      onSettled: askResumableAgain,
+      onSuccess: (data: HarvestResultOut) => {
+        setResult(data);
+        setHeld(spent);
+        // A harvest writes Books and authors, no reading record and no
+        // setting. Its headings wait as suggestions, which no catalogue
+        // write moves, so every book's list of them is dropped here.
+        invalidate.catalogue();
+        dropOnEveryBook(queryClient, BOOK_PENDING_HEADINGS);
+      },
+      onError: (error: unknown) => {
+        if (!isRepositoryChanged(error)) return;
+        setHeld(null);
+        void queryClient.invalidateQueries({
+          queryKey: getGetSettingsQueryKey(),
+        });
+      },
+    },
+  });
+
+  const ask = (asked: HarvestRead) => {
+    setHeld(asked);
+    setResult(null);
+    harvesting.reset();
+    previewing.mutate(
+      { params: paramsOf(asked) },
+      {
+        // Kept only while this read is still the one held: a reset or a
+        // changed address since has replaced it.
+        onSuccess: (data: HarvestPreviewOut) =>
+          setHeld((now) => landed(now, asked, data)),
+      },
+    );
+  };
+  const offered = repository === null ? null : (resumable.data ?? null);
+
+  return {
+    preview: previewOf(held),
+    result,
+    resumable: offered,
+
+    read: (typed: string) => ask(readOf(repository, typed)),
+
+    carryOn: () => {
+      if (offered !== null) ask(continuationOf(repository, offered));
+    },
+
+    confirm: () => {
+      const params = applyParamsOf(held);
+      if (params !== undefined) harvesting.mutate({ params });
+    },
+
+    isPreviewing: previewing.isPending,
+    isImporting: harvesting.isPending,
+    readError: held === null ? null : previewing.error,
+    // Not gated on the read: an apply refused after the address changed
+    // still harvested nothing, and saying so is true under any address.
+    harvestError: harvesting.error,
+
+    reset: () => {
+      setHeld(null);
+      setResult(null);
+      previewing.reset();
+      harvesting.reset();
+    },
+  };
+}
+
+/** The read of `typed` under `repository`, a blank set being no set. */
+function readOf(repository: string | null, typed: string): HarvestRead {
+  const trimmed = typed.trim();
+  return {
+    repository,
+    setSpec: trimmed === "" ? undefined : trimmed,
+    continues: undefined,
+    preview: null,
+  };
+}
+
+/**
+ * The read carrying on from `run`. No set of its own: the server reads the
+ * set the run read, and refuses one named beside it.
+ */
+function continuationOf(
+  repository: string | null,
+  run: ResumableHarvestOut,
+): HarvestRead {
+  return {
+    repository,
+    setSpec: undefined,
+    continues: run.harvest_id,
+    preview: null,
+  };
+}
+
+/** `asked` with its answer, unless another read has replaced it since. */
+function landed(
+  now: HarvestRead | null,
+  asked: HarvestRead,
+  data: HarvestPreviewOut,
+): HarvestRead | null {
+  return now === asked ? { ...asked, preview: data } : now;
+}
+
+/** The read after its harvest: the preview is spent, the set kept. */
+function spent(now: HarvestRead | null): HarvestRead | null {
+  return now && { ...now, preview: null };
+}
+
+function previewOf(held: HarvestRead | null): HarvestPreviewOut | null {
+  return held?.preview ?? null;
+}
+
+/**
+ * What the apply asks for, or nothing before a preview: the address this tab
+ * held when it read and the set it read, so the server can refuse a harvest
+ * of another address.
+ */
+function applyParamsOf(
+  held: HarvestRead | null,
+): { repository: string; set_spec?: string; continues?: number } | undefined {
+  if (held?.preview == null || held.repository === null) return undefined;
+  return { repository: held.repository, ...paramsOf(held) };
+}
+
+/** The apply's refusal for an address stored since this tab read it. */
+function isRepositoryChanged(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "repository_changed";
+}
+
+/**
+ * What a read asks beside the address: no `set_spec` at all for the whole
+ * repository, rather than an empty one, and `continues` only on a
+ * continuation.
+ */
+function paramsOf(read: HarvestRead): {
+  set_spec?: string;
+  continues?: number;
+} {
+  return {
+    ...(read.setSpec === undefined ? {} : { set_spec: read.setSpec }),
+    ...(read.continues === undefined ? {} : { continues: read.continues }),
   };
 }
 
@@ -1594,4 +1871,139 @@ export function useKoreaderHighlightImport(): UseKoreaderHighlightImportResult {
       void run(files).finally(() => setRunning(false));
     },
   };
+}
+
+export interface UseClassificationSchemesResult {
+  schemes: ClassificationSchemeOut[];
+  /** `onDone` runs only on success, so the form survives a refused code. */
+  define: (scheme: ClassificationSchemeCreate, onDone: () => void) => void;
+  rename: (scheme: string, name: string, callbacks: RenameCallbacks) => void;
+  remove: (scheme: string) => void;
+  isBusy: boolean;
+  /**
+   * A refused define or delete. A delete's carries how many books the admin
+   * can see still quote the scheme, which the section words in the reader's
+   * language. A rename's is the row's own.
+   */
+  error: unknown;
+}
+
+/**
+ * The schemes a heading may quote, and the admin's three writes.
+ *
+ * Only `enabled` for an admin: nobody else may write one, and the list itself
+ * says nothing a member needs on this page.
+ *
+ * **A write drops the list and nothing else.** A heading carries the code, which
+ * no write here changes, and a chip draws a library's own scheme by its code,
+ * so no book's cached record names a scheme's name.
+ */
+export function useClassificationSchemes(
+  enabled: boolean,
+): UseClassificationSchemesResult {
+  const queryClient = useQueryClient();
+  const list = useListClassificationSchemes({ query: { enabled } });
+  const mutation = {
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: getListClassificationSchemesQueryKey(),
+      });
+    },
+  };
+  const define = useDefineClassificationScheme({ mutation });
+  const rename = useRenameClassificationScheme({ mutation });
+  const remove = useDeleteClassificationScheme({ mutation });
+
+  return {
+    schemes: list.data ?? [],
+    define: (scheme, onDone) =>
+      define.mutate({ data: scheme }, { onSuccess: () => onDone() }),
+    rename: (scheme, name, callbacks) =>
+      rename.mutate(
+        { scheme, data: { name } },
+        { onSuccess: () => callbacks.onSuccess(), onError: callbacks.onError },
+      ),
+    remove: (scheme) => remove.mutate({ scheme }),
+    isBusy: define.isPending || rename.isPending || remove.isPending,
+    error: list.error ?? define.error ?? remove.error,
+  };
+}
+
+/**
+ * How often the list is asked again while a vocabulary loads. A load runs for
+ * minutes, so a reader waiting on it sees the bar move without the page
+ * hammering the server.
+ */
+const VOCABULARY_POLL_MS = 2000;
+
+export interface UseVocabulariesResult {
+  vocabularies: VocabularyOut[];
+  /** Start, or repeat, the download of one vocabulary's local copy. */
+  download: (scheme: string) => void;
+  isStarting: boolean;
+  /** A list that would not load, or a refused start: the 409 says why. */
+  error: unknown;
+}
+
+/**
+ * Each subject vocabulary, what is loaded of it, and the admin's download.
+ *
+ * Only `enabled` for an admin, as `useClassificationSchemes`: both routes are
+ * admin only.
+ *
+ * **The list is polled while any load is under way, and only then.** The load
+ * runs on the server in the background and its progress lives nowhere but that
+ * list, so without the poll the bar would stand still until the page was left.
+ * A failed load is not under way: polling on it would never stop.
+ */
+export function useVocabularies(enabled: boolean): UseVocabulariesResult {
+  const queryClient = useQueryClient();
+  const list = useListVocabularies({
+    query: {
+      enabled,
+      refetchInterval: (query) =>
+        (query.state.data ?? []).some(isLoading) ? VOCABULARY_POLL_MS : false,
+    },
+  });
+  const start = useDownloadVocabulary({
+    mutation: {
+      // Returned rather than voided, so the start stays pending until the list
+      // answers with the load queued. Voided, the button came back for one
+      // round trip over the old list, and a second click there drew the
+      // server's 409. Settled rather than succeeded, so a refused start reads
+      // the list again too and shows the load the 409 is about.
+      onSettled: () =>
+        queryClient.invalidateQueries({
+          queryKey: getListVocabulariesQueryKey(),
+        }),
+    },
+  });
+  const vocabularies = list.data ?? [];
+
+  return {
+    vocabularies,
+    download: (scheme) => start.mutate({ scheme }),
+    isStarting: start.isPending,
+    error: list.error ?? standingRefusal(start, vocabularies),
+  };
+}
+
+/**
+ * A refused start, unless the list now shows that vocabulary loading. The
+ * refusal then says only what the bar already shows, and an alert standing
+ * above a load that runs fine reads as a load that failed.
+ */
+function standingRefusal(
+  start: { error: unknown; variables?: { scheme: string } },
+  vocabularies: VocabularyOut[],
+): unknown {
+  const scheme = start.variables?.scheme;
+  const running = vocabularies.some(
+    (vocabulary) => vocabulary.scheme === scheme && isLoading(vocabulary),
+  );
+  return running ? null : start.error;
+}
+
+function isLoading(vocabulary: VocabularyOut): boolean {
+  return vocabulary.progress != null && vocabulary.progress.phase !== "failed";
 }

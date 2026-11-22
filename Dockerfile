@@ -88,8 +88,14 @@ ENV CI_COMMIT_TAG=$APP_VERSION
 # `chmod -R a+rX,go-w dist` for the reasons the app stage gives: Vite copies `public/`
 # with the modes the checkout gave it, so the app's user may be unable to read a file, or
 # able to write one.
+#
+# `collect-notices.ts` writes the JavaScript half of the third party notices, from the
+# record the build just left and the licence files in node_modules, so it runs before
+# node_modules goes. A shipped package with no licence text fails the build here. The
+# notices stage below formats it; its output lands outside dist, which ships whole.
 RUN BUN_INSTALL_CACHE_DIR=/tmp/bun-install-cache bun install --frozen-lockfile \
     && bun run build \
+    && bun run scripts/collect-notices.ts /app/notices/javascript.json \
     && chmod -R a+rX,go-w dist \
     && rm -rf node_modules /tmp/bun-install-cache
 
@@ -121,7 +127,7 @@ WORKDIR /app
 # variant ships it at /usr/local/bin/uv. Copying /uv from the alpine image fails with
 # "failed to get fileinfo for /kaniko/deps/.../uv: no such file or directory", which
 # reads like a kaniko cross-stage bug and is really just a missing file.
-COPY --from=ghcr.io/astral-sh/uv:0.13.7-alpine@sha256:a788290ce829958f18bcea1dfd9fb5dcf4bfb22f6380b52c9322f9d91e86b117 /usr/local/bin/uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.9-alpine@sha256:788c243c482a0b16ef0e05c6e5bf7e4c2ba7f2e7ec04f05eb758a28607cfb652 /usr/local/bin/uv /bin/uv
 
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
@@ -167,7 +173,29 @@ COPY backend/ .
 RUN python -m compileall -q -j 0 --invalidation-mode unchecked-hash . \
     && chmod -R a+rX,go-w .
 
-# ── Stage 5: The FastAPI server ────────────────────────────────────────────
+# ── Stage 5: The third party notices ──────────────────────────────────────
+#
+# One file naming every third party package the image ships and carrying its licence
+# text: the JavaScript the browser is served, every distribution in the virtualenv, and
+# YAZ. MIT, BSD and Apache each ask for the notice to travel with copies, and an image
+# published on Docker Hub is a copy. `docker/notices.py` says what it reads and what
+# fails it; it is standard library only, so it runs offline on the base. The script and
+# the copied venv stay in this stage, and only the one file crosses, into `static`
+# beside the OCR engine's notice, where the Appearance page links both.
+FROM ${BASE} AS notices
+ARG YAZ_VERSION
+WORKDIR /notices
+COPY docker/notices.py docker/ocr-engine-notices.txt ./
+COPY --from=frontend /app/notices/javascript.json ./javascript.json
+COPY --from=venv /app/.venv/lib ./venv-lib
+COPY --from=yaz /opt/yaz-notice/LICENSE ./yaz-LICENSE
+RUN python -I notices.py --javascript javascript.json \
+        --site-packages venv-lib/python3.*/site-packages \
+        --yaz yaz-LICENSE --yaz-version "${YAZ_VERSION}" \
+        --extra ocr-engine-notices.txt --out third-party.txt \
+    && chmod a+r,go-w third-party.txt
+
+# ── Stage 6: The FastAPI server ────────────────────────────────────────────
 #
 # Alpine, matching stage 1. Moved off python:3.14.7-slim (Debian 13) on 2026-08-18,
 # alongside the same move in the webpage project, where the first gating image scan
@@ -240,13 +268,15 @@ RUN apk upgrade --no-cache
 # line, and an earlier version of this comment claimed there was "nothing else to
 # remember", which was wrong about the larger half.
 #
-# **What gnutls buys is transport encryption and NOT peer authentication.** Up to 5.37.3
-# YAZ performed no certificate verification at all; 5.38.0 added it as an opt in, the ZOOM
-# option `check_cert`, default 0, and nothing in this application sets it. So an `ssl:`
-# target is encrypted against a passive listener and not against anyone who can answer
-# for the address. The reasoning is in docs/decisions.md, "YAZ encrypts a TLS connection
-# and does not authenticate it".
-RUN apk add --no-cache libxml2 libxslt gnutls
+# **What gnutls buys is transport encryption AND peer authentication, the second only
+# because it is asked for.** YAZ verifies an `ssl:` target's certificate from 5.38.0, behind
+# the ZOOM option `check_cert`, default 0, which `_options()` in backend/z3950_yaz.py sets
+# on every connection. It verifies against the system trust, `ca-certificates`, named on
+# the line below although the base image carries it today: a base without it fails every
+# `ssl:` target closed, and that looks like each of them being down. gnutls reads it as the
+# unprivileged user. The reasoning is in docs/decisions.md, "YAZ checks a TLS target's
+# certificate".
+RUN apk add --no-cache libxml2 libxslt gnutls ca-certificates
 
 # ── And now make it actually link ──────────────────────────────────────────
 #
@@ -293,6 +323,7 @@ COPY --from=app /app /app
 # Only the compiled assets cross from the frontend stage: no Bun, no node_modules,
 # no TypeScript sources in the shipped image.
 COPY --from=frontend /app/frontend/dist ./static
+COPY --from=notices /notices/third-party.txt ./static/licences/third-party.txt
 
 # The licence travels with the copy, because MIT conditions the grant on the
 # notice being included in every copy of the software and an image is a copy.

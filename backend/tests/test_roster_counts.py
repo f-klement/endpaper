@@ -20,8 +20,8 @@ seven are the roster's own size. Nothing
 in a sentence's shape says which one is meant. So "seventeen sources" in this tree
 is a correct count of the roster, a correct count of what a lookup or a search
 may ask, or a stale count of some other subject entirely. Measured over the census below,
-**24** of its occurrences count something that is not the roster, so a scan
-with no classification fails 24 times on its first run and is switched off.
+**13** of its occurrences count something that is not the roster, so a scan
+with no classification fails 13 times on its first run and is switched off.
 
 Both figures in that paragraph are recomputed by `TestThisFileCountsItself`
 rather than reread, because this file's own prose is inside its subject.
@@ -307,10 +307,9 @@ def roster_sets() -> dict[str, int]:
 #: sources there are.
 #:
 #: **`Counts` compares a number, not a set, and a reader will read it as the
-#: set.** Three of these seven names are 17 today, so seven names discriminate
-#: five ways and a claim can bind to the wrong one and pass. Live instance:
-#: `test_books_google.py` says enrichment reaches all seventeen sources and binds
-#: to `the whole roster`, while `helpers.py` states the identical fact about the
+#: set.** Several of these names share a size, so a claim can bind to the wrong
+#: one and pass. Live instance: `test_books_google.py` says enrichment reaches
+#: every source and binds to `the whole roster`, while `helpers.py` states the identical fact about the
 #: identical helper and binds to `lookup or search`. Both pass. The day those
 #: two stop being equal, one fails naming a set it was never about. No test can
 #: catch that, because the two claims are indistinguishable by number, which is
@@ -405,9 +404,30 @@ SPELLED = {
     "eighteen": 18,
     "nineteen": 19,
     "twenty": 20,
+    "thirty": 30,
 }
+#: **The compounds are generated, to thirty nine, for `fifteen`'s reason**: a
+#: table listing them stops one short of the next source, and a compound it
+#: does not hold reads as its tens with one intervening word.
+SPELLED.update(
+    {
+        f"{tens} {unit}": SPELLED[tens] + SPELLED[unit]
+        for tens in ("twenty", "thirty")
+        for unit in ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+    }
+)
 
-_NUMBER = rf"(?:{'|'.join(SPELLED)}|\d{{1,3}})"
+#: **Longest first, and the space in a compound is a hyphen or any run of
+#: blanks.** Alternation takes the first spelling that matches, so with `twenty`
+#: ahead of `twenty one` the census read the roster's size spelled that way as
+#: twenty with one intervening word: a claim of 20, outside the bound once the
+#: roster is 21, and so unread. The blank run is for a count wrapped across a
+#: line, which `_WRAP` turns into several spaces, and the hyphen for
+#: `twenty-one`, which the tree writes too; `_value` folds either back to the key.
+_SPELLINGS = "|".join(
+    re.escape(word).replace(chr(92) + " ", r"(?:-|[ \t]+)") for word in sorted(SPELLED, key=len, reverse=True)
+)
+_NUMBER = rf"(?:{_SPELLINGS}|\d{{1,3}})"
 _NOUN = r"(?:sources?|catalogues?|providers?)"
 
 #: A number, at most two words, a roster noun, within one table cell.
@@ -635,7 +655,7 @@ class KnownStale:
 
 
 def _value(token: str) -> int:
-    lowered = token.lower()
+    lowered = " ".join(token.lower().replace("-", " ").split())
     return SPELLED.get(lowered, int(token) if token.isdigit() else 0)
 
 
@@ -1308,22 +1328,32 @@ _MARC_IMPORT = "frontend/tests/pages/SettingsPage/LibrarySettingsPage/components
 #: count of something that is not the roster, or both.
 OUT_OF_BOUND: frozenset[str] = frozenset(
     {
-        "backend/fetch.py '{n} concurrent sources' entry[0]",
+        "backend/fetch.py '{n} catalogue' entry[0]",
+        "backend/fetch.py '{n} seeded catalogues' entry[0]",
+        "backend/fetch.py '{n} sources' entry[1]",
         "backend/metadata.py '{n} sources' entry[3]",
         "backend/metadata.py '{n} sources' entry[4]",
         "backend/tests/routers/test_books_search.py '{n} sources' entry[0]",
-        "backend/tests/test_authority.py '{n} `670` source' entry[0]",
         "backend/tests/test_authority.py '{n} viaf source' entry[0]",
         "backend/tests/test_classifications.py '{n} catalogues' entry[0]",
+        "backend/tests/test_fetch.py '{n} catalogues' entry[0]",
         "backend/tests/test_fetch.py '{n} sources' entry[0]",
         "backend/tests/test_fetch.py '{n} sources' entry[2]",
         "backend/tests/test_fetch.py '{n} sources' entry[3]",
         "backend/tests/test_fetch.py '{n} sources' entry[4]",
         "backend/tests/test_marc.py '{n} source' entry[0]",
+        "backend/tests/test_metadata.py '{n} check this source' entry[0]",
+        "backend/tests/test_metadata.py '{n} from every catalogue' entry[0]",
+        "backend/tests/test_roster_counts.py '{n} sources' entry[0]",
         "backend/tests/test_roster_counts.py '{n} sources' entry[1]",
-        "backend/tests/test_roster_counts.py '{n} sources' entry[5]",
+        "backend/tests/test_roster_counts.py '{n} sources' entry[4]",
+        "docs/decisions.md '{n} other sources' entry[0]",
         "docs/decisions.md '{n} source' entry[0]",
         "docs/decisions.md '{n} sources' entry[1]",
+        "docs/legend.md '{n} sources' entry[0]",
+        "docs/security.md '{n} catalogue' entry[0]",
+        "docs/security.md '{n} catalogues' entry[1]",
+        "docs/security.md '{n} seeded catalogues' entry[0]",
         "docs/security.md '{n} sources' entry[0]",
         # Split only to fit the line: this is one path and two entries on it.
         _MARC_IMPORT + " '{n} records this catalogue' entry[0]",
@@ -1538,10 +1568,6 @@ CLAIMS: dict[tuple[str, str], list[Counts | NotTheRoster | KnownStale]] = {
         NotTheRoster(
             "a fixture text, in the file that states the rule",
             near="stops_at_a_blank_line",
-        ),
-        NotTheRoster(
-            "an example of two verdicts that pass while meaning different sets",
-            near="reader will read it as the set",
         ),
         NotTheRoster(
             "the fixture in the sentence stating that emphasis blinds the "
@@ -2051,6 +2077,13 @@ class TestTheCensusSeesWhatItClaimsTo:
         """
         text = "queries at 50 records. Eight sources are asked now.\n"
         assert [o.value for o in scan("t.py", text)] == [8]
+
+    def test_it_reads_a_compound_the_table_never_listed_whole(self):
+        """Far past the roster, so the fixture never enters the census bound."""
+        assert 37 in {o.value for o in scan_unbounded("t.py", "thirty seven sources answer.\n")}
+
+    def test_it_reads_a_hyphenated_compound_whole(self):
+        assert 39 in {o.value for o in scan_unbounded("t.py", "thirty-nine sources answer.\n")}
 
     def test_it_reads_a_digit(self):
         """Every stale site in #111 was spelled. That is a fact about the past."""
@@ -2846,6 +2879,7 @@ class TestTheFeatureListNamesTheRosterAsSourcesHoldsIt:
         CatalogueSource.SBN: "Italian National Library Service",
         CatalogueSource.PORBASE: "PORBASE",
         CatalogueSource.OSZK: "National Széchényi Library",
+        CatalogueSource.SNK: "Slovak National Library",
         CatalogueSource.BN_PL: "Polish National Library",
         CatalogueSource.BNA: "Argentine National Library",
         CatalogueSource.BNU: "Uruguayan National Library",
@@ -2867,6 +2901,7 @@ class TestTheFeatureListNamesTheRosterAsSourcesHoldsIt:
         CatalogueSource.SBN: "Italian",
         CatalogueSource.PORBASE: "Portuguese",
         CatalogueSource.OSZK: "Hungarian",
+        CatalogueSource.SNK: "Slovak",
         CatalogueSource.BNA: "Argentine",
         CatalogueSource.BNU: "Uruguayan",
         CatalogueSource.BNF: "French",

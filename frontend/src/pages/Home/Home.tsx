@@ -15,6 +15,7 @@ import OverdueBanner from "./components/OverdueBanner";
 import SavedSearches from "./components/SavedSearches";
 import SelectionBar from "./components/SelectionBar";
 import UnconfirmedBanner from "./components/UnconfirmedBanner";
+import VocabularyOfferBanner from "./components/VocabularyOfferBanner";
 import {
   useBookSelection,
   useBrokenSenders,
@@ -24,6 +25,7 @@ import {
   useViewChoice,
   useMyOverdue,
   useUnconfirmedCount,
+  useVocabularyOffer,
 } from "./hooks";
 import { hasActiveFilters, isWishlist } from "./types";
 
@@ -48,6 +50,7 @@ export default function Home() {
   const unconfirmed = useUnconfirmedCount();
   const overdue = useMyOverdue();
   const brokenSenders = useBrokenSenders();
+  const vocabularyOffer = useVocabularyOffer();
   const [showTagPanel, setShowTagPanel] = useState(false);
   // Its own flag rather than one "which panel is open" value, so opening the
   // classification panel does not close the tag panel: the two narrow the same
@@ -90,19 +93,25 @@ export default function Home() {
       />
 
       {/* Hidden while selecting: the reader is already doing the thing the
-          banner would be asking them to do. All three, for the same reason.
+          banner would be asking them to do. All four, for the same reason.
 
           Overdue first: a book somebody else is holding past its date is the
-          one of the three with a person waiting at the other end. The broken
+          one of the four with a person waiting at the other end. The broken
           channel is next because it is about the app rather than the shelf,
-          and the unconfirmed nudge is last because its books are not going
-          anywhere. Each renders nothing when its own count is zero, so the
-          usual library page still has none of them. */}
+          then the unconfirmed nudge, whose books are not going anywhere. The
+          vocabulary offer is last: nothing is wrong without a copy, and a
+          lookup asks the source live meanwhile. Each renders nothing when it
+          has nothing to say, so the usual library page still has none of them. */}
       {!selection.isSelecting && (
         <>
           <OverdueBanner count={overdue} />
           <ChannelAlertBanner senders={brokenSenders} />
           <UnconfirmedBanner count={unconfirmed} onReview={reviewUnconfirmed} />
+          <VocabularyOfferBanner
+            offer={vocabularyOffer.offer}
+            onDismiss={vocabularyOffer.dismiss}
+            isDismissing={vocabularyOffer.isDismissing}
+          />
         </>
       )}
 
@@ -119,6 +128,7 @@ export default function Home() {
           setShowClassificationPanel((open) => !open)
         }
         onFilterChange={library.update}
+        offersOrigin={library.offersOrigin}
         locations={library.locations}
         collections={library.collections}
         view={view}

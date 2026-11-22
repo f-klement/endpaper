@@ -15,5 +15,6 @@ export interface LoanCreate {
   book_id: number;
   due_at?: string | null;
   loaned_to_name?: string | null;
+  loaned_to_patron_id?: number | null;
   loaned_to_user_id?: number | null;
 }

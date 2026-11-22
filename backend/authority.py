@@ -1,6 +1,6 @@
 """The authority files, read for a person rather than for a book.
 
-`metadata.py` asks catalogues about **books**; this module asks five authority
+`metadata.py` asks catalogues about **books**; this module asks six authority
 files about **people**. A book record describes a printing and dies with it; an
 authority record describes somebody who outlives every printing.
 
@@ -36,13 +36,14 @@ the Library of Congress catalogue, so it is a database name on a connection that
 exists rather than a new host. What its index can and cannot find is on
 `_NAF_PAGE`.
 
-**ORCID is the last file, and it is asked only for a name the two before it
-both answered with nobody.** It is a researcher's own registration rather than a
-national file, so it is strong where both national files are thin and empty
-for the novelist and the long dead author a household shelf holds. A miss there
-then costs one request on a name nothing else could answer. Its people arrive
-under its own scheme, never as an ISNI: why the two are never compared is on
-`_ORCID_URI`.
+**ORCID is the last file, asked by name only in library mode, and only for a
+name the two before it both answered with nobody.** It is a researcher's own
+registration rather than a national file, so it is strong where both national
+files are thin and empty for the novelist and the long dead author a household
+shelf holds: there its hits are namesakes, which is why a household is not
+offered them. A stored ORCID iD is resolved in either mode, because a number is
+a key and names nobody else. Its people arrive under its own scheme, never as an
+ISNI: why the two are never compared is on `_ORCID_URI`.
 
 ## Why VIAF is not a supplier
 
@@ -59,6 +60,7 @@ reason it stays out of the resolution path.
 **The Library of Congress gateway** states no terms in its responses either; it
 is the same gateway, under the same footing, as the catalogue search.
 **ORCID**'s public terms and limits are on `_ORCID_SEARCH_URL`.
+**The BNP** states none beyond a contact: see `_BNP_URL`.
 
 ## The refusal this module is built around
 
@@ -68,9 +70,9 @@ authority file can only ever attach a number to it.
 
 ## The boundary
 
-Every catalogue source's, plus lobid, Wikidata and `pub.orcid.org`. The NAF
-adds none: it is the Library of Congress catalogue's gateway, over the same
-plaintext HTTP. **No cover
+Every catalogue source's, plus lobid, Wikidata, `pub.orcid.org` and
+`urn.bnportugal.gov.pt`. The NAF adds none: it is the Library of Congress
+catalogue's gateway, over the same plaintext HTTP. **No cover
 host is added and none could be**: `covers.COVER_HOSTS` is what the CSP is
 derived from, so a host added here would widen what the browser may load.
 """
@@ -82,6 +84,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Final
 from xml.etree import ElementTree
 
+import authors
 import fetch
 import marc_fields
 import metadata
@@ -108,6 +111,10 @@ _WIKIDATA_URL: Final = "https://www.wikidata.org/w/api.php"
 _P_GND: Final = "P227"
 _P_VIAF: Final = "P214"
 _P_ISNI: Final = "P213"
+
+#: The Wikidata property holding a Biblioteca Nacional de Portugal number, the
+#: one national file `_bnp_resolve` can look a stored number up in.
+_P_PTBNP: Final = "P1005"
 
 #: What a GND number may contain, anchored at both ends.
 #:
@@ -355,16 +362,18 @@ _RESPONSE_LIMIT: Final = 262_144
 #: search runs beside it, so the slower of the two counts: a NAF page measured
 #: 0.49 to 0.85s on 2026-11-16, two in sequence when the session is cold, then
 #: two Wikidata calls at most 0.29s each. So about **1.4s**, and **2.3s** cold.
-#: **ORCID adds one request after the pair, on a miss only**: 0.16 to 0.36s on
-#: 2026-11-16, so a name neither national file holds is about **1.8s**, and
-#: **2.7s** cold.
+#: **ORCID adds one request after the pair, on a library mode miss only**: 0.16
+#: to 0.36s on 2026-11-16, so a name neither national file holds is about
+#: **1.8s**, and **2.7s** cold.
 #:
 #: **A confirmation is the longer path and the figure above is not it.** It is
 #: one resolve plus `national_identifiers`, whose three VIAF calls measured 0.56,
-#: 0.75 and 1.81 seconds at their worst on 2026-08-28, so about **4.4s** in
-#: total against this 8.0. That is 1.8x rather than 6x, and it is the number to
-#: re-derive before adding a fourth call to that path. The third of the three is
-#: paid only on a 5xx, so the common confirmation is nearer 2.6s.
+#: 0.75 and 1.81 seconds at their worst on 2026-08-28, then one BNP request
+#: where the cluster names a Portuguese number, 0.17 to 0.46s over 20 on
+#: 2026-11-18, so about **4.9s** in total against this 8.0. That is 1.6x rather
+#: than 6x, and it is the number to re-derive before adding another call to that
+#: path. The third VIAF call is paid only on a 5xx, so the common confirmation
+#: is nearer 3.1s.
 #:
 #: **The Wikidata fallback does not move that worst case, and the reason is the
 #: shape of the branch rather than the size of the calls.** Its six
@@ -637,12 +646,13 @@ _WIKIDATA_PROPERTY: Final = {
     AuthorityScheme.GND: _P_GND,
     AuthorityScheme.LCNAF: _P_LCNAF,
     AuthorityScheme.ORCID: _P_ORCID,
+    AuthorityScheme.PTBNP: _P_PTBNP,
 }
 
 
 async def _item_for(candidate: AuthorityCandidate, deadline: float | None) -> str | None:
-    """The Wikidata item whose `P227` (GND), `P244` (LCNAF) or `P496` (ORCID) is
-    this candidate's number, found by Wikidata.
+    """The Wikidata item whose `P227` (GND), `P244` (LCNAF), `P496` (ORCID) or
+    `P1005` (PTBNP) is this candidate's number, found by Wikidata.
 
     **Not read from lobid's `sameAs`**, and that is the whole point of the second
     supplier: two independent assertions about one link can be compared, and one
@@ -1011,7 +1021,7 @@ _NATIONAL_PROPERTIES: Final = {
     AuthorityScheme.BLBNB: "P4619",
     AuthorityScheme.ARBABN: "P3788",
     AuthorityScheme.BNE: "P950",
-    AuthorityScheme.PTBNP: "P1005",
+    AuthorityScheme.PTBNP: _P_PTBNP,
     AuthorityScheme.ICCU: "P396",
     AuthorityScheme.BNCHL: "P1890",
 }
@@ -1447,9 +1457,13 @@ async def national_identifiers(
     **Wikidata is the fallback for this route and never a comparator**, asked only
     where VIAF produced no cluster. One supplier speaks per confirmation.
 
+    **A Portuguese number is put back to the BNP** and kept only where its
+    record names this person, or links the cluster that spoke: `_ptbnp_checked`.
+
     **The budget is three requests on the path that works**, and six more on the
-    fallback, which are the cheap ones. A member is not waiting on this: it runs
-    after a confirmation rather than inside a lookup.
+    fallback, which are the cheap ones, plus one to the BNP where a PTBNP number
+    came back. A member is not waiting on this: it runs after a confirmation
+    rather than inside a lookup.
     """
     if not candidate.certain:
         return {}
@@ -1471,9 +1485,13 @@ async def national_identifiers(
 
     if sources is None:
         logger.info("VIAF produced no cluster; asking Wikidata for the national files")
-        return await _national_from_wikidata(candidate, deadline)
-
-    return _national_from_cluster(candidate, sources)
+        found = await _national_from_wikidata(candidate, deadline)
+        return await _ptbnp_checked(candidate, found, deadline, cluster=None)
+    # `cluster` is named only here: a number `_national_from_cluster` returns
+    # came from a cluster that named the GND number back. On the Wikidata
+    # route it may be lobid's, never verified.
+    found = _national_from_cluster(candidate, sources)
+    return await _ptbnp_checked(candidate, found, deadline, cluster=cluster)
 
 
 async def _cluster_for(
@@ -1594,8 +1612,9 @@ async def resolve_stored(
     **One file's numbers, the first in `_STORED_ORDER` that has any.** A GND
     record confirmed here arrives with its LCNAF number and its ORCID as cross
     references, so asking every file would show one person several times and
-    pay a request for each. An LCNAF number or an ORCID stands alone only where
-    a Member confirmed that file's record, and then it is the one key there is.
+    pay a request for each. An LCNAF number, an ORCID or a PTBNP number stands
+    alone only where a Member confirmed that file's record or forgot the GND
+    number beside it, and then it is the one key there is.
     A scheme no file here can be asked by is passed over rather than spent: it
     used to take one of the five places and answer nothing.
 
@@ -1613,7 +1632,9 @@ async def resolve_stored(
     return []
 
 
-async def search(name: str, *, deadline: float | None = None) -> list[AuthorityCandidate]:
+async def search(
+    name: str, *, deadline: float | None = None, ask_orcid: bool = False
+) -> list[AuthorityCandidate]:
     """The people the authority files hold under one name. A guess, every time.
 
     **A name is not a key**, which is the entire reason the confirmation step
@@ -1632,6 +1653,12 @@ async def search(name: str, *, deadline: float | None = None) -> list[AuthorityC
     **ORCID only where both answered and found nobody**, the rank the owner
     set on 2026-09-05: a fallback for the names the national files do not
     carry, so its request is paid on a miss and never on an ordinary search.
+    **And only where the caller passes `ask_orcid`**, which the route sets from
+    library mode. Off by default because on a household's shelf ORCID's top
+    hit was the book's own author for 30 of 385 authors and some hit came back
+    for 192, mostly namesakes: a researcher sharing a novelist's name is an
+    answer a member could confirm by mistake. `docs/decisions.md` has the
+    measurement.
     A file that did not answer has not found nobody, so a national file down
     raises before ORCID is asked, as it did before ORCID was a file: its
     researchers sharing the name are not an answer to "try again".
@@ -1651,7 +1678,7 @@ async def search(name: str, *, deadline: float | None = None) -> list[AuthorityC
         _gnd_people(query, deadline), _naf_people(query, deadline), return_exceptions=True
     )
     people = _merged(gnd, naf)
-    if not people:
+    if not people and ask_orcid:
         people = await _orcid_people(query, deadline)
     return list(
         await asyncio.gather(
@@ -1841,6 +1868,22 @@ def _naf_read(response: fetch.Fetched, *, certain: bool = False) -> list[Authori
     diagnostic stand in for one record it could not render, and that says
     nothing about the 24 beside it.
     """
+    root = _tree(response)
+    found = (_naf_person(node, certain=certain) for node in root.iter(marc_fields.RECORD_TAG))
+    people = [row for row in found if row is not None]
+    if not people:
+        _naf_refuse_on_diagnostic(root)
+    return people
+
+
+def _tree(response: fetch.Fetched) -> ElementTree.Element:
+    """One XML answer as a tree, or `AuthorityUnavailable` where it is not a
+    200 or not XML this module will build.
+
+    **The one place this module turns outside XML into a tree**, shared by the
+    NAF and the BNP so both keep the terms `_naf_read` states: the doctype
+    refused before the parse, the depth and the names bounded by `xml_parse`.
+    """
     if response.status_code != 200:
         raise AuthorityUnavailable
     body = response.text
@@ -1848,14 +1891,9 @@ def _naf_read(response: fetch.Fetched, *, certain: bool = False) -> list[Authori
         raise AuthorityUnavailable
     parser = ElementTree.XMLParser(target=xml_parse.DepthBoundedTree())  # noqa: S314  doctype refused above, bytes capped, depth bounded
     try:
-        root = xml_parse.fed(parser, body)
+        return xml_parse.fed(parser, body)
     except ElementTree.ParseError as failure:
         raise AuthorityUnavailable from failure
-    found = (_naf_person(node, certain=certain) for node in root.iter(marc_fields.RECORD_TAG))
-    people = [row for row in found if row is not None]
-    if not people:
-        _naf_refuse_on_diagnostic(root)
-    return people
 
 
 def _naf_refuse_on_diagnostic(root: ElementTree.Element) -> None:
@@ -1985,9 +2023,9 @@ def _naf_variants(fields: marc_fields.Fields, name: str) -> tuple[str, ...]:
 #: (together the Public APIs)", and say "you may not make use of the public
 #: APIs in connection with any revenue-generating product or service". The
 #: anonymous tier is named inside that definition, so staying anonymous does
-#: not step outside the clause. This module asks once per name search the two files before it
-#: answered with nobody, and once per stored ORCID resolved, under
-#: `ratelimit.AUTHORITY_LIMIT`.
+#: not step outside the clause. This module asks once per library mode name
+#: search the two files before it answered with nobody, and once per stored
+#: ORCID resolved in either mode, under `ratelimit.AUTHORITY_LIMIT`.
 #:
 #: **`expanded-search` rather than `search`**, because it answers the names in
 #: the same request: `search` answers bare iDs, and a record per iD would follow.
@@ -2117,8 +2155,309 @@ def _orcid_strings(*values: Any) -> list[str]:
     return [value.strip() for value in values if isinstance(value, str) and value.strip()]
 
 
+#: The Biblioteca Nacional de Portugal's authority file, one record by number.
+#:
+#: **Its URN service, plain HTTPS, and no Z39.50 at all.** The BNP's Z39.50
+#: server ignores the database name and answers bibliographic records under
+#: every one, `aut` included, so it serves no authority file; this does, as
+#: UNIMARC authority records in MarcXchange. Measured 2026-11-18 over 20 numbers
+#: read off VIAF clusters: 20 found, each named as its cluster names the person.
+#:
+#: **This host and not the one the record names itself by.** A record's `003`
+#: is `id.bnportugal.gov.pt/aut/catbnp/<n>`, which redirects to `urn.bn.pt`,
+#: whose certificate does not match that name.
+#:
+#: **Terms:** the BNP's open data page offers the service for retrieving a
+#: record by its identifier, mainly for library systems, and states nothing
+#: beyond a contact. Asked once per stored PTBNP number resolved, and once per
+#: confirmation whose cluster names one, both under `ratelimit.AUTHORITY_LIMIT`.
+_BNP_URL: Final = "https://urn.bnportugal.gov.pt/nca/unimarc-authorities/marcxchange"
+
+#: A PTBNP number as VIAF and Wikidata carry it and the record's `001` holds it:
+#: digits, no leading zero. The sample ran from 4 digits (`9003`) to 7
+#: (`1869137`); ten allow for growth. Anchored, because it goes into a query.
+_BNP_NUMBER: Final = re.compile(r"\A[1-9][0-9]{0,9}\Z")
+
+#: Bytes one BNP record may bring back.
+#:
+#: Measured 2026-11-18 over the 20 sampled records: 1,631 to **2,901**
+#: (Nietzsche, five `400` variants and two `675`). 64 KiB is 22x that, room
+#: for a record listing a hundred variants, and a quarter of `_RESPONSE_LIMIT`,
+#: which the NAF page needs and one record does not.
+_BNP_LIMIT: Final = 65_536
+
+#: The MarcXchange namespace in ElementTree's `{uri}` spelling. Not MARC21
+#: slim, so neither `marc_fields` nor the catalogue door's UNIMARC crosswalk
+#: reads the record as it arrives.
+_MARCXCHANGE: Final = "{info:lc/xmlns/marcxchange-v2}"
+
+#: What the service answers for a number it does not hold, with HTTP 200, as
+#: the whole of `<urn-response><error>`: measured on the planted `99999999`.
+_BNP_MISS: Final = "Registo inexistente"
+
+#: UNIMARC authority leader/06 for an entry record: an established heading,
+#: rather than a reference (`y`) or an explanatory note (`z`). All 20 sampled
+#: records carried it.
+_BNP_ENTRY: Final = "x"
+
+#: A VIAF cluster a BNP record links, in each shape measured on 2026-11-18:
+#: `856 $u` as `https://viaf.org/viaf/<n>/` (Nietzsche, Marías, Sánchez
+#: Dragó) or `https://viaf.org/en/viaf/<n>` (Eco), and `810 $a` as
+#: `VIAF http://viaf.org/viaf/<n>/` (Fogazzaro). 4 of the 20 sampled records
+#: carried one, each the cluster the number was read from.
+_BNP_VIAF: Final = re.compile(r"\A(?:VIAF\s+)?https?://viaf\.org/(?:[a-z]{2}/)?viaf/([0-9]{1,20})/?\Z")
+
+
+@dataclass(frozen=True)
+class _BnpRecord:
+    """One BNP record as read: the person, and the VIAF clusters it links."""
+
+    person: AuthorityCandidate
+    viaf: frozenset[str]
+
+
+async def _bnp_resolve(identifier: str, deadline: float | None) -> AuthorityCandidate | None:
+    """The one person a PTBNP number names, or None if the BNP does not hold it.
+
+    Certain for the reason `resolve` is. **Wikidata is asked for the item and
+    its description, and nothing is compared**: a BNP candidate carries no
+    `same_as` for `_disagreements` to set against the item `P1005` finds, and
+    the record's own `856` Wikidata link is not read, because 1 of 21 records
+    fetched on 2026-11-18 carried one.
+    """
+    record = await _bnp_record(identifier, deadline)
+    if record is None:
+        return None
+    return await _cross_check(record.person, compare_references=False, deadline=deadline)
+
+
+async def _bnp_record(identifier: str, deadline: float | None) -> _BnpRecord | None:
+    """The BNP's own record for a PTBNP number, with no Wikidata request: the
+    one request both `_bnp_resolve` and `_ptbnp_checked` make."""
+    if not _BNP_NUMBER.match(identifier):
+        logger.info("Refused to resolve an identifier that is not a PTBNP number")
+        return None
+    try:
+        response = await fetch.get_once(
+            _BNP_URL, params={"id": identifier}, limit=_BNP_LIMIT, deadline=deadline
+        )
+    except Exception as failure:
+        raise AuthorityUnavailable from failure
+    return _bnp_read(response, identifier)
+
+
+async def _ptbnp_checked(
+    confirmed: AuthorityCandidate,
+    found: dict[AuthorityScheme, str],
+    deadline: float | None,
+    *,
+    cluster: str | None,
+) -> dict[AuthorityScheme, str]:
+    """`found`, less its PTBNP number unless the BNP's record by that number
+    vouches for the confirmed person: `_bnp_vouches`.
+
+    **Dropped where the BNP answers and does not vouch**: a record under
+    another name and no link to `cluster`, the BNP's own miss, or a number it
+    would not be asked by. A wrong number is a durable row, and nothing here
+    renames anybody: the record is read for its names and links and discarded.
+
+    **Kept, unchecked, where the BNP cannot answer**, which is what was stored
+    before the BNP was asked. The supplier it came from already tied it to the
+    confirmed person (VIAF in both directions, Wikidata by the GND number),
+    and a confirmation must not fail, or lose a number, because one library is
+    down.
+
+    `cluster` is the VIAF cluster that named the GND number back, or None
+    where Wikidata supplied the number. One request, under the confirmation's
+    own deadline: `DEADLINE_SECONDS` carries the cost.
+    """
+    number = found.get(AuthorityScheme.PTBNP)
+    if number is None:
+        return found
+    try:
+        record = await _bnp_record(number, deadline)
+    except AuthorityUnavailable:
+        logger.info("The BNP did not answer; keeping its number as the supplier names it")
+        return found
+    if record is not None and _bnp_vouches(confirmed, record, cluster):
+        return found
+    logger.info("The BNP does not name the confirmed person by that number; not storing it")
+    return {scheme: value for scheme, value in found.items() if scheme is not AuthorityScheme.PTBNP}
+
+
+def _bnp_vouches(confirmed: AuthorityCandidate, record: _BnpRecord, cluster: str | None) -> bool:
+    """Whether the BNP's record names the confirmed person, or links the very
+    cluster that named the confirmed GND record back.
+
+    **The link rescues a misspelling the name rule refuses**: Fogazzaro, whom
+    the BNP heads `Fogazarro`, links cluster `39408145` in his `810`. It is the
+    bidirectional check `national_identifiers` makes for the GND number, from
+    the BNP's side. Only on the VIAF route: Wikidata supplies no cluster.
+    """
+    return _names_one_person(confirmed, record.person) or cluster in record.viaf
+
+
+def _names_one_person(confirmed: AuthorityCandidate, record: AuthorityCandidate) -> bool:
+    """Whether any name the confirmed record gives is any name the BNP's gives,
+    as the same words in any order, by `authors.author_key`.
+
+    **Any form, either side, and word order ignored**, because the two files
+    head one person differently: the GND writes `Taibo, Paco Ignacio II.`
+    and the BNP `Taibo II, Paco I.`, met only through a GND variant. Measured
+    2026-11-18 over 19 people whose VIAF cluster carried both numbers: 18 of 19
+    match, against 16 on the headings alone; the one refused is the BNP's own
+    misspelling, `Fogazarro, Antonio`, in its heading and every variant. 0 of
+    361 pairings of one person's GND record with another's BNP record match.
+
+    **It catches a number for somebody else entirely, and no more.** A
+    namesake shares a form and passes, which is the error a VIAF mis-merge
+    most plausibly makes; a one word form such as `Nietzsche` or `Plutarco`
+    is enough on its own. The 361 pairings are of differently named people,
+    so they do not measure that, and no wrong number was seen in the 19.
+    """
+    return not _name_forms(confirmed).isdisjoint(_name_forms(record))
+
+
+def _name_forms(candidate: AuthorityCandidate) -> set[tuple[str, ...]]:
+    """Every name a candidate gives, each as its sorted words; a name with no
+    words is no evidence and is left out."""
+    forms = {
+        tuple(sorted(authors.author_key(name).split())) for name in (candidate.name, *candidate.variants)
+    }
+    forms.discard(())
+    return forms
+
+
+def _bnp_read(response: fetch.Fetched, identifier: str) -> _BnpRecord | None:
+    """The record one BNP answer holds for the number, None for the service's
+    own miss, or `AuthorityUnavailable`.
+
+    **A miss is read from the body, never the status**: the service answers
+    200 either way. Any `urn-response` but `_BNP_MISS` is an answer this module
+    cannot read, so an outage is not shown to a Member as nobody.
+
+    **The record must be the one asked for**: its `001` equal to the number,
+    the check `_naf_resolve` and `_orcid_resolve` make on theirs. A record for
+    another number is an answer about somebody else, so None.
+    """
+    root = _tree(response)
+    if root.tag == "urn-response":
+        if (root.findtext("error") or "").strip() == _BNP_MISS:
+            return None
+        raise AuthorityUnavailable
+    for record in _bnp_records(root):
+        candidate = _bnp_person(record)
+        if candidate is not None and candidate.identifier == identifier:
+            return _BnpRecord(candidate, _bnp_viaf(record))
+    return None
+
+
+def _bnp_records(root: ElementTree.Element) -> list[ElementTree.Element]:
+    """The records of a MarcXchange collection, or `AuthorityUnavailable`.
+
+    **A collection holding no record is refused, not read as a miss.** The
+    service's miss is `_BNP_MISS`, and an empty collection was never seen; a
+    confirmation drops a number on a miss, so a format drift read as one would
+    lose every Portuguese number confirmed while it lasted.
+    """
+    records = list(root.iter(f"{_MARCXCHANGE}record")) if root.tag == f"{_MARCXCHANGE}collection" else []
+    if not records:
+        raise AuthorityUnavailable
+    return records
+
+
+def _bnp_viaf(record: ElementTree.Element) -> frozenset[str]:
+    """Every VIAF cluster one BNP record links, by `_BNP_VIAF`, in `856 $u` or
+    `810 $a`."""
+    links = [
+        text.strip()
+        for tag, code in (("856", "u"), ("810", "a"))
+        for field in _bnp_fields(record, tag)
+        for sub, text in field
+        if sub == code
+    ]
+    return frozenset(match.group(1) for match in map(_BNP_VIAF.match, links) if match)
+
+
+def _bnp_person(record: ElementTree.Element) -> AuthorityCandidate | None:
+    """One UNIMARC authority record as a candidate, or None where it is not an
+    established personal name.
+
+    **The heading is `200`**, a personal name in a UNIMARC authority record,
+    read by `metadata.unimarc_name_heading`; a family or a corporate body
+    heads its record with another tag and has none. `400` are its other
+    spellings. Nothing else is read: `830` is a biographical note, and
+    `docs/featurelist.md` refuses author biographies.
+
+    **An undifferentiated heading is served as one person**: `120`, which
+    flags one, is not read, where `_naf_established` refuses the NAF's
+    equivalent. None of the 20 sampled records carried a `120`.
+
+    Dropped rather than raised, the call `_candidate` makes.
+    """
+    if record.findtext(f"{_MARCXCHANGE}leader", "")[_RECORD_TYPE : _RECORD_TYPE + 1] != _BNP_ENTRY:
+        return None
+    identifier = next(
+        (
+            (field.text or "").strip()
+            for field in record.findall(f"{_MARCXCHANGE}controlfield")
+            if field.get("tag") == "001"
+        ),
+        "",
+    )
+    headings = _bnp_fields(record, "200")
+    name = metadata.unimarc_name_heading(headings[0]) if headings else None
+    if not _BNP_NUMBER.match(identifier) or not name:
+        return None
+    born, died = _bnp_dates(headings[0])
+    return AuthorityCandidate(
+        scheme=AuthorityScheme.PTBNP,
+        identifier=identifier,
+        name=name,
+        variants=_bnp_variants(record, name),
+        born=born,
+        died=died,
+        certain=True,
+    )
+
+
+def _bnp_fields(record: ElementTree.Element, tag: str) -> list[list[tuple[str, str]]]:
+    """Every field of one tag, each as its subfields in record order."""
+    return [
+        [(sub.get("code") or "", sub.text or "") for sub in field.findall(f"{_MARCXCHANGE}subfield")]
+        for field in record.findall(f"{_MARCXCHANGE}datafield")
+        if field.get("tag") == tag
+    ]
+
+
+def _bnp_dates(heading: list[tuple[str, str]]) -> tuple[str | None, str | None]:
+    """Birth and death as `200 $f` writes them, split at the hyphen.
+
+    `1932-2016` is both, `1946-` a birth alone and `ca 50-120` keeps its
+    qualifier, the strings kept as written for the reason `AuthorityCandidate`
+    gives. A `$f` with no hyphen is not split, because which of the two it is
+    cannot be told.
+    """
+    dates = next((text.strip() for code, text in heading if code == "f"), "")
+    if "-" not in dates:
+        return None, None
+    born, _, died = dates.partition("-")
+    return born.strip() or None, died.strip() or None
+
+
+def _bnp_variants(record: ElementTree.Element, name: str) -> tuple[str, ...]:
+    """The other spellings a BNP record lists, `400`, as `_naf_variants` reads
+    the NAF's: repeats and the heading itself dropped."""
+    seen: dict[str, None] = {}
+    for subfields in _bnp_fields(record, "400"):
+        variant = metadata.unimarc_name_heading(subfields)
+        if variant and variant != name:
+            seen.setdefault(variant)
+    return tuple(seen)
+
+
 async def _gnd_resolve(identifier: str, deadline: float | None) -> AuthorityCandidate | None:
-    """`resolve` in the shape the other two files' resolvers take."""
+    """`resolve` in the shape the other files' resolvers take."""
     return await resolve(identifier, deadline=deadline)
 
 
@@ -2128,6 +2467,10 @@ _STORED_ORDER: Final = (
     (AuthorityScheme.GND, _gnd_resolve),
     (AuthorityScheme.LCNAF, _naf_resolve),
     (AuthorityScheme.ORCID, _orcid_resolve),
+    # Last, and reached only where none of the three above is stored: a PTBNP
+    # number arrives as a cross reference of a confirmed GND record, so it
+    # stands alone only where a Member confirmed it or forgot the GND number.
+    (AuthorityScheme.PTBNP, _bnp_resolve),
 )
 
 

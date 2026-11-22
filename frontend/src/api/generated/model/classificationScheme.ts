@@ -7,29 +7,32 @@
  */
 
 /**
- * Published schemes a `classifications` row may quote.
+ * The schemes this application's own code reads or writes.
  *
- * A closed set rather than free text, because the scheme is what makes the
- * number mean anything: `004` is computing in Dewey and nothing at all in
- * Library of Congress notation. A row whose scheme nobody recognises is a
- * number with no reading.
+ * **A `classifications` row may quote any scheme in the
+ * `classification_schemes` table, and these four are the rows that table is
+ * seeded with.** A library on UDC adds a row rather than asking for a code
+ * change: whether UDC exists is not this project's business. What makes
+ * these four different is that code names them. A catalogue reader produces
+ * them (`sources.CLASSIFIES`, held to the decoders by its test), `BookSort`
+ * orders a shelf by two of them, and the MARC export writes a field for each.
+ * So `classification_schemes.BUILT_IN` seeds them, and their rows can be
+ * neither renamed nor deleted nor refiled: a row this code reads changing
+ * under it would be the failure a closed enum used to make impossible.
  *
- * All four are produced today. DDC comes from the DNB and K10plus (MARC
- * 082) and from the Library of Congress (`classification authority="ddc"`);
- * LCC comes from the Library of Congress alone (`authority="lcc"`); GND comes
- * from the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from
- * the same Library of Congress record as the other two, `<subject
- * authority="lcsh">` beside the `<classification>` elements.
+ * The scheme is still what makes the number mean anything: `004` is
+ * computing in Dewey and nothing at all in Library of Congress notation. A
+ * row is the place a library states that reading for a scheme of its own.
  *
  * **GND is an authority file rather than a shelf order, and it still belongs
  * here.** What the column called `number` holds is the scheme's own identifier
  * for a heading, which is the half that does not change while the caption
  * does. For Dewey that was measured: `004` is Informatik in a German record
  * and Computing in an English one. For GND it is a property of the identifier
- * rather than something this app will see, the DNB being its only supplier
- * here and German its only caption: `4203576-4` names one heading whatever a
- * record calls it. What differs is that a Dewey number also sorts, and a GND
- * number does not. That is now a visible difference rather than a latent one:
+ * rather than something this app will see, German being its only caption:
+ * `4203576-4` names one heading whatever a record calls it. What differs is
+ * that a Dewey number also sorts, and a GND number does not. That is now a
+ * visible difference rather than a latent one:
  * `BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that
  * place a book on one, each under its own rule in `filing.py`, and there is
  * deliberately no counterpart for GND or LCSH because a subject vocabulary
@@ -44,7 +47,8 @@
  * honest and worth knowing: a heading the Library of Congress later revises
  * (`Afro-Americans` became `African Americans`) changes this scheme's
  * identifier, where a GND number or a Dewey notation survives its own
- * recaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.
+ * recaptioning. That is why LCSH sorts last of these four in
+ * `classifications.SCHEME_ORDER`.
  *
  * **A person's identifier is not one of these**, though the DNB writes it in
  * the same `$0`: `100 $0` says who wrote the book, and every scheme here says
@@ -66,8 +70,8 @@
  * now: a book shows the headings it carries, and any of them can be filtered
  * on. What DDC has that the others do not is a second reading, the division,
  * which is what makes it browsable as well as filterable. **Sortable is no
- * longer one of the things it has alone**: every scheme names a filing rule
- * in `filing.py`, and LCC's orders a shelf too.
+ * longer one of the things it has alone**: every scheme row names a filing
+ * rule, and LCC's orders a shelf too.
  */
 export type ClassificationScheme =
   (typeof ClassificationScheme)[keyof typeof ClassificationScheme];

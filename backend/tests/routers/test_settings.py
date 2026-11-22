@@ -243,10 +243,166 @@ class TestUpdateSettings:
     @pytest.mark.parametrize("field", sorted(settings_router._STORED_BOOL))
     @pytest.mark.parametrize("value", [True, False])
     def test_a_stored_switch_is_written_as_it_was_sent(self, client, admin, db, field, value):
+        # The two switches with a precondition: each refuses on without an address.
+        settings_store.set_value(db, SettingKey.OAI_ADMIN_EMAIL, "catalogue@library.example")
+        settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, "http://10.0.0.10/oai")
         res = client.put("/api/settings", json={field: value}, headers=admin["headers"])
 
         assert res.status_code == 200, res.text
         assert settings_store.get_bool(db, settings_router._STORED_BOOL[field]) is value
+
+    def test_a_member_cannot_switch_the_sru_server_on(self, client, member, db):
+        res = client.put("/api/settings", json={"sru_server_enabled": True}, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED) is False
+
+    def test_a_member_cannot_switch_the_oai_provider_on(self, client, member, db):
+        res = client.put("/api/settings", json={"oai_provider_enabled": True}, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is False
+
+    def test_the_oai_provider_is_refused_without_a_contact_address(self, client, admin, db):
+        res = client.put("/api/settings", json={"oai_provider_enabled": True}, headers=admin["headers"])
+
+        assert res.status_code == 409
+        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is False
+
+    def test_the_oai_provider_turns_on_with_its_address_in_the_same_write(self, client, admin, db):
+        body = {"oai_provider_enabled": True, "oai_admin_email": "catalogue@library.example"}
+        res = client.put("/api/settings", json=body, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["oai_admin_email"] == "catalogue@library.example"
+        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is True
+
+    def test_the_address_cannot_be_cleared_while_the_provider_is_on(self, client, admin, db):
+        body = {"oai_provider_enabled": True, "oai_admin_email": "catalogue@library.example"}
+        client.put("/api/settings", json=body, headers=admin["headers"])
+        res = client.put("/api/settings", json={"oai_admin_email": ""}, headers=admin["headers"])
+
+        assert res.status_code == 409
+        db.expire_all()
+        assert settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL) == "catalogue@library.example"
+
+    def test_a_contact_address_that_is_not_one_is_refused(self, client, admin):
+        res = client.put("/api/settings", json={"oai_admin_email": "nobody here"}, headers=admin["headers"])
+
+        assert res.status_code == 422
+
+    def test_a_member_cannot_switch_the_harvester_on(self, client, member, db):
+        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": "https://repository.example/oai"}
+        res = client.put("/api/settings", json=body, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED) is False
+        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == ""
+
+    def test_the_harvester_is_refused_without_a_repository(self, client, admin, db):
+        res = client.put("/api/settings", json={"oai_harvest_enabled": True}, headers=admin["headers"])
+
+        assert res.status_code == 409
+        assert settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED) is False
+
+    def test_the_harvester_turns_on_with_its_repository_in_the_same_write(self, client, admin, db):
+        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": " https://repository.example/oai "}
+        res = client.put("/api/settings", json=body, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["oai_harvest_enabled"] is True
+        assert res.json()["oai_harvest_base_url"] == "https://repository.example/oai"
+        assert settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED) is True
+
+    def test_the_repository_cannot_be_cleared_while_the_harvester_is_on(self, client, admin, db):
+        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": "https://repository.example/oai"}
+        client.put("/api/settings", json=body, headers=admin["headers"])
+        res = client.put("/api/settings", json={"oai_harvest_base_url": ""}, headers=admin["headers"])
+
+        assert res.status_code == 409
+        db.expire_all()
+        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == "https://repository.example/oai"
+
+    def test_the_harvester_and_its_repository_are_cleared_together(self, client, admin, db):
+        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": "https://repository.example/oai"}
+        client.put("/api/settings", json=body, headers=admin["headers"])
+        body = {"oai_harvest_enabled": False, "oai_harvest_base_url": ""}
+        res = client.put("/api/settings", json=body, headers=admin["headers"])
+
+        assert res.status_code == 200
+        assert res.json()["oai_harvest_enabled"] is False
+        assert res.json()["oai_harvest_base_url"] == ""
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "http://10.0.0.10/oai",
+            "http://localhost:8080/oai",
+            "http://172.16.5.20/cgi-bin/oai",
+            "http://127.0.0.1/oai",
+        ],
+    )
+    def test_a_household_repository_is_accepted_over_http(self, client, admin, db, address):
+        """The owner's decision: migrating off a system on the same network is
+        the case the harvester exists for."""
+        res = client.put("/api/settings", json={"oai_harvest_base_url": address}, headers=admin["headers"])
+
+        assert res.status_code == 200, res.text
+        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == address
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "ftp://repository.example/oai",
+            "https://harvest:secret@repository.example/oai",
+            "https://repository.example/oai?verb=Identify",
+            "https://repository.example/oai#records",
+            "http://169.254.169.254/latest",
+            "https:///oai",
+            "https://repository.example:70000/oai",
+            "repository.example/oai",
+        ],
+    )
+    def test_a_repository_address_the_harvester_may_not_reach_is_refused(self, client, admin, db, address):
+        res = client.put("/api/settings", json={"oai_harvest_base_url": address}, headers=admin["headers"])
+
+        assert res.status_code == 400
+        assert "http or https" in res.json()["detail"]
+        assert address not in res.text
+        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == ""
+
+    def test_a_member_cannot_switch_public_availability_on(self, client, member, db):
+        body = {"public_availability_enabled": True}
+        res = client.put("/api/settings", json=body, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED) is False
+
+    def test_the_vocabulary_offer_starts_undismissed(self, client, admin):
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+
+        assert body["vocabulary_offer_dismissed"] is False
+
+    def test_a_dismissed_vocabulary_offer_reads_back_dismissed(self, client, admin):
+        client.put("/api/settings", json={"vocabulary_offer_dismissed": True}, headers=admin["headers"])
+
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert body["vocabulary_offer_dismissed"] is True
+
+    def test_a_member_cannot_dismiss_the_vocabulary_offer(self, client, member, db):
+        body = {"vocabulary_offer_dismissed": True}
+        res = client.put("/api/settings", json=body, headers=member["headers"])
+
+        assert res.status_code == 403
+        assert settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED) is False
+
+    def test_the_sru_switch_reads_back_as_stored_while_nothing_is_published(self, client, admin):
+        """The admin's intent, not what is served: the route also needs the
+        catalogue published, which `public_catalogue_published` reports."""
+        body = client.put("/api/settings", json={"sru_server_enabled": True}, headers=admin["headers"]).json()
+
+        assert body["sru_server_enabled"] is True
+        assert body["public_catalogue_published"] is False
 
     def test_an_absent_field_is_left_alone(self, client, admin):
         """The reason the update is partial.
@@ -1306,6 +1462,19 @@ class TestTheProviderList:
     def test_the_whole_roster_is_returned_in_order(self, client, admin):
         listed = [row["source"] for row in self._sources(client, admin)]
         assert listed == [source.value for source in sources.DEFAULT_ORDER]
+
+    def test_a_row_carries_how_its_catalogue_is_asked_and_never_its_address(self, client, admin):
+        """The four facts a compliance reader needs reach the wire, and the URL
+        does not: it changes without the policy changing."""
+        loc = next(row for row in self._sources(client, admin) if row["source"] == "loc")
+        assert {key: loc[key] for key in ("protocol", "record_schema", "encrypted", "credential")} == {
+            "protocol": "sru",
+            "record_schema": "mods",
+            "encrypted": False,
+            "credential": "none",
+        }
+        assert "lcc" in loc["classification_schemes"]
+        assert not any("loc.gov" in str(value) for value in loc.values())
 
     def test_a_switched_off_source_is_still_listed(self, client, admin):
         """Or "off" and "not in this build" would look the same on screen."""

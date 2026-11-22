@@ -14,7 +14,7 @@ from typing import Final
 
 from ldap3 import Server
 
-from enums import AppEnv, AuthMode, SettingKey
+from enums import AppEnv, AuthMode, ImageExtension, SettingKey
 
 # Where the SQLite database and uploaded images live. In the container this is
 # the bind-mounted volume at /app/data; locally it defaults to ./data so the
@@ -23,10 +23,10 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data" if Path("/app").is_dir() else 
 
 COVERS_DIR = DATA_DIR / "covers"
 
-# Image formats accepted for book covers and the login background. SVG is
-# deliberately absent: these files are served back from the app's own origin,
-# and an SVG can carry script, which would make it a stored-XSS vector.
-ALLOWED_IMAGE_EXTENSIONS = frozenset({"jpg", "jpeg", "png", "webp"})
+# Image formats accepted for book covers and the login background; why SVG
+# is absent is on `ImageExtension`. Plain strings rather than members, so a
+# caller formatting one gets its value whatever it reaches for.
+ALLOWED_IMAGE_EXTENSIONS = frozenset(extension.value for extension in ImageExtension)
 
 # Uploads are read fully into memory before being written, so this cap is also
 # what stops a large request exhausting the container's memory.

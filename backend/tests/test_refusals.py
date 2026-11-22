@@ -25,6 +25,8 @@ from starlette.exceptions import HTTPException
 
 import main
 import refusals
+from routers.oai import oai_switch
+from routers.sru import sru_switch
 from tests.corpus import BACKEND, application_modules
 from tests.test_errors import _constructions, _Module, _resolve, _status_of
 
@@ -330,15 +332,21 @@ class TestEveryRouteDeclaresTheRefusalsItsCodeBuilds:
         """Coverage rather than spelling: a 401, 403 or 404 the walk never
         reads from any route is one no route can be held to declaring.
 
-        Two are outside every walk, and rightly: `main.api_not_found` answers
-        API paths no route matches and the SPA mount answers a missing file,
-        so neither has an operation in the document to declare it on.
+        Three are outside every walk, and rightly: `main.api_not_found` answers
+        API paths no route matches, the SPA mount answers a missing file, and
+        `routers.sru.sru_switch` and `routers.oai.oai_switch` guard routes hidden from the schema, so none
+        of them has an operation in the document to declare it on.
         """
         read = _read_by_every_route()
-        for nowhere in (main.api_not_found, main.CachePolicyStaticFiles.get_response):
+        for nowhere, where in (
+            (main.api_not_found, "main.py"),
+            (main.CachePolicyStaticFiles.get_response, "main.py"),
+            (sru_switch, "routers/sru.py"),
+            (oai_switch, "routers/oai.py"),
+        ):
             found = _definition(nowhere)
             assert found is not None, nowhere
-            read[found[0]] = "main.py"
+            read[found[0]] = where
         spans = [(where, node.lineno, node.end_lineno or node.lineno) for node, where in read.items()]
         unread = [
             f"{where}:{call.lineno} builds {sorted(statuses & refusals.DECLARED)}"
@@ -352,7 +360,7 @@ class TestEveryRouteDeclaresTheRefusalsItsCodeBuilds:
             "they build. Reach each from the route that answers it in a way the walk "
             "follows (`_constructed` lists them); a method of an instance the "
             "function was handed is one it does not. A raise no schema operation can "
-            "answer, on a hidden route or in code no route runs, joins the two exempt "
+            "answer, on a hidden route or in code no route runs, joins those exempt "
             "beside `main.api_not_found` in this test, with its reason:\n  " + "\n  ".join(unread)
         )
 

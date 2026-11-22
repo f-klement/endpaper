@@ -23,6 +23,9 @@ import type {
 
 import type {
   BodySetLoginImage,
+  ClassificationSchemeCreate,
+  ClassificationSchemeOut,
+  ClassificationSchemeRename,
   CredentialKeyOut,
   FeatureFlagsOut,
   HTTPValidationError,
@@ -34,11 +37,42 @@ import type {
   SettingsOut,
   SettingsUpdate,
   SourceCredentialIn,
+  VocabularyOut,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+const getHeaders = (
+  ...sources: (RequestInit["headers"] | Record<string, string | undefined>)[]
+) => {
+  const seen = new Set<string>();
+  const layers: [string, string | readonly string[]][][] = [];
+  for (const source of sources.reverse()) {
+    if (!source) continue;
+    const entries =
+      source instanceof Headers
+        ? source.entries()
+        : Symbol.iterator in source
+          ? Array.from(
+              source as Iterable<Iterable<string>>,
+              (entry) => Array.from(entry) as [string, string],
+            )
+          : Object.entries<string | readonly string[] | undefined>(source);
+    const layer: [string, string | readonly string[]][] = [];
+    for (const [name, value] of entries) {
+      if (value !== undefined && !seen.has(name.toLowerCase()))
+        layer.push([name, value]);
+    }
+    for (const [name] of layer) seen.add(name.toLowerCase());
+    layers.push(layer);
+  }
+  return Object.fromEntries(layers.reverse().flat()) as Extract<
+    RequestInit["headers"],
+    Record<string, unknown>
+  >;
+};
 
 const withQueryKey = <T extends object, K>(
   query: T,
@@ -209,34 +243,13 @@ export const updateSettings = async (
   settingsUpdate: SettingsUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<SettingsOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<SettingsOut>(getUpdateSettingsUrl(), {
     ...options,
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(settingsUpdate),
   });
 };
@@ -492,34 +505,13 @@ export const setSourceCredential = async (
   sourceCredentialIn: SourceCredentialIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<SettingsOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<SettingsOut>(getSetSourceCredentialUrl(source), {
     ...options,
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(sourceCredentialIn),
   });
 };
@@ -611,6 +603,529 @@ export const useSetSourceCredential = <
 > => {
   return useMutation(
     getSetSourceCredentialMutationOptions(options),
+    queryClient,
+  );
+};
+export const getListClassificationSchemesUrl = () => {
+  return `/api/settings/classification-schemes`;
+};
+
+/**
+ * Every scheme a heading may quote: the built in four, then the library's own.
+ *
+ * **Any member**, because a book page names each heading's scheme from this
+ * list. It says nothing about a book: no count, and no scheme is hidden for
+ * being quoted only by somebody's private one.
+ * @summary List Classification Schemes
+ */
+export const listClassificationSchemes = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ClassificationSchemeOut[]> => {
+  return customFetch<ClassificationSchemeOut[]>(
+    getListClassificationSchemesUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListClassificationSchemesQueryKey = () => {
+  return [`/api/settings/classification-schemes`] as const;
+};
+
+export const getListClassificationSchemesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
+  TError = Refusal,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof listClassificationSchemes>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListClassificationSchemesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listClassificationSchemes>>
+  > = ({ signal }) => listClassificationSchemes({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listClassificationSchemes>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListClassificationSchemesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listClassificationSchemes>>
+>;
+export type ListClassificationSchemesQueryError = Refusal;
+
+/**
+ * Every scheme a heading may quote: the built in four, then the library's own.
+ *
+ * **Any member**, because a book page names each heading's scheme from this
+ * list. It says nothing about a book: no count, and no scheme is hidden for
+ * being quoted only by somebody's private one.
+ * @summary List Classification Schemes
+ */
+export function useListClassificationSchemes<
+  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
+  TError = Refusal,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassificationSchemes>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listClassificationSchemes>>,
+          TError,
+          Awaited<ReturnType<typeof listClassificationSchemes>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Every scheme a heading may quote: the built in four, then the library's own.
+ *
+ * **Any member**, because a book page names each heading's scheme from this
+ * list. It says nothing about a book: no count, and no scheme is hidden for
+ * being quoted only by somebody's private one.
+ * @summary List Classification Schemes
+ */
+export function useListClassificationSchemes<
+  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassificationSchemes>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listClassificationSchemes>>,
+          TError,
+          Awaited<ReturnType<typeof listClassificationSchemes>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Every scheme a heading may quote: the built in four, then the library's own.
+ *
+ * **Any member**, because a book page names each heading's scheme from this
+ * list. It says nothing about a book: no count, and no scheme is hidden for
+ * being quoted only by somebody's private one.
+ * @summary List Classification Schemes
+ */
+export function useListClassificationSchemes<
+  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassificationSchemes>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Every scheme a heading may quote: the built in four, then the library's own.
+ *
+ * **Any member**, because a book page names each heading's scheme from this
+ * list. It says nothing about a book: no count, and no scheme is hidden for
+ * being quoted only by somebody's private one.
+ * @summary List Classification Schemes
+ */
+export function useListClassificationSchemes<
+  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listClassificationSchemes>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListClassificationSchemesQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getDefineClassificationSchemeUrl = () => {
+  return `/api/settings/classification-schemes`;
+};
+
+/**
+ * Add a scheme. A code already taken is a 409.
+ *
+ * **Admin only**, unlike defining a custom field: a scheme's filing rule is
+ * fixed once defined, and what it files under orders a library's shelves.
+ * @summary Define Classification Scheme
+ */
+export const defineClassificationScheme = async (
+  classificationSchemeCreate: ClassificationSchemeCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ClassificationSchemeOut> => {
+  return customFetch<ClassificationSchemeOut>(
+    getDefineClassificationSchemeUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: getHeaders(
+        { "Content-Type": "application/json" },
+        options?.headers,
+      ),
+      body: JSON.stringify(classificationSchemeCreate),
+    },
+  );
+};
+
+export const getDefineClassificationSchemeMutationKey = () =>
+  ["defineClassificationScheme"] as const;
+
+export const getDefineClassificationSchemeMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof defineClassificationScheme>>,
+    TError,
+    DefineClassificationSchemeMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof defineClassificationScheme>>,
+  TError,
+  DefineClassificationSchemeMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDefineClassificationSchemeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof defineClassificationScheme>>,
+    DefineClassificationSchemeMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return defineClassificationScheme(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DefineClassificationSchemeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof defineClassificationScheme>>
+>;
+export type DefineClassificationSchemeMutationBody = ClassificationSchemeCreate;
+export type DefineClassificationSchemeMutationError =
+  | Refusal
+  | HTTPValidationError;
+export type DefineClassificationSchemeMutationVariables = {
+  data: ClassificationSchemeCreate;
+};
+
+/**
+ * Add a scheme. A code already taken is a 409.
+ *
+ * **Admin only**, unlike defining a custom field: a scheme's filing rule is
+ * fixed once defined, and what it files under orders a library's shelves.
+ * @summary Define Classification Scheme
+ */
+export const useDefineClassificationScheme = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof defineClassificationScheme>>,
+      TError,
+      DefineClassificationSchemeMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof defineClassificationScheme>>,
+  TError,
+  DefineClassificationSchemeMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDefineClassificationSchemeMutationOptions(options),
+    queryClient,
+  );
+};
+export const getDeleteClassificationSchemeUrl = (scheme: string) => {
+  return `/api/settings/classification-schemes/${scheme}`;
+};
+
+/**
+ * Delete a scheme no heading quotes.
+ *
+ * **A 409 naming how many books still quote it**, the owner's rule: no soft
+ * delete and no reassignment. Its `detail` carries `code` `scheme_in_use` and
+ * the `count` apart from the English sentence, for a client to word;
+ * `classification_schemes.remove` says what the count covers. A built in
+ * scheme is a 409 too, with a sentence only.
+ * @summary Delete Classification Scheme
+ */
+export const deleteClassificationScheme = async (
+  scheme: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeleteClassificationSchemeUrl(scheme), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteClassificationSchemeMutationKey = () =>
+  ["deleteClassificationScheme"] as const;
+
+export const getDeleteClassificationSchemeMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteClassificationScheme>>,
+    TError,
+    DeleteClassificationSchemeMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteClassificationScheme>>,
+  TError,
+  DeleteClassificationSchemeMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeleteClassificationSchemeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteClassificationScheme>>,
+    DeleteClassificationSchemeMutationVariables
+  > = (props) => {
+    const { scheme } = props ?? {};
+
+    return deleteClassificationScheme(scheme, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteClassificationSchemeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteClassificationScheme>>
+>;
+
+export type DeleteClassificationSchemeMutationError =
+  | Refusal
+  | HTTPValidationError;
+export type DeleteClassificationSchemeMutationVariables = { scheme: string };
+
+/**
+ * Delete a scheme no heading quotes.
+ *
+ * **A 409 naming how many books still quote it**, the owner's rule: no soft
+ * delete and no reassignment. Its `detail` carries `code` `scheme_in_use` and
+ * the `count` apart from the English sentence, for a client to word;
+ * `classification_schemes.remove` says what the count covers. A built in
+ * scheme is a 409 too, with a sentence only.
+ * @summary Delete Classification Scheme
+ */
+export const useDeleteClassificationScheme = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deleteClassificationScheme>>,
+      TError,
+      DeleteClassificationSchemeMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deleteClassificationScheme>>,
+  TError,
+  DeleteClassificationSchemeMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDeleteClassificationSchemeMutationOptions(options),
+    queryClient,
+  );
+};
+export const getRenameClassificationSchemeUrl = (scheme: string) => {
+  return `/api/settings/classification-schemes/${scheme}`;
+};
+
+/**
+ * Rename a library's own scheme. A built in one is a 409.
+ * @summary Rename Classification Scheme
+ */
+export const renameClassificationScheme = async (
+  scheme: string,
+  classificationSchemeRename: ClassificationSchemeRename,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ClassificationSchemeOut> => {
+  return customFetch<ClassificationSchemeOut>(
+    getRenameClassificationSchemeUrl(scheme),
+    {
+      ...options,
+      method: "PATCH",
+      headers: getHeaders(
+        { "Content-Type": "application/json" },
+        options?.headers,
+      ),
+      body: JSON.stringify(classificationSchemeRename),
+    },
+  );
+};
+
+export const getRenameClassificationSchemeMutationKey = () =>
+  ["renameClassificationScheme"] as const;
+
+export const getRenameClassificationSchemeMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof renameClassificationScheme>>,
+    TError,
+    RenameClassificationSchemeMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof renameClassificationScheme>>,
+  TError,
+  RenameClassificationSchemeMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRenameClassificationSchemeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof renameClassificationScheme>>,
+    RenameClassificationSchemeMutationVariables
+  > = (props) => {
+    const { scheme, data } = props ?? {};
+
+    return renameClassificationScheme(scheme, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RenameClassificationSchemeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof renameClassificationScheme>>
+>;
+export type RenameClassificationSchemeMutationBody = ClassificationSchemeRename;
+export type RenameClassificationSchemeMutationError =
+  | Refusal
+  | HTTPValidationError;
+export type RenameClassificationSchemeMutationVariables = {
+  scheme: string;
+  data: ClassificationSchemeRename;
+};
+
+/**
+ * Rename a library's own scheme. A built in one is a 409.
+ * @summary Rename Classification Scheme
+ */
+export const useRenameClassificationScheme = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof renameClassificationScheme>>,
+      TError,
+      RenameClassificationSchemeMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof renameClassificationScheme>>,
+  TError,
+  RenameClassificationSchemeMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRenameClassificationSchemeMutationOptions(options),
     queryClient,
   );
 };
@@ -1047,34 +1562,13 @@ export const restoreCredentialKey = async (
   recoveryPhraseIn: RecoveryPhraseIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CredentialKeyOut> => {
-  const getHeaders = (
-    h?: NonNullable<RequestInit["headers"]>,
-  ): Record<string, string | readonly string[]> => {
-    if (!h) return {};
-    if (h instanceof Headers) return Object.fromEntries(h.entries());
-    if (Symbol.iterator in h) {
-      return Object.fromEntries(
-        Array.from(
-          h as Iterable<Iterable<string>>,
-          (entry) => Array.from(entry) as [string, string],
-        ),
-      );
-    }
-    const headers: Record<string, string | readonly string[]> = {};
-    for (const [name, value] of Object.entries<
-      string | readonly string[] | undefined
-    >(h)) {
-      if (value !== undefined) headers[name] = value;
-    }
-    return headers;
-  };
   return customFetch<CredentialKeyOut>(getRestoreCredentialKeyUrl(), {
     ...options,
     method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-      ...getHeaders(options?.headers),
-    },
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
     body: JSON.stringify(recoveryPhraseIn),
   });
 };
@@ -1807,3 +2301,283 @@ export function useGetSenderHealth<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getListVocabulariesUrl = () => {
+  return `/api/settings/vocabularies`;
+};
+
+/**
+ * Every declared subject vocabulary: its licence, what is loaded of it and
+ * when, and any download under way. **Admin only**, beside the download it
+ * is read to start.
+ * @summary List Vocabularies
+ */
+export const listVocabularies = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<VocabularyOut[]> => {
+  return customFetch<VocabularyOut[]>(getListVocabulariesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListVocabulariesQueryKey = () => {
+  return [`/api/settings/vocabularies`] as const;
+};
+
+export const getListVocabulariesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listVocabularies>>,
+  TError = Refusal,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listVocabularies>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListVocabulariesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listVocabularies>>
+  > = ({ signal }) => listVocabularies({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listVocabularies>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListVocabulariesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listVocabularies>>
+>;
+export type ListVocabulariesQueryError = Refusal;
+
+/**
+ * Every declared subject vocabulary: its licence, what is loaded of it and
+ * when, and any download under way. **Admin only**, beside the download it
+ * is read to start.
+ * @summary List Vocabularies
+ */
+export function useListVocabularies<
+  TData = Awaited<ReturnType<typeof listVocabularies>>,
+  TError = Refusal,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVocabularies>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listVocabularies>>,
+          TError,
+          Awaited<ReturnType<typeof listVocabularies>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Every declared subject vocabulary: its licence, what is loaded of it and
+ * when, and any download under way. **Admin only**, beside the download it
+ * is read to start.
+ * @summary List Vocabularies
+ */
+export function useListVocabularies<
+  TData = Awaited<ReturnType<typeof listVocabularies>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVocabularies>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listVocabularies>>,
+          TError,
+          Awaited<ReturnType<typeof listVocabularies>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Every declared subject vocabulary: its licence, what is loaded of it and
+ * when, and any download under way. **Admin only**, beside the download it
+ * is read to start.
+ * @summary List Vocabularies
+ */
+export function useListVocabularies<
+  TData = Awaited<ReturnType<typeof listVocabularies>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVocabularies>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Every declared subject vocabulary: its licence, what is loaded of it and
+ * when, and any download under way. **Admin only**, beside the download it
+ * is read to start.
+ * @summary List Vocabularies
+ */
+export function useListVocabularies<
+  TData = Awaited<ReturnType<typeof listVocabularies>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listVocabularies>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListVocabulariesQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getDownloadVocabularyUrl = (scheme: string) => {
+  return `/api/settings/vocabularies/${scheme}/download`;
+};
+
+/**
+ * Fetch the vocabulary's release and load it in the background, replacing
+ * the copy in use only once the new one is complete. The first download and
+ * every refresh are this one request.
+ *
+ * A 404 for a vocabulary nobody declared. A 409 where its licence permits no
+ * local copy, or a download of it is already under way.
+ * @summary Download Vocabulary
+ */
+export const downloadVocabulary = async (
+  scheme: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<VocabularyOut> => {
+  return customFetch<VocabularyOut>(getDownloadVocabularyUrl(scheme), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getDownloadVocabularyMutationKey = () =>
+  ["downloadVocabulary"] as const;
+
+export const getDownloadVocabularyMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof downloadVocabulary>>,
+    TError,
+    DownloadVocabularyMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof downloadVocabulary>>,
+  TError,
+  DownloadVocabularyMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDownloadVocabularyMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof downloadVocabulary>>,
+    DownloadVocabularyMutationVariables
+  > = (props) => {
+    const { scheme } = props ?? {};
+
+    return downloadVocabulary(scheme, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DownloadVocabularyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof downloadVocabulary>>
+>;
+
+export type DownloadVocabularyMutationError = Refusal | HTTPValidationError;
+export type DownloadVocabularyMutationVariables = { scheme: string };
+
+/**
+ * Fetch the vocabulary's release and load it in the background, replacing
+ * the copy in use only once the new one is complete. The first download and
+ * every refresh are this one request.
+ *
+ * A 404 for a vocabulary nobody declared. A 409 where its licence permits no
+ * local copy, or a download of it is already under way.
+ * @summary Download Vocabulary
+ */
+export const useDownloadVocabulary = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof downloadVocabulary>>,
+      TError,
+      DownloadVocabularyMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof downloadVocabulary>>,
+  TError,
+  DownloadVocabularyMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDownloadVocabularyMutationOptions(options),
+    queryClient,
+  );
+};

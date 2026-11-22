@@ -11,9 +11,12 @@ Read from Koha, whose `Classification sources` seed six schemes each naming a
 sorting routine, `dewey`, `lcc` or `generic`. The design is taken; Koha is GPL
 and none of its code is.
 
-**Three rules, four schemes.** Dewey and Library of Congress each get their
-own. The two subject vocabularies get the generic one, which sorts a value as
-the text it is and declares that no shelf may be ordered by it.
+**Three rules, and which scheme files under which is a row, not code.**
+`classification_schemes.filing` names a rule per scheme, as Koha's
+classification sources do, and defaults to the generic one, which sorts a value
+as the text it is and declares that no shelf may be ordered by it. The built in
+rows file Dewey under Dewey's rule, Library of Congress under its own, and the
+two subject vocabularies under the generic one.
 
 **A rule answers once, in Python, and the answer is stored.** `sort_key` is
 the whole of a rule's arithmetic; `models.Classification.sort_key` holds what
@@ -36,10 +39,12 @@ implementation to drift.
 was written, and nothing recomputes it on read: not paying that is the point
 of the column. So an edit to any `sort_key` here needs an Alembic revision that
 recomputes the column, and a rule edited without one leaves a library filed by
-the old rule with no error anywhere.
+the old rule with no error anywhere. **The same is why a scheme's rule is
+fixed when the scheme is defined**: `classification_schemes.define` takes one
+and nothing changes it afterwards.
 
 **Nothing here queries, and nothing here names a table.** `models.py` calls
-`sort_key_for` on the way in and `shelf.py` reads the column. That keeps the
+`sort_key_under` on the way in and `shelf.py` reads the column. That keeps the
 privacy rule where it belongs and keeps this module invisible to the four
 guards in `tests/test_shelf.py`.
 """
@@ -49,7 +54,7 @@ from abc import ABC, abstractmethod
 from typing import ClassVar, Final
 
 import ddc
-from enums import ClassificationScheme
+from enums import FilingRuleName
 
 
 class FilingRule(ABC):
@@ -90,7 +95,7 @@ class GenericFiling(FilingRule):
     the honest thing to do with the values; offering that as a *shelf order*
     would be exactly the defect this module exists to fix, which is promising an
     order nobody has verified. So the generic rule is a fallback for a key and
-    never an entry in `SHELF_SCHEMES`.
+    never behind an entry in `classification_schemes.SHELF_SCHEMES`.
     """
 
     name: ClassVar[str] = "generic"
@@ -280,60 +285,43 @@ GENERIC: Final = GenericFiling()
 DEWEY: Final = DeweyFiling()
 LIBRARY_OF_CONGRESS: Final = LccFiling()
 
-#: Which rule files each published scheme.
+#: Each rule, by the name a `classification_schemes.filing` value gives it.
 #:
-#: **A scheme missing from here files under the generic rule rather than
-#: raising**, which is the arrangement `classifications.SCHEME_ORDER` already
-#: uses for the same reason: adding a member to `ClassificationScheme` must not
-#: be able to break a listing by forgetting a table. What it *cannot* do is
-#: acquire a shelf order by accident, because the generic rule orders none.
-FILING_RULES: Final[dict[ClassificationScheme, FilingRule]] = {
-    ClassificationScheme.DDC: DEWEY,
-    ClassificationScheme.LCC: LIBRARY_OF_CONGRESS,
-    ClassificationScheme.GND: GENERIC,
-    ClassificationScheme.LCSH: GENERIC,
+#: **Keyed on the rule rather than on a scheme**: which scheme files under
+#: which rule is that column, and this answers only what the name means.
+FILING_RULES: Final[dict[FilingRuleName, FilingRule]] = {
+    FilingRuleName.GENERIC: GENERIC,
+    FilingRuleName.DEWEY: DEWEY,
+    FilingRuleName.LCC: LIBRARY_OF_CONGRESS,
 }
 
 
-def rule_for(scheme: ClassificationScheme) -> FilingRule:
-    """The filing rule for one scheme. See `FILING_RULES` for the fallback."""
-    return FILING_RULES.get(scheme, GENERIC)
+def rule_named(name: object) -> FilingRule:
+    """The rule a stored `filing` value names, the generic one where it names none.
 
-
-def sort_key_for(scheme: object, number: str) -> str:
-    """The stored key for one row, from whatever that row's two columns hold.
-
-    **The one entry point every writer of `classifications.sort_key` uses**, so
-    that the ORM hook, the restore path and a test cannot each decide the
-    question differently. `models.Classification._file_the_number` is the hook
-    and `backup._parse_row` is the restore.
-
-    **`scheme` is `object` because the column is a plain `VARCHAR(20)` and one
-    write path has no validator.** `backup.restore` inserts through Core, so an
-    archive may carry `"scheme": "udc"`, or a number, or nothing this app has
-    ever published. A scheme this app cannot name is exactly the case
-    `FILING_RULES` already answers with the generic rule: file it as its own
-    text and order no shelf by it. Raising instead would turn one unrecognised
-    row into a failed restore of a whole library.
-
-    Two ways to be unnameable and both end here: not text at all, and text this
-    app does not publish. A `ClassificationScheme` passes the first test because
-    it is a `StrEnum`.
+    **`object` because one write path has no validator.** `backup.restore`
+    inserts through Core, and `ck_classification_schemes_filing` is what keeps
+    the column inside `FilingRuleName`; a value outside it reaching here files
+    as text and orders no shelf rather than raising, since a raise would turn
+    one unrecognised row into a failed listing.
     """
-    if isinstance(scheme, str):
-        try:
-            return rule_for(ClassificationScheme(scheme)).sort_key(number)
-        except ValueError:
-            pass
-    return GENERIC.sort_key(number)
+    if not isinstance(name, str):
+        return GENERIC
+    try:
+        return FILING_RULES[FilingRuleName(name)]
+    except ValueError:
+        return GENERIC
 
 
-#: The schemes a shelf may be ordered by, derived from the rules themselves.
-#:
-#: Derived rather than written out, so "which schemes file a shelf" is stated
-#: once, on the rule that answers it. `shelf._SHELF_SORTS` pairs each of these
-#: with the `BookSort` value that asks for it, and `tests/test_shelf.py` pins
-#: that the two cover each other.
-SHELF_SCHEMES: Final[tuple[ClassificationScheme, ...]] = tuple(
-    scheme for scheme, rule in FILING_RULES.items() if rule.orders_a_shelf
-)
+def sort_key_under(rule: object, number: str) -> str:
+    """The stored `classifications.sort_key` for `number` filed under `rule`.
+
+    **The one entry point every writer of that column uses**, so that the ORM
+    hook (`models._file_the_numbers`), the restore path (`backup._parse_row`)
+    and a test cannot each decide the question differently. `rule` is a
+    `filing` value as stored, resolved through `rule_named`.
+
+    **A rule's name, never a scheme's code.** `lcc` happens to be both, and
+    `ddc` is only the second: passed here it files as text, with no error.
+    """
+    return rule_named(rule).sort_key(number)

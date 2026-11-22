@@ -185,8 +185,9 @@ const BOOK_RECORD = /^\/api\/books\/\d+(\/copies)?$/;
  *
  * **The published catalogue is outside all of this too, and for a different
  * reason, which is why it is a separate paragraph rather than a fifth item
- * above.** Those four cannot be made stale by a write. `/api/public/books` and
- * `/api/public/books/{id}` can: editing a book does change what a visitor sees.
+ * above.** Those four cannot be made stale by a write. `/api/public/books`,
+ * `/api/public/books/{id}` and its `/availability` can: editing or lending a
+ * book does change what a visitor sees.
  * They are excluded because of who pays for the refresh. They are the only
  * queries here with no session behind them, answered under a rate limit keyed
  * on the **source address**, which behind a reverse proxy is close to a global
@@ -195,8 +196,8 @@ const BOOK_RECORD = /^\/api\/books\/\d+(\/copies)?$/;
  * catalogue for the people it was published for.
  *
  * What that gives up is bounded: a signed-out reader never invalidates anything,
- * so the only client holding both is an admin previewing, and both public hooks
- * carry a sixty second `staleTime`. **It falls out of the path predicates today
+ * so the only client holding both is an admin previewing, and every public hook
+ * carries a sixty second `staleTime`. **It falls out of the path predicates today
  * rather than out of a rule**, since `BOOK_RECORD` is anchored at
  * `^/api/books/` and `/api/public/books` is not in `LIBRARY_WIDE`, so
  * `tests/api/invalidate.test.ts` pins it as a decision instead of leaving it an

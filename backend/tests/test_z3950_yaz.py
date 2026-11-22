@@ -16,6 +16,7 @@ already, and it is produced by the library rather than by anything here.
 
 import ctypes
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -295,6 +296,14 @@ class TestWhatIsNegotiatedAtInit:
         bindings = FakeBindings()
         opened(bindings)
         assert bindings.options["implementationName"] == "endpaper"
+
+    @pytest.mark.parametrize("host", ["h", "tcp:h", "ssl:h"])
+    def test_every_connection_checks_the_peers_certificate(self, host):
+        # YAZ defaults `check_cert` to 0, which encrypts an `ssl:` target without
+        # authenticating it. On a `tcp:` target the library never reaches the check.
+        bindings = FakeBindings()
+        yaz.YazClient(bindings).open(Target(host=host, port=210, database="d"), timeout=5.0)
+        assert bindings.options["check_cert"] == "1"
 
 
 class TestTheSessionMatchesTheSeam:
@@ -745,6 +754,19 @@ class TestTheLibraryPathIsWhereTheImagePutsIt:
     def test_the_image_copies_the_subset_back_to_that_prefix(self):
         dockerfile = executable_lines(REPO / "Dockerfile")
         assert f"\nCOPY --from=yaz /opt/yaz-runtime {self.PREFIX}\n" in dockerfile
+
+    def test_the_pinned_yaz_can_check_a_certificate(self):
+        # `check_cert` arrived in 5.38.0. An older library ignores the option and connects
+        # to an `ssl:` target unverified, with no error to say so. Every valued pin is read,
+        # since a stage's own `ARG YAZ_VERSION=` overrides the global one inside that stage,
+        # and a pin this cannot read as three numbers is refused rather than skipped.
+        dockerfile = executable_lines(REPO / "Dockerfile")
+        pins = re.findall(r"^\s*(?i:arg)\s+YAZ_VERSION=(\S*)", dockerfile, re.MULTILINE)
+        assert pins
+        for pin in pins:
+            version = re.fullmatch(r'"?(\d+)\.(\d+)\.(\d+)"?', pin)
+            assert version is not None, pin
+            assert tuple(map(int, version.groups())) >= (5, 38, 0), pin
 
     def test_the_smoke_test_loads_the_client_in_the_finished_image(self):
         # The only check that the real library loads from this path and holds every

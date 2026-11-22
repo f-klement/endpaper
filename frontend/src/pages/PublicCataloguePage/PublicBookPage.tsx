@@ -2,6 +2,7 @@ import { Link, useParams } from "react-router-dom";
 
 import {
   TagCategory,
+  type PublicAvailability,
   type PublicBookOut,
   type PublicClassificationOut,
 } from "../../api/generated/model";
@@ -17,7 +18,11 @@ import { Page } from "../components";
 import CoverImage from "../components/CoverImage";
 import { FORMAT_LABELS, TAG_PILL_CLASSES, originLabel } from "../types";
 import PublicShell from "./components/PublicShell";
-import { usePublicBook, type UsePublicBookResult } from "./hooks";
+import {
+  usePublicAvailability,
+  usePublicBook,
+  type UsePublicBookResult,
+} from "./hooks";
 
 /**
  * The bibliographic facts a record carries, as label and value pairs in the
@@ -67,10 +72,12 @@ function seriesFact(book: PublicBookOut): string | null {
 /**
  * One published record, read by somebody with no account.
  *
- * **Every field on screen comes off `PublicBookOut` and nothing is fetched
- * beside it.** There is no loan, no reading status, no note and no member,
- * because the payload carries none of those: the column boundary is on the
- * server, and this page could not draw them if it tried.
+ * **Every field on screen comes off `PublicBookOut`, and the one thing
+ * fetched beside it is whether the title is on the shelf or on loan**, which
+ * the server answers only when the library has switched it on. There is no
+ * due date, no borrower, no reading status, no note and no member, because no
+ * payload carries any of those: the column boundary is on the server, and
+ * this page could not draw them if it tried.
  *
  * A book that is not published, does not exist, or is in the trash is the same
  * "not found", which is what the server answers and what this must not
@@ -110,6 +117,7 @@ export default function PublicBookPage() {
           {t("public.backToCatalogue")}
         </Link>
         <RecordHeading book={book} />
+        <Availability bookId={bookId} />
         <FactList facts={publicFacts(book, t)} />
         <ClassificationList classifications={book.classifications} />
         <TagList tags={book.tags} />
@@ -180,6 +188,23 @@ function RecordHeading({ book }: { book: PublicBookOut }) {
         )}
       </div>
     </div>
+  );
+}
+
+const AVAILABILITY_LABEL: Record<PublicAvailability, MessageKey> = {
+  on_shelf: "public.availability.on_shelf",
+  on_loan: "public.availability.on_loan",
+};
+
+/** On the shelf or on loan, or nothing while the library does not show it. */
+function Availability({ bookId }: { bookId: number }) {
+  const { t } = useTranslation();
+  const status = usePublicAvailability(bookId);
+  if (!status) return null;
+  return (
+    <p className="mb-6 text-sm font-medium text-paper-900 dark:text-paper-100">
+      {t(AVAILABILITY_LABEL[status])}
+    </p>
   );
 }
 

@@ -1209,6 +1209,57 @@ class TestThisIsTheOnlyDoorOutwards:
         assert not _http_offences(shape)
 
 
+#: A published file, and the host a publisher moves it to, as id.loc.gov moves
+#: its LCSH release to S3.
+RELEASE = "https://publisher.test/release.gz"
+MOVED = "https://bucket.test/release.gz"
+
+
+class TestADownloadIsWrittenToDiskUnderTheSameBounds:
+    @pytest.mark.asyncio
+    async def test_a_hop_to_another_https_host_is_followed(self, tmp_path):
+        with respx.mock:
+            respx.get(RELEASE).mock(return_value=httpx.Response(303, headers={"location": MOVED}))
+            respx.get(MOVED).mock(
+                return_value=httpx.Response(200, content=b"release", headers={"last-modified": "then"})
+            )
+            downloaded = await fetch.download(RELEASE, tmp_path / "r", limit=100, seconds=5)
+
+        assert (downloaded, (tmp_path / "r").read_bytes()) == (fetch.Downloaded(7, "then"), b"release")
+
+    @pytest.mark.asyncio
+    async def test_a_hop_down_to_http_is_refused(self, tmp_path):
+        with respx.mock:
+            respx.get(RELEASE).mock(
+                return_value=httpx.Response(302, headers={"location": "http://publisher.test/release.gz"})
+            )
+            with pytest.raises(fetch.RedirectedOffHost):
+                await fetch.download(RELEASE, tmp_path / "r", limit=100, seconds=5)
+
+    @pytest.mark.asyncio
+    async def test_a_body_past_the_limit_is_refused(self, tmp_path):
+        with respx.mock:
+            respx.get(RELEASE).mock(return_value=httpx.Response(200, content=b"x" * 101))
+            with pytest.raises(fetch.ResponseTooLarge):
+                await fetch.download(RELEASE, tmp_path / "r", limit=100, seconds=5)
+
+    @pytest.mark.asyncio
+    async def test_the_deadline_is_the_whole_downloads(self, tmp_path):
+        """A source answering each read in time but never finishing is stopped."""
+
+        async def trickle(_request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(5)
+            return httpx.Response(200, content=b"late")
+
+        with respx.mock:
+            respx.get(RELEASE).mock(side_effect=trickle)
+            started = time.monotonic()
+            with pytest.raises(fetch.DeadlineExceeded):
+                await fetch.download(RELEASE, tmp_path / "r", limit=100, seconds=0.2)
+
+        assert time.monotonic() - started < 2
+
+
 class TestACredentialGoesOnlyToTheOriginItWasSetFor:
     """The header is asked for per hop, and it is never set on the client.
 

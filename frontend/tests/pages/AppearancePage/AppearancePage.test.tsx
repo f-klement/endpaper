@@ -235,6 +235,19 @@ describe("the appearance picker", () => {
     ).toBeInTheDocument();
   });
 
+  it("links the third party notices the image ships, and the engine's", () => {
+    renderPicker();
+
+    expect(
+      screen.getByRole("link", { name: "Third party notices" }),
+    ).toHaveAttribute("href", "/licences/third-party.txt");
+    expect(
+      screen.getByRole("link", {
+        name: "The printed ISBN reader's text recognition engine",
+      }),
+    ).toHaveAttribute("href", "/licences/tesseract.txt");
+  });
+
   it("says nothing about contrast while the wallpaper is on", () => {
     renderPicker();
 

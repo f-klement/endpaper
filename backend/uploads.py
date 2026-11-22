@@ -140,9 +140,11 @@ def sweep_other_formats(directory: Path, base: str, kept: Path) -> None:
 def write_image(directory: Path, base: str, extension: str, data: bytes) -> Path:
     """Write `data` as `base.extension`, atomically, touching nothing else.
 
-    `replace_image` without the sweep, and the split is not tidying: **a restore
-    must not sweep.** `cover_store.restore` carries that reasoning, because it
-    is the one caller and the one place the choice is made.
+    `replace_image` without the sweep, for a caller that must not sweep now or
+    at all. **A restore must not sweep**: `cover_store.restore` carries that
+    reasoning. `cover_store.write` sweeps once the row commits, and a further
+    image's slot and a cover a rollback puts back have no other format to
+    sweep. Each caller in `cover_store` says which.
 
     **Two files of a base is a stable state, not a coin flip**, which is what
     makes leaving them the safe answer rather than the lazy one: the two lookups

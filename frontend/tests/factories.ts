@@ -17,6 +17,7 @@ import {
   type LoanOut,
   type NoteOut,
   type PageBookOut,
+  type PatronOut,
   type ProgressOut,
   type QuoteOut,
   type QuoteWithBookOut,
@@ -169,12 +170,36 @@ export function makeLoan(overrides: Partial<LoanOut> = {}): LoanOut {
     id: id(),
     book_id: 1,
     loaned_to_user_id: 2,
+    loaned_to_name: null,
     loaned_by_user_id: 1,
     loaned_at: "2026-02-01T12:00:00Z",
     returned_at: null,
+    due_at: null,
+    is_overdue: false,
+    days_overdue: 0,
+    days_out: 0,
+    to_patron: false,
+    patron: null,
     book: null,
     loaned_to: makeUser({ username: "borrower" }),
     loaned_by: makeUser({ username: "lender" }),
+    ...overrides,
+  };
+}
+
+export function makePatron(overrides: Partial<PatronOut> = {}): PatronOut {
+  return {
+    id: id(),
+    card_number: "A-1001",
+    name: "Ada Lovelace",
+    email: "ada@example.org",
+    phone: null,
+    street: null,
+    house_number: null,
+    postcode: null,
+    city: null,
+    expires_on: null,
+    enrolled_at: "2026-01-01T12:00:00Z",
     ...overrides,
   };
 }

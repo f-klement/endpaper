@@ -61,6 +61,7 @@ const INTACT = [
   "./i18n/catalogue.test.ts",
   "./lib/zip.test.ts",
   "./pages/Home/Home.test.tsx",
+  "./scripts/notices.test.ts",
   "./setup.ts",
   "./theme/palettes.test.ts",
   "./utils.tsx",

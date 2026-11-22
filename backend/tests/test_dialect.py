@@ -176,14 +176,15 @@ class TestTheseAreTheConstraintsWithTwoSpellings:
             ("opds_servers", "ck_opds_servers_name"),
             ("quotes", "ck_quotes_text_bounds"),
             ("readwise_books", "ck_readwise_books_bounds"),
+            ("vocabulary_labels", "ck_vocabulary_labels_bounds"),
         }
 
-    def test_fifteen_of_the_twenty_nine_tables_carry_one(self):
+    def test_sixteen_of_the_thirty_seven_tables_carry_one(self):
         """The other half of the ADR's sentence, from the same source. A set of
         names and a count of tables are two different claims, and stating both
         here is what stopped the first one going out with the wrong number."""
-        assert len({table for table, _, _ in _dialect_checks()}) == 15
-        assert len(Base.metadata.tables) == 29
+        assert len({table for table, _, _ in _dialect_checks()}) == 16
+        assert len(Base.metadata.tables) == 37
 
 
 class TestTheStringifierIsNotAnEngine:
@@ -727,6 +728,7 @@ class TestTheRevisionsPostgresArmIsTheModelsPostgresArm:
             ("b8f4c1a7e309", "catalogue_targets", "ck_catalogue_targets_base_url"),
             ("6ecb05b436b5", "catalogue_targets", "ck_catalogue_targets_record_charset"),
             ("2d87a872d78e", "catalogue_targets", "ck_catalogue_targets_isbn10_retry"),
+            ("e59cee46d754", "catalogue_targets", "ck_catalogue_targets_timeout"),
         ]
 
     def test_an_addition_is_compared_with_the_swap_that_followed_it(self):

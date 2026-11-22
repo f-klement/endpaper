@@ -7,6 +7,7 @@ import {
   KIND_LABEL,
   headingKind,
   headingText,
+  schemeLabel,
 } from "../../src/lib/classificationLabels";
 
 describe("what a heading reads as", () => {
@@ -49,5 +50,24 @@ describe("what a heading asserts", () => {
     expect(KIND_LABEL[HeadingKind.subject]).toBeNull();
     expect(KIND_LABEL[HeadingKind.content]).toBe("classification.kind.content");
     expect(KIND_LABEL[HeadingKind.carrier]).toBe("classification.kind.carrier");
+  });
+});
+
+/** A translator that shows which key it was asked for. */
+function t(key: string): string {
+  return `translated ${key}`;
+}
+
+describe("what a heading's scheme is called", () => {
+  it("translates a built in scheme", () => {
+    expect(schemeLabel("ddc", t)).toBe("translated classification.scheme.ddc");
+  });
+
+  it("shows a library's own scheme by its code, in capitals", () => {
+    expect(schemeLabel("rvk", t)).toBe("RVK");
+  });
+
+  it("shows a library's own scheme named for an object's own property by its code", () => {
+    expect(schemeLabel("constructor", t)).toBe("CONSTRUCTOR");
   });
 });

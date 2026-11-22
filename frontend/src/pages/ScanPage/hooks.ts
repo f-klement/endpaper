@@ -24,6 +24,7 @@ import { ApiError } from "../../api/mutator";
 
 import {
   findFileHolders,
+  getListNarrowableCataloguesQueryKey,
   getLookupIsbnQueryKey,
   getSearchBooksQueryKey,
   listCopies,
@@ -34,6 +35,7 @@ import {
   useAddBookTagByName,
   useAlreadyHeld,
   useListLocations,
+  useListNarrowableCatalogues,
   useListTags,
   useLookupIsbn,
   useReportDigitalReference,
@@ -43,7 +45,7 @@ import {
 } from "../../api/generated/endpoints/books/books";
 import { useListCollections } from "../../api/generated/endpoints/collections/collections";
 import { BookFormat } from "../../api/generated/model";
-import { useGoogleBooksReady } from "../../app/hooks";
+import { useGoogleBooksReady, useLibraryMode } from "../../app/hooks";
 import type {
   AlreadyHeldOut,
   AlreadyHeldParams,
@@ -98,6 +100,8 @@ import {
   type HolderQuestion,
   type Landing,
 } from "../../lib/fileLanding";
+import { readPrintedIsbns, type PrintedIsbns } from "../../lib/printedIsbn";
+import type { FrameRegion, TextRecogniser } from "../../lib/textRecognition";
 import { locate } from "../hooks";
 import {
   FALLBACK_INTERVAL_MS,
@@ -251,6 +255,22 @@ export interface UseScanFlowResult {
   tags: TagOut[];
 
   lookup: (isbn: string) => void;
+  /** The catalogues a lookup may be narrowed to; empty outside library mode. */
+  lookupCatalogues: CatalogueSource[];
+  /**
+   * The ticks for the next lookup, in library mode; empty asks every one.
+   * **Spent by `lookup`**, which carries them with that ISBN and clears them, so
+   * they narrow one lookup and no other, and a tick sends nothing by itself.
+   */
+  lookupOnly: CatalogueSource[];
+  setLookupOnly: (only: CatalogueSource[]) => void;
+  /**
+   * What the lookup on screen was narrowed to, for the line saying so; empty
+   * where it asked every catalogue, and where it was refused and asked none.
+   */
+  lookupAskedOnly: CatalogueSource[];
+  /** The lookup on screen was narrowed and refused: the roster had changed. */
+  lookupNarrowingRefused: boolean;
   isLookingUp: boolean;
   /**
    * Why the lookup could not be answered, where no catalogue was reached; null
@@ -323,6 +343,7 @@ export function useScanFlow(
   account: number,
 ): UseScanFlowResult {
   const [isbn, setIsbn] = useState<string | null>(null);
+  const narrowing = useNarrowing("lookup");
   // What the last book this account added left, read from storage once as the
   // initial value, so the first scan of a session starts where the last ended.
   // Kept beside the book rather than only inside it, because the privacy
@@ -358,7 +379,7 @@ export function useScanFlow(
 
   // Only runs once an ISBN has been scanned or typed.
   const lookupQuery = useLookupIsbn(
-    { isbn: isbn ?? "" },
+    { isbn: isbn ?? "", ...narrowedTo(narrowing.asked) },
     {
       query: {
         enabled: isbn !== null,
@@ -374,6 +395,13 @@ export function useScanFlow(
   if (settled) setPending(settled);
 
   const unanswered = unansweredLookup(isbn, pending.draft, lookupQuery);
+  // Read off the query's own error rather than `unanswered`, which clears once a
+  // hand entered draft replaces the failure: nothing was asked for that draft
+  // either, so it must not read as narrowed.
+  const narrowingRefused = useRefusedNarrowing(
+    narrowing.asked,
+    lookupQuery.error,
+  );
 
   const writes: ScanWrites = {
     account,
@@ -389,6 +417,7 @@ export function useScanFlow(
 
   function reset() {
     setIsbn(null);
+    narrowing.forget();
     setAddError(null);
     setEnteredByHand(false);
     // Everything except the shelf. It is the one field that is the same for
@@ -438,8 +467,20 @@ export function useScanFlow(
       update({ draft: null });
       setAddError(null);
       setEnteredByHand(false);
+      narrowing.spend();
       setIsbn(nextIsbn);
     },
+    lookupCatalogues: narrowing.catalogues,
+    lookupOnly: narrowing.only,
+    setLookupOnly: narrowing.setOnly,
+    // An ISBN on screen, because `chooseMatch` parks it at null and leaves the
+    // last narrowing behind, which says nothing about a search's candidate.
+    // Not above a draft entered by hand either, which no catalogue supplied.
+    lookupAskedOnly: shownNarrowing(
+      narrowing.asked,
+      isbn !== null && !narrowingRefused && !enteredByHand,
+    ),
+    lookupNarrowingRefused: narrowingRefused,
     isLookingUp: stillLookingUp(isbn, pending.draft, unanswered),
     lookupError: unanswered,
     // A refetch rather than `lookup` again: the ISBN is the same, so the key
@@ -752,6 +793,23 @@ export interface UseBookSearchResult {
   askedNothing: boolean;
   /** Ask again, including the catalogues `unasked` names. */
   searchHarder: () => void;
+  /** The catalogues a search may be narrowed to; empty outside library mode. */
+  catalogues: CatalogueSource[];
+  /**
+   * The ticks for the next search, in library mode; empty asks every one.
+   * **Spent by `submit`**, which carries them with that query and clears them, so
+   * they narrow one search and no other, and a tick sends nothing by itself.
+   */
+  only: CatalogueSource[];
+  setOnly: (only: CatalogueSource[]) => void;
+  /**
+   * The ticked catalogues the server says it asked for the search on screen,
+   * for the line saying so; empty where it asked every catalogue, where it was
+   * refused, where it asked nothing, and while no answer is in.
+   */
+  askedOnly: CatalogueSource[];
+  /** The search on screen was narrowed and refused: the roster had changed. */
+  narrowingRefused: boolean;
   /** True while that longer search is in flight, rather than the ordinary one. */
   isSearchingHarder: boolean;
   /** True once the longer search has answered for the query on screen. */
@@ -789,6 +847,7 @@ export function useBookSearch(): UseBookSearchResult {
   // harder is an answer to the question on screen; a new question has not been
   // asked harder yet, whatever the last one was.
   const [harder, setHarder] = useState(false);
+  const narrowing = useNarrowing("search");
   const { locale } = useTranslation();
 
   const isConfigured = useGoogleBooksReady();
@@ -801,7 +860,13 @@ export function useBookSearch(): UseBookSearchResult {
     // `harder` is part of the parameters and so part of the query key, which is
     // what holds both answers in the cache: going back to a phrase that was
     // already searched hard does not spend the longer wait again.
-    { q: submitted, limit: 10, lang: locale, harder },
+    {
+      q: submitted,
+      limit: 10,
+      lang: locale,
+      harder,
+      ...narrowedTo(narrowing.asked),
+    },
     {
       query: {
         enabled: submitted.length >= MIN_QUERY_LENGTH,
@@ -830,6 +895,7 @@ export function useBookSearch(): UseBookSearchResult {
   // hand is the previous query's, and offering a longer search off it would
   // name catalogues that have nothing to do with what is being typed.
   const answer = search.isFetching ? undefined : search.data;
+  const narrowingRefused = useRefusedNarrowing(narrowing.asked, search.error);
 
   return {
     isConfigured,
@@ -837,13 +903,20 @@ export function useBookSearch(): UseBookSearchResult {
     setQuery,
     submit: () => {
       setHarder(false);
+      narrowing.spend();
       setSubmitted(query.trim());
     },
     clear: () => {
       setHarder(false);
+      narrowing.forget();
       setQuery("");
       setSubmitted("");
     },
+    catalogues: narrowing.catalogues,
+    only: narrowing.only,
+    setOnly: narrowing.setOnly,
+    askedOnly: narrowingRefused ? [] : askedOf(narrowing.asked, answer),
+    narrowingRefused,
     matches: search.data?.matches ?? [],
     isSearching: search.isFetching,
     ...readTheAnswer(answer, submitted),
@@ -865,6 +938,124 @@ export function useBookSearch(): UseBookSearchResult {
     },
     ...harderStatus(harder, search.isFetching, answer),
   };
+}
+
+/**
+ * The `only` parameter, or nothing where no catalogue is ticked.
+ *
+ * **Absent rather than empty**, so an unnarrowed request keeps the query key it
+ * had before the narrowing existed. Empty would send nothing either way, and
+ * would only split the cache.
+ */
+function narrowedTo(only: CatalogueSource[]): { only?: CatalogueSource[] } {
+  return only.length > 0 ? { only } : {};
+}
+
+/**
+ * The catalogues a cataloguer may narrow a lookup and a search to, in this
+ * library's order. Asked in library mode only: the server refuses a household.
+ */
+export function useNarrowableCatalogues(libraryMode: boolean): {
+  lookup: CatalogueSource[];
+  search: CatalogueSource[];
+} {
+  const roster = useListNarrowableCatalogues({
+    // **Stale at once, so every visit to the page asks again.** The roster is
+    // the settings in force, and an admin who switches a catalogue off and comes
+    // here would otherwise be offered it and refused with a 409. Refetching on
+    // mount covers every settings page that writes in this tab. A write made
+    // while the page is open (another tab, another admin) is caught by the 409
+    // itself: `useRefusedNarrowing` asks again. Not on focus: the app turns
+    // that off for every query. Cheap: the route reaches no catalogue and
+    // charges no budget.
+    query: { enabled: libraryMode, staleTime: 0 },
+  });
+  const rows = libraryMode ? (roster.data ?? []) : [];
+  return {
+    lookup: rows.filter((row) => row.answers_lookup).map((row) => row.source),
+    search: rows.filter((row) => row.answers_search).map((row) => row.source),
+  };
+}
+
+/**
+ * One path's narrowing: the catalogues it may name, the pending ticks, and what
+ * the request on screen was narrowed to.
+ *
+ * **Two copies of the ticks: a draft and the spent one.** The query key reads
+ * `asked` alone, so a tick refires nothing; `spend` moves the draft there with
+ * the request it narrows, so the next request asks every catalogue.
+ */
+function useNarrowing(path: "lookup" | "search") {
+  const catalogues = useNarrowableCatalogues(useLibraryMode())[path];
+  const [ticked, setOnly] = useState<CatalogueSource[]>([]);
+  const [asked, setAsked] = useState<CatalogueSource[]>([]);
+  // **A tick the roster no longer offers is dropped.** It is no longer drawn,
+  // so nobody could untick it, and sending it would earn the 409.
+  const only = ticked.filter((source) => catalogues.includes(source));
+  return {
+    catalogues,
+    only,
+    setOnly,
+    asked,
+    spend: () => {
+      setAsked(only);
+      setOnly([]);
+    },
+    forget: () => {
+      setOnly([]);
+      setAsked([]);
+    },
+  };
+}
+
+/**
+ * Whether a narrowed request was refused with a 409, asking for the roster
+ * again when it was.
+ *
+ * **The 409 is the one sure sign the page's roster is out of date**: a
+ * narrowing naming only offered catalogues is refused only when the plan in
+ * force moved since the roster was read. Asking again is what takes the
+ * switched off catalogue off screen and drops its tick.
+ */
+function useRefusedNarrowing(
+  asked: CatalogueSource[],
+  error: unknown,
+): boolean {
+  const refused =
+    asked.length > 0 && error instanceof ApiError && error.status === 409;
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!refused) return;
+    void queryClient.invalidateQueries({
+      queryKey: getListNarrowableCataloguesQueryKey(),
+    });
+  }, [refused, queryClient]);
+  return refused;
+}
+
+/**
+ * The ticks the server says it asked, for the search on screen.
+ *
+ * **Read off the answer's `asked`, never off the ticks alone.** A narrowed
+ * search still leaves a slow catalogue to `harder` and may be refused its
+ * longer slot, so a ticked catalogue can go unasked, and naming it would sit
+ * "Asked only" above the line saying it was not asked. No answer, a refusal
+ * among them, names nothing.
+ */
+function askedOf(
+  ticked: CatalogueSource[],
+  answer: BookSearchOut | undefined,
+): CatalogueSource[] {
+  if (answer === undefined) return [];
+  return ticked.filter((source) => answer.asked.includes(source));
+}
+
+/** The narrowing to name beside an answer, or none where there is no answer. */
+function shownNarrowing(
+  asked: CatalogueSource[],
+  answered: boolean,
+): CatalogueSource[] {
+  return answered ? asked : [];
 }
 
 /**
@@ -1175,6 +1366,17 @@ export interface UseRapidIntakeResult {
   /** Feed a scanned barcode in. Repeats are ignored rather than queued twice. */
   capture: (isbn: string) => void;
   /**
+   * Queue a list of canonical ISBNs and ask the catalogues about them.
+   *
+   * **The one entry into the paced run that starts it without a second press**,
+   * because handing over a list of identifiers is the request to look them up:
+   * the press that queued them names the count, and nothing leaves the browser
+   * but the ISBNs the member wrote. It is still the one paced run, so a run
+   * already going finishes first and this starts when it ends. An ISBN the
+   * queue already holds is not asked again.
+   */
+  listIsbns: (isbns: readonly string[]) => void;
+  /**
    * Read picked files and queue what they say.
    *
    * The same queue as the scanner fills, deliberately: a folder is a third way
@@ -1221,6 +1423,15 @@ export interface UseRapidIntakeResult {
   /** Stop the paced run after the call in flight. */
   stopLookingUp: () => void;
   isLookingUp: boolean;
+  /**
+   * How far the paced run has got, or `null` when none is running.
+   *
+   * `addProgress`'s figure for the other loop, and for the same reason: a list
+   * of five hundred is a quarter of an hour, and a stop with no figure beside
+   * it is pressed blind. Counted over the rows the run set out to ask, so a
+   * row picked meanwhile, which joins the next run, does not move it.
+   */
+  lookUpProgress: BulkProgress | null;
   /**
    * File one audiobook candidate's parts as a book each.
    *
@@ -1370,6 +1581,18 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const [entries, setEntries] = useState<ScannedEntry[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [isLookingUp, setIsLookingUp] = useState(false);
+  const [lookUpProgress, setLookUpProgress] = useState<BulkProgress | null>(
+    null,
+  );
+  // Set by a list and read once the queue holding it has rendered: the run
+  // walks the rendered queue and checks each row against `liveEntries`, so
+  // starting it in the press that queued the rows would skip every one.
+  const runWhenListed = useRef(false);
+  // **Whether a paced run is going, read where `isLookingUp` cannot be.** The
+  // rendered flag lags the call that starts a run by one commit, and a list's
+  // run starts from an effect rather than a press: `runTheLookups` says why
+  // that window is real.
+  const lookUpRunning = useRef(false);
   // **What the last pick passed over, rather than a running total.** A total
   // has no way down: the notice sits beside the picker rather than the queue,
   // precisely so it can be shown when nothing was queued at all, and a member
@@ -1399,6 +1622,19 @@ export function useRapidIntake(): UseRapidIntakeResult {
   // How to end the wait between two calls early. Null whenever the run is not
   // waiting, which is every moment a stop has nothing to interrupt.
   const endTheWait = useRef<(() => void) | null>(null);
+  // **Leaving the page stops the paced run.** Nothing else would: the loop
+  // reads `liveEntries`, which keeps its last value once nothing renders, so a
+  // list of five hundred went on spending a quarter of an hour of lookups
+  // into dead state, and a list pasted on coming back started a second run on
+  // the fresh hook beside it, the two together the whole of `METADATA_LIMIT`.
+  useEffect(
+    () => () => {
+      runWhenListed.current = false;
+      stopRequested.current = true;
+      endTheWait.current?.();
+    },
+    [],
+  );
   const [location, setLocation] = useState(readLastLocation);
   const [result, setResult] = useState<IntakeResult | null>(null);
   // **The whole of `addAsCopy`, not the copy request's own pending flag.** That
@@ -1410,11 +1646,12 @@ export function useRapidIntake(): UseRapidIntakeResult {
   const intake: Intake = {
     entries,
     location,
-    isLookingUp,
+    lookUpRunning,
     setEntries,
     setSkipped,
     setLibraryNotice,
     setIsLookingUp,
+    setLookUpProgress,
     setIsAdding,
     setIsAddingCopy,
     setAddProgress,
@@ -1436,6 +1673,17 @@ export function useRapidIntake(): UseRapidIntakeResult {
   };
   const apply = (event: QueueEvent) => applyTo(intake, event);
 
+  // **After `liveEntries` is written, which is why it is declared after it.**
+  // A run going when the list arrived keeps the flag until it ends, and this
+  // fires again then because `isLookingUp` moved. A stop pressed meanwhile
+  // clears the flag, so the list waits for a press rather than starting the
+  // moment the run the member stopped has ended.
+  useEffect(() => {
+    if (!runWhenListed.current || lookUpRunning.current) return;
+    runWhenListed.current = false;
+    void runTheLookups(intake, isListed);
+  });
+
   return {
     isActive,
     start: () => {
@@ -1448,6 +1696,10 @@ export function useRapidIntake(): UseRapidIntakeResult {
     setLocation,
     locations,
     capture: (isbn) => capture(intake, isbn),
+    listIsbns: (isbns) => {
+      runWhenListed.current = true;
+      apply({ kind: "listed", isbns });
+    },
     pickFiles: (files) => pickFiles(intake, files),
     isReading: isReading(entries),
     skipped,
@@ -1457,12 +1709,14 @@ export function useRapidIntake(): UseRapidIntakeResult {
     lookUpTheKeptNames: () => void runTheLookups(intake, canBeAskedAgain),
     stopLookingUp: () => {
       stopRequested.current = true;
+      runWhenListed.current = false;
       // The run may be between two calls rather than inside one, and the loop
       // reads the flag only at its top. Without this the button is inert for up
       // to a whole interval.
       endTheWait.current?.();
     },
     isLookingUp,
+    lookUpProgress,
     chooseFor: (key, match) => apply({ kind: "chosen", key, match }),
     takeTheRecord: (key) => apply({ kind: "record-taken", key }),
     keepTheFile: (key) => apply({ kind: "kept-the-file", key }),
@@ -1508,12 +1762,13 @@ type IntakeResult = NonNullable<UseRapidIntakeResult["result"]>;
 interface Intake {
   readonly entries: ScannedEntry[];
   readonly location: string;
-  readonly isLookingUp: boolean;
+  readonly lookUpRunning: RefObject<boolean>;
   readonly locale: Locale;
   readonly setEntries: Dispatch<SetStateAction<ScannedEntry[]>>;
   readonly setSkipped: (count: number) => void;
   readonly setLibraryNotice: (notice: LibraryNotice | null) => void;
   readonly setIsLookingUp: (running: boolean) => void;
+  readonly setLookUpProgress: (progress: BulkProgress | null) => void;
   readonly setIsAdding: (running: boolean) => void;
   readonly setIsAddingCopy: (running: boolean) => void;
   readonly setAddProgress: (progress: BulkProgress | null) => void;
@@ -1557,6 +1812,11 @@ function fetchTheIsbn(queryClient: QueryClient, isbn: string) {
     queryFn: () => lookupIsbn({ isbn }),
     staleTime: 60_000,
   });
+}
+
+/** A row a list queued that the paced run has not asked about yet. */
+function isListed(entry: ScannedEntry): boolean {
+  return entry.state === "listed";
 }
 
 async function lookUpTheBarcode(intake: Intake, isbn: string) {
@@ -2085,7 +2345,7 @@ async function lookUpTheName(intake: Intake, entry: ScannedEntry) {
  * **One loop for both presses, taking the predicate rather than the list.**
  * The pace is priced against a limiter the whole page shares, so a second
  * mechanism beside this one would be a second run able to start while this is
- * going: `isLookingUp` is what refuses that, and it refuses it once here
+ * going: `lookUpRunning` is what refuses that, and it refuses it once here
  * rather than once per caller. The predicate is passed rather than the
  * filtered array so the run reads the entries it starts from, which is what
  * makes the count on the button and the list the loop walks the same set.
@@ -2094,32 +2354,28 @@ async function runTheLookups(
   intake: Intake,
   over: (entry: ScannedEntry) => boolean,
 ) {
-  // **The rendered state, and a ref was tried here and taken back out.** A
-  // press is a discrete event, which React flushes before it delivers the
-  // next, so a second press cannot see this as it was, and there are two
-  // presses: one per set. Two calls inside one tick would both pass, and a
-  // ref refused the second.
-  //
-  // **What that would now cost is no longer nothing.** While there was one
-  // entry point the two loops walked the same list and asked the same query
-  // keys, so React Query answered the second out of the first's flight. The
-  // two sets here are disjoint by construction, so two runs would ask
-  // different rows: 30 starts a minute each is the whole of `METADATA_LIMIT`,
-  // which is the one outcome `FALLBACK_STARTS_PER_MINUTE` is priced to
-  // refuse. What holds is that nothing calls both in one tick. **Anything
-  // that ever does needs the ref back**, and it is this paragraph rather than
-  // a test that says so, because a guard nothing can watch go wrong is a
-  // guard nothing can watch go missing.
-  if (intake.isLookingUp) return;
+  // **A ref, set in the same call, and not the rendered `isLookingUp`.** The
+  // rendered flag held while every caller was a press, because React flushes
+  // a discrete event before it delivers the next. A list's run starts from an
+  // effect, which React defers after a render that a continuation caused,
+  // such as a file read: a press in that window and the effect would both see
+  // the flag down, and two runs, 30 starts a minute each, are the whole of
+  // `METADATA_LIMIT`, the one outcome `FALLBACK_STARTS_PER_MINUTE` is priced
+  // to refuse. The sets the callers pass also overlap now (a listed row
+  // needs a lookup), so the second run would ask the same rows again.
+  if (intake.lookUpRunning.current) return;
   const walking = intake.entries.filter(over);
   if (walking.length === 0) return;
 
+  intake.lookUpRunning.current = true;
   intake.stopRequested.current = false;
   intake.setIsLookingUp(true);
   try {
     await walkTheLookups(intake, walking);
   } finally {
+    intake.lookUpRunning.current = false;
     intake.setIsLookingUp(false);
+    intake.setLookUpProgress(null);
   }
 }
 
@@ -2133,6 +2389,7 @@ async function walkTheLookups(intake: Intake, walking: ScannedEntry[]) {
     if (!intake.liveEntries.current.some((one) => one.key === entry.key))
       continue;
     applyTo(intake, { kind: "asked", key: entry.key });
+    intake.setLookUpProgress({ done: index, total: walking.length });
     const startedAt = Date.now();
     await lookUpTheName(intake, entry);
     if (index === walking.length - 1) break;
@@ -2446,4 +2703,90 @@ function paramsOf(
     ...(author ? { author } : {}),
     ...(isbn ? { isbn } : {}),
   };
+}
+
+/** Where the printed number reader is: the engine, then each read. */
+export type PrintedReaderState =
+  | { readonly kind: "loading" }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "ready" }
+  | { readonly kind: "reading" }
+  | { readonly kind: "read"; readonly found: PrintedIsbns };
+
+export interface UsePrintedIsbnReaderResult {
+  state: PrintedReaderState;
+  /** Read the ISBN printed inside `region` of the frame `video` shows. */
+  read: (video: HTMLVideoElement, region: FrameRegion) => void;
+  /** Put the last read aside and wait for the next. */
+  again: () => void;
+}
+
+/** What a read that never reached the engine's answer counts as. */
+const NOTHING_READ: PrintedIsbns = { isbns: [], misread: [] };
+
+/** The engine, through `await import`: `lib/textRecognition.ts` says why. */
+async function openRecogniser(closing: AbortSignal): Promise<TextRecogniser> {
+  const { openTextRecogniser } = await import("../../lib/textRecognition");
+  return openTextRecogniser(closing);
+}
+
+/**
+ * The printed number reader for as long as the calling component is mounted:
+ * the engine opens on mount, and its worker is closed on unmount.
+ *
+ * **Opened on mount rather than on the first read**, so the engine and its
+ * model download while the member lines the book up.
+ *
+ * A read never looks anything up. It hands back what the text held, and the
+ * member confirms an ISBN before the page looks it up: `readPrintedIsbns` says
+ * why the check digit is what makes that safe.
+ */
+export function usePrintedIsbnReader(): UsePrintedIsbnReaderResult {
+  const [state, setState] = useState<PrintedReaderState>({ kind: "loading" });
+  const recogniser = useRef<TextRecogniser | null>(null);
+
+  useEffect(() => {
+    // Aborted on unmount, which ends a load still running rather than
+    // leaving it to finish for nobody.
+    const closing = new AbortController();
+    openRecogniser(closing.signal).then(
+      (opened) => {
+        if (closing.signal.aborted) {
+          opened.close();
+          return;
+        }
+        recogniser.current = opened;
+        setState({ kind: "ready" });
+      },
+      (error: unknown) => {
+        if (closing.signal.aborted) return;
+        console.warn("The text reader did not start:", error);
+        setState({ kind: "unavailable" });
+      },
+    );
+    return () => {
+      closing.abort();
+      recogniser.current?.close();
+      recogniser.current = null;
+    };
+  }, []);
+
+  const read = useCallback((video: HTMLVideoElement, region: FrameRegion) => {
+    const opened = recogniser.current;
+    if (opened === null) return;
+    setState({ kind: "reading" });
+    opened.read(video, region).then(
+      (text) => setState({ kind: "read", found: readPrintedIsbns(text) }),
+      (error: unknown) => {
+        // A frame the camera had not delivered yet, most often: the member is
+        // told nothing was read, which is true, and offered another go.
+        console.warn("The text reader could not read the frame:", error);
+        setState({ kind: "read", found: NOTHING_READ });
+      },
+    );
+  }, []);
+
+  const again = useCallback(() => setState({ kind: "ready" }), []);
+
+  return { state, read, again };
 }

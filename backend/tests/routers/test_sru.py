@@ -21,13 +21,13 @@ from main import app, iter_api_routes
 from models import Book
 from ratelimit import PUBLIC_CATALOGUE_LIMIT
 from routers.public import public_reader
-from routers.sru import SRU_PREFIX, server_for
+from routers.sru import SRU_PREFIX, server_for, sru_switch
 
 MARC_SLIM = "http://www.loc.gov/MARC21/slim"
 
 
-def _publish(db, *, mode: bool = True, published: bool = True, indexed: bool = False):
-    """Put the two switches, and the indexing one, where a test wants them."""
+def _publish(db, *, mode: bool = True, published: bool = True, indexed: bool = False, sru: bool = True):
+    """Put the two switches, the indexing one and SRU's own where a test wants them."""
     settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true" if mode else "false")
     settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true" if published else "false")
     settings_store.set_value(
@@ -35,6 +35,14 @@ def _publish(db, *, mode: bool = True, published: bool = True, indexed: bool = F
         SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
         "true" if indexed else "false",
     )
+    settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true" if sru else "false")
+
+
+def _unpublished_answer(client, db) -> tuple[int, bytes]:
+    """What the public gate answers with nothing published, for comparison."""
+    _publish(db, published=False)
+    response = client.get(SRU_PREFIX)
+    return response.status_code, response.content
 
 
 @pytest.fixture
@@ -88,6 +96,66 @@ class TestTheEndpointDoesNotExistUntilTheCatalogueIsPublished:
         assert response.status_code == 404
 
 
+class TestTheProtocolHasASwitchOfItsOwn:
+    """Publishing a catalogue to people and serving it over SRU are two
+    decisions, so the route needs the published catalogue **and** its switch."""
+
+    def test_a_published_catalogue_serves_no_sru_until_the_switch_is_set(self, client, db):
+        """The default read through the route: no SRU row written at all."""
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
+        assert client.get(SRU_PREFIX).status_code == 404
+
+    def test_the_switch_off_closes_a_published_catalogue(self, client, db):
+        _publish(db, sru=False)
+        assert client.get(SRU_PREFIX).status_code == 404
+
+    def test_the_switch_on_serves_nothing_while_the_catalogue_is_unpublished(self, client, db):
+        """The switch cannot publish a catalogue on its own."""
+        _publish(db, published=False, sru=True)
+        assert client.get(SRU_PREFIX).status_code == 404
+
+    def test_turning_the_switch_off_closes_it_again(self, client, db):
+        _publish(db)
+        assert client.get(SRU_PREFIX).status_code == 200
+        settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "false")
+        assert client.get(SRU_PREFIX).status_code == 404
+
+    def test_the_json_catalogue_is_still_served_with_the_switch_off(self, client, db):
+        """The switch withdraws the protocol and nothing else."""
+        _publish(db, sru=False)
+        assert client.get("/api/public/books").status_code == 200
+
+    def test_the_switch_off_answers_exactly_what_an_unpublished_catalogue_does(self, client, db):
+        """Same status and same body, so a stranger cannot tell a withheld
+        protocol from a catalogue that is not published."""
+        expected = _unpublished_answer(client, db)
+        _publish(db, sru=False)
+        response = client.get(SRU_PREFIX)
+        assert (response.status_code, response.content) == expected
+
+    def test_the_answer_does_not_depend_on_whether_a_book_matches(self, client, db, book):
+        """The switch refuses before the query is read, so a search naming a
+        Book that exists and one naming nothing get the same bytes."""
+        _publish(db, sru=False)
+        answers = {
+            (response.status_code, response.content)
+            for response in (
+                client.get(SRU_PREFIX, params={"operation": "searchRetrieve", "query": term})
+                for term in ("Chartreuse", "Nonexistent", f"rec.id={book}")
+            )
+        }
+        assert answers == {_unpublished_answer(client, db)}
+
+    def test_probing_the_switch_is_rate_limited(self, client, db):
+        """The public gate runs before the switch, so a 404 here spends the
+        catalogue's budget like any other request."""
+        _publish(db, sru=False)
+        for _ in range(PUBLIC_CATALOGUE_LIMIT.max_attempts):
+            assert client.get(SRU_PREFIX).status_code == 404
+        assert client.get(SRU_PREFIX).status_code == 429
+
+
 class TestEverySruRouteIsGated:
     """The structural half, asserted against the **live route table**.
 
@@ -120,6 +188,16 @@ class TestEverySruRouteIsGated:
             "is declared on the router and there is no exemption: it is what "
             "refuses an unpublished catalogue and what bounds the rate."
         )
+
+    def test_every_route_runs_the_switch_after_the_public_gate(self):
+        """After, because the rate limit in `public_reader` is what bounds
+        probing the switch."""
+        out_of_order = sorted(
+            route.path
+            for route in self._module_routes()
+            if [d.call for d in route.dependant.dependencies][:2] != [public_reader, sru_switch]
+        )
+        assert out_of_order == []
 
     def test_nothing_in_the_module_writes(self):
         writing = [

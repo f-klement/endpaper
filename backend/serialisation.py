@@ -15,16 +15,17 @@ users.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
 import ddc
+import patrons
 from enums import ClassificationScheme
 from lending import Loans
-from models import Book, Collection, Loan, ReadingProgress, Tag, User
+from models import Book, Collection, Loan, Patron, ReadingProgress, Tag, User
 from reading import Reading, Records, discussers
 from schemas import (
     BookColumns,
@@ -32,6 +33,7 @@ from schemas import (
     ClassificationIn,
     ClassificationOut,
     LoanOut,
+    LoanPatronOut,
     PublicBookOut,
     UserOut,
     ViewerFields,
@@ -136,7 +138,7 @@ def suggested_tag_ids(
     `subjects` too).
     """
     matched = list(match_subjects_to_tags(subjects, tags))
-    numbers = [entry.number for entry in classifications if entry.scheme is ClassificationScheme.DDC]
+    numbers = [entry.number for entry in classifications if entry.scheme == ClassificationScheme.DDC]
     wanted = {name.lower() for name in ddc.tag_names(numbers)}
     if wanted:
         seen = set(matched)
@@ -144,7 +146,18 @@ def suggested_tag_ids(
     return matched
 
 
-def loan_summary(loan: Loan) -> LoanOut:
+def loan_patron(loan: Loan, named: Mapping[int, Patron]) -> LoanPatronOut | None:
+    """Who the patron on this loan is, when `named` holds them, and None otherwise.
+
+    `named` comes from `patrons.named_on_loans`, which is empty for anyone but
+    an admin, so this cannot name a patron to a member whatever it is handed
+    by a route that is open to one.
+    """
+    patron = named.get(loan.loaned_to_patron_id) if loan.loaned_to_patron_id is not None else None
+    return LoanPatronOut.model_validate(patron) if patron is not None else None
+
+
+def loan_summary(loan: Loan, named: Mapping[int, Patron]) -> LoanOut:
     """A loan as it appears *inside* a book payload.
 
     `book` is left None deliberately: the caller is already holding the book
@@ -168,6 +181,10 @@ def loan_summary(loan: Loan) -> LoanOut:
         # no account. Carried here too, or the badge on a book lent to a
         # neighbour says "Loaned to" and then nothing.
         loaned_to_name=loan.loaned_to_name,
+        # Never served: it answers `to_patron`, so the badge on a book lent to
+        # a patron says so rather than naming nobody.
+        loaned_to_patron_id=loan.loaned_to_patron_id,
+        patron=loan_patron(loan, named),
         loaned_by_user_id=loan.loaned_by_user_id,
         loaned_at=loan.loaned_at,
         returned_at=loan.returned_at,
@@ -324,8 +341,9 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
 
     **10 when the page holds a copy**, because the copy count issues its statement
     only when there is one, and **10 when the page holds a book filed in a
-    collection**, for the same reason. **Plus one per distinct `added_by` the
-    session has not already loaded.**
+    collection**, for the same reason, and **10 when an admin's page holds a
+    book lent to a patron** (`patrons.named_on_loans`). **Plus one per distinct
+    `added_by` the session has not already loaded.**
 
     **Only the constant is pinned by a test**, which is worth knowing before
     quoting the others: the conditional statements need a page shaped to
@@ -380,6 +398,7 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
     # exists to prevent. The two joinedloads the badge needs are the door's, so
     # `loan_summary` below reads both without a statement per row.
     active_loans = Loans.open_on(db, book_ids)
+    named = patrons.named_on_loans(db, current_user, active_loans.values())
 
     # One query for the whole page, not one per book. The row carries the
     # status, the rating and both dates, so adding those three fields cost no
@@ -412,7 +431,7 @@ def books_to_out(books: list[Book], current_user: User, db: Session) -> list[Boo
         # was a well formed 200 carrying the default. `ViewerFields` has no
         # defaults, so the same omission is a `TypeError` here.
         viewer = ViewerFields(
-            active_loan=loan_summary(loan) if loan else None,
+            active_loan=loan_summary(loan, named) if loan else None,
             # `.get`, not indexing: the row can vanish between the two
             # statements, and a name nobody can look up is a null rather than a
             # 500 in the middle of a listing.

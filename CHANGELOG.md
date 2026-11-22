@@ -1,16 +1,51 @@
 # Changelog
 
-## v0.22.1
-
-_2026-11-21_
-
-**Fixed: a known security problem in a component this app depends on.** Released automatically and carrying nothing else, because a fix was published for libxml2.
-
-- CVE-2026-86144 (high) in libxml2
-
-The fix for libxml2 is in the image rather than in the source: rebuilding at this tag upgrades the operating system packages, and the image is re-scanned and started before anything is published.
-
 ## Unreleased
+
+- A lookup now also asks the Slovak National Library about books from Czech and Slovak publishers, after the Hungarian library and before Open Library; on fifty Slovak books it finds sixteen that no other free catalogue holds.
+- A list of ISBNs, pasted or picked as a text or CSV file, can be catalogued from the Scan page: each is looked up at the same pace as a folder of files and waits in the queue for review before anything is added, and ISBNs with a wrong check digit are listed back rather than looked up.
+- An author with a Portuguese national library number and no GND, Library of Congress or ORCID number is now looked up in the Biblioteca Nacional de Portugal's authority file by that number.
+- Confirming an author's GND number now checks the Portuguese national library number it brings against the Biblioteca Nacional de Portugal's own record, and keeps it only where that record names the same person or links the same VIAF cluster; where the library cannot answer, or answers with an empty record set, the number is kept unchecked.
+- Outside library mode an author lookup no longer offers ORCID's researchers for a name the GND and the Library of Congress do not hold; an ORCID iD already stored still resolves.
+- When a barcode will not scan, the scan page can read the printed ISBN from the camera instead, in the browser so no picture leaves the device, and offers the number read for confirmation before looking it up; a read whose check digit fails is reported as a misread and offered another read.
+- A book keeps up to seven more images beside its cover, such as the back, the spine or a dust jacket, and any of them can be made the shelf cover.
+- A replaced cover shows at once rather than after the browser's cache expires.
+- The image now ships the licence texts of the third party software it carries, linked from the Appearance page.
+- In library mode, each candidate in the title search picker names the catalogue it came from.
+- In library mode, a record offered for a file name in the rapid queue names the catalogue it came from, like the title search does.
+- The SRU server has its own switch, Serve this catalogue over SRU, under the public catalogue settings. It starts off on a new installation; a deployment already serving SRU finds it on and keeps serving.
+- An SRU search by subject is charged by how many tags the public catalogue's books carry on average, so a heavily tagged catalogue refuses a long subject query rather than running it slowly.
+- A published catalogue can show whether each book is on the shelf or on loan, never who has it or when it is due back. Turn it on with Show whether a book is on the shelf or on loan, in the public catalogue settings; it starts off.
+- A slow catalogue is now given up on after a few seconds of its own rather than after ten, so it holds up a lookup less.
+- A Postgres `DATABASE_URL` spelled without `+pg8000` now stops startup with a message naming `postgresql+pg8000://`, instead of an import error about psycopg.
+- `/openapi.json` now needs a signed in member; a request with no session answers 401.
+- `/docs` and `/redoc`, which the page's security policy kept blank, are gone; the schema stays at `/openapi.json` for a signed in member.
+- In library mode, a cataloguer can ask only some of the library's catalogues for one ISBN lookup or one title search.
+- The catalogue list in the settings shows how each catalogue is asked: its protocol, its record schema, whether the connection is encrypted, whether it needs a key or a login, and which classifications it supplies. Switching off the only catalogue supplying a classification, or switching every catalogue off, now asks first.
+- A catalogue that cannot answer, such as Google Books without its key, no longer counts as a supplier when the settings ask before switching a catalogue off.
+- A published catalogue can be harvested by union catalogues and aggregators over OAI-PMH at /oai, which reports changed and withdrawn records. Turn it on with "Let aggregators harvest this catalogue over OAI-PMH" in the public catalogue settings, after setting a repository contact address there; it starts off.
+- Restoring a backup into a new PostgreSQL database no longer makes the next book, tag or account fail to save because its id is already taken.
+- An admin can add a library's own classification scheme in the library settings, choose how its numbers sort, rename it, and delete it while no book uses it.
+- An uploaded Library of Congress MARC file now keeps its Library of Congress subject headings as LCSH classifications.
+- A book list link filtering by a classification scheme the library does not have now shows no books rather than every book.
+- An admin can download a local copy of GND subjects or LCSH from the library settings, where the licence allows, and refresh it by hand; the copy rides the backup.
+- Until a subject vocabulary is copied, the library page points an admin at the settings that download one.
+- The library page's offer of a subject vocabulary copy can be dismissed by an admin, for the whole installation.
+- While a subject vocabulary copy is being made, the library page says so and links to its progress instead of offering the download.
+- A MARC upload from a German speaking catalogue names a subject's vocabulary from its $0, or as LCSH where the local LCSH copy holds the heading.
+- A MARC upload stores a Library of Congress subject heading without the full stop that closes it, as the Library of Congress catalogue sends it.
+- An LCSH heading imported from MARC before this release keeps no closing full stop, so importing the book again adds no second heading.
+- An admin can keep a register of patrons, borrowers with no account, and deleting one keeps their loans' dates and drops their name.
+- A staff page for patrons: search, register, edit and erase.
+- An admin can lend a book to a registered patron from the loan form, finding them with one search field or registering them there and then.
+- An admin sees which patron holds a lent book, by name and card number, and a patron's record lists the books they have out.
+- In library mode an admin can harvest another library system's catalogue over OAI-PMH from the library page: the repository, or one set of it, is read first and what a harvest would add and fill in is counted before anything is written; harvested books belong to nobody and are public.
+- An OAI-PMH harvest keeps each record's subject headings as suggestions on the Book it created, which an admin confirms or discards on the Book.
+- An admin confirms or discards the subject headings a harvest suggests, on each book's page.
+- A harvest reads a repository that offers no MARCXML in Dublin Core, and the preview and result say which format it read.
+- A harvest's result links to the books that run added.
+- The books list filters by origin and by harvest run in library mode, so a member can review the books harvesting, or one run, brought in.
+- A harvest cut short by a limit or a busy repository can now be carried on from where it stopped, from the harvest card.
 
 ## v0.22.0
 

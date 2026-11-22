@@ -17,8 +17,14 @@ import {
 import LoanPanel, {
   type Borrower,
 } from "../../../../src/pages/BookDetail/components/LoanPanel";
-import { makeBook, makeLoan, makeUser, resetIds } from "../../../factories";
-import { renderLocalised } from "../../../utils";
+import {
+  makeBook,
+  makeLoan,
+  makePatron,
+  makeUser,
+  resetIds,
+} from "../../../factories";
+import { mockApi, renderLocalised, renderWithProviders } from "../../../utils";
 
 beforeEach(resetIds);
 
@@ -37,6 +43,7 @@ function renderPanel(overrides = {}, props = {}) {
     <LoanPanel
       book={makeBook(overrides)}
       members={[member]}
+      canLendToPatron={false}
       isBusy={false}
       isSavingDetails={false}
       onSaveLending={onSaveLending}
@@ -177,6 +184,7 @@ describe("a loan and its return", () => {
         <LoanPanel
           book={{ ...book, active_loan }}
           members={[member]}
+          canLendToPatron={false}
           isBusy={false}
           isSavingDetails={false}
           onSaveLending={vi.fn<(fields: BookDetailsUpdate) => void>()}
@@ -195,5 +203,94 @@ describe("a loan and its return", () => {
     rerender(panel(null));
 
     expect(screen.getByLabelText("Loan to")).toHaveValue("9");
+  });
+});
+
+describe("lending to a registered patron", () => {
+  type OnLend = (
+    borrower: Borrower,
+    dueAt: string | null,
+    acknowledgeNotLendable: boolean,
+  ) => void;
+
+  function adminPanel(
+    active_loan: BookOut["active_loan"],
+    onLend: ReturnType<typeof vi.fn<OnLend>>,
+  ) {
+    return (
+      <LoanPanel
+        book={makeBook({ id: 3, active_loan })}
+        members={[]}
+        canLendToPatron
+        isBusy={false}
+        isSavingDetails={false}
+        onSaveLending={vi.fn<(fields: BookDetailsUpdate) => void>()}
+        onLend={onLend}
+        onMarkReturned={vi.fn<(loanId: number) => void>()}
+      />
+    );
+  }
+
+  it("is never offered to a member", () => {
+    renderPanel();
+
+    expect(
+      screen.queryByRole("radio", { name: "A registered patron" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("is offered to an admin as a third kind of borrower", () => {
+    renderPanel({}, { canLendToPatron: true });
+
+    expect(
+      screen.getByRole("radio", { name: "A registered patron" }),
+    ).toBeInTheDocument();
+  });
+
+  it("holds the Loan button until a patron is picked", async () => {
+    mockApi();
+    renderWithProviders(adminPanel(null, vi.fn<OnLend>()));
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("radio", { name: "A registered patron" }));
+
+    expect(screen.getByRole("button", { name: "Loan" })).toBeDisabled();
+  });
+
+  it("registers one patron at the first loan, and lending to them again registers nobody", async () => {
+    const api = mockApi();
+    const stored = makePatron({ id: 41, name: "Pat Lee", card_number: "C1" });
+    api.on("/api/patrons", { status: 201, body: stored }, "POST");
+    const onLend = vi.fn<OnLend>();
+    const { rerender } = renderWithProviders(adminPanel(null, onLend));
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole("radio", { name: "A registered patron" }),
+    );
+    await user.click(screen.getByRole("button", { name: "New patron" }));
+    await user.type(screen.getByLabelText("Name"), "Pat Lee");
+    await user.type(screen.getByLabelText(/^Card number/), "C1");
+    await user.click(screen.getByRole("button", { name: "Register" }));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Loan" })).toBeEnabled(),
+    );
+    await user.click(screen.getByRole("button", { name: "Loan" }));
+    // Out and back, as the book is between two loans to the same person.
+    rerender(adminPanel(makeLoan(), onLend));
+    rerender(adminPanel(null, onLend));
+    await user.click(screen.getByRole("button", { name: "Loan" }));
+
+    const patron = { kind: "patron", patronId: 41 };
+    expect(onLend.mock.calls.map(([borrower]) => borrower)).toEqual([
+      patron,
+      patron,
+    ]);
+    expect(
+      api.calls.filter(
+        (call) => call.method === "POST" && call.url.endsWith("/api/patrons"),
+      ),
+    ).toHaveLength(1);
   });
 });

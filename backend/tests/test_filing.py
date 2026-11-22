@@ -13,7 +13,7 @@ import pytest
 
 import ddc
 import filing
-from enums import ClassificationScheme
+from enums import FilingRuleName
 
 #: Call numbers the two live sources have supplied, kept as they were stored.
 #:
@@ -288,31 +288,14 @@ class TestTheLibraryOfCongressRule:
 
 
 class TestWhichRuleFilesWhichScheme:
-    def test_every_published_scheme_has_a_rule(self):
-        """Parametrised over the enum, so a fifth member is covered on the day
-        it is added rather than the day somebody remembers this file."""
-        assert set(filing.FILING_RULES) == set(ClassificationScheme)
+    def test_every_rule_a_scheme_may_name_has_one(self):
+        """Over the enum, so a fourth rule name is covered on the day it is added."""
+        assert set(filing.FILING_RULES) == set(FilingRuleName)
 
-    def test_a_scheme_with_no_rule_files_under_the_generic_one(self):
-        """The fallback `FILING_RULES` documents, exercised rather than described.
-
-        Reached with a value outside the enum because every member has an
-        entry, which is the state the test above pins.
-        """
-        unknown = "udc"
-
-        assert filing.rule_for(unknown) is filing.GENERIC  # type: ignore[arg-type]
-
-    def test_only_the_two_shelf_schemes_order_a_shelf(self):
-        assert filing.SHELF_SCHEMES == (
-            ClassificationScheme.DDC,
-            ClassificationScheme.LCC,
-        )
-
-    def test_the_subject_vocabularies_file_under_the_generic_rule(self):
-        """They are authority files, not shelf orders, so they have no schedule."""
-        assert filing.rule_for(ClassificationScheme.GND) is filing.GENERIC
-        assert filing.rule_for(ClassificationScheme.LCSH) is filing.GENERIC
+    def test_a_name_with_no_rule_files_under_the_generic_one(self):
+        """The fallback `rule_named` documents, reached with a name outside the
+        enum because every member has an entry."""
+        assert filing.rule_named("udc") is filing.GENERIC
 
     def test_the_rules_are_named_as_the_reference_implementation_names_them(self):
         """Koha seeds `dewey`, `lcc` and `generic`. Keeping the spellings is
@@ -477,33 +460,30 @@ class TestTheKeyGrowsByABoundedAmount:
     def test_no_corpus_value_grows_by_more(self, number):
         """Over every rule, not the Library of Congress one alone: the bound is
         on the column, and the column holds all four schemes' keys."""
-        for scheme in ClassificationScheme:
-            key = filing.rule_for(scheme).sort_key(number)
+        for rule in filing.FILING_RULES.values():
+            key = rule.sort_key(number)
             assert len(key) - len(number) <= filing.MAX_KEY_GROWTH
 
 
-class TestTheKeyForARowsTwoColumns:
-    """`sort_key_for` is the one entry point every writer of the column uses.
+class TestTheKeyUnderARulesName:
+    """`sort_key_under` is the one entry point every writer of the column uses.
 
-    Its argument is `object` rather than `ClassificationScheme` because
-    `backup.restore` inserts through Core, so what arrives is whatever an
-    archive holds.
+    Its argument is `object` because `backup.restore` inserts through Core, so
+    what arrives is whatever an archive's scheme rows hold.
     """
 
-    def test_it_applies_the_scheme_s_own_rule(self):
-        assert filing.sort_key_for(ClassificationScheme.LCC, "BF75") == filing.LIBRARY_OF_CONGRESS.sort_key(
+    def test_it_applies_the_named_rule(self):
+        assert filing.sort_key_under(FilingRuleName.LCC, "BF75") == filing.LIBRARY_OF_CONGRESS.sort_key(
             "BF75"
         )
-        assert filing.sort_key_for(ClassificationScheme.DDC, "005.13/3") == filing.DEWEY.sort_key("005.13/3")
+        assert filing.sort_key_under(FilingRuleName.DEWEY, "005.13/3") == filing.DEWEY.sort_key("005.13/3")
 
-    def test_the_scheme_may_arrive_as_the_string_the_column_holds(self):
-        """Which is what a `VARCHAR(20)` returns and what an archive carries."""
-        assert filing.sort_key_for("lcc", "BF75") == (filing.LIBRARY_OF_CONGRESS.sort_key("BF75"))
+    def test_the_name_may_arrive_as_the_string_the_column_holds(self):
+        assert filing.sort_key_under("lcc", "BF75") == filing.LIBRARY_OF_CONGRESS.sort_key("BF75")
 
-    @pytest.mark.parametrize("scheme", ["udc", "", None, 7, ["ddc"]])
-    def test_a_scheme_this_app_cannot_name_files_under_the_generic_rule(self, scheme):
-        """Rather than raising. One unrecognised row would otherwise fail the
-        restore of a whole library, and the generic rule is the answer
-        `FILING_RULES` already gives a scheme with no entry.
-        """
-        assert filing.sort_key_for(scheme, "BF75") == filing.GENERIC.sort_key("BF75")
+    @pytest.mark.parametrize("rule", ["udc", "ddc", "", None, 7, ["lcc"]])
+    def test_a_name_this_app_does_not_know_files_under_the_generic_rule(self, rule):
+        """Rather than raising: one unrecognised row would otherwise fail the
+        restore of a whole library. `ddc` is a scheme's code, not a rule's
+        name, so it is unknown here too."""
+        assert filing.sort_key_under(rule, "BF75") == filing.GENERIC.sort_key("BF75")

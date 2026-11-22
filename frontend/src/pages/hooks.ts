@@ -45,9 +45,16 @@ import {
 } from "../api/generated/endpoints/books/books";
 import { getReturnLoanMutationOptions } from "../api/generated/endpoints/loans/loans";
 import {
+  getSearchPatronsQueryKey,
+  useCreatePatron,
+  useSearchPatrons,
+} from "../api/generated/endpoints/patrons/patrons";
+import {
   AuthMode,
   type DigitalReferenceIn,
   type DigitalReferenceOut,
+  type PatronCreate,
+  type PatronOut,
   type SightingIn,
   type UserOut,
 } from "../api/generated/model";
@@ -56,6 +63,7 @@ import { clearSession, setSession } from "../api/mutator";
 import { referenceFor } from "../lib/digitalReference";
 import { partialMd5 } from "../lib/fileDigest";
 import { inChunks, reportEach } from "../lib/fileLanding";
+import { calendarToday } from "./types";
 
 const USER_KEY = "user";
 
@@ -818,4 +826,104 @@ function refreshReferences(
   void queryClient.invalidateQueries({
     queryKey: getListMissingDigitalReferencesQueryKey(),
   });
+}
+
+/**
+ * The key every patron search shares, whatever its term: the method and the
+ * path.
+ *
+ * Cut from the generated key rather than taken whole, because the generated
+ * key with no body still ends in `undefined`, and react-query matches a filter
+ * key element by element: `undefined` matches no search's body, so an erased
+ * patron would stay on the screen until the cache aged out.
+ */
+export const EVERY_PATRON_SEARCH = getSearchPatronsQueryKey().slice(0, 2);
+
+/**
+ * How many matches one patron search asks for: the endpoint's own ceiling.
+ *
+ * A full page is the only sign more exist, since the endpoint returns no
+ * total (a count of matching people is itself something it declines to say).
+ */
+export const PATRON_SEARCH_LIMIT = 50;
+
+export interface UsePatronSearchResult {
+  /** The matches, or empty while there is no term or no answer yet. */
+  patrons: PatronOut[];
+  /** True once a term has been sent, so "no match" and "not asked" differ. */
+  hasTerm: boolean;
+  isLoading: boolean;
+  /** The search came back as full as it may, so there may be more. */
+  isCapped: boolean;
+  /**
+   * The reader's calendar day when the matches arrived, `YYYY-MM-DD`, which
+   * decides whether a registration has expired.
+   *
+   * Taken from the answer's own timestamp rather than a clock read during
+   * render, so a render stays pure and every row is judged against one day.
+   */
+  today: string;
+  error: unknown;
+  refetch: () => void;
+}
+
+/**
+ * The patrons matching `term`, which arrives trimmed from the search box.
+ *
+ * Shared by the patron register and the loan form, which find a patron the
+ * same way. The term goes in a POST body, never a URL, so no proxy or server
+ * request log records whom staff looked up.
+ *
+ * Disabled while the term is empty, because the endpoint refuses an empty one
+ * and an empty one would otherwise be a request whose only answer is a 422.
+ */
+export function usePatronSearch(term: string): UsePatronSearchResult {
+  const hasTerm = term !== "";
+  const query = useSearchPatrons(
+    { q: term, limit: PATRON_SEARCH_LIMIT },
+    { query: { enabled: hasTerm, retry: false } },
+  );
+  const patrons = hasTerm ? (query.data ?? []) : [];
+  return {
+    patrons,
+    hasTerm,
+    isLoading: hasTerm && query.isPending,
+    isCapped: patrons.length >= PATRON_SEARCH_LIMIT,
+    today: calendarToday(new Date(query.dataUpdatedAt)),
+    error: hasTerm ? query.error : null,
+    refetch: () => void query.refetch(),
+  };
+}
+
+export interface UseRegisterPatronResult {
+  /** Register a patron; `onDone` receives the record the server stored. */
+  register: (body: PatronCreate, onDone: (patron: PatronOut) => void) => void;
+  isRegistering: boolean;
+  error: unknown;
+  /** Forget the last refusal, as the form closes or opens anew. */
+  reset: () => void;
+}
+
+/**
+ * Register a patron, from the register or from the loan form.
+ *
+ * `onDone` is handed the stored record, so the loan form lends to the patron
+ * it has just registered rather than finding them again. Every search is
+ * invalidated, since a new patron may match any term.
+ */
+export function useRegisterPatron(): UseRegisterPatronResult {
+  const queryClient = useQueryClient();
+  const create = useCreatePatron({
+    mutation: {
+      onSuccess: () =>
+        void queryClient.invalidateQueries({ queryKey: EVERY_PATRON_SEARCH }),
+    },
+  });
+  return {
+    register: (body, onDone) =>
+      create.mutate({ data: body }, { onSuccess: onDone }),
+    isRegistering: create.isPending,
+    error: create.error,
+    reset: create.reset,
+  };
 }

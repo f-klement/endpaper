@@ -1317,6 +1317,44 @@ class TestReadingRealCatalogueShapes:
         assert shouted.records[0].headings == (Heading(ClassificationScheme.LCSH, "Treasure troves", None),)
         assert shouted.records[0].headings == quiet.records[0].headings
 
+    #: The LCSH label of `Psychology, Industrial.`: no closing full stop.
+    INDUSTRIAL_PSYCHOLOGY: Final = Heading(ClassificationScheme.LCSH, "Psychology, Industrial", None)
+
+    def test_a_heading_a_copy_confirms_is_stored_as_the_label_it_confirmed(self):
+        """K10plus closes `$a` with a full stop and LCSH's label has none, so
+        the number stored is the form the copy was asked, not `$a` as written."""
+        asked: list[tuple[str, str]] = []
+
+        def copies(questions: set[tuple[str, str]]) -> frozenset[tuple[str, str]]:
+            asked.extend(questions)
+            return frozenset(questions)
+
+        parsed = marc.read(
+            a_record(
+                datafield("040", ("a", "DE-627")),
+                datafield("245", ("a", "T")),
+                datafield("650", ("a", "Psychology, Industrial."), ind2="0"),
+            ),
+            copies,
+        )
+
+        assert asked == [("lcsh", "Psychology, Industrial")]
+        assert parsed.records[0].headings == (self.INDUSTRIAL_PSYCHOLOGY,)
+
+    def test_a_library_of_congress_heading_is_stored_without_its_closing_full_stop(self):
+        """The form the Library of Congress catalogue sends for the same
+        heading where it has no subdivision, so a book read from both keeps
+        one row."""
+        parsed = marc.read(
+            a_record(
+                datafield("040", ("a", "DLC")),
+                datafield("245", ("a", "T")),
+                datafield("650", ("a", "Psychology, Industrial."), ind2="0"),
+            )
+        )
+
+        assert parsed.records[0].headings == (self.INDUSTRIAL_PSYCHOLOGY,)
+
 
 class TestNoModuleReadsAnotherModulesPrivateNames:
     """No module of ours reaches past another's door, with no exemption at all.

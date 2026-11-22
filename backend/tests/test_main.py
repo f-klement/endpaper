@@ -77,8 +77,8 @@ class TestTheSeededVocabularyIsKeyed:
 
 
 class TestAppWiring:
-    def test_every_router_is_registered(self, client):
-        paths = client.get("/openapi.json").json()["paths"]
+    def test_every_router_is_registered(self):
+        paths = main.app.openapi()["paths"]
         for expected in (
             "/auth/login",
             "/api/books",
@@ -89,8 +89,8 @@ class TestAppWiring:
         ):
             assert expected in paths
 
-    def test_the_cover_route_exists(self, client):
-        paths = client.get("/openapi.json").json()["paths"]
+    def test_the_cover_route_exists(self):
+        paths = main.app.openapi()["paths"]
         assert "/covers/{book_id}.{extension}" in paths
 
     def test_covers_are_registered_before_the_spa_catch_all(self):
@@ -129,12 +129,26 @@ class TestAppWiring:
         from disk."""
         assert client.get("/covers/1.jpg").status_code == 401
 
-    def test_openapi_schema_builds(self, client):
+    def test_openapi_schema_builds(self, client, member):
         """Catches unresolvable response models across every route at once."""
-        assert client.get("/openapi.json").status_code == 200
+        assert client.get("/openapi.json", headers=member["headers"]).status_code == 200
 
-    def test_docs_are_served(self, client):
-        assert client.get("/docs").status_code == 200
+    def test_no_session_reads_the_schema(self, client):
+        """Every route docstring is in the schema, and the owner put it behind sign in."""
+        assert client.get("/openapi.json").status_code == 401
+
+    @pytest.mark.parametrize("path", ["/docs", "/redoc", "/docs/oauth2-redirect"])
+    def test_the_schema_viewers_are_gone_and_answer_a_json_404(self, client, member, path):
+        """The page's CSP refused their CDN script, so neither ever rendered.
+
+        A browser navigation, signed in, so neither the gate nor the shell can
+        answer in the route's place: `errors.API_PREFIXES` keeps both paths.
+        """
+        headers = {**member["headers"], "Accept": "text/html"}
+        res = client.get(path, headers=headers)
+
+        assert res.status_code == 404
+        assert res.headers["content-type"].startswith("application/json")
 
     def test_no_cors_headers_by_default(self, client):
         """The API and the compiled frontend are served from one origin, so no

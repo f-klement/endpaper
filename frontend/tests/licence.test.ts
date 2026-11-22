@@ -50,8 +50,10 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveConfig } from "vite";
 import { describe, expect, it } from "vitest";
 
 const ROOT = new URL("../../", import.meta.url);
@@ -221,5 +223,93 @@ describe("the project's licence", () => {
     const lastStage = dockerfile.slice(dockerfile.lastIndexOf("\nFROM "));
 
     expect(lastStage).toMatch(/^COPY LICENSE\s/m);
+  });
+});
+
+describe("the text recogniser's third party licence", () => {
+  it("is served beside the engine, in the engine's own words", () => {
+    // Apache-2.0 clause 4(a) asks for the licence with every copy of the
+    // engine and its model, and both reach the image and every browser that
+    // opens the reader as files under `/assets`. `public/` is copied into the
+    // build whole, and the build into the image's `static/`, so this file
+    // travels with them. Compared with the package's own text rather than a
+    // digest, so a version bump that changes the licence fails here.
+    const notice = licenceBody(read("frontend/public/licences/tesseract.txt"));
+
+    expect(notice).toContain(
+      licenceBody(read("frontend/node_modules/tesseract.js-core/LICENSE")),
+    );
+  });
+
+  it("names the libraries the engine's WebAssembly links, each under its own licence", () => {
+    // The wasm statically links these, and each licence asks for its notice
+    // with a binary. One phrase per library, taken from its own text, so a
+    // notice deleted from the file fails by name.
+    const notice = read("frontend/public/licences/tesseract.txt");
+
+    for (const phrase of [
+      "Copyright (C) 2001-2020 Leptonica",
+      "Copyright (c) 1988-1997 Sam Leffler",
+      "PNG Reference Library License version 2",
+      "Copyright (C) 1995-2022 Jean-loup Gailly and Mark Adler",
+      "based in part on the work of the Independent JPEG Group",
+      "Copyright (c) 1997  Eric S. Raymond",
+      "Copyright (c) 2010, Google Inc.",
+      "OpenLibm contains code that is covered by various licenses",
+    ]) {
+      expect(notice).toContain(phrase);
+    }
+  });
+
+  it("is copied into the built tree and so into the image", async () => {
+    // The arm above holds the file's text, not that it ships. A file under
+    // `public/` is copied into `dist` whole, and the Dockerfile copies `dist`
+    // into `static/`, so what can stop it travelling is a build config that
+    // moves `publicDir`, turns `copyPublicDir` off or moves `outDir` away
+    // from where the Dockerfile reads. This resolves the real config rather
+    // than reading its text, and a full build is left to the gate.
+    const config = await resolveConfig({}, "build", "production");
+    const publicDir = fileURLToPath(new URL("frontend/public", ROOT));
+
+    expect(config.publicDir).toBe(publicDir);
+    expect(config.build.copyPublicDir).toBe(true);
+    // `outDir` stays relative to the root in a resolved config.
+    expect(resolve(config.root, config.build.outDir)).toBe(
+      fileURLToPath(new URL("frontend/dist", ROOT)),
+    );
+    expect(read("Dockerfile")).toMatch(
+      /^COPY --from=frontend \/app\/frontend\/dist \.\/static$/m,
+    );
+  });
+});
+
+describe("the notices the Appearance page links", () => {
+  // Each link is a path the server answers from `static/`, and nothing else
+  // connects the href to the file: a renamed COPY destination or a moved
+  // public file leaves a link to a 404 with every other arm green.
+  // Read as text rather than imported: this file runs in node, and the
+  // component pulls in the theme and the i18n catalogue.
+  const hrefs = [
+    ...read(
+      "frontend/src/pages/AppearancePage/components/Licences.tsx",
+    ).matchAll(/^\s*href: "([^"]+)",$/gm),
+  ].map((match) => match[1]!);
+  const lastStage = (): string => {
+    const dockerfile = read("Dockerfile");
+    return dockerfile.slice(dockerfile.lastIndexOf("\nFROM "));
+  };
+
+  it("finds the collected notices where the image's last stage writes them", () => {
+    expect(hrefs).toHaveLength(2);
+    expect(lastStage()).toMatch(
+      new RegExp(
+        `^COPY --from=notices \\S+ \\./static${hrefs[0]!.replace(/\./g, "\\.")}$`,
+        "m",
+      ),
+    );
+  });
+
+  it("finds the engine's notice in public, which the bundle ships whole", () => {
+    expect(read(`frontend/public${hrefs[1]!}`)).toMatch(/Apache License/);
   });
 });

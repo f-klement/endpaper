@@ -26,7 +26,7 @@ repeat the argument.
 <!-- index: begin -->
 | Section | Entry | Words |
 |---|---|---|
-|  | [Backend](decisions.md#backend) | 35,524 |
+|  | [Backend](decisions.md#backend) | 35,525 |
 | Backend | [`bcrypt` directly, not `passlib`](decisions.md#bcrypt-directly-not-passlib) | 98 |
 | Backend | [Settings are functions, not module constants](decisions.md#settings-are-functions-not-module-constants) | 59 |
 | Backend | [`DATA_DIR` exists at all](decisions.md#data_dir-exists-at-all) | 22 |
@@ -128,7 +128,7 @@ repeat the argument.
 | Backend | [SQLite folds case in ASCII and Python does not](decisions.md#sqlite-folds-case-in-ascii-and-python-does-not) | 382 |
 | Backend | [A collection's name folds in Python, and the migration that did it merges](decisions.md#a-collections-name-folds-in-python-and-the-migration-that-did-it-merges) | 393 |
 | Backend | [The migration merges, and four SQLite traps decided its shape](decisions.md#the-migration-merges-and-four-sqlite-traps-decided-its-shape) | 134 |
-| Backend | [A route docstring is API documentation, not an internal comment](decisions.md#a-route-docstring-is-api-documentation-not-an-internal-comment) | 292 |
+| Backend | [A route docstring is API documentation, not an internal comment](decisions.md#a-route-docstring-is-api-documentation-not-an-internal-comment) | 296 |
 | Backend | [`authorship.py` owns author identity, and `authors.py` stays pure underneath](decisions.md#authorshippy-owns-author-identity-and-authorspy-stays-pure-underneath) | 308 |
 | Backend | [Book duplicates are not author identity](decisions.md#book-duplicates-are-not-author-identity) | 99 |
 | Backend | [The alias mapping is library wide; the shelf is what `visible_to` filters](decisions.md#the-alias-mapping-is-library-wide-the-shelf-is-what-visible_to-filters) | 453 |
@@ -158,7 +158,7 @@ repeat the argument.
 | Backend | [A `ValueError` no SRU handler caught, and a bound that could not have helped](decisions.md#a-valueerror-no-sru-handler-caught-and-a-bound-that-could-not-have-helped) | 139 |
 | Backend | [What was deliberately not done](decisions.md#what-was-deliberately-not-done) | 38 |
 | Backend | [What adding a catalogue cost, which is the seam's own report card](decisions.md#what-adding-a-catalogue-cost-which-is-the-seams-own-report-card) | 31 |
-| Backend | [The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it](decisions.md#the-privacy-rule-covers-the-tables-that-belong-only-to-a-book-and-does-not-try-to-be-clever-about-it) | 485 |
+| Backend | [The privacy rule covers the tables that belong only to a Book, and does not try to be clever about it](decisions.md#the-privacy-rule-covers-the-tables-that-belong-only-to-a-book-and-does-not-try-to-be-clever-about-it) | 482 |
 | Backend | [The shared bibliographic vocabulary is a module, and MARC reading is not](decisions.md#the-shared-bibliographic-vocabulary-is-a-module-and-marc-reading-is-not) | 248 |
 | Backend | [The catalogue family publishes its decoders, and three readers are not decoders](decisions.md#the-catalogue-family-publishes-its-decoders-and-three-readers-are-not-decoders) | 281 |
 | Backend | [A list filter's toggle is a patch, not a helper over an array](decisions.md#a-list-filters-toggle-is-a-patch-not-a-helper-over-an-array) | 92 |
@@ -274,10 +274,10 @@ repeat the argument.
 | Product | [No bookshop or retailer is a catalogue source](decisions.md#no-bookshop-or-retailer-is-a-catalogue-source) | 252 |
 |  | [Multi workstation is joined terminals, and the container stays the documented alternative](decisions.md#multi-workstation-is-joined-terminals-and-the-container-stays-the-documented-alternative) | 496 |
 |  | [VIAF is the wrong supplier for resolution and the right one for discovery](decisions.md#viaf-is-the-wrong-supplier-for-resolution-and-the-right-one-for-discovery) | 447 |
-|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,492 |
+|  | [An identifier two files disagree about is shown and never stored](decisions.md#an-identifier-two-files-disagree-about-is-shown-and-never-stored) | 17,924 |
 | An identifier two files disagree about is shown and never stored | [VIAF was refused as a supplier and is used as an enrichment, and both are right](decisions.md#viaf-was-refused-as-a-supplier-and-is-used-as-an-enrichment-and-both-are-right) | 251 |
 | An identifier two files disagree about is shown and never stored | [A VIAF cluster is verified against the confirmed record, never trusted](decisions.md#a-viaf-cluster-is-verified-against-the-confirmed-record-never-trusted) | 300 |
-| An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 173 |
+| An identifier two files disagree about is shown and never stored | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts) | 205 |
 | An identifier two files disagree about is shown and never stored | [The national identifiers have one route, and Wikidata is the fallback for it](decisions.md#the-national-identifiers-have-one-route-and-wikidata-is-the-fallback-for-it) | 142 |
 | An identifier two files disagree about is shown and never stored | [A refusal test whose subject is a plausible future member is a countdown](decisions.md#a-refusal-test-whose-subject-is-a-plausible-future-member-is-a-countdown) | 178 |
 | An identifier two files disagree about is shown and never stored | [The in app reminder is a sender, and it is the one that does not stamp `notified_at`](decisions.md#the-in-app-reminder-is-a-sender-and-it-is-the-one-that-does-not-stamp-notified_at) | 165 |
@@ -289,7 +289,7 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [The runtime `COPY` shipped with the builder image, not with the transport](decisions.md#the-runtime-copy-shipped-with-the-builder-image-not-with-the-transport) | 188 |
 | An identifier two files disagree about is shown and never stored | [The YAZ build id names what is built, never what it is built against](decisions.md#the-yaz-build-id-names-what-is-built-never-what-it-is-built-against) | 343 |
 | An identifier two files disagree about is shown and never stored | [The YAZ pin is trust on first use, and nothing else watches it](decisions.md#the-yaz-pin-is-trust-on-first-use-and-nothing-else-watches-it) | 175 |
-| An identifier two files disagree about is shown and never stored | [YAZ encrypts a TLS connection and does not authenticate it](decisions.md#yaz-encrypts-a-tls-connection-and-does-not-authenticate-it) | 141 |
+| An identifier two files disagree about is shown and never stored | [YAZ checks a TLS target's certificate](decisions.md#yaz-checks-a-tls-targets-certificate) | 545 |
 | An identifier two files disagree about is shown and never stored | [A suite pod must not outlive the run that made it](decisions.md#a-suite-pod-must-not-outlive-the-run-that-made-it) | 219 |
 | An identifier two files disagree about is shown and never stored | [The suite pod registry is untrusted, and what that bought is a bound rather than safety](decisions.md#the-suite-pod-registry-is-untrusted-and-what-that-bought-is-a-bound-rather-than-safety) | 310 |
 | An identifier two files disagree about is shown and never stored | [A member's address is served only where it is named, and never on `UserOut`](decisions.md#a-members-address-is-served-only-where-it-is-named-and-never-on-userout) | 328 |
@@ -350,8 +350,10 @@ repeat the argument.
 | An identifier two files disagree about is shown and never stored | [The release image reads nothing from this project's registry](decisions.md#the-release-image-reads-nothing-from-this-projects-registry) | 161 |
 | An identifier two files disagree about is shown and never stored | [A finding with no advisory id is refused](decisions.md#a-finding-with-no-advisory-id-is-refused) | 65 |
 | An identifier two files disagree about is shown and never stored | [A guard proved on one validated field, then trusted for the fields beside it](decisions.md#a-guard-proved-on-one-validated-field-then-trusted-for-the-fields-beside-it) | 333 |
-|  | [Open, and not resolved in this ticket](decisions.md#open-and-not-resolved-in-this-ticket) | 1,234 |
+|  | [Open, and not resolved in this ticket](decisions.md#open-and-not-resolved-in-this-ticket) | 1,715 |
 | Open, and not resolved in this ticket | [The provider order is the order sources are asked, and nothing else](decisions.md#the-provider-order-is-the-order-sources-are-asked-and-nothing-else) | 217 |
+| Open, and not resolved in this ticket | [An institution's order is an ask order too, and trust stays measured](decisions.md#an-institutions-order-is-an-ask-order-too-and-trust-stays-measured) | 219 |
+| Open, and not resolved in this ticket | [Which schemes a catalogue supplies is declared per reader](decisions.md#which-schemes-a-catalogue-supplies-is-declared-per-reader) | 239 |
 | Open, and not resolved in this ticket | [The tier a source is asked in is a position, not a property of the source](decisions.md#the-tier-a-source-is-asked-in-is-a-position-not-a-property-of-the-source) | 162 |
 | Open, and not resolved in this ticket | [Google Books has two switches and they are conjoined in one place](decisions.md#google-books-has-two-switches-and-they-are-conjoined-in-one-place) | 118 |
 | Open, and not resolved in this ticket | [The provider list does not reach the cover and authority hosts](decisions.md#the-provider-list-does-not-reach-the-cover-and-authority-hosts) | 76 |
@@ -439,13 +441,13 @@ repeat the argument.
 |  | [A subject label keeps the place of its first occurrence](decisions.md#a-subject-label-keeps-the-place-of-its-first-occurrence) | 105 |
 |  | [The first `$0` is the authority file's number, and `Subfields.gnd_identifier` asks a different question](decisions.md#the-first-0-is-the-authority-files-number-and-subfieldsgnd_identifier-asks-a-different-question) | 316 |
 |  | [A label under two vocabularies is two subjects; a label restated undeclared is one](decisions.md#a-label-under-two-vocabularies-is-two-subjects-a-label-restated-undeclared-is-one) | 154 |
-|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,120 |
+|  | [`$2` means a vocabulary on a subject field and a Dewey edition on `082`](decisions.md#2-means-a-vocabulary-on-a-subject-field-and-a-dewey-edition-on-082) | 2,110 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every Python file is compiled, and the warning is recorded rather than raised](decisions.md#every-python-file-is-compiled-and-the-warning-is-recorded-rather-than-raised) | 448 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Every field a request body carries is bounded, and the value comes from one place each](decisions.md#every-field-a-request-body-carries-is-bounded-and-the-value-comes-from-one-place-each) | 816 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The guard is three questions asked of every request body, not a table of fields](decisions.md#the-guard-is-three-questions-asked-of-every-request-body-not-a-table-of-fields) | 50 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [`BodySizeLimitMiddleware` promises a bound it does not apply, and the gap is stated](decisions.md#bodysizelimitmiddleware-promises-a-bound-it-does-not-apply-and-the-gap-is-stated) | 89 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [Two bounds this entry does not close](decisions.md#two-bounds-this-entry-does-not-close) | 155 |
-| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The roster count is guarded by a census with a verdict, not by a scan and not by a list](decisions.md#the-roster-count-is-guarded-by-a-census-with-a-verdict-not-by-a-scan-and-not-by-a-list) | 711 |
+| `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The roster count is guarded by a census with a verdict, not by a scan and not by a list](decisions.md#the-roster-count-is-guarded-by-a-census-with-a-verdict-not-by-a-scan-and-not-by-a-list) | 701 |
 | `$2` means a vocabulary on a subject field and a Dewey edition on `082` | [The hole a reviewer should know about](decisions.md#the-hole-a-reviewer-should-know-about) | 52 |
 |  | [A stale count outside the census grammar is fixed by rewriting the sentence, not by widening the census](decisions.md#a-stale-count-outside-the-census-grammar-is-fixed-by-rewriting-the-sentence-not-by-widening-the-census) | 278 |
 |  | [Four figures in the roster census are snapshots rather than recomputed, deliberately](decisions.md#four-figures-in-the-roster-census-are-snapshots-rather-than-recomputed-deliberately) | 172 |
@@ -484,10 +486,10 @@ repeat the argument.
 | The refused long search names our own limit, not the catalogues' | [The runner checks its image against the pipeline for both toolchains, not one](decisions.md#the-runner-checks-its-image-against-the-pipeline-for-both-toolchains-not-one) | 451 |
 | The refused long search names our own limit, not the catalogues' | [What the pipeline now reports about its own CPU](decisions.md#what-the-pipeline-now-reports-about-its-own-cpu) | 622 |
 |  | [The library view is remembered per mode, and the household's key kept its name](decisions.md#the-library-view-is-remembered-per-mode-and-the-households-key-kept-its-name) | 349 |
-|  | [The SRU server borrows the public catalogue's gate rather than growing one](decisions.md#the-sru-server-borrows-the-public-catalogues-gate-rather-than-growing-one) | 149 |
+|  | [The SRU server borrows the public catalogue's gate rather than growing one](decisions.md#the-sru-server-borrows-the-public-catalogues-gate-rather-than-growing-one) | 173 |
 |  | [The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned](decisions.md#the-column-boundary-for-a-marc-record-is-marcpys-field-mapping-and-it-is-now-pinned) | 173 |
 |  | [Masking is supported because SQLite's LIKE does not backtrack](decisions.md#masking-is-supported-because-sqlites-like-does-not-backtrack) | 304 |
-|  | [The query bound is a cost budget, because a count of predicates is not a cost](decisions.md#the-query-bound-is-a-cost-budget-because-a-count-of-predicates-is-not-a-cost) | 238 |
+|  | [The query bound is a cost budget, because a count of predicates is not a cost](decisions.md#the-query-bound-is-a-cost-budget-because-a-count-of-predicates-is-not-a-cost) | 262 |
 |  | [The SRU response bound is charged in bytes, and the row count is not that bound](decisions.md#the-sru-response-bound-is-charged-in-bytes-and-the-row-count-is-not-that-bound) | 1,028 |
 |  | [An integer the storage engine cannot hold was three unauthenticated 500s](decisions.md#an-integer-the-storage-engine-cannot-hold-was-three-unauthenticated-500s) | 216 |
 |  | [A filter is a read of its column, and only the record writer was guarded](decisions.md#a-filter-is-a-read-of-its-column-and-only-the-record-writer-was-guarded) | 93 |
@@ -499,7 +501,7 @@ repeat the argument.
 |  | [A request body bounds the cover URL it stores, not the one it receives](decisions.md#a-request-body-bounds-the-cover-url-it-stores-not-the-one-it-receives) | 289 |
 |  | [Which columns an import may fill, column by column](decisions.md#which-columns-an-import-may-fill-column-by-column) | 667 |
 |  | [Which authority schemes exist, and why the list is code rather than rows](decisions.md#which-authority-schemes-exist-and-why-the-list-is-code-rather-than-rows) | 401 |
-|  | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts-1) | 246 |
+|  | [Storing an identifier and resolving one are different acts](decisions.md#storing-an-identifier-and-resolving-one-are-different-acts-1) | 278 |
 |  | [The Z39.50 door's bounds, and which of fetch.py's four have no counterpart](decisions.md#the-z3950-doors-bounds-and-which-of-fetchpys-four-have-no-counterpart) | 617 |
 |  | [UNIMARC is read from the Library of Congress crosswalk, and not until a source sends one](decisions.md#unimarc-is-read-from-the-library-of-congress-crosswalk-and-not-until-a-source-sends-one) | 1,441 |
 |  | [ISNI is the identity spine, and VIAF is a discovery route](decisions.md#isni-is-the-identity-spine-and-viaf-is-a-discovery-route) | 455 |
@@ -577,7 +579,15 @@ repeat the argument.
 |  | [An excluded row is counted in the open, where a blocked row is not](decisions.md#an-excluded-row-is-counted-in-the-open-where-a-blocked-row-is-not) | 68 |
 |  | [A source carries a remit, so a catalogue is asked about books it might hold](decisions.md#a-source-carries-a-remit-so-a-catalogue-is-asked-about-books-it-might-hold) | 185 |
 |  | [Provenance is published, because a catalogue that hides its sources is not a catalogue](decisions.md#provenance-is-published-because-a-catalogue-that-hides-its-sources-is-not-a-catalogue) | 127 |
-|  | [A harvested Book is owned by the harvest, not by the admin who ran it](decisions.md#a-harvested-book-is-owned-by-the-harvest-not-by-the-admin-who-ran-it) | 180 |
+|  | [Harvesting an OAI-PMH repository (owner, 2026-11-20)](decisions.md#harvesting-an-oai-pmh-repository-owner-2026-11-20) | 2,264 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvested Book has no owner, points at its harvest run, and is never private](decisions.md#a-harvested-book-has-no-owner-points-at-its-harvest-run-and-is-never-private) | 175 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [The repository may be a household address, over http or https](decisions.md#the-repository-may-be-a-household-address-over-http-or-https) | 153 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest reads MARCXML where offered, and Dublin Core where not](decisions.md#a-harvest-reads-marcxml-where-offered-and-dublin-core-where-not) | 443 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest's headings wait as suggestions](decisions.md#a-harvests-headings-wait-as-suggestions) | 320 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [How a harvested record is matched](decisions.md#how-a-harvested-record-is-matched) | 177 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A run is cut short rather than failed](decisions.md#a-run-is-cut-short-rather-than-failed) | 229 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A truncated harvest carries on as a new run](decisions.md#a-truncated-harvest-carries-on-as-a-new-run) | 480 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [The books list filters by origin and by harvest run](decisions.md#the-books-list-filters-by-origin-and-by-harvest-run) | 203 |
 |  | [The competitor register's reference counts get a stated command and no guard](decisions.md#the-competitor-registers-reference-counts-get-a-stated-command-and-no-guard) | 248 |
 |  | [A household's own OPDS server is its own table, not a row in `catalogue_targets`](decisions.md#a-households-own-opds-server-is-its-own-table-not-a-row-in-catalogue_targets) | 170 |
 |  | [An OPDS server is refused link local after resolution, and admitted everywhere else private](decisions.md#an-opds-server-is-refused-link-local-after-resolution-and-admitted-everywhere-else-private) | 276 |
@@ -699,7 +709,7 @@ repeat the argument.
 |  | [A NUL arm is subsumed by a column type, not by an engine](decisions.md#a-nul-arm-is-subsumed-by-a-column-type-not-by-an-engine) | 129 |
 |  | [A refusal on Postgres is classified by SQLSTATE, and a bound is the narrowest engine's](decisions.md#a-refusal-on-postgres-is-classified-by-sqlstate-and-a-bound-is-the-narrowest-engines) | 291 |
 |  | [Creation is not preservation](decisions.md#creation-is-not-preservation) | 347 |
-|  | [The Postgres driver is a runtime dependency, and the image is the reason](decisions.md#the-postgres-driver-is-a-runtime-dependency-and-the-image-is-the-reason) | 791 |
+|  | [The Postgres driver is a runtime dependency, and the image is the reason](decisions.md#the-postgres-driver-is-a-runtime-dependency-and-the-image-is-the-reason) | 794 |
 |  | [The channel's loans are the public shelf's, not a second spelling of it](decisions.md#the-channels-loans-are-the-public-shelfs-not-a-second-spelling-of-it) | 106 |
 |  | [The loan door has three constructors, not two](decisions.md#the-loan-door-has-three-constructors-not-two) | 138 |
 |  | [What stayed outside that door, and why](decisions.md#what-stayed-outside-that-door-and-why) | 137 |
@@ -936,7 +946,7 @@ repeat the argument.
 |  | [A tie at the add door refuses without naming a Book](decisions.md#a-tie-at-the-add-door-refuses-without-naming-a-book) | 180 |
 |  | [An import row whose ISBN only the trash view holds is listed "in the trash"](decisions.md#an-import-row-whose-isbn-only-the-trash-view-holds-is-listed-in-the-trash) | 219 |
 |  | [The add door refuses another member's trashed holder, and purges only the caller's own](decisions.md#the-add-door-refuses-another-members-trashed-holder-and-purges-only-the-callers-own) | 587 |
-|  | [Deleting for good reaches only the trashed Books the caller added](decisions.md#deleting-for-good-reaches-only-the-trashed-books-the-caller-added) | 743 |
+|  | [Deleting for good reaches only the trashed Books the caller added](decisions.md#deleting-for-good-reaches-only-the-trashed-books-the-caller-added) | 760 |
 |  | [A merge folds away only the Books the caller added, unless the caller is an admin](decisions.md#a-merge-folds-away-only-the-books-the-caller-added-unless-the-caller-is-an-admin) | 652 |
 |  | [Hidden outranks the trash, and the disclosure that costs is accepted](decisions.md#hidden-outranks-the-trash-and-the-disclosure-that-costs-is-accepted) | 290 |
 |  | [ISBNs compare by `isbn.parse`](decisions.md#isbns-compare-by-isbnparse) | 89 |
@@ -998,7 +1008,9 @@ repeat the argument.
 |  | [What the collection cost counts, and for whom](decisions.md#what-the-collection-cost-counts-and-for-whom) | 519 |
 |  | [The Uruguayan catalogue ships its published login, and carries a remit the Argentine one could not](decisions.md#the-uruguayan-catalogue-ships-its-published-login-and-carries-a-remit-the-argentine-one-could-not) | 175 |
 |  | [The HTML export is not asked for by the download's Accept header](decisions.md#the-html-export-is-not-asked-for-by-the-downloads-accept-header) | 89 |
-|  | [The HTML export carries six columns, not the CSV's](decisions.md#the-html-export-carries-six-columns-not-the-csvs) | 114 |
+|  | [The HTML export carries six columns, not the CSV's](decisions.md#the-html-export-carries-six-columns-not-the-csvs) | 495 |
+| The HTML export carries six columns, not the CSV's | [The HTML export carries no covers](decisions.md#the-html-export-carries-no-covers) | 220 |
+| The HTML export carries six columns, not the CSV's | [The HTML export has no size cap of its own](decisions.md#the-html-export-has-no-size-cap-of-its-own) | 143 |
 |  | [Five exports a minute is held to the formats the menu offers](decisions.md#five-exports-a-minute-is-held-to-the-formats-the-menu-offers) | 76 |
 |  | [CRAP under 10 on every pipeline, as a ratchet, with a scorer of our own in Go](decisions.md#crap-under-10-on-every-pipeline-as-a-ratchet-with-a-scorer-of-our-own-in-go) | 3,689 |
 |  | [SonarQube is read by hand before a release tag, and never gated on](decisions.md#sonarqube-is-read-by-hand-before-a-release-tag-and-never-gated-on) | 1,083 |
@@ -1008,7 +1020,7 @@ repeat the argument.
 | SonarQube is read by hand before a release tag, and never gated on | [The error page takes the app's accent as literal values](decisions.md#the-error-page-takes-the-apps-accent-as-literal-values) | 145 |
 | SonarQube is read by hand before a release tag, and never gated on | [A bidirectional control character is refused in every file the suite reads](decisions.md#a-bidirectional-control-character-is-refused-in-every-file-the-suite-reads) | 132 |
 |  | [The local gate runs the backend job's two ruff steps](decisions.md#the-local-gate-runs-the-backend-jobs-two-ruff-steps) | 129 |
-|  | [The gate runs its legs side by side](decisions.md#the-gate-runs-its-legs-side-by-side) | 441 |
+|  | [The gate runs its legs side by side](decisions.md#the-gate-runs-its-legs-side-by-side) | 449 |
 |  | [One backend run per handoff](decisions.md#one-backend-run-per-handoff) | 78 |
 |  | [The backend suite keeps `--dist loadfile`, because the profile found nothing to rebalance](decisions.md#the-backend-suite-keeps---dist-loadfile-because-the-profile-found-nothing-to-rebalance) | 156 |
 |  | [A test that restates a constant, a derivation or a type is deleted, and an agreement between two artefacts is kept](decisions.md#a-test-that-restates-a-constant-a-derivation-or-a-type-is-deleted-and-an-agreement-between-two-artefacts-is-kept) | 344 |
@@ -1027,7 +1039,7 @@ repeat the argument.
 |  | [MARC `040` names only an agency that can be cited](decisions.md#marc-040-names-only-an-agency-that-can-be-cited) | 336 |
 |  | [A test module's caches live as long as its tests, not as long as the worker](decisions.md#a-test-modules-caches-live-as-long-as-its-tests-not-as-long-as-the-worker) | 416 |
 |  | [The Library of Congress name authority file is the second file a name search asks (2026-11-16)](decisions.md#the-library-of-congress-name-authority-file-is-the-second-file-a-name-search-asks-2026-11-16) | 873 |
-|  | [ORCID is the last file a name search asks, and never compared with ISNI (2026-11-16)](decisions.md#orcid-is-the-last-file-a-name-search-asks-and-never-compared-with-isni-2026-11-16) | 1,234 |
+|  | [ORCID is the last file a name search asks, and never compared with ISNI (2026-11-16)](decisions.md#orcid-is-the-last-file-a-name-search-asks-and-never-compared-with-isni-2026-11-16) | 1,258 |
 |  | [Poland's National Library and LIBRIS join the roster, placed by the marginal rule (2026-11-16)](decisions.md#polands-national-library-and-libris-join-the-roster-placed-by-the-marginal-rule-2026-11-16) | 1,346 |
 |  | [The Royal Danish Library, BIBSYS and Melinda join the roster, and where the remit placement put them (2026-11-16)](decisions.md#the-royal-danish-library-bibsys-and-melinda-join-the-roster-and-where-the-remit-placement-put-them-2026-11-16) | 1,436 |
 |  | [Refused: the National Library of Norway's view (47BIBSYS_NB)](decisions.md#refused-the-national-library-of-norways-view-47bibsys_nb) | 83 |
@@ -1052,4 +1064,78 @@ repeat the argument.
 | Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [The UNIMARC e book coded as text is recorded, not fixed](decisions.md#the-unimarc-e-book-coded-as-text-is-recorded-not-fixed) | 47 |
 | Italy, Portugal and Hungary join the roster over Z39.50 (2026-11-17) | [The UNIMARC reader is under the catalogue property, through PORBASE](decisions.md#the-unimarc-reader-is-under-the-catalogue-property-through-porbase) | 94 |
 |  | [The leading tier reads concentration on what a source adds, not on everything it answers (2026-11-17)](decisions.md#the-leading-tier-reads-concentration-on-what-a-source-adds-not-on-everything-it-answers-2026-11-17) | 427 |
+|  | [The Slovak National Library joins the roster over Z39.50 (2026-11-17)](decisions.md#the-slovak-national-library-joins-the-roster-over-z3950-2026-11-17) | 1,696 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Where the placement rules put it](decisions.md#where-the-placement-rules-put-it) | 561 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Its door closes after about eight connections a minute](decisions.md#its-door-closes-after-about-eight-connections-a-minute) | 203 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [No ISBN-10 retry: the index matches the ten digit form](decisions.md#no-isbn-10-retry-the-index-matches-the-ten-digit-form) | 118 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Leader/07 `b` records arrive among the hits](decisions.md#leader07-b-records-arrive-among-the-hits) | 36 |
+| The Slovak National Library joins the roster over Z39.50 (2026-11-17) | [Three survey candidates refused, each on its own frame (2026-11-17)](decisions.md#three-survey-candidates-refused-each-on-its-own-frame-2026-11-17) | 565 |
+|  | [A list of ISBNs joins the rapid queue and its paced run, and adds no route (2026-11-18)](decisions.md#a-list-of-isbns-joins-the-rapid-queue-and-its-paced-run-and-adds-no-route-2026-11-18) | 809 |
+|  | [ORCID is asked by name only in library mode; a stored iD resolves in either (2026-11-18)](decisions.md#orcid-is-asked-by-name-only-in-library-mode-a-stored-id-resolves-in-either-2026-11-18) | 287 |
+|  | [A Portuguese author number is checked against the BNP's authority file and looked up there, and the other five are not (2026-11-18)](decisions.md#a-portuguese-author-number-is-checked-against-the-bnps-authority-file-and-looked-up-there-and-the-other-five-are-not-2026-11-18) | 1,489 |
+|  | [picomatch ReDoS advisory accepted, not overridden (2026-11-19)](decisions.md#picomatch-redos-advisory-accepted-not-overridden-2026-11-19) | 204 |
+|  | [The printed ISBN is read in the browser, lazy loaded (2026-11-19)](decisions.md#the-printed-isbn-is-read-in-the-browser-lazy-loaded-2026-11-19) | 976 |
+|  | [Further images of a book (2026-11-19)](decisions.md#further-images-of-a-book-2026-11-19) | 1,151 |
+| Further images of a book (2026-11-19) | [Slot count: the shelf cover plus seven](decisions.md#slot-count-the-shelf-cover-plus-seven) | 60 |
+| Further images of a book (2026-11-19) | [The shelf image: `books.cover_url`, unchanged, chosen by a swap](decisions.md#the-shelf-image-bookscover_url-unchanged-chosen-by-a-swap) | 374 |
+| Further images of a book (2026-11-19) | [The storage bound per book: eight times the upload cap](decisions.md#the-storage-bound-per-book-eight-times-the-upload-cap) | 97 |
+| Further images of a book (2026-11-19) | [A replaced cover gets a new URL: `?v=` on `cover_url`](decisions.md#a-replaced-cover-gets-a-new-url-v-on-cover_url) | 185 |
+| Further images of a book (2026-11-19) | [Catalogue cover and uploaded images](decisions.md#catalogue-cover-and-uploaded-images) | 106 |
+| Further images of a book (2026-11-19) | [Files are named by the row, not the book](decisions.md#files-are-named-by-the-row-not-the-book) | 70 |
+| Further images of a book (2026-11-19) | [What each path does with the images](decisions.md#what-each-path-does-with-the-images) | 181 |
+|  | [The image ships one generated notices file, served at /licences/third-party.txt (2026-11-19)](decisions.md#the-image-ships-one-generated-notices-file-served-at-licencesthird-partytxt-2026-11-19) | 727 |
+|  | [`dc.subject` is charged by the public shelf's tags per book (2026-11-19)](decisions.md#dcsubject-is-charged-by-the-public-shelfs-tags-per-book-2026-11-19) | 389 |
+|  | [A catalogue's own bound is applied at the door seam, inside the fan out's wait (2026-11-19)](decisions.md#a-catalogues-own-bound-is-applied-at-the-door-seam-inside-the-fan-outs-wait-2026-11-19) | 595 |
+|  | [A Postgres URL naming any driver but pg8000 is refused at startup, never rewritten (2026-11-19)](decisions.md#a-postgres-url-naming-any-driver-but-pg8000-is-refused-at-startup-never-rewritten-2026-11-19) | 163 |
+|  | [The schema is behind sign in, its two viewers are gone, and `google_books_ready` stays public (2026-11-19)](decisions.md#the-schema-is-behind-sign-in-its-two-viewers-are-gone-and-google_books_ready-stays-public-2026-11-19) | 289 |
+|  | [The SRU server has a switch of its own (2026-11-19)](decisions.md#the-sru-server-has-a-switch-of-its-own-2026-11-19) | 365 |
+|  | [A public record says on the shelf or on loan, at its own path, for the title (2026-11-19)](decisions.md#a-public-record-says-on-the-shelf-or-on-loan-at-its-own-path-for-the-title-2026-11-19) | 486 |
+|  | [The OAI-PMH provider (2026-11-20)](decisions.md#the-oai-pmh-provider-2026-11-20) | 1,442 |
+| The OAI-PMH provider (2026-11-20) | [The OAI-PMH provider keeps persistent tombstones of an id and a datestamp, with no backfill](decisions.md#the-oai-pmh-provider-keeps-persistent-tombstones-of-an-id-and-a-datestamp-with-no-backfill) | 127 |
+| The OAI-PMH provider (2026-11-20) | [No tombstone before the provider first served a request](decisions.md#no-tombstone-before-the-provider-first-served-a-request) | 130 |
+| The OAI-PMH provider (2026-11-20) | [Datestamps are served to the day, and the day a Book was added is an accepted disclosure](decisions.md#datestamps-are-served-to-the-day-and-the-day-a-book-was-added-is-an-accepted-disclosure) | 118 |
+| The OAI-PMH provider (2026-11-20) | [The datestamp is kept by session events registered from models.py, not by each write path](decisions.md#the-datestamp-is-kept-by-session-events-registered-from-modelspy-not-by-each-write-path) | 223 |
+| The OAI-PMH provider (2026-11-20) | [A restore re-stamps every record and raises the Book id counter](decisions.md#a-restore-re-stamps-every-record-and-raises-the-book-id-counter) | 192 |
+| The OAI-PMH provider (2026-11-20) | [OAI-PMH is GET only](decisions.md#oai-pmh-is-get-only) | 26 |
+| The OAI-PMH provider (2026-11-20) | [Identify serves a repository contact address an admin stores](decisions.md#identify-serves-a-repository-contact-address-an-admin-stores) | 103 |
+| The OAI-PMH provider (2026-11-20) | [Identifiers are oai:<request host>:<book id>](decisions.md#identifiers-are-oairequest-hostbook-id) | 80 |
+| The OAI-PMH provider (2026-11-20) | [The resumption token carries only what a fresh request could ask, and no bound finer than a day](decisions.md#the-resumption-token-carries-only-what-a-fresh-request-could-ask-and-no-bound-finer-than-a-day) | 238 |
+| The OAI-PMH provider (2026-11-20) | [Known limit: datestamp against responseDate](decisions.md#known-limit-datestamp-against-responsedate) | 64 |
+|  | [One search or lookup narrowed to some catalogues (2026-11-20)](decisions.md#one-search-or-lookup-narrowed-to-some-catalogues-2026-11-20) | 407 |
+| One search or lookup narrowed to some catalogues (2026-11-20) | [A narrowing is refused rather than intersected, with a 409](decisions.md#a-narrowing-is-refused-rather-than-intersected-with-a-409) | 136 |
+| One search or lookup narrowed to some catalogues (2026-11-20) | [The ticks are a draft spent by the one request they narrow](decisions.md#the-ticks-are-a-draft-spent-by-the-one-request-they-narrow) | 115 |
+| One search or lookup narrowed to some catalogues (2026-11-20) | [A refused narrowing asks for the roster again](decisions.md#a-refused-narrowing-asks-for-the-roster-again) | 84 |
+|  | [Classification schemes are rows a library can add to (2026-11-20)](decisions.md#classification-schemes-are-rows-a-library-can-add-to-2026-11-20) | 732 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The four built in schemes are locked](decisions.md#the-four-built-in-schemes-are-locked) | 62 |
+| Classification schemes are rows a library can add to (2026-11-20) | [A scheme's filing rule is fixed when it is defined](decisions.md#a-schemes-filing-rule-is-fixed-when-it-is-defined) | 41 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The sort key is derived at flush, under the row's rule](decisions.md#the-sort-key-is-derived-at-flush-under-the-rows-rule) | 51 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The delete refusal counts only books the caller may see, and says so](decisions.md#the-delete-refusal-counts-only-books-the-caller-may-see-and-says-so) | 100 |
+| Classification schemes are rows a library can add to (2026-11-20) | [What the enum gave, each answered in code](decisions.md#what-the-enum-gave-each-answered-in-code) | 182 |
+| Classification schemes are rows a library can add to (2026-11-20) | [A filter naming a scheme with no row matches no book](decisions.md#a-filter-naming-a-scheme-with-no-row-matches-no-book) | 87 |
+| Classification schemes are rows a library can add to (2026-11-20) | [A chip shows a library's own scheme by its code](decisions.md#a-chip-shows-a-librarys-own-scheme-by-its-code) | 41 |
+| Classification schemes are rows a library can add to (2026-11-20) | [The API field is `scheme`, not `code`](decisions.md#the-api-field-is-scheme-not-code) | 20 |
+| Classification schemes are rows a library can add to (2026-11-20) | [Defining a scheme is admin only](decisions.md#defining-a-scheme-is-admin-only) | 26 |
+|  | [A local copy of the GND and LCSH subject vocabularies (2026-11-20)](decisions.md#a-local-copy-of-the-gnd-and-lcsh-subject-vocabularies-2026-11-20) | 765 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [An LCSH entry's id is its id.loc.gov URI](decisions.md#an-lcsh-entrys-id-is-its-idlocgov-uri) | 128 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [A subject field's second indicator is read as a thesaurus only on a Library of Congress record](decisions.md#a-subject-fields-second-indicator-is-read-as-a-thesaurus-only-on-a-library-of-congress-record) | 300 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [The GND converter reads JSON-LD, not MARC21 XML](decisions.md#the-gnd-converter-reads-json-ld-not-marc21-xml) | 32 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [A data file is streamed and checked twice over one handle](decisions.md#a-data-file-is-streamed-and-checked-twice-over-one-handle) | 56 |
+| A local copy of the GND and LCSH subject vocabularies (2026-11-20) | [Points the ADR leaves open, decided in code](decisions.md#points-the-adr-leaves-open-decided-in-code) | 81 |
+|  | [The subject vocabulary download (2026-11-20)](decisions.md#the-subject-vocabulary-download-2026-11-20) | 369 |
+| The subject vocabulary download (2026-11-20) | [It is offered in library settings, and by a notice to an admin](decisions.md#it-is-offered-in-library-settings-and-by-a-notice-to-an-admin) | 88 |
+| The subject vocabulary download (2026-11-20) | [A restore holds off a download, and nothing else](decisions.md#a-restore-holds-off-a-download-and-nothing-else) | 102 |
+| The subject vocabulary download (2026-11-20) | [The download's first URL is not checked for https](decisions.md#the-downloads-first-url-is-not-checked-for-https) | 55 |
+| The subject vocabulary download (2026-11-20) | [Converting and loading share the interpreter with requests](decisions.md#converting-and-loading-share-the-interpreter-with-requests) | 81 |
+|  | [Option AC: a subject field with no `$2`, outside a Library of Congress record (2026-11-20)](decisions.md#option-ac-a-subject-field-with-no-2-outside-a-library-of-congress-record-2026-11-20) | 252 |
+|  | [Patron records (2026-11-20)](decisions.md#patron-records-2026-11-20) | 305 |
+| Patron records (2026-11-20) | [A card number is stored upper cased](decisions.md#a-card-number-is-stored-upper-cased) | 77 |
+| Patron records (2026-11-20) | [The search carries its term in a POST body](decisions.md#the-search-carries-its-term-in-a-post-body) | 59 |
+| Patron records (2026-11-20) | [An erasure zeroes the row on SQLite](decisions.md#an-erasure-zeroes-the-row-on-sqlite) | 78 |
+| Patron records (2026-11-20) | [Accepted as built](decisions.md#accepted-as-built) | 61 |
+|  | [Lending to a patron (2026-11-20)](decisions.md#lending-to-a-patron-2026-11-20) | 438 |
+| Lending to a patron (2026-11-20) | [Only an admin names a patron on a loan](decisions.md#only-an-admin-names-a-patron-on-a-loan) | 48 |
+| Lending to a patron (2026-11-20) | [An admin reads who has the book; everyone else reads that a patron has it](decisions.md#an-admin-reads-who-has-the-book-everyone-else-reads-that-a-patron-has-it) | 149 |
+| Lending to a patron (2026-11-20) | [An expired registration still lends](decisions.md#an-expired-registration-still-lends) | 106 |
+| Lending to a patron (2026-11-20) | [Registering at the loan is two requests, not one](decisions.md#registering-at-the-loan-is-two-requests-not-one) | 57 |
+| Lending to a patron (2026-11-20) | [The patron form and search are one copy, in the middle tier](decisions.md#the-patron-form-and-search-are-one-copy-in-the-middle-tier) | 23 |
 <!-- index: end -->

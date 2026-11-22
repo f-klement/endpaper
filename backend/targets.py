@@ -57,6 +57,7 @@ from types import MappingProxyType
 from typing import Final, assert_never
 from urllib.parse import urlsplit
 
+import fetch
 import z3950
 
 # `Reader` is aliased to itself deliberately: `Target.reader` is typed on it, so
@@ -174,6 +175,14 @@ _MAY_WAIVE_THE_ISBN_CLAIM: Final = frozenset({CatalogueSource.DNB})
 #: to be widened together: `backup.restore` writes through Core, so the Python
 #: half of this rule runs on nothing a database returns.
 _USE_ATTRIBUTES: Final = frozenset({z3950.USE_ISBN})
+
+#: The most `Target.timeout_seconds` may be: the lower of the two transports'
+#: ceilings on one request, so lowering either narrows every row with it.
+#:
+#: **`ck_catalogue_targets_timeout` is this figure in SQL**, as a literal, and
+#: `test_targets.py` holds the two together: a restore writes through Core, so
+#: the dataclass's half of the rule runs on nothing a database returns.
+TIMEOUT_CEILING_SECONDS: Final = min(float(fetch.TIMEOUT_SECONDS), z3950.TIMEOUT_SECONDS)
 
 #: A Z39.50 row's address, `z3950://host:port/database`, and nothing else.
 #:
@@ -612,12 +621,30 @@ class Target:
     #: the people they name.
     reads_author_identifiers: bool = False
 
-    #: A deadline for this target alone, in seconds, under
-    #: `metadata.SEARCH_DEADLINE_SECONDS` as the ceiling over the whole fan out.
+    #: A bound for this target alone, in seconds, over one question asked of
+    #: it: a lookup with its ISBN-10 retry, or one title search.
     #:
-    #: **NULL on every seeded row and read by nothing today.** #132 enforces it;
-    #: this ticket is the spine it lands on. `test_targets.py` pins it None
-    #: across the roster so the column cannot be read as working.
+    #: **On a search, the fan out's deadline stays the ceiling**, and by
+    #: construction rather than by a comparison: `metadata._search_one` applies
+    #: this inside the wait its caller holds, so a bound longer than the time
+    #: left is simply never reached. **A lookup holds no shared deadline**, so
+    #: there this bound is the only one over the question beyond one request's
+    #: own. None means no bound of its own, which is the behaviour every row
+    #: had before the field was read.
+    #:
+    #: **A Z39.50 row's client waits one second less than its bound.** YAZ
+    #: takes whole seconds and `z3950_yaz._options` truncates what is left,
+    #: which keeps a missed association's thread inside the bound, so a bound
+    #: of 3.0 opens YAZ with 2. A Z39.50 seed therefore carries one second
+    #: more than its measurement asks for.
+    #:
+    #: **At most `TIMEOUT_CEILING_SECONDS`**, the lower of the two transports'
+    #: ceilings on one request, refused at construction and by
+    #: `ck_catalogue_targets_timeout`:
+    #: `z3950.association` raises `ValueError` on a deadline further away than
+    #: `z3950.TIMEOUT_SECONDS`, which would reach a member as a 500 rather than
+    #: as this source being `UNAVAILABLE`, and a bound past
+    #: `fetch.TIMEOUT_SECONDS` would widen an SRU row past the wait it had.
     timeout_seconds: float | None = None
 
     def __post_init__(self) -> None:
@@ -628,6 +655,7 @@ class Target:
         self._check_waivers()
         self._check_secret()
         self._check_retry()
+        self._check_timeout()
 
     def _check_waivers(self) -> None:
         """Refuses a waived ISBN claim off the DNB, and a shipped login on a row needing none."""
@@ -650,6 +678,22 @@ class Target:
         """
         if self.retries_as_isbn10 and (not self.answers_lookup or self.transport is Transport.BESPOKE):
             raise ValueError(f"{self.source}: retries as an ISBN-10 a lookup this module builds no query for")
+
+    def _check_timeout(self) -> None:
+        """Refuses a bound that is not a positive number of seconds within one request's ceiling.
+
+        `not 0 < value <= ceiling` rather than two comparisons the other way
+        round, because NaN fails every comparison: written as `value <= 0 or
+        value > ceiling` it passes both and reaches `asyncio.timeout`, which
+        never fires on it.
+        """
+        if self.timeout_seconds is None:
+            return
+        if not 0 < self.timeout_seconds <= TIMEOUT_CEILING_SECONDS:
+            raise ValueError(
+                f"{self.source}: timeout_seconds must be over 0 and at most "
+                f"{TIMEOUT_CEILING_SECONDS}, not {self.timeout_seconds!r}"
+            )
 
     def _check_reader(self) -> None:
         """Refuses a reader that is not a `Reader`, and one of the import family."""
@@ -1005,7 +1049,7 @@ class Target:
 #: is on `enums.SourceFamily`.
 FAMILY: Final = SourceFamily.CATALOGUE
 
-#: The twenty catalogues this application ships knowing about.
+#: The twenty one catalogues this application ships knowing about.
 #:
 #: **This is what the runtime asks, and the table is what it seeds.** The
 #: migrations write every one of these rows into `catalogue_targets` and
@@ -1093,6 +1137,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             source=CatalogueSource.K10PLUS,
             rank=1,
             transport=Transport.SRU,
+            timeout_seconds=6.0,
             base_url="https://sru.k10plus.de/opac-de-627",
             reader=Reader.MARC_PLAIN,
             answers_lookup=True,
@@ -1113,7 +1158,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OPEN_LIBRARY: Target(
             source=CatalogueSource.OPEN_LIBRARY,
-            rank=8,
+            rank=9,
             transport=Transport.BESPOKE,
             base_url="https://openlibrary.org",
             reader=Reader.OPEN_LIBRARY,
@@ -1125,8 +1170,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.NKP: Target(
             source=CatalogueSource.NKP,
-            rank=10,
+            rank=11,
             transport=Transport.SRU,
+            timeout_seconds=3.0,
             # The database path is load bearing: `aleph.nkp.cz:9991` alone, and
             # `/biblios`, both answer SRU diagnostic 1/235, "database does not
             # exist". Measured 2026-08-31.
@@ -1157,8 +1203,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNE: Target(
             source=CatalogueSource.BNE,
-            rank=11,
+            rank=12,
             transport=Transport.SRU,
+            timeout_seconds=7.0,
             # **The OPAC hostname, and that is the whole finding.** This library was
             # recorded as having no open interface, measured against
             # `z3950.bne.es`, which authenticates and answers every database name
@@ -1197,6 +1244,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             source=CatalogueSource.NLG,
             rank=2,
             transport=Transport.SRU,
+            timeout_seconds=3.0,
             # Plaintext by necessity: port 210 speaks no TLS, and
             # `https://catalogue.nlg.gr` on 443 is a different service that answers
             # 404 to this path. Both measured 2026-08-30. `metadata`'s NLG block
@@ -1228,8 +1276,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LIBRIS: Target(
             source=CatalogueSource.LIBRIS,
-            rank=12,
+            rank=13,
             transport=Transport.SRU,
+            timeout_seconds=3.0,
             # SRU on LIBRIS's own server, so Sweden needs no Z39.50 client. The
             # same records answer Z39.50 on port 210 of this host.
             base_url="https://libris.kb.se/sru/libris",
@@ -1258,8 +1307,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.MELINDA: Target(
             source=CatalogueSource.MELINDA,
-            rank=13,
+            rank=14,
             transport=Transport.SRU,
+            timeout_seconds=3.0,
             # SRU on Melinda's own server, the National Library of Finland's
             # public API host. Measured 2026-11-16.
             base_url="https://sru.api.melinda.kansalliskirjasto.fi/bib",
@@ -1286,8 +1336,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BIBSYS: Target(
             source=CatalogueSource.BIBSYS,
-            rank=14,
+            rank=15,
             transport=Transport.SRU,
+            timeout_seconds=3.0,
             # Alma's SRU path on the network zone's own host, where the
             # Norwegian libraries' shared records live. The National Library of
             # Norway's institution view, `47BIBSYS_NB`, finds the same books more
@@ -1343,6 +1394,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             source=CatalogueSource.PORBASE,
             rank=6,
             transport=Transport.Z3950,
+            timeout_seconds=5.0,
             base_url="z3950://z3950.catalogo.bnportugal.gov.pt:210/bn",
             reader=Reader.UNIMARC,
             answers_lookup=True,
@@ -1368,6 +1420,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             source=CatalogueSource.OSZK,
             rank=7,
             transport=Transport.Z3950,
+            timeout_seconds=4.0,
             base_url="z3950://amicus.oszk.hu:1616/ANY",
             reader=Reader.MARC_GND,
             answers_lookup=True,
@@ -1386,10 +1439,42 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             retries_as_isbn10=True,
             refuses_component_parts=True,
         ),
+        CatalogueSource.SNK: Target(
+            source=CatalogueSource.SNK,
+            rank=8,
+            transport=Transport.Z3950,
+            # The national library's Metaproxy in front of its Virtua catalogue.
+            # The database is `Default`; the national bibliography's records
+            # carry its local fields 919, 949 and 972, which no reader here reads.
+            base_url="z3950://z3950.snk.sk:1111/Default",
+            reader=Reader.MARC_GND,
+            answers_lookup=True,
+            # The BNE's reason: nobody has measured what a search here would
+            # find that the roster does not. See `sources.SEARCH_SOURCES`.
+            answers_search=False,
+            metered=False,
+            needs_key=False,
+            # **`978-80`, which Czech and Slovak publishers share**, and which
+            # the NKP, carrying no remit, is asked about too. `metadata`'s block
+            # for this row carries the bar.
+            serves_groups=frozenset({"978-80"}),
+            query_language=QueryLanguage.PQF,
+            record_schema=z3950.Syntax.MARC21.value,
+            # UTF-8 and declared in leader/09. `metadata`'s block for this row
+            # carries the measurement.
+            record_charset=RecordCharset.UTF8,
+            isbn_attribute=z3950.USE_ISBN,
+            lookup_records=5,
+            # No ISBN-10 retry: the index matches the ten digit form too, so
+            # a second search would ask the same thing. `metadata`'s block for
+            # this row measures it.
+            refuses_component_parts=True,
+        ),
         CatalogueSource.KB_DK: Target(
             source=CatalogueSource.KB_DK,
             rank=4,
             transport=Transport.SRU,
+            timeout_seconds=3.0,
             # Alma's SRU path at the `eu01` data centre, the Royal Danish
             # Library's own institution zone. Measured 2026-11-16.
             base_url="https://eu01.alma.exlibrisgroup.com/view/sru/45KBDK_KGL",
@@ -1421,6 +1506,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
             source=CatalogueSource.BN_PL,
             rank=3,
             transport=Transport.SRU,
+            timeout_seconds=3.0,
             # The `bn-nl` host and Alma's SRU path. `eu.alma.exlibrisgroup.com`,
             # the address a public Z39.50 registry lists, answers access control
             # failure 101; `bn-nl` answers both doors. Measured 2026-11-16.
@@ -1451,8 +1537,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.OENB: Target(
             source=CatalogueSource.OENB,
-            rank=9,
+            rank=10,
             transport=Transport.SRU,
+            timeout_seconds=5.0,
             base_url="https://obv-at-oenb.alma.exlibrisgroup.com/view/sru/43ACC_ONB",
             reader=Reader.MARC_GND,
             answers_lookup=True,
@@ -1478,7 +1565,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNA: Target(
             source=CatalogueSource.BNA,
-            rank=15,
+            rank=16,
             transport=Transport.SRU,
             # **Plaintext by necessity and an IP address by necessity**, which are
             # two separate compromises: port 9991 speaks no TLS, and the library
@@ -1531,7 +1618,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNU: Target(
             source=CatalogueSource.BNU,
-            rank=16,
+            rank=17,
             transport=Transport.SRU,
             # **The BNA's two compromises again**: port 9992 speaks no TLS and the
             # library publishes a bare address. That row's comment carries what
@@ -1575,7 +1662,7 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.GOOGLE_BOOKS: Target(
             source=CatalogueSource.GOOGLE_BOOKS,
-            rank=17,
+            rank=18,
             transport=Transport.BESPOKE,
             base_url="https://www.googleapis.com/books/v1/volumes",
             reader=Reader.GOOGLE_BOOKS,
@@ -1592,8 +1679,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.BNF: Target(
             source=CatalogueSource.BNF,
-            rank=18,
+            rank=19,
             transport=Transport.SRU,
+            timeout_seconds=4.0,
             base_url="https://catalogue.bnf.fr/api/SRU",
             reader=Reader.DUBLIN_CORE,
             answers_lookup=False,
@@ -1612,8 +1700,9 @@ SEEDED: Final[Mapping[CatalogueSource, Target]] = MappingProxyType(
         ),
         CatalogueSource.LOC: Target(
             source=CatalogueSource.LOC,
-            rank=19,
+            rank=20,
             transport=Transport.SRU,
+            timeout_seconds=4.0,
             base_url="http://lx2.loc.gov:210/lcdb",
             reader=Reader.MODS,
             answers_lookup=False,
@@ -1662,11 +1751,11 @@ def origin(base_url: str) -> str:
 #: Every origin this application will open a catalogue connection to.
 #:
 #: **Scheme, host and port, and not just the host**, so a row cannot downgrade a
-#: TLS target to plaintext or move it to another port on the same name. **Eight**
+#: TLS target to plaintext or move it to another port on the same name. **Nine**
 #: targets speak no TLS: five are plain HTTP by necessity (ports 210, 210, 9991,
-#: 9991 and 9992 offer nothing else) and three are Z39.50, which has no TLS form
+#: 9991 and 9992 offer nothing else) and four are Z39.50, which has no TLS form
 #: here, and an allowlist of bare hostnames would let the HTTPS ones join them.
-#: Two of the eight authenticate, so a plaintext origin here is not only a
+#: Two of the nine authenticate, so a plaintext origin here is not only a
 #: question of what an eavesdropper reads.
 #: `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` recomputes that
 #: count from the rows and checks this sentence against it, because it had gone
@@ -1697,10 +1786,10 @@ def origin(base_url: str) -> str:
 #: * it raises a `fetch.FetchRefused` subclass, which is an `httpx.HTTPError`, so
 #:   it lands in every existing handler and costs no new arm;
 #: * and **this set is not the whole allowlist**. `fetch.py` is every outbound
-#:   door but covers, and `authority.py` is a caller with four origins of its
-#:   own, `lobid.org`, `viaf.org`, `wikidata.org` and `pub.orcid.org`, none of
-#:   them here. A check derived from this set alone refuses every author identity
-#:   lookup in the application.
+#:   door but covers, and `authority.py` is a caller with five origins of its
+#:   own, `lobid.org`, `viaf.org`, `wikidata.org`, `pub.orcid.org` and
+#:   `urn.bnportugal.gov.pt`, none of them here. A check derived from this set
+#:   alone refuses every author identity lookup in the application.
 #:
 #: Not merged with `covers.COVER_HOSTS`, which is a different question with a
 #: different answer: that tuple generates the CSP's `img-src`, so merging would
