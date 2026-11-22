@@ -115,8 +115,8 @@ class Loading(Enum):
 
     **The stronger sentence is false**, and it was the one written here until it
     was measured: "everything fetched with `SERIALISED` is serialised by
-    `books_to_out`" is falsified by **38 of the 57 routes** reaching
-    `book_for_read` or `book_in_trash`. **25** serialise a sub-resource and never
+    `books_to_out`" is falsified by **40 of the 60 routes** reaching
+    `book_for_read` or `book_in_trash`. **27** serialise a sub-resource and never
     the book, **12** answer 204 and serialise nothing at all, and `add_copy`
     serialises the copy rather than the book it read.
 
@@ -906,6 +906,16 @@ class Shelf:
         What `classification_schemes.remove` counts when it refuses a delete.
         """
         return self.where(Book.classifications.any(Classification.scheme == scheme))
+
+    def labelled(self, accession: str) -> Shelf:
+        """This shelf, narrowed to the copy whose label carries `accession`.
+
+        A narrowing rather than a lookup of its own, so a code on somebody's
+        private Book, or on a trashed one, is not found from `seen_by`: a scan
+        answers exactly what an id in the path answers. The code is not
+        checked here; a caller refuses a malformed one before asking.
+        """
+        return self.where(Book.accession == accession)
 
     def count(self) -> int:
         """How many Books are on this shelf.

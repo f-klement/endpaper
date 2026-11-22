@@ -115,8 +115,9 @@ _Avoid_: Location, shelfmark as a synonym for location
 **Accession number**:
 An Institution's own identifier for one Copy, distinct from an ISBN, which names a title.
 Digits only and fixed length, because a barcode scanner in keyboard mode emits characters that
-the host keyboard layout decides, and only digits survive every layout. Endpaper does not assign
-one.
+the host keyboard layout decides, and only digits survive every layout. Endpaper mints one from
+the Copy's row when a Member asks: nine digits starting `2`, the last a check digit
+(`backend/accession.py`). The other lead digits are left for numbers a library already has.
 _Avoid_: Barcode, copy id
 
 ## A Member's files

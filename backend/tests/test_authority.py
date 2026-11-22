@@ -56,7 +56,7 @@ import fetch
 import marc_fields
 import xml_parse
 from authority import AuthorityUnavailable, resolve, resolve_stored, search
-from enums import AuthorityScheme
+from enums import AuthorityScheme, AuthoritySupplier
 from tests.strategies import (
     Node,
     answer_of,
@@ -1263,6 +1263,14 @@ VIAF_AUTOSUGGEST: dict[str, Any] = {
 #: Built from `LOBID_RECORD` through the module's own parser rather than typed
 #: out, so a change to `_candidate` cannot leave these tests asserting against a
 #: candidate the module no longer produces.
+def _supplied(
+    identifier: str, asserted_by: AuthoritySupplier, checked_by: AuthoritySupplier | None
+) -> authority.SuppliedIdentifier:
+    """One expected value with both suppliers named, so no assertion here can
+    leave out which file gave it or which checked it."""
+    return authority.SuppliedIdentifier(identifier, asserted_by=asserted_by, checked_by=checked_by)
+
+
 def _certain_candidate(**overrides):
     candidate = authority._candidate(LOBID_RECORD, certain=True)
     assert candidate is not None
@@ -1339,12 +1347,12 @@ class TestTheNationalIdentifiersAGndRecordDoesNotCarry:
             found = await authority.national_identifiers(_certain_candidate())
 
         assert found == {
-            AuthorityScheme.BLBNB: "000560463",
-            AuthorityScheme.ARBABN: "000035867",
-            AuthorityScheme.BNE: "981060880923108606",
-            AuthorityScheme.PTBNP: "27012",
-            AuthorityScheme.ICCU: "CFIV000439",
-            AuthorityScheme.BNCHL: "10000000000000000007303",
+            AuthorityScheme.BLBNB: _supplied("000560463", AuthoritySupplier.VIAF, None),
+            AuthorityScheme.ARBABN: _supplied("000035867", AuthoritySupplier.VIAF, None),
+            AuthorityScheme.BNE: _supplied("981060880923108606", AuthoritySupplier.VIAF, None),
+            AuthorityScheme.PTBNP: _supplied("27012", AuthoritySupplier.VIAF, None),
+            AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.VIAF, None),
+            AuthorityScheme.BNCHL: _supplied("10000000000000000007303", AuthoritySupplier.VIAF, None),
         }
 
     @pytest.mark.asyncio
@@ -1357,8 +1365,8 @@ class TestTheNationalIdentifiersAGndRecordDoesNotCarry:
             _viaf_router(mock)
             found = await authority.national_identifiers(_certain_candidate())
 
-        assert "n  78088964" not in found.values()
-        assert "027149102" not in found.values()
+        assert "n  78088964" not in {supplied.identifier for supplied in found.values()}
+        assert "027149102" not in {supplied.identifier for supplied in found.values()}
 
     @pytest.mark.asyncio
     async def test_the_viaf_cluster_id_is_never_returned_as_an_identity(self):
@@ -1371,7 +1379,7 @@ class TestTheNationalIdentifiersAGndRecordDoesNotCarry:
             found = await authority.national_identifiers(_certain_candidate())
 
         assert AuthorityScheme.VIAF not in found
-        assert "95207986" not in found.values()
+        assert "95207986" not in {supplied.identifier for supplied in found.values()}
 
     @pytest.mark.asyncio
     async def test_nothing_is_asked_of_viaf_when_the_record_already_names_a_cluster(self):
@@ -1707,7 +1715,7 @@ class TestTheSruSerialiserFailsOnSomeRecordsAndRetryingIsUseless:
             found = await authority.national_identifiers(confirmed)
             paths = [call.request.url.path for call in mock.calls]
 
-        assert found[AuthorityScheme.BLBNB] == "000612368"
+        assert found[AuthorityScheme.BLBNB] == _supplied("000612368", AuthoritySupplier.VIAF, None)
         assert len(found) == 6
         assert paths[-1] == "/viaf/95207986"
 
@@ -1904,8 +1912,10 @@ class TestWikidataIsAFallbackAndNotAComparator:
             asked = _national_asks(mock)
 
         assert asked == []
-        assert found[AuthorityScheme.BNE] == "981060880923108606"
-        assert found[AuthorityScheme.BNCHL] == "10000000000000000007303"
+        assert found[AuthorityScheme.BNE] == _supplied("981060880923108606", AuthoritySupplier.VIAF, None)
+        assert found[AuthorityScheme.BNCHL] == _supplied(
+            "10000000000000000007303", AuthoritySupplier.VIAF, None
+        )
         assert len(found) == 6
 
     @pytest.mark.asyncio
@@ -1920,12 +1930,12 @@ class TestWikidataIsAFallbackAndNotAComparator:
 
         assert sorted(asked) == sorted(WIKIDATA_NATIONAL_VALUES)
         assert found == {
-            AuthorityScheme.BLBNB: "000560463",
-            AuthorityScheme.ARBABN: "000035867",
-            AuthorityScheme.BNE: "XX900250",
-            AuthorityScheme.PTBNP: "27012",
-            AuthorityScheme.ICCU: "CFIV000439",
-            AuthorityScheme.BNCHL: "000034753",
+            AuthorityScheme.BLBNB: _supplied("000560463", AuthoritySupplier.WIKIDATA, None),
+            AuthorityScheme.ARBABN: _supplied("000035867", AuthoritySupplier.WIKIDATA, None),
+            AuthorityScheme.BNE: _supplied("XX900250", AuthoritySupplier.WIKIDATA, None),
+            AuthorityScheme.PTBNP: _supplied("27012", AuthoritySupplier.WIKIDATA, None),
+            AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.WIKIDATA, None),
+            AuthorityScheme.BNCHL: _supplied("000034753", AuthoritySupplier.WIKIDATA, None),
         }
 
     @pytest.mark.asyncio
@@ -1938,7 +1948,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             _wikidata_router(mock, national=WIKIDATA_NATIONAL)
             found = await authority.national_identifiers(self._confirmable())
 
-        assert found[AuthorityScheme.BNE] == "XX900250"
+        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
 
     @pytest.mark.asyncio
     async def test_a_body_that_parses_and_holds_no_cluster_buys_it_too(self):
@@ -1964,7 +1974,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             asked = _national_asks(mock)
 
         assert sorted(asked) == sorted(WIKIDATA_NATIONAL_VALUES)
-        assert found[AuthorityScheme.BNE] == "XX900250"
+        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
 
     @pytest.mark.asyncio
     async def test_an_item_id_that_is_not_one_never_reaches_a_request(self):
@@ -2061,7 +2071,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             asked = _national_asks(mock)
 
         assert sorted(asked) == sorted(WIKIDATA_NATIONAL_VALUES)
-        assert found[AuthorityScheme.BNE] == "XX900250"
+        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
 
     @pytest.mark.asyncio
     async def test_a_cluster_id_lobid_supplied_that_viaf_would_refuse_is_an_outage(self):
@@ -2101,7 +2111,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             viaf_calls = [call for call in mock.calls if str(call.request.url).startswith(VIAF)]
 
         assert viaf_calls == []
-        assert found[AuthorityScheme.BNE] == "XX900250"
+        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
 
     @pytest.mark.asyncio
     async def test_a_candidate_with_no_wikidata_item_has_no_second_supplier(self):
@@ -2176,7 +2186,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             _wikidata_router(mock, national=repeated)
             found = await authority.national_identifiers(self._confirmable())
 
-        assert found[AuthorityScheme.BNE] == "XX900250"
+        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
 
     @pytest.mark.asyncio
     async def test_a_deprecated_statement_is_not_stored(self):
@@ -2224,7 +2234,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             _wikidata_router(mock, national=preferred)
             found = await authority.national_identifiers(self._confirmable())
 
-        assert found[AuthorityScheme.BNE] == "XX900250"
+        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
 
     @pytest.mark.asyncio
     async def test_the_six_are_asked_one_at_a_time(self):
@@ -3397,6 +3407,19 @@ class TestACrossReferenceIsOnlyEverAWebLink:
         )
 
 
+class TestAnUncheckedIdentifierKeepsWhatItsSupplierSaid:
+    """`SuppliedIdentifier.unchecked`, which the router calls where the record
+    the identifier came from names somebody else."""
+
+    def test_only_the_second_file_is_dropped(self):
+        checked = authority.SuppliedIdentifier(
+            "Q1", asserted_by=AuthoritySupplier.WIKIDATA, checked_by=AuthoritySupplier.LOBID
+        )
+        assert checked.unchecked() == authority.SuppliedIdentifier(
+            "Q1", asserted_by=AuthoritySupplier.WIKIDATA, checked_by=None
+        )
+
+
 class TestTheCrossReferencesThatArriveWithTheRecord:
     """`cross_references`, which reads four identifiers off a record already in
     hand.
@@ -3420,11 +3443,23 @@ class TestTheCrossReferencesThatArriveWithTheRecord:
         candidate = await self._resolved(LOBID_RECORD)
 
         assert authority.cross_references(candidate) == {
-            AuthorityScheme.ISNI: "0000000122831567",
-            AuthorityScheme.LCNAF: "n78088964",
-            AuthorityScheme.VIAF: "95207986",
-            AuthorityScheme.WIKIDATA: "Q1512",
+            AuthorityScheme.ISNI: _supplied(
+                "0000000122831567", AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA
+            ),
+            AuthorityScheme.LCNAF: _supplied("n78088964", AuthoritySupplier.LOBID, None),
+            AuthorityScheme.VIAF: _supplied("95207986", AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA),
+            AuthorityScheme.WIKIDATA: _supplied("Q1512", AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA),
         }
+
+    @pytest.mark.asyncio
+    async def test_a_value_wikidata_is_silent_about_is_lobids_alone_and_unchecked(self):
+        """Silence is not agreement: the VIAF cluster is stored, as before,
+        and says no second file named it."""
+        candidate = await self._resolved(LOBID_RECORD, viaf={"claims": {}})
+
+        assert authority.cross_references(candidate)[AuthorityScheme.VIAF] == _supplied(
+            "95207986", AuthoritySupplier.LOBID, None
+        )
 
     @pytest.mark.asyncio
     async def test_the_records_own_scheme_is_never_among_them(self):
@@ -3475,7 +3510,9 @@ class TestTheCrossReferencesThatArriveWithTheRecord:
         candidate = await self._resolved(without_item)
 
         assert candidate.wikidata_id == "Q1512"
-        assert authority.cross_references(candidate)[AuthorityScheme.WIKIDATA] == "Q1512"
+        assert authority.cross_references(candidate)[AuthorityScheme.WIKIDATA] == _supplied(
+            "Q1512", AuthoritySupplier.WIKIDATA, None
+        )
 
     def test_a_subject_heading_is_not_read_as_a_person(self):
         """`id.loc.gov` serves several files under one host and the two shapes
@@ -4643,7 +4680,9 @@ class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
         found, asked = await _confirmed_beside_the_bnp(_bnp_naming("Stevenson", "Robert Louis"))
 
         assert asked == ["27012"]
-        assert found[AuthorityScheme.PTBNP] == "27012"
+        assert found[AuthorityScheme.PTBNP] == _supplied(
+            "27012", AuthoritySupplier.VIAF, AuthoritySupplier.BNP
+        )
         assert len(found) == 6
 
     @pytest.mark.asyncio
@@ -4667,7 +4706,9 @@ class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
         the BNP heading here gives its words in another order."""
         found, _ = await _confirmed_beside_the_bnp(_bnp_naming("Luis Stivenson", "Robert"))
 
-        assert found[AuthorityScheme.PTBNP] == "27012"
+        assert found[AuthorityScheme.PTBNP] == _supplied(
+            "27012", AuthoritySupplier.VIAF, AuthoritySupplier.BNP
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -4678,7 +4719,7 @@ class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
     async def test_a_bnp_that_cannot_answer_keeps_the_number_unchecked(self, answer):
         found, _ = await _confirmed_beside_the_bnp(answer)
 
-        assert found[AuthorityScheme.PTBNP] == "27012"
+        assert found[AuthorityScheme.PTBNP] == _supplied("27012", AuthoritySupplier.VIAF, None)
         assert len(found) == 6
 
     @pytest.mark.asyncio
@@ -4691,7 +4732,7 @@ class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
 
         assert asked == ["27012"]
         assert AuthorityScheme.PTBNP not in found
-        assert found[AuthorityScheme.BNE] == "XX900250"
+        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
 
     @pytest.mark.asyncio
     async def test_an_empty_collection_keeps_the_number_unchecked(self):
@@ -4700,7 +4741,7 @@ class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
         found, asked = await _confirmed_beside_the_bnp(BNP_EMPTY)
 
         assert asked == ["27012"]
-        assert found[AuthorityScheme.PTBNP] == "27012"
+        assert found[AuthorityScheme.PTBNP] == _supplied("27012", AuthoritySupplier.VIAF, None)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -4722,7 +4763,9 @@ class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
         found, asked = await _confirmed_beside_the_bnp(record.replace(old, new))
 
         assert asked == ["27012"]
-        assert found[AuthorityScheme.PTBNP] == "27012"
+        assert found[AuthorityScheme.PTBNP] == _supplied(
+            "27012", AuthoritySupplier.VIAF, AuthoritySupplier.BNP
+        )
 
     @pytest.mark.asyncio
     async def test_on_the_wikidata_route_a_link_to_lobids_cluster_rescues_nothing(self):
@@ -4745,12 +4788,15 @@ class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
             route = mock.get(url__startswith=BNP).mock(return_value=_xml(BNP_ECO))
             found = await authority._ptbnp_checked(
                 _certain_candidate(),
-                {AuthorityScheme.PTBNP: "027012", AuthorityScheme.ICCU: "CFIV000439"},
+                {
+                    AuthorityScheme.PTBNP: _supplied("027012", AuthoritySupplier.VIAF, None),
+                    AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.VIAF, None),
+                },
                 None,
                 cluster="95207986",
             )
 
-        assert found == {AuthorityScheme.ICCU: "CFIV000439"}
+        assert found == {AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.VIAF, None)}
         assert route.call_count == 0
 
 
@@ -4767,7 +4813,9 @@ class TestAnOrcidArrivesFreeWithAGndRecord:
     def test_one_orcid_is_a_cross_reference(self):
         references = authority.cross_references(self._linking("0000-0002-1825-0097"))
 
-        assert references[AuthorityScheme.ORCID] == "0000-0002-1825-0097"
+        assert references[AuthorityScheme.ORCID] == _supplied(
+            "0000-0002-1825-0097", AuthoritySupplier.LOBID, None
+        )
 
     def test_two_orcids_are_neither_stored(self):
         """GND `1344514472` links two, measured; taking the first would be
@@ -4779,7 +4827,9 @@ class TestAnOrcidArrivesFreeWithAGndRecord:
     def test_one_orcid_linked_twice_is_one(self):
         references = authority.cross_references(self._linking("0000-0002-1825-0097", "0000-0002-1825-0097"))
 
-        assert references[AuthorityScheme.ORCID] == "0000-0002-1825-0097"
+        assert references[AuthorityScheme.ORCID] == _supplied(
+            "0000-0002-1825-0097", AuthoritySupplier.LOBID, None
+        )
 
     @pytest.mark.parametrize(
         ("scheme", "second"),
@@ -4804,4 +4854,6 @@ class TestAnOrcidArrivesFreeWithAGndRecord:
         nothing compares them: see `authority._ORCID_URI`."""
         references = authority.cross_references(self._linking("0000-0002-1825-0097"))
 
-        assert references[AuthorityScheme.ISNI] == "0000000122831567"
+        assert references[AuthorityScheme.ISNI] == _supplied(
+            "0000000122831567", AuthoritySupplier.LOBID, None
+        )

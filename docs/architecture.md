@@ -282,6 +282,7 @@ listed.
 | Catalogue | [`z3950.py`](../backend/z3950.py) | One door for the Z39.50 requests this app makes, and every bound on them. |
 | Catalogue | [`z3950_yaz.py`](../backend/z3950_yaz.py) | The Z39.50 client: a `ctypes` binding to the ZOOM C API in the `libyaz` the image ships. |
 | Contracts | [`schemas/`](../backend/schemas/) | Request and response contracts. |
+| Foundations | [`accession.py`](../backend/accession.py) | The accession number: the code that names one physical copy, and its rules. |
 | Foundations | [`authors.py`](../backend/authors.py) | Who wrote what, read out of one free text column. |
 | Foundations | [`categories.py`](../backend/categories.py) | A Book's Categories: the stored form of `books.categories`, its bounds, and the four producer policies. |
 | Foundations | [`config.py`](../backend/config.py) | Runtime configuration, resolved from the environment. |
@@ -322,7 +323,7 @@ flowchart TB
   settings["Settings, 2 modules"]
   catalogue["Catalogue, 17 modules"]
   contracts["Contracts, 1 module"]
-  foundations["Foundations, 18 modules"]
+  foundations["Foundations, 19 modules"]
   app --> routers
   routers --> request
   request --> identity

@@ -73,7 +73,7 @@ describe("SelectionBar", () => {
       ).toBeDisabled();
     });
 
-    it("disables the five verbs behind the disclosure, delete included", async () => {
+    it("disables the six verbs behind the disclosure, delete included", async () => {
       renderBar({
         selectedCount: 0,
         collections: [makeCollection({ id: 3, name: "Ebooks" })],
@@ -90,6 +90,9 @@ describe("SelectionBar", () => {
         screen.getByRole("button", { name: "Set location" }),
       ).toBeDisabled();
       expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Give accession numbers" }),
+      ).toBeDisabled();
     });
 
     it("still allows selecting everything", () => {
@@ -302,5 +305,17 @@ describe("SelectionBar extra actions", () => {
     await user.click(screen.getByRole("button", { name: "Set location" }));
 
     expect(props.onRun).toHaveBeenCalledWith("set_location", "");
+  });
+
+  it("gives the selection accession numbers without asking for a value", async () => {
+    const props = renderBar();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /More actions/ }));
+
+    await user.click(
+      screen.getByRole("button", { name: "Give accession numbers" }),
+    );
+
+    expect(props.onRun).toHaveBeenCalledWith("assign_accession");
   });
 });

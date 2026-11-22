@@ -22,6 +22,7 @@ export interface SettingsUpdate {
   goodreads_lookup_enabled?: boolean | null;
   google_books_api_key?: string | null;
   google_books_enabled?: boolean | null;
+  headings_from_vocabulary?: boolean | null;
   library_mode?: boolean | null;
   mail_default_sender?: string | null;
   mail_password?: string | null;
@@ -37,6 +38,7 @@ export interface SettingsUpdate {
   overdue_in_app_enabled?: boolean | null;
   overdue_mail_enabled?: boolean | null;
   overdue_mail_to?: string | null;
+  overdue_patron_mail_enabled?: boolean | null;
   overdue_reminder_days?: number | null;
   overdue_telegram_enabled?: boolean | null;
   overdue_webhook_enabled?: boolean | null;

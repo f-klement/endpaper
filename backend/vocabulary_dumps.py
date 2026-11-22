@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 import zlib
 from collections.abc import Callable, Iterator
@@ -232,6 +233,8 @@ def _entries(scheme: str, nodes: Iterator[dict[str, object]]) -> Iterator[Entry]
         if not vocabularies.is_publisher_identifier(scheme, identifier):
             foreign += 1
             continue
+        if _is_subdivision(node):
+            continue
         for label_key, synonyms_key in _LABELS:
             labels = _values(node.get(label_key))
             if labels:
@@ -246,6 +249,26 @@ def _entries(scheme: str, nodes: Iterator[dict[str, object]]) -> Iterator[Entry]
                 break
     if foreign:
         logger.warning("%s: passed over %d nodes whose id is not in the publisher's form", scheme, foreign)
+
+
+#: How an LCSH subdivision record's usage note opens. Such a record is in the
+#: subjects file beside the headings (`History`, `Risk factors`) and is not
+#: valid alone as a subject added entry, so a copy that kept it would offer a
+#: field one heading no catalogue writes. The SKOS dump has no type for it: the
+#: note is all it carries. Measured on the release of 2026-11-18: 3,796 of the
+#: 514,020 labelled nodes open a note this way, under `sh99`, `sh00` and `sh20`
+#: ids alike, so the id is no test. Where a subdivision's string is also a
+#: heading (`Histology`), the heading is its own record and is kept, and so is
+#: a heading usable as a geographic subdivision, whose note opens otherwise.
+_SUBDIVISION_NOTE: Final = re.compile(
+    r"Use (as an? (topical|form|chronological) subdivision|this subdivision combination)"
+)
+
+
+def _is_subdivision(node: dict[str, object]) -> bool:
+    """Whether `node` is an LCSH subdivision record, by its usage note."""
+    notes = _values(node.get("skos:note")) + _values(node.get(f"{_SKOS}note"))
+    return any(_SUBDIVISION_NOTE.match(note) for note in notes)
 
 
 def _values(raw: object) -> list[str]:

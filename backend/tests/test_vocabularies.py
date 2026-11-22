@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import marc_fields
 import vocabularies
 from vocabularies import DeclarationRefused, EntriesRefused, Entry, Release
 
@@ -116,6 +117,27 @@ class TestTheStoredIdentifier:
     )
     def test_a_publisher_spelling_maps_onto_the_form_an_import_stores(self, scheme, raw, stored):
         assert vocabularies.stored_identifier(scheme, raw) == stored
+
+
+class TestTheClassificationRow:
+    def test_a_gnd_entry_is_the_number_the_marc_reader_stores_from_its_dollar_zero(self):
+        identifier = vocabularies.stored_identifier("gnd", "https://d-nb.info/gnd/4026894-9")
+        imported = marc_fields.Subfields([("a", "Informatik"), ("0", identifier)]).gnd_identifier()
+
+        assert vocabularies.classification_row("gnd", identifier, "Informatik") == (imported, "Informatik")
+
+    def test_an_lcsh_entry_is_its_heading_string_with_no_label(self):
+        identifier = "http://id.loc.gov/authorities/subjects/sh89003285"
+
+        assert vocabularies.classification_row("lcsh", identifier, "Computer science") == (
+            "Computer science",
+            None,
+        )
+
+    def test_a_scheme_with_no_rule_keeps_the_identifier_as_the_number(self):
+        identifier = "https://id.nlm.nih.gov/mesh/D000001"
+
+        assert vocabularies.classification_row("mesh", identifier, "Calcimycin") == (identifier, "Calcimycin")
 
 
 def _gnd() -> vocabularies.Scheme:

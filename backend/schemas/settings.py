@@ -417,6 +417,13 @@ class SettingsOut(BaseModel):
     #: catalogue content somewhere outside this app.
     overdue_in_app_enabled: bool = True
 
+    # ── The patron's own notice ──────────────────────────────────────────
+    #: One mail per patron about their own overdue loans, private Books
+    #: included, to the address on their record, over the mail server above.
+    #: Off by default, and turned on once by the first switch of library mode
+    #: on, with `overdue_mail_enabled` beside it.
+    overdue_patron_mail_enabled: bool = False
+
     #: The secrets sealed under a key this deployment cannot open, by setting
     #: name: `google_books_api_key`, `overdue_webhook_secret`, `mail_password`
     #: or `telegram_bot_token`. Each has to be entered again; until then its
@@ -475,6 +482,12 @@ class SettingsOut(BaseModel):
     #: vocabulary copy, for the whole installation. The offer also ends once
     #: any copy is loaded, which the vocabularies list says, not this.
     vocabulary_offer_dismissed: bool = False
+
+    #: Whether a book's heading field offers headings from the local vocabulary
+    #: copies. **The stored row, not the one in force**, as `library_mode` is:
+    #: it is read with library mode (`settings_store.headings_from_vocabulary`),
+    #: and an admin has to see what they set.
+    headings_from_vocabulary: bool = True
 
 
 class SourceCredentialIn(BaseModel):
@@ -643,6 +656,9 @@ class SettingsUpdate(BaseModel):
 
     overdue_in_app_enabled: bool | None = None
 
+    #: The patron's own overdue notice. See `SettingsOut`.
+    overdue_patron_mail_enabled: bool | None = None
+
     #: Library mode, the publish switch and whether a crawler is invited.
     #:
     #: Three separate fields, and none of them refuses the other: an admin may
@@ -686,6 +702,9 @@ class SettingsUpdate(BaseModel):
     #: Puts the library page's vocabulary offer away for the installation, or
     #: brings it back with false.
     vocabulary_offer_dismissed: bool | None = None
+
+    #: Turns the vocabulary suggestions on a book's heading field on or off.
+    headings_from_vocabulary: bool | None = None
 
     @field_validator("oai_admin_email")
     @classmethod

@@ -23,7 +23,7 @@ from sqlalchemy.exc import OperationalError
 import fetch
 import vocabulary_copy
 from database import SessionLocal, engine
-from enums import VocabularyLoadPhase
+from enums import HeadingUse, VocabularyLoadPhase
 from models import VOCABULARY_IDENTIFIER_MAX, VOCABULARY_LABEL_MAX, VocabularyCopy, VocabularyLabel
 from vocabularies import Entry
 from vocabulary_copy import Heading, Progress, Refused, Unknown
@@ -222,6 +222,60 @@ class TestTheLookups:
 
     def test_nothing_is_found_before_a_copy_is_loaded(self, db):
         assert vocabulary_copy.headings_for(db, "gnd", "Abfall") == ()
+
+
+class TestTheSuggestion:
+    """What the heading field offers as a cataloguer types."""
+
+    @staticmethod
+    def _offered(db, typed: str, use: HeadingUse = HeadingUse.SUBJECT) -> list[str]:
+        return [heading.label for heading in vocabulary_copy.suggest(db, "gnd", typed, use)]
+
+    def test_a_label_beginning_with_what_was_typed_is_offered_under_its_preferred_label(self, db):
+        _load(db, _gnd("(DE-588)1", "Abfall", "Müll"), _gnd("(DE-588)2", "Mühle"))
+
+        offered = vocabulary_copy.suggest(db, "gnd", "Mül", HeadingUse.SUBJECT)
+
+        assert offered == (Heading("(DE-588)1", "Abfall"),)
+
+    def test_a_first_letter_typed_in_lower_case_finds_the_capitalised_heading(self, db):
+        _load(db, _gnd("(DE-588)1", "Abfall"))
+
+        assert self._offered(db, "abf") == ["Abfall"]
+
+    def test_an_entry_matching_under_two_labels_is_offered_once(self, db):
+        _load(db, _gnd("(DE-588)1", "Abfall", "Abfälle"))
+
+        assert self._offered(db, "Abf") == ["Abfall"]
+
+    def test_at_most_the_cap_is_offered_in_label_order(self, db):
+        count = vocabulary_copy.SUGGEST_MAX + 3
+        _load(db, *(_gnd(f"(DE-588){n}", f"Bau {n:02d}") for n in reversed(range(count))))
+
+        assert self._offered(db, "Bau") == [f"Bau {n:02d}" for n in range(vocabulary_copy.SUGGEST_MAX)]
+
+    def test_fewer_characters_than_the_minimum_offer_nothing(self, db):
+        _load(db, _gnd("(DE-588)1", "Abfall"))
+
+        assert self._offered(db, "A" * (vocabulary_copy.SUGGEST_MIN - 1)) == []
+
+    def test_a_use_the_copies_do_not_serve_offers_nothing(self, db):
+        """A subject file offers no heading to a field filling a name."""
+        _load(db, _gnd("(DE-588)1", "Abfall"))
+
+        assert self._offered(db, "Abf", HeadingUse.NAME) == []
+
+    def test_a_wildcard_typed_is_a_character(self, db):
+        _load(db, _gnd("(DE-588)1", "Abfall"), _gnd("(DE-588)2", "A%b"))
+
+        assert self._offered(db, "A%") == ["A%b"]
+
+    def test_only_a_vocabulary_with_a_copy_loaded_is_suggestible(self, db):
+        assert vocabulary_copy.suggestible(db) == ()
+
+        _load(db, _gnd("(DE-588)1", "Abfall"))
+
+        assert [scheme.id for scheme in vocabulary_copy.suggestible(db)] == ["gnd"]
 
 
 class TestTheBatchedPreferredLabelLookup:

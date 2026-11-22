@@ -20,8 +20,9 @@ definitions of empty between them. This module is the one place that decides:
 - **whether Classifications cross**: only through a door a Member's choice
   opened, which is ADR 0006 held by which door a caller can reach. `confirm`
   is the door for a record a Member selected, `confirm_file_headings` for
-  a MARC file a Member chose to import, and `confirm_harvested_headings` for
-  a harvested Book's pending set an admin confirmed.
+  a MARC file a Member chose to import, `confirm_harvested_headings` for
+  a harvested Book's pending set an admin confirmed, and `confirm_picked_heading`
+  for a heading a Member picked on the Book's heading field.
 
 What stays with the caller: fetching the cover (`routers/books._store_cover`,
 which the create paths share and which runs on a thread from a coroutine) and the
@@ -214,6 +215,17 @@ def confirm_harvested_headings(book: Book, headings: Sequence[ClassificationIn],
     they are, and counts the ceiling against what the Book carries.
     """
     return add_headings(book, headings, db)
+
+
+def confirm_picked_heading(book: Book, heading: ClassificationIn, db: Session) -> list[str]:
+    """Add the one heading a Member picked on `book`'s heading field, returning
+    the numbers changed.
+
+    `routers.books.add_heading`'s door. The pick is the Member's choice ADR 0006
+    asks for, made on this Book rather than on a record, so there is no record to
+    review first. `add_headings` counts the ceiling against what the Book carries.
+    """
+    return add_headings(book, [heading], db)
 
 
 def fill_gaps(book: Book, values: Mapping[str, object]) -> list[str]:

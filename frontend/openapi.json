@@ -295,8 +295,21 @@
         "type": "object"
       },
       "AuthorIdentifierOut": {
-        "description": "Which record in an authority file one spelling of this name means.\n\n`spelling` rather than the key it is filed under, for the reason\n`AuthorMergeOut` carries one: the key is normalised past the point of being\nreadable, and the whole use of this field is to say *which* of a merged\nauthor's spellings carries this number when two of them disagree.\n\n`provenance` is an explicit value and never a null. A member auditing the\nlist has to be able to tell an assertion a catalogue made from one somebody\nchose, and inferring it from an absent user id would make a deleted account\nlook like a machine. See `enums.AuthorityProvenance`.",
+        "description": "Which record in an authority file one spelling of this name means.\n\n`spelling` rather than the key it is filed under, for the reason\n`AuthorMergeOut` carries one: the key is normalised past the point of being\nreadable, and the whole use of this field is to say *which* of a merged\nauthor's spellings carries this number when two of them disagree.\n\n`provenance` is an explicit value and never a null. A member auditing the\nlist has to be able to tell an assertion a catalogue made from one somebody\nchose, and inferring it from an absent user id would make a deleted account\nlook like a machine. See `enums.AuthorityProvenance`.\n\n`asserted_by` is the file the value came from and `checked_by` a second\nfile that tied the same value to the same person, or null where none did,\nso a number two files agree on reads differently from one a single file\ncarried. A row stored before either was recorded reads `unrecorded`. See\n`enums.AuthoritySupplier`.",
         "properties": {
+          "asserted_by": {
+            "$ref": "#/components/schemas/AuthoritySupplier"
+          },
+          "checked_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthoritySupplier"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -321,7 +334,9 @@
           "spelling",
           "scheme",
           "identifier",
-          "provenance"
+          "provenance",
+          "asserted_by",
+          "checked_by"
         ],
         "title": "AuthorIdentifierOut",
         "type": "object"
@@ -731,6 +746,22 @@
         "title": "AuthorityScheme",
         "type": "string"
       },
+      "AuthoritySupplier": {
+        "description": "Which file supplied an author identifier, or checked it.\n\n`asserted_by` names the file the value came from and `checked_by` a\nsecond file that tied the same value to the same person, or null where\nnone did: for a cross reference, a file whose own record carries the\nvalue; for a member's GND number, lobid, where its record for that number\nnames the author. A reader can tell a number two files agree on from one\nthat a single file carried, which looked identical before either was\nrecorded.\n\n`unrecorded` is a row stored before the supplier was recorded. It is never\na guess: the same scheme under the same provenance arrived by more than\none route, so the row cannot say which.",
+        "enum": [
+          "catalogue",
+          "member",
+          "lobid",
+          "wikidata",
+          "viaf",
+          "loc",
+          "orcid",
+          "bnp",
+          "unrecorded"
+        ],
+        "title": "AuthoritySupplier",
+        "type": "string"
+      },
       "Body_import_csv": {
         "properties": {
           "file": {
@@ -846,6 +877,17 @@
       "BookColumns": {
         "description": "Everything on a Book payload that a Book row answers for itself.\n\nA column, or something derived from one by a string operation with no\nstatement behind it. Validating this from an ORM object is complete: every\nfield here has a value the moment the row is loaded.\n\n**Split from the rest so that the rest cannot be forgotten.** See `BookOut`.",
         "properties": {
+          "accession": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accession"
+          },
           "added_at": {
             "format": "date-time",
             "title": "Added At",
@@ -2194,6 +2236,17 @@
       "BookOut": {
         "description": "One Book, as one member sees it. The wire shape, flat and unchanged.\n\n**Never cache one across accounts**: half of what is on it is an answer to\nwho asked. The split above is what makes that readable rather than a comment\nin the middle of a field list.\n\nBuilt only by `seen_by`, which is the point: `model_validate(book)` cannot\nproduce one, because a Book row does not know eleven of these twelve.\n\n**The base order is what puts the columns first in the response body.**\nPydantic collects fields in reverse MRO, so the class listed second is the\none whose fields lead, which is the opposite of how it reads. It governs the\nbody's key order and nothing else: `scripts/dump_openapi.py` dumps with\n`sort_keys=True`, so the schema and everything orval writes from it are\nalphabetical whatever this says.",
         "properties": {
+          "accession": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accession"
+          },
           "active_loan": {
             "anyOf": [
               {
@@ -2769,7 +2822,8 @@
           "set_ownership",
           "set_location",
           "set_collection",
-          "delete"
+          "delete",
+          "assign_accession"
         ],
         "title": "BulkAction",
         "type": "string"
@@ -4477,6 +4531,16 @@
           "carrier"
         ],
         "title": "HeadingKind",
+        "type": "string"
+      },
+      "HeadingUse": {
+        "description": "What an authority heading may be used as: MARC 21 authority `008/14` to `16`.\n\nThe suggest field asks with the use of the field it fills, so a field adding\na subject is never offered a name heading: one would resolve and carry an\nidentifier, and still be filed under the wrong kind of thing, which nothing\ndownstream can detect. `vocabulary_copy.suggest` applies it.",
+        "enum": [
+          "name",
+          "subject",
+          "series"
+        ],
+        "title": "HeadingUse",
         "type": "string"
       },
       "HighlightImportOut": {
@@ -6385,7 +6449,8 @@
           "unreachable",
           "misconfigured",
           "in_app_only",
-          "unexpected"
+          "unexpected",
+          "no_address"
         ],
         "title": "OverdueNotifyReason",
         "type": "string"
@@ -6448,7 +6513,8 @@
           "in_app",
           "webhook",
           "email",
-          "telegram"
+          "telegram",
+          "patron_mail"
         ],
         "title": "OverdueSender",
         "type": "string"
@@ -8660,6 +8726,11 @@
             "title": "Has Telegram Bot Token",
             "type": "boolean"
           },
+          "headings_from_vocabulary": {
+            "default": true,
+            "title": "Headings From Vocabulary",
+            "type": "boolean"
+          },
           "library_mode": {
             "default": false,
             "title": "Library Mode",
@@ -8741,6 +8812,11 @@
             "default": "",
             "title": "Overdue Mail To",
             "type": "string"
+          },
+          "overdue_patron_mail_enabled": {
+            "default": false,
+            "title": "Overdue Patron Mail Enabled",
+            "type": "boolean"
           },
           "overdue_reminder_days": {
             "default": 7,
@@ -8909,6 +8985,17 @@
               }
             ],
             "title": "Google Books Enabled"
+          },
+          "headings_from_vocabulary": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headings From Vocabulary"
           },
           "library_mode": {
             "anyOf": [
@@ -9082,6 +9169,17 @@
               }
             ],
             "title": "Overdue Mail To"
+          },
+          "overdue_patron_mail_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overdue Patron Mail Enabled"
           },
           "overdue_reminder_days": {
             "anyOf": [
@@ -9412,6 +9510,25 @@
           "by_month"
         ],
         "title": "StatsOut",
+        "type": "object"
+      },
+      "SuggestingVocabularyOut": {
+        "description": "A vocabulary a book's heading field offers headings from: one declared\nin `vocabularies.yaml` with a local copy loaded.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheme",
+          "name"
+        ],
+        "title": "SuggestingVocabularyOut",
         "type": "object"
       },
       "SuggestionReason": {
@@ -10642,6 +10759,74 @@
         ]
       }
     },
+    "/api/books/accession/{code}": {
+      "get": {
+        "description": "The copy whose label carries this accession number.\n\nWhat a scanned label resolves through, so it answers what `GET /{book_id}`\nanswers: **404 for a copy the caller may not see**, private to somebody\nelse or in the trash, never 403, since a 403 would confirm the label\nexists. A string that is not an accession number at all, a mistyped check\ndigit included, is 400, the house status for a refused value: that says\nnothing about any Book.\n\nDeclared before `/{book_id}`, which would otherwise take `accession` as an id.",
+        "operationId": "get_book_by_accession",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Book By Accession",
+        "tags": [
+          "books"
+        ]
+      }
+    },
     "/api/books/already-held": {
       "get": {
         "description": "Whether the member already has the record they are about to save.\n\nAsked by `recognition.Source.LOOKUP`, which reads the member's shelf alone:\na Book held where they cannot see it answers as nothing here, though the\nsave itself still refuses on its ISBN. The bounds are `BookCreate`'s, so a\ntitle is compared as it would be stored.",
@@ -10938,7 +11123,7 @@
     },
     "/api/books/authors/identifiers": {
       "post": {
-        "description": "Confirm that a candidate authority identifier is this author's.\n\n**This endpoint exists because a name is not a key.** An identifier belongs\nto a person, and only a member can say that this spelling is that person.\n\n**409, not 422, where the spelling already carries a different value**: the\nrequest is well formed and the state refuses it.\n\n**Confirming a GND number stores the cross references that came with it**,\nand the six national numbers, which cost the extra requests; a Portuguese\none is kept only where the BNP's record names the person. A confirmation\nis up to nine outbound calls, which is why it is a deliberate action rather\nthan something a lookup does on the way past.\n\n**The cross references only for `gnd`.** An LCNAF or ORCID record is\nstored as confirmed and nothing else is read from it.\n\n**A cross reference colliding with a stored value is reported, not raised.**\nThe confirmation is already committed, so failing here would report a write\nthat happened as one that did not.",
+        "description": "Confirm that a candidate authority identifier is this author's.\n\n**This endpoint exists because a name is not a key.** An identifier belongs\nto a person, and only a member can say that this spelling is that person.\n\n**409, not 422, where the spelling already carries a different value**: the\nrequest is well formed and the state refuses it.\n\n**Confirming a GND number stores the cross references that came with it**,\nand the six national numbers, which cost the extra requests; a Portuguese\none is kept only where the BNP's record names the person. A confirmation\nis up to nine outbound calls, which is why it is a deliberate action rather\nthan something a lookup does on the way past.\n\n**The cross references only for `gnd`.** An LCNAF or ORCID record is\nstored as confirmed and nothing else is read from it. A GND number whose\nlobid record names the author is recorded as checked by lobid; any other\nconfirmation is the member's word, unchecked.\n\n**A cross reference colliding with a stored value is reported, not raised.**\nThe confirmation is already committed, so failing here would report a write\nthat happened as one that did not.",
         "operationId": "confirm_author_identifier",
         "requestBody": {
           "content": {
@@ -14923,6 +15108,285 @@
           }
         ],
         "summary": "Enrichment Candidates",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/headings": {
+      "post": {
+        "description": "Add the heading a Member picked on this Book's heading field, and answer the Book.\n\n**Not checked against a copy**: the setting filters what the field offers\nand refuses nothing here, as `docs/decisions.md` records for #135, until a\nbatch matcher can mark a heading no copy holds rather than refuse it. A\nheading the Book carries already, or one past the ceiling, changes nothing;\na scheme with no row is a 422. 403 while the setting is not in force, since\nthe field this serves is not drawn then.",
+        "operationId": "add_heading",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassificationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Add Heading",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/headings/suggest": {
+      "get": {
+        "description": "Headings from `scheme`'s local copy with a label beginning with `q`, as\nthe heading field offers them while a cataloguer types.\n\n**The local copy only**, never a vocabulary service, so a keystroke costs\nthis server and nobody else. Bounded three ways: `q` of at least\n`SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and\n`ratelimit.HEADING_SUGGEST_LIMIT` per member.\n\n`use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the\ncopies cannot serve as it is never offered. Empty for a vocabulary with no\ncopy loaded; 403 while the setting is not in force.\n\n**Each heading is the row a pick writes**, already in the form an import of\nit writes (`vocabularies.classification_row`), so a pick posts it back\nunchanged and lands on the row an imported record of the same heading\nholds, rather than beside it under the copy's `$0` spelling.",
+        "operationId": "suggest_headings",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scheme",
+            "required": true,
+            "schema": {
+              "maxLength": 20,
+              "minLength": 1,
+              "title": "Scheme",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "use",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/HeadingUse",
+              "default": "subject"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ClassificationOut"
+                  },
+                  "title": "Response Suggest Headings",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Suggest Headings",
+        "tags": [
+          "books"
+        ]
+      }
+    },
+    "/api/books/{book_id}/headings/vocabularies": {
+      "get": {
+        "description": "The vocabularies this Book's heading field offers headings from.\n\nThose with a local copy loaded, and **none while the setting is not in\nforce**: library mode off, or `headings_from_vocabulary` switched off. An\nempty list is how a client knows to draw no field, so it is an answer\nrather than a refusal.",
+        "operationId": "list_suggesting_vocabularies",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "book_id",
+            "required": true,
+            "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
+              "title": "Book Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SuggestingVocabularyOut"
+                  },
+                  "title": "Response List Suggesting Vocabularies",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List Suggesting Vocabularies",
         "tags": [
           "books"
         ]

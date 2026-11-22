@@ -158,8 +158,12 @@ const LIBRARY_WIDE: ReadonlySet<unknown> = new Set([
  * Merging duplicates writes all four without going through any of those hooks:
  * it moves a deleted book's notes, quotes, progress and reading statuses onto
  * the survivor. So `DuplicatesPage` does not call this group.
+ *
+ * **A copy found by its accession number is the same record under its label**,
+ * so it is here too: a bulk assign or a merge moves which copy a code answers
+ * with, and a cached 404 would hide a label just numbered.
  */
-const BOOK_RECORD = /^\/api\/books\/\d+(\/copies)?$/;
+const BOOK_RECORD = /^\/api\/books\/(\d+(\/copies)?|accession\/[^/]+)$/;
 
 /**
  * Whether a cached query is part of the catalogue.

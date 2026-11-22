@@ -123,6 +123,15 @@ function LibraryModeSection({ settings, state, onConfirm }: SectionProps) {
           state.save({ library_mode: checked });
         }}
       />
+      {/* Said before the switch, not after: the first switch on also turns
+          on the overdue mail to patrons and to the household (#24), and an
+          automatic default nobody was shown is how a library ends up mailing
+          people it did not mean to. */}
+      {!settings.library_mode && (
+        <p className="text-xs text-paper-600 mt-1.5 ml-12 dark:text-paper-400">
+          {t("settings.public.modeTurnsOnNotices")}
+        </p>
+      )}
     </SettingsSection>
   );
 }

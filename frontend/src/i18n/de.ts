@@ -191,6 +191,14 @@ export const de: Messages = {
     "Diese Vorschläge verwerfen? Eine spätere Übernahme desselben Datensatzes schlägt sie nicht noch einmal vor.",
   "pendingHeadings.discardConfirmOne":
     "Diesen Vorschlag verwerfen? Eine spätere Übernahme desselben Datensatzes schlägt ihn nicht noch einmal vor.",
+  "headingField.section": "Schlagwort hinzufügen",
+  "headingField.label": "Schlagwort suchen",
+  "headingField.placeholder": "Den Anfang eines Schlagworts eingeben",
+  "headingField.vocabulary": "Vokabular",
+  "headingField.settingTitle": "Schlagwortfeld",
+  "headingField.setting": "Schlagwörter aus den lokalen Vokabularen anbieten",
+  "headingField.settingHint":
+    "Bei einem Buch bietet ein Feld beim Tippen Schlagwörter aus einer geladenen Kopie eines Vokabulars an. Es liest nur die Kopie auf diesem Server.",
   "onlineLinks.section": "Verweise im Netz",
   "onlineLinks.relation.resource": "Die Ressource selbst",
   "onlineLinks.relation.version": "Eine Fassung davon",
@@ -1038,6 +1046,22 @@ export const de: Messages = {
     "auf unerwartete Weise fehlgeschlagen. Das Serverprotokoll nennt die Ursache.",
   "settings.overdueRowNothingSent": "nichts gesendet.",
 
+  // ── Die eigene Mahnung an Benutzer:innen (#24) ──────────────────────────
+  "settings.overdueSenderPatronMail": "E-Mail an Benutzer:innen",
+  "settings.overdueNotSentNoAddress":
+    "Es wurde nichts gesendet: Für eine überfällige Ausleihe hat die Benutzerin oder der Benutzer keine brauchbare E-Mail-Adresse. Trag eine ein oder schalte die E-Mail an Benutzer:innen aus.",
+  "settings.overdueRowNoAddress":
+    "für eine überfällige Ausleihe fehlt eine brauchbare E-Mail-Adresse.",
+  "settings.patronMail": "E-Mail an Benutzer:innen",
+  "settings.patronMailEnable":
+    "Benutzer:innen per E-Mail an die eigenen überfälligen Ausleihen erinnern",
+  "settings.patronMailHint":
+    "Eine Nachricht an jede Benutzerin und jeden Benutzer, an die Adresse aus dem eigenen Eintrag, mit nur den Ausleihen dieser Person. Gesendet wird über den Mailserver oben, und jede Ausleihe wird höchstens einmal pro Erinnerungsabstand angemahnt. Das Einschalten des Bibliotheksmodus schaltet diese und die E-Mail an den Haushalt einmalig ein, sofern keine von beiden schon eigens eingestellt wurde; das Ausschalten ändert keine von beiden.",
+  "settings.public.modeTurnsOnNotices":
+    "Beim ersten Einschalten werden auch die Mahn-E-Mails an jede Benutzerin und jeden Benutzer und an den Haushalt eingeschaltet, sofern sie nicht schon eigens eingestellt wurden. Beide stehen unter Ausleihe.",
+  "settings.patronMailPrivacyNote":
+    "Diese geht an die Person, die das Buch hat, und nennt deshalb auch ein privates Buch, das sie ausgeliehen hat, aber nie die Ausleihe eines anderen Menschen. Fehlt einer Benutzerin oder einem Benutzer die E-Mail-Adresse, wird das hier gemeldet statt übergangen.",
+
   // ── Erinnerungen in der App, und ob ein Kanal funktioniert ──────────────
   "settings.inApp": "In der App",
   "settings.inAppEnable": "Überfällige Ausleihen in der App anzeigen",
@@ -1551,6 +1575,10 @@ export const de: Messages = {
   "copy.purchaseSource": "Gekauft bei",
   "copy.save": "Angaben zum Exemplar speichern",
   "copy.purchaseSourcePlaceholder": "Der Buchladen um die Ecke",
+
+  // ── Zugangsnummern ──────────────────────────────────────────────────────
+  "accession.label": "Zugangsnummer",
+  "accession.assign": "Zugangsnummern vergeben",
 
   // ── Mehrere Exemplare desselben Buchs ───────────────────────────────────
   "copies.title": "Exemplare",

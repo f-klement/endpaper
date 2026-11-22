@@ -30,6 +30,7 @@ from hypothesis import strategies as st
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 
+import accession
 import backup
 import credentials
 import filing
@@ -41,6 +42,9 @@ from backup import RestoreError
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from database import Base, SessionLocal
 from enums import (
+    AuthorityProvenance,
+    AuthorityScheme,
+    AuthoritySupplier,
     CatalogueSource,
     ClassificationScheme,
     FilingRuleName,
@@ -55,6 +59,7 @@ from models import (
     BLANK_IS_NULL,
     AccessRequest,
     AuthorAlias,
+    AuthorIdentifier,
     Book,
     CatalogueCredential,
     Classification,
@@ -353,6 +358,49 @@ class TestRoundTrip:
         assert res.json()["author_aliases"] == 1
         restored = db.query(AuthorAlias).one()
         assert restored.canonical_name == "F. Herbert"
+
+    @staticmethod
+    def _identified(db) -> None:
+        db.add(
+            AuthorIdentifier(
+                author_key=author_key("Frank Herbert"),
+                scheme=AuthorityScheme.GND,
+                identifier="118549871",
+                provenance=AuthorityProvenance.CATALOGUE,
+                asserted_by=AuthoritySupplier.CATALOGUE,
+                checked_by=AuthoritySupplier.LOBID,
+            )
+        )
+        db.commit()
+
+    def test_an_identifier_keeps_the_supplier_its_archive_names(self, client, admin, library, db):
+        self._identified(db)
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        res = _restore(client, admin, data)
+
+        assert res.status_code == 200, res.text
+        restored = db.query(AuthorIdentifier).one()
+        assert (restored.asserted_by, restored.checked_by) == (
+            AuthoritySupplier.CATALOGUE,
+            AuthoritySupplier.LOBID,
+        )
+
+    def test_an_archive_written_before_suppliers_restores_them_unrecorded(self, client, admin, library, db):
+        """Decided by the key's absence, not guessed from provenance, as the
+        revision decides it for rows already stored. Without it the insert
+        fails on a column with no default and the whole restore answers 500."""
+        self._identified(db)
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        for row in manifest["tables"]["author_identifiers"]:
+            del row["asserted_by"], row["checked_by"]
+
+        res = _restore(client, admin, rewrite(data, manifest))
+
+        assert res.status_code == 200, res.text
+        restored = db.query(AuthorIdentifier).one()
+        assert (restored.asserted_by, restored.checked_by) == (AuthoritySupplier.UNRECORDED, None)
 
     def test_the_opds_servers_come_back(self, client, admin, library, db):
         """The manifest guard caught the table being absent; this is what the
@@ -3078,6 +3126,104 @@ class TestARestoreOntoAFreshDatabaseIssuesFreshIds:
         db.commit()
 
         assert created.id > highest
+
+    def test_a_book_created_after_the_restore_never_mints_a_code_a_merge_carried(
+        self, client, admin, db, make_book
+    ):
+        """A merge moves a deleted copy's code onto its keeper, so the archive
+        holds a code minted from an id above every restored Book. A new Book
+        given that id would mint it again, and its bulk assign would fail the
+        unique index."""
+        keeper = db.get(Book, make_book(admin["headers"], title="Keeper")["id"])
+        carried_from = keeper.id + 3
+        keeper.accession = accession.mint(carried_from)
+        db.commit()
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        _forget_the_book_id_counter(db)
+        backup.restore(db, data)
+        # Through the session: a restore ends every session issued before it.
+        created = Book(title="After the restore", added_by_user_id=admin["user"]["id"])
+        db.add(created)
+        db.commit()
+
+        assert created.id > carried_from
+
+    @pytest.mark.parametrize("another_copy_stays", [True, False], ids=["weeded", "the last copy"])
+    def test_a_book_created_after_the_restore_never_mints_a_purged_copys_code(
+        self, client, admin, db, make_book, another_copy_stays
+    ):
+        """A purged copy leaves no row and no code in the archive, so only the
+        counter's mark it carries keeps that id from being issued again. With
+        no Book left, SQLite has no counter row for the restore to raise."""
+        if another_copy_stays:
+            make_book(admin["headers"], title="Keeper")
+        purged_id = make_book(admin["headers"], title="Weeded")["id"]
+        db.get(Book, purged_id).accession = accession.mint(purged_id)
+        db.commit()
+        client.delete(f"/api/books/{purged_id}", headers=admin["headers"])
+        assert client.delete(f"/api/books/{purged_id}/permanent", headers=admin["headers"]).status_code == 204
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        _forget_the_book_id_counter(db)
+        backup.restore(db, data)
+        created = Book(title="After the restore", added_by_user_id=admin["user"]["id"])
+        db.add(created)
+        db.commit()
+
+        assert created.id > purged_id
+
+    def test_an_archive_without_the_mark_still_restores(self, client, admin, db, make_book):
+        """An archive taken before the mark existed restores, its counter
+        raised past its highest row as before."""
+        book_id = make_book(admin["headers"], title="Kept")["id"]
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = backup.read_manifest(data)
+        del manifest["highest_issued"]
+        _forget_the_book_id_counter(db)
+        backup.restore(db, _with_entry(data, backup.MANIFEST_NAME, json.dumps(manifest).encode()))
+        created = Book(title="After the restore", added_by_user_id=admin["user"]["id"])
+        db.add(created)
+        db.commit()
+
+        assert created.id > book_id
+
+    @pytest.mark.parametrize(
+        "mark", [{"books": -1}, {"books": "12"}, {"books": True}, {"books": 2**31}, [["books", 3]]]
+    )
+    def test_a_malformed_mark_is_refused_before_anything_is_deleted(self, client, admin, db, make_book, mark):
+        make_book(admin["headers"], title="Kept")
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = backup.read_manifest(data)
+        manifest["highest_issued"] = mark
+        forged = _with_entry(data, backup.MANIFEST_NAME, json.dumps(manifest).encode())
+
+        with pytest.raises(backup.RestoreError):
+            backup.restore(db, forged)
+        assert db.query(Book).count() == 1
+
+
+class TestARestoreNeverLowersACounter:
+    """The common restore is onto the same database: back up, label and purge a
+    copy, restore. The archive's mark then stands below the live counter, and a
+    counter lowered to it issues the purged copy's id, and its code, again."""
+
+    def test_a_book_created_after_the_restore_never_takes_an_id_purged_after_the_backup(
+        self, client, admin, db, make_book
+    ):
+        make_book(admin["headers"], title="Kept")
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        purged_id = make_book(admin["headers"], title="Weeded after the backup")["id"]
+        db.get(Book, purged_id).accession = accession.mint(purged_id)
+        db.commit()
+        client.delete(f"/api/books/{purged_id}", headers=admin["headers"])
+        assert client.delete(f"/api/books/{purged_id}/permanent", headers=admin["headers"]).status_code == 204
+        # Without this the test proves only "raised": the mark must stand below the live counter.
+        assert backup.read_manifest(data)["highest_issued"]["books"] < purged_id
+        backup.restore(db, data)
+        created = Book(title="After the restore", added_by_user_id=admin["user"]["id"])
+        db.add(created)
+        db.commit()
+
+        assert created.id > purged_id
 
 
 def _forget_every_id_counter(db) -> None:

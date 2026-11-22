@@ -37,7 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, cast
 
-from sqlalchemy import CursorResult, Delete, and_, delete, select
+from sqlalchemy import CursorResult, Delete, and_, delete, or_, select
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -46,7 +46,7 @@ import fetch
 import vocabularies
 import vocabulary_dumps
 from database import Base, SessionLocal
-from enums import VocabularyLoadPhase
+from enums import HeadingUse, VocabularyLoadPhase
 from models import (
     VOCABULARY_IDENTIFIER_MAX,
     VOCABULARY_LABEL_MAX,
@@ -570,3 +570,117 @@ def _preferred_among(db: Session, scheme_id: str, texts: list[str]) -> Iterator[
             )
             .distinct()
         )
+
+
+# ── The suggest field ────────────────────────────────────────────────────────
+
+#: The fewest characters a suggestion is asked for. One letter would rank a
+#: twenty-sixth of a vocabulary for a keystroke nobody reads the answer to.
+SUGGEST_MIN: Final = 2
+
+#: The most headings one suggestion answers: what a dropdown shows unscrolled.
+SUGGEST_MAX: Final = 10
+
+#: Label rows read per suggestion before they are folded to entries. An entry
+#: matching under its preferred and an alternate label is two rows, so this
+#: leaves room for the fold while bounding the read whatever the prefix.
+_SUGGEST_ROWS: Final = 4 * SUGGEST_MAX
+
+#: What every declared vocabulary may be used as. The declaration holds subject
+#: vocabularies alone (its `subjects:` key, ADR 0009) and both copies are subject
+#: files, the GND's Sachbegriffe and LCSH, so the use is the file's rather than
+#: an entry's: no column records an entry's `008/14` to `16`, and the converter
+#: reads no MARC to take one from. What the file's use does not cover is LCSH's
+#: subdivision records, `008/09` rather than `008/14` to `16`, valid only under
+#: a heading: `vocabulary_dumps` leaves those out of a copy as it converts one.
+_DECLARED_USE: Final = HeadingUse.SUBJECT
+
+#: Above every character, so `prefix + _PAST_EVERY_CHARACTER` bounds the labels
+#: beginning with `prefix` from above.
+_PAST_EVERY_CHARACTER: Final = "\U0010ffff"
+
+
+def suggest(db: Session, scheme_id: str, typed: str, use: HeadingUse) -> tuple[Heading, ...]:
+    """Up to `SUGGEST_MAX` entries of `scheme_id`'s current copy with a label
+    beginning with `typed`, each under its preferred label, in label order.
+
+    A preferred or an alternate label matches, so typing a variant offers the
+    preferred term. `typed` is composed as an import composes a label, and its
+    first letter is also tried upper cased, since both files capitalise a
+    heading. Nothing under `SUGGEST_MIN` characters, for a `use` the copies do
+    not serve, or before a copy is loaded.
+
+    **Reads the local copy only**, never a vocabulary service: this answers a
+    keystroke, and one request per keystroke to somebody else's free service is
+    the politeness problem #135 names.
+    """
+    text = vocabularies.heading_text(typed)
+    if use is not _DECLARED_USE or len(text) < SUGGEST_MIN:
+        return ()
+    identifiers = _matching_identifiers(db, scheme_id, text)
+    if not identifiers:
+        return ()
+    # A comprehension and not `dict(result)`: a `Result` has `keys()`, so
+    # `dict` reads it as a mapping of column names and raises.
+    preferred = {
+        row.identifier: row.label
+        for row in db.execute(
+            select(VocabularyLabel.identifier, VocabularyLabel.label)
+            .join(VocabularyCopy, _current(VocabularyLabel))
+            .where(
+                VocabularyLabel.scheme == scheme_id,
+                VocabularyLabel.preferred.is_(True),
+                VocabularyLabel.identifier.in_(identifiers),
+            )
+        )
+    }
+    # An entry missing here was swapped out between the two reads.
+    return tuple(
+        Heading(identifier, preferred[identifier]) for identifier in identifiers if identifier in preferred
+    )
+
+
+def suggestible(db: Session) -> tuple[Scheme, ...]:
+    """The declared vocabularies `suggest` can answer from, those with a copy
+    loaded, in the declaration's order."""
+    loaded = set(db.scalars(select(VocabularyCopy.scheme)))
+    return tuple(declared_scheme for declared_scheme in declared() if declared_scheme.id in loaded)
+
+
+def _matching_identifiers(db: Session, scheme_id: str, text: str) -> list[str]:
+    """The first `SUGGEST_MAX` distinct entries with a label beginning with
+    `text` or its capitalised spelling, in label order."""
+    spellings = dict.fromkeys((text, text[:1].upper() + text[1:]))
+    rows = db.scalars(
+        select(VocabularyLabel.identifier)
+        .join(VocabularyCopy, _current(VocabularyLabel))
+        .where(
+            VocabularyLabel.scheme == scheme_id,
+            or_(*(_begins_with(prefix) for prefix in spellings)),
+        )
+        .order_by(VocabularyLabel.label, VocabularyLabel.identifier)
+        .limit(_SUGGEST_ROWS)
+    )
+    return list(dict.fromkeys(rows))[:SUGGEST_MAX]
+
+
+def _begins_with(prefix: str) -> ColumnElement[bool]:
+    """A label beginning with `prefix`, case sensitively.
+
+    **The range is what reads the index**, `ix_vocabulary_labels_label`, so a
+    keystroke reads the matching rows rather than the whole copy: SQLite's
+    `LIKE` folds ASCII case and so cannot use a binary index, and PostgreSQL's
+    cannot use a btree under a locale collation. **The `LIKE` is what makes it
+    a prefix match on PostgreSQL**, where a locale collation's range also holds
+    labels that do not begin with `prefix`; one such collation may also order a
+    label that does past the upper bound, and that label is not offered. The
+    `LIKE` is escaped, so a `%` or `_`
+    typed is a character. On SQLite the range alone is exact, since the column
+    compares bytes.
+    """
+    label = VocabularyLabel.label
+    return and_(
+        label >= prefix,
+        label < prefix + _PAST_EVERY_CHARACTER,
+        label.startswith(prefix, autoescape=True),
+    )

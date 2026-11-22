@@ -480,8 +480,8 @@ if _UNDECLARED:
 # of column names relates to `Book` through nothing, so a column added to the
 # schema joins it only if somebody remembers. `book_columns` refuses to import
 # when a column is classified nowhere, and its cells carry why each exclusion is
-# an exclusion: `isbn` because it is unique and `fold` releases it in its own
-# flush ahead of everything, `copy_group` because absorbing it would make the
+# an exclusion: `isbn` and `accession` because each is unique and `fold`
+# releases it in its own flush ahead of everything, `copy_group` because absorbing it would make the
 # survivor a copy of the loser's siblings.
 
 
@@ -512,6 +512,24 @@ def _absorb_fields(keeper: Book, losers: Sequence[Book], isbn: str | None) -> No
     evidence.touched(keeper, filled)
 
 
+def _released(db: Session, keeper: Book, losers: Sequence[Book], column: str) -> str | None:
+    """The first losing row's value of a unique `column`, let go, for a survivor without one.
+
+    None, and nothing written, where the survivor has its own or no loser has
+    one. Otherwise every loser lets go and the release is flushed **before**
+    the caller hands the value to the survivor: both UPDATEs in one executemany
+    put the set before the clear and trip the index. `fold`'s docstring says
+    why that costs nothing.
+    """
+    value: str | None = next((getattr(loser, column) for loser in losers if getattr(loser, column)), None)
+    if getattr(keeper, column) is not None or value is None:
+        return None
+    for loser in losers:
+        setattr(loser, column, None)
+    db.flush()
+    return value
+
+
 # ── The door ──────────────────────────────────────────────────────────────────
 
 
@@ -535,8 +553,9 @@ def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
     first: their loaded collections still list the rows just moved, and the
     cascade walks those collections rather than the database.
 
-    **The ISBN is released in its own flush, before anything else.** It is
-    unique, so the row it is being taken from has to let go first. Both UPDATEs
+    **The ISBN and the accession number are released in their own flush,
+    before anything else** (`_released`). Each is unique, so the row it is
+    being taken from has to let go first. Both UPDATEs
     in one executemany puts the set before the clear and trips the index. These
     rows are about to cease to exist, so releasing it costs nothing.
 
@@ -567,12 +586,12 @@ def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
     """
     _hold_every_book(db, [keeper, *losers])
 
-    absorbed_isbn = next((loser.isbn for loser in losers if loser.isbn), None)
-    if keeper.isbn is None and absorbed_isbn is not None:
-        for loser in losers:
-            loser.isbn = None
-        db.flush()
-
+    absorbed_isbn = _released(db, keeper, losers, "isbn")
+    # Fill only: a survivor with its own label keeps it, and the loser's goes
+    # with the loser (`book_columns.COPY_IDENTITY`). Not handed to
+    # `_absorb_fields`, because it is no work fact and `evidence.touched` must
+    # not count it as a change to the record.
+    keeper.accession = keeper.accession or _released(db, keeper, losers, "accession")
     _absorb_fields(keeper, losers, absorbed_isbn)
     db.flush()
 

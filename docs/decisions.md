@@ -28006,3 +28006,132 @@ whatever an address serves.
 Books replies included, each arm under a test: a rejected key and a dead host need different
 fixes. The action is admin only and limited to 10 a minute for the deployment, which is per
 process; the image runs one.
+
+## A heading's vocabulary filters what the field offers and refuses nothing on save (2026-11-22)
+
+A book's heading field offers headings from the local GND and LCSH copies, and **the vocabulary
+filters what it offers and refuses nothing on save** (owner, 2026-11-22). A heading posted that
+no copy holds is written as any member's heading is, until ticket 136's batch matcher can mark a
+heading no copy holds. The field is behind `headings_from_vocabulary`, on by default and read
+together with library mode, so a household is not offered a cataloguer's field.
+
+**A picked heading is written as an import writes it** (`vocabularies.classification_row`): a
+GND heading as its bare number and label, an LCSH heading as its heading string with no URI. A
+pick and an import of the same heading are therefore one row rather than two.
+
+What a heading may be used as, `008/14` to `16`, is the vocabulary's rather than the entry's,
+since both copies are subject files. LCSH's subdivision records (`008/09`), valid only under a
+heading, are left out of a copy at conversion by their usage note, so neither the field nor the
+MARC import's confirmation of an untrusted `650 _0` sees them. A copy loaded before that keeps
+them until its next refresh.
+
+## A patron's own overdue notice names a private book the patron holds, and keeps its own reminder stamp (2026-11-22)
+
+**The notice names a private book the patron holds** (owner, 2026-11-22): privacy protects a
+book from other members, not from its borrower. The notice goes only to the patron the loan
+belongs to and never names another patron's or member's loan. The household digest and the
+other channels still withhold private books and count them as `skipped_private`, which reads 0
+when no channel is on.
+
+**The digest and the patron notice each keep a stamp per loan**, `notified_at` and
+`patron_notified_at`, and each selection reads its own, so a failure on one audience never
+silences the other. One shared stamp would let a digest that delivered hold back a patron whose
+mail failed for the whole interval, and a patron mail that delivered drop the loan out of the
+household digest.
+
+**The patron loop goes on only past a failure about one address** (a refused recipient, or a non
+ASCII address on a server without `SMTPUTF8`) and stops on any other, which would repeat for
+every patron: a server that is down costs one deadline, and a rejected login one attempt, rather
+than one per patron each hour. A server that refuses to relay refuses every recipient the same
+way, so it costs one refused conversation per patron per run and reads as `unreachable`; that is
+accepted, since it waits on no deadline and tries no login. A patron with no usable address is
+reported as `no_address`, a configuration fault shown at once.
+
+The notice greets the patron by name, lists each loan with its due date and asks for the books
+back. It is English, since the server has no message catalogue, and names no library, since no
+setting holds one.
+
+Both notices turn on once, when library mode is first switched on, and each only where nobody
+has already set it. A later switch on, a switch off, and an upgrade that finds the mode already
+on change neither.
+
+## Which file supplied an author identifier, and which checked it (2026-11-22)
+
+An author identifier records `asserted_by`, the file that supplied it, and `checked_by`, a second
+file that tied the same value to the same person, both `enums.AuthoritySupplier`.
+
+**Rows stored before the columns existed read `unrecorded`, never a supplier guessed from
+`provenance`** (owner, 2026-11-22), because an LCNAF member row can be a NAF confirmation or a
+lobid cross reference. `provenance` keeps its meaning beside them: it says who tied the number to
+the author, where the supplier says which file carried it.
+
+**A stored row changes only by gaining `checked_by`, never its `identifier`** (owner,
+2026-11-22). `Authorship.record_check` is that rule's one door, and an agreeing cross reference
+sets it by the same rule. Rows stored while a host is switched off are kept and shown with their
+supplier; an admin recheck that may set `checked_by` is not built yet.
+
+**Lobid holding a member's GND number is not a check** (owner, 2026-11-22): the member picked the
+number from a lobid search, and a wrong but existing number is held too. The row is stamped
+`checked_by = lobid` only where lobid's record is the number's own and its preferred or a variant
+name folds to the row's key by `authors.author_key` with words in any order, the fold the BNP
+check already uses; otherwise `checked_by` stays empty, so the recheck finds it. A plain key
+comparison would refuse `Stevenson, Robert Louis` against `Robert Louis Stevenson` on nearly every
+confirmation. A namesake passes, and so does a person whose name is the same words in another
+order: `Luther Martin` against `Luther, Martin`. Where the record does not name the author, its
+cross references are stored with their check cleared too, since Wikidata and the BNP corroborated
+somebody else.
+
+**Switching the authority spine off degrades author identity to name only, and the spine is a
+pick of ISNI, GND, LCNAF or none** (owner, 2026-11-22), the existing `suggest_merges(spines=None)`
+path. Not built yet.
+
+**Switching VIAF off removes the national numbers it supplied rather than promoting the Wikidata
+fallback** (owner, 2026-11-22), which changed 2 of 6 national values in the fixture. Only lobid,
+LoC and ORCID rerank, and the LoC authority switch leaves the LoC catalogue target alone. Not
+built yet.
+
+## The accession number (2026-11-22)
+
+A copy carries an accession number, the code its label prints and a scan resolves: the first
+slice of ticket 31, which tickets 25 and 26 also wait on.
+
+### Endpaper mints it, from the row
+
+Endpaper mints the number rather than taking one a member types (owner, 2026-11-22), which
+reverses the rule that Endpaper assigns none. It is nine ASCII digits: lead `2`, the zero padded
+row id, a Damm check digit (`backend/accession.py`, mirrored by `frontend/src/lib/accession.ts`,
+both held to `conformance/cases/accession.json`). Nine is no length a book or retail barcode
+carries, so a scan is told from an ISBN by its length. The lead digit reserves the minted range,
+so typed numbers can follow outside it. Damm misses no single digit error and no adjacent
+transposition, where Luhn misses 289 of 14441 transpositions. A scan is classified after
+stripping one pinned set, ASCII space and the C0 controls, on both sides.
+
+### A label prints Code 128 or Code 39, as its stock says
+
+Labels print either symbology by label stock, and the scanner reads both (owner, 2026-11-22).
+The case file names both; neither the label printer nor the label reader exists yet, and each
+must read its declared constant.
+
+### Member only
+
+The number is withheld from the public catalogue (owner, 2026-11-22): it is off
+`PublicBookOut`, so off OAI-PMH, SRU and the public pages. It is derivable from the public id,
+which is acceptable because it grants nothing. A malformed code is a 400, and a code on a copy
+the caller cannot see is the same 404 as one nobody holds.
+
+### None until assigned
+
+Existing books get no number at upgrade; a bulk action assigns them (owner, 2026-11-22). The
+action numbers owned rows and counts the rest unchanged. A new copy starts with none; a merge
+fills a keeper's empty number from a loser and never overwrites one; the trash keeps it.
+
+### A number is unique for life, across a restore
+
+No number is ever issued twice, a restore onto a fresh database included (owner, 2026-11-22).
+Ids are never reused on one database, so the row id needs no counter of its own. A backup
+archive carries the books counter's highest issued id under `highest_issued`, and a restore
+raises the counter to it, so a purged copy's number, which leaves no row in the archive, is not
+minted again. An archive taken before that key existed still restores: its counter goes past the
+highest restored row and the highest serial a restored code carries, so a copy purged before it
+was taken may have its number issued again. Ticket 145, which splits a copy out of its instance,
+must keep the `books` id sequence as the item id, or move minting to a counter of its own.

@@ -26,6 +26,7 @@ from database import Base, engine
 from enums import (
     AuthorityProvenance,
     AuthorityScheme,
+    AuthoritySupplier,
     BookFormat,
     CatalogueSource,
     ClassificationScheme,
@@ -1241,6 +1242,7 @@ class TestTheAuthorityIdentifierConstraints:
                 "scheme": AuthorityScheme.GND,
                 "identifier": "1042243212",
                 "provenance": AuthorityProvenance.CATALOGUE,
+                "asserted_by": AuthoritySupplier.CATALOGUE,
             }
             | overrides
         )
@@ -1321,7 +1323,9 @@ class TestTheAuthorityIdentifierConstraints:
         assert shared == {"gnd"}
 
     def test_a_provenance_that_is_neither_is_refused(self, db):
-        self._row(db, provenance="robot")
+        # A member supplier, so `ck_author_identifiers_supplier` holds and
+        # the provenance CHECK is the only one this row breaks.
+        self._row(db, provenance="robot", asserted_by=AuthoritySupplier.MEMBER)
         with pytest.raises(IntegrityError) as refusal:
             db.commit()
 
@@ -1339,7 +1343,12 @@ class TestTheAuthorityIdentifierConstraints:
     def test_a_member_assertion_with_no_person_is_allowed(self, db):
         """The other direction is deliberately open, so a row whose author is
         gone still reads `member` rather than becoming a machine's."""
-        self._row(db, provenance=AuthorityProvenance.MEMBER, created_by_user_id=None)
+        self._row(
+            db,
+            provenance=AuthorityProvenance.MEMBER,
+            created_by_user_id=None,
+            asserted_by=AuthoritySupplier.MEMBER,
+        )
         db.commit()
 
         assert db.query(AuthorIdentifier).count() == 1

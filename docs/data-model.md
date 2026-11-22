@@ -502,10 +502,13 @@ that write the table and what the issuer is bound to, and names what it cannot s
 archive through Core, so the issuer of a restored loan is whatever the archive holds, which
 is the same deliberate unfiltered reach that makes a backup a backup.
 
-`notified_at` is the one piece of state the overdue digest keeps: when a reminder last
-went out for this loan, or null if none ever has. Stamped only after a delivery that
-succeeded, so a failed one retries on the next run. Without it the digest either sends
+`notified_at` is the one piece of state the overdue digest keeps: when the digest last
+went out on a channel for this loan, or null if it never has. Stamped only after a delivery
+that succeeded, so a failed one retries on the next run. Without it the digest either sends
 once and forgets a book that is still out, or repeats the same list every hour.
+`patron_notified_at` is the same for the patron's own notice: when a mail about the loan
+last reached the patron holding it. Each audience reads and stamps its own column, so a
+failure on one never silences the other.
 
 **A borrower need not be a member.** `loaned_to_user_id` is nullable, and
 `loaned_to_name` holds a free-text name (120 characters) for somebody with no account: a
@@ -1089,6 +1092,8 @@ means:
 | `identifier` | the number, stored bare without MARC's `(DE-588)` wrapper |
 | `provenance` | `catalogue` where a record for this book's own ISBN asserted it, `member` where a person confirmed a candidate |
 | `created_by_user_id` | set on a `member` row and null on a `catalogue` one, by check constraint. Provenance: read by nothing but the archive's whole table select, and named by no schema field |
+| `asserted_by` | which file the number came from, `enums.AuthoritySupplier`, with no default. `catalogue` exactly where provenance is `catalogue`; `unrecorded` on a row stored before the column, never guessed from provenance |
+| `checked_by` | a second file that tied the same number to the same person, or null. Never `member` or `unrecorded`, neither being a file, and never the file in `asserted_by`. lobid checks a member's GND number only where its record for that number names the author. Setting it once is the only change a stored row ever takes |
 
 **Per spelling, not per person**, which is the same shape as the aliases and for a sharper
 reason: two spellings a member folded into one author may carry different numbers, and that
@@ -1157,6 +1162,13 @@ The restore would then fail on a button that has nothing to do with copies.
 a copy is a book row, so "one is lent out and one is on the shelf" is already expressible. A
 copy **count** column could not have said that, which is why this is rows: see
 [decisions.md](decisions.md).
+
+**The accession number is per row.** `books.accession` is the code on a copy's label,
+unique over every row, trashed ones included, and null until a member numbers it with the
+bulk action, which numbers owned rows only. It is minted from the row id
+(`backend/accession.py` says why it has the shape it has), so a new copy starts without
+one, trash keeps it, and a merge fills the keeper's from a loser but never overwrites one.
+Member only: no public surface carries it.
 
 ## Collections
 

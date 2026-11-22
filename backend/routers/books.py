@@ -30,6 +30,7 @@ from sqlalchemy import func, nullslast, or_
 from sqlalchemy.orm import Query as RowQuery
 from sqlalchemy.orm import Session, joinedload
 
+import accession
 import authority
 import book_columns
 import catalogue
@@ -54,6 +55,8 @@ import metadata
 import pending_headings
 import recognition
 import settings_store
+import vocabularies
+import vocabulary_copy
 from auth import require_admin
 from authors import AUTHOR_NAME_MAX, MATCHERS, MatcherName
 from authorship import (
@@ -87,6 +90,7 @@ from dependencies import headings as parse_headings
 from enums import (
     EXPORT_MEDIA_TYPES,
     AuthorityScheme,
+    AuthoritySupplier,
     BookFormat,
     BookIdentifierScheme,
     BookOrigin,
@@ -94,6 +98,7 @@ from enums import (
     BulkAction,
     CatalogueSource,
     ExportFormat,
+    HeadingUse,
     LendingWillingness,
     Locale,
     OwnershipStatus,
@@ -108,6 +113,7 @@ from logvalues import clipped
 from models import (
     AUTHOR_KEY_MAX,
     AUTHOR_LINE_MAX,
+    CLASSIFICATION_SCHEME_CODE_MAX,
     DIGITAL_REFERENCE_PATH_MAX,
     ISBN_MAX,
     LOCATION_MAX,
@@ -116,6 +122,7 @@ from models import (
     QUOTE_TEXT_MAX,
     SERIES_NAME_MAX,
     TITLE_MAX,
+    VOCABULARY_LABEL_MAX,
     AccessRequest,
     AuthorIdentifier,
     Book,
@@ -139,6 +146,7 @@ from ratelimit import (
     authority_limiter,
     cover_backfill_limiter,
     export_limiter,
+    heading_suggest_limiter,
 )
 from reading import Reading, Records
 from refusals import refuses
@@ -219,6 +227,7 @@ from schemas import (
     QuoteWithBookOut,
     RefusedAssertionOut,
     SeriesOut,
+    SuggestingVocabularyOut,
     SweepIn,
     SweepOut,
     TagCreate,
@@ -899,6 +908,28 @@ def already_held(
         case recognition.Resembles(book_ids=book_ids):
             return AlreadyHeldOut(match="title_author", book_ids=sorted(book_ids))
     return AlreadyHeldOut(match=None, book_ids=[])
+
+
+@router.get("/accession/{code}", response_model=BookOut)
+@refuses(404)
+def get_book_by_accession(code: str, db: DbSession, current_user: CurrentUser) -> BookOut:
+    """The copy whose label carries this accession number.
+
+    What a scanned label resolves through, so it answers what `GET /{book_id}`
+    answers: **404 for a copy the caller may not see**, private to somebody
+    else or in the trash, never 403, since a 403 would confirm the label
+    exists. A string that is not an accession number at all, a mistyped check
+    digit included, is 400, the house status for a refused value: that says
+    nothing about any Book.
+
+    Declared before `/{book_id}`, which would otherwise take `accession` as an id.
+    """
+    if not accession.is_accession(code):
+        raise HTTPException(status_code=400, detail="Not an accession number")
+    book = Shelf.seen_by(db, current_user.id).labelled(code).first(load=Loading.SERIALISED)
+    if book is None:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book_to_out(book, current_user, db)
 
 
 @router.get("/search", response_model=BookSearchOut)
@@ -2356,6 +2387,32 @@ def _bulk_delete(
     return len(books), 0
 
 
+def _bulk_assign_accession(
+    db: Session, books: list[Book], value: str | int | None, current_user: User
+) -> tuple[int, int]:
+    """Give each owned copy in the selection an accession number. `value` is unused.
+
+    **Owned rows only**: a label names an object the library holds, so a wanted
+    or harvested record gets none. Such a row, one already numbered, and one
+    whose id is past what a code can carry are all counted unchanged, the
+    bucket `_bulk_add_tag` already uses for a refusal: `BulkResult` has three
+    and a fourth is a response shape change. The number is the row's own
+    (`accession.mint`), so assigning twice gives the same code and a peeled
+    label is reprinted rather than renumbered.
+    """
+    assignable = [book for book in books if _takes_an_accession(book)]
+    for book in assignable:
+        book.accession = accession.mint(book.id)
+    return len(assignable), len(books) - len(assignable)
+
+
+def _takes_an_accession(book: Book) -> bool:
+    """Whether `_bulk_assign_accession` numbers this row."""
+    return (
+        book.accession is None and book.ownership == OwnershipStatus.OWNED and book.id <= accession.MAX_SERIAL
+    )
+
+
 def _require_tag(db: Session, value: str | int | None, viewer_id: int) -> Tag:
     """The Tag a bulk verb names, or a refusal.
 
@@ -2471,6 +2528,7 @@ _BULK_HANDLERS: dict[BulkAction, _BulkHandler] = _dispatch_table(
         BulkAction.SET_LOCATION: _bulk_set_location,
         BulkAction.SET_COLLECTION: _bulk_set_collection,
         BulkAction.DELETE: _bulk_delete,
+        BulkAction.ASSIGN_ACCESSION: _bulk_assign_accession,
     },
     set(BulkAction),
 )
@@ -2925,11 +2983,45 @@ def _identifier_out(row: AuthorIdentifier, spelling: str) -> AuthorIdentifierOut
         scheme=row.scheme,
         identifier=row.identifier,
         provenance=row.provenance,
+        asserted_by=row.asserted_by,
+        checked_by=row.checked_by,
     )
 
 
-async def _cross_references_for(identifier: str) -> dict[AuthorityScheme, str]:
-    """What the confirmed GND record says this person is called elsewhere.
+async def _checked_by_the_gnd(
+    authorship: Authorship, row: AuthorIdentifier
+) -> dict[AuthorityScheme, authority.SuppliedIdentifier]:
+    """The cross references a confirmed GND number's record carries, with the
+    confirmed row recorded as checked by lobid where lobid's record for that
+    number names the author.
+
+    **After the commit, not before it**, so the 409 for a retype stays free of
+    outbound requests.
+
+    **Naming the author, not holding the number.** The member picked the
+    number from a lobid search, so lobid holding it says nothing; a wrong but
+    existing number is held too. Unchecked, the row stays where the admin
+    recheck finds it.
+
+    **An unchecked record's cross references go unchecked too.** Wikidata and
+    the BNP corroborate the record lobid returned, so where that record names
+    somebody else their check vouches for that person, not this author. Kept
+    rather than dropped, beside the unchecked GND row where the recheck finds
+    them; keeping their check would file "two files agree" under the wrong
+    author.
+    """
+    checked, references = await _cross_references_for(row.identifier, row.author_key)
+    if not checked:
+        return {scheme: found.unchecked() for scheme, found in references.items()}
+    authorship.record_check(row, AuthoritySupplier.LOBID)
+    return references
+
+
+async def _cross_references_for(
+    identifier: str, key: str
+) -> tuple[bool, dict[AuthorityScheme, authority.SuppliedIdentifier]]:
+    """Whether lobid's record for this GND number names the spelling under
+    `key`, and what that record says this person is called elsewhere.
 
     **Resolved by the server, never read off the request body**, so a caller
     cannot name a record it did not confirm.
@@ -2942,19 +3034,26 @@ async def _cross_references_for(identifier: str) -> dict[AuthorityScheme, str]:
     collision, which would silently prefer the fetched one.
 
     **Never raises, and an empty mapping is an ordinary answer**, because a
-    person with no other names is not an error.
+    person with no other names is not an error. lobid unreachable answers
+    False, as a number it does not hold does: neither has been checked.
+
+    **Only the record lobid returns as this number's own counts.** A retired
+    number can resolve to its successor, and that is not lobid naming the
+    value the member confirmed.
     """
     deadline = authority.deadline_from_now()
     try:
         candidate = await authority.resolve(identifier, deadline=deadline)
     except authority.AuthorityUnavailable:
         logger.info("Could not resolve a confirmed identifier for its cross references")
-        return {}
+        return False, {}
     if candidate is None:
-        return {}
-    return authority.cross_references(candidate) | await authority.national_identifiers(
+        return False, {}
+    references = authority.cross_references(candidate) | await authority.national_identifiers(
         candidate, deadline=deadline
     )
+    checked = candidate.identifier == identifier and authority.names_the_spelling(candidate, key)
+    return checked, references
 
 
 @router.post(
@@ -2983,7 +3082,9 @@ async def confirm_author_identifier(
     than something a lookup does on the way past.
 
     **The cross references only for `gnd`.** An LCNAF or ORCID record is
-    stored as confirmed and nothing else is read from it.
+    stored as confirmed and nothing else is read from it. A GND number whose
+    lobid record names the author is recorded as checked by lobid; any other
+    confirmation is the member's word, unchecked.
 
     **A cross reference colliding with a stored value is reported, not raised.**
     The confirmation is already committed, so failing here would report a write
@@ -3009,9 +3110,7 @@ async def confirm_author_identifier(
             detail="That spelling already carries a different identifier. Remove it first.",
         ) from None
 
-    references = (
-        await _cross_references_for(payload.identifier) if payload.scheme is AuthorityScheme.GND else {}
-    )
+    references = await _checked_by_the_gnd(authorship, row) if payload.scheme is AuthorityScheme.GND else {}
     recorded = RecordedAssertions(stored=[], refused=[])
     if references:
         try:
@@ -5822,6 +5921,104 @@ def discard_pending_headings(book: BookForAdmin, db: DbSession) -> None:
     """
     pending_headings.discard(book)
     db.commit()
+
+
+# ── Headings from a vocabulary ───────────────────────────────────────────────
+
+
+@router.get("/{book_id}/headings/vocabularies", response_model=list[SuggestingVocabularyOut])
+def list_suggesting_vocabularies(book: BookForWrite, db: DbSession) -> list[SuggestingVocabularyOut]:
+    """The vocabularies this Book's heading field offers headings from.
+
+    Those with a local copy loaded, and **none while the setting is not in
+    force**: library mode off, or `headings_from_vocabulary` switched off. An
+    empty list is how a client knows to draw no field, so it is an answer
+    rather than a refusal.
+    """
+    if not settings_store.headings_from_vocabulary(db):
+        return []
+    suggestible = vocabulary_copy.suggestible(db)
+    return [SuggestingVocabularyOut(scheme=scheme.id, name=scheme.name) for scheme in suggestible]
+
+
+@router.get("/{book_id}/headings/suggest", response_model=list[ClassificationOut])
+@refuses(403)
+def suggest_headings(
+    book: BookForWrite,
+    db: DbSession,
+    current_user: CurrentUser,
+    scheme: Annotated[str, Query(min_length=1, max_length=CLASSIFICATION_SCHEME_CODE_MAX)],
+    q: Annotated[str, Query(min_length=vocabulary_copy.SUGGEST_MIN, max_length=VOCABULARY_LABEL_MAX)],
+    use: HeadingUse = HeadingUse.SUBJECT,
+) -> list[ClassificationOut]:
+    """Headings from `scheme`'s local copy with a label beginning with `q`, as
+    the heading field offers them while a cataloguer types.
+
+    **The local copy only**, never a vocabulary service, so a keystroke costs
+    this server and nobody else. Bounded three ways: `q` of at least
+    `SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and
+    `ratelimit.HEADING_SUGGEST_LIMIT` per member.
+
+    `use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the
+    copies cannot serve as it is never offered. Empty for a vocabulary with no
+    copy loaded; 403 while the setting is not in force.
+
+    **Each heading is the row a pick writes**, already in the form an import of
+    it writes (`vocabularies.classification_row`), so a pick posts it back
+    unchanged and lands on the row an imported record of the same heading
+    holds, rather than beside it under the copy's `$0` spelling.
+    """
+    _require_headings_from_vocabulary(db)
+    heading_suggest_limiter.check(current_user.username)
+    # Folded by row, since two entries can make one: an LCSH heading and a
+    # subdivision record of the same string are both that string.
+    rows = dict.fromkeys(
+        vocabularies.classification_row(scheme, heading.identifier, heading.label)
+        for heading in vocabulary_copy.suggest(db, scheme, q, use)
+    )
+    return [ClassificationOut(scheme=scheme, number=number, label=label) for number, label in rows]
+
+
+@router.post("/{book_id}/headings", response_model=BookOut)
+@refuses(403)
+def add_heading(
+    payload: ClassificationIn, book: BookForWrite, db: DbSession, current_user: CurrentUser
+) -> BookOut:
+    """Add the heading a Member picked on this Book's heading field, and answer the Book.
+
+    **Not checked against a copy**: the setting filters what the field offers
+    and refuses nothing here, as `docs/decisions.md` records for #135, until a
+    batch matcher can mark a heading no copy holds rather than refuse it. A
+    heading the Book carries already, or one past the ceiling, changes nothing;
+    a scheme with no row is a 422. 403 while the setting is not in force, since
+    the field this serves is not drawn then.
+    """
+    _require_headings_from_vocabulary(db)
+    if unknown_schemes([payload], db):
+        raise RequestValidationError(
+            [
+                {
+                    "type": "value_error",
+                    "loc": ("body", "scheme"),
+                    "msg": f"Value error, no classification scheme has the code {payload.scheme!r}.",
+                    "input": payload.scheme,
+                }
+            ]
+        )
+    if evidence.confirm_picked_heading(book, payload, db):
+        db.commit()
+        db.refresh(book)
+    return book_to_out(book, current_user, db)
+
+
+def _require_headings_from_vocabulary(db: Session) -> None:
+    """Refuse a heading field route while the setting is not in force.
+
+    403 rather than 404 for the reason `routers.imports._require_library_mode`
+    gives: the caller is a signed in member and library mode is public.
+    """
+    if not settings_store.headings_from_vocabulary(db):
+        raise HTTPException(status_code=403, detail="Headings from a vocabulary are not offered here.")
 
 
 @router.put("/{book_id}/refresh", response_model=BookOut)

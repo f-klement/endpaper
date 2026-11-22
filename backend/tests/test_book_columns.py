@@ -491,6 +491,20 @@ class TestEachCellIsDerivableFromSomethingThatIsNotItself:
         assert unique, "no unique index on `books`, so this arm asserts nothing"
         assert set(book_columns.FILLABLE_FROM_ANOTHER_ROW) & unique == set()
 
+    def test_the_copy_identity_is_every_column_unique_over_every_row(self):
+        """A column no two rows may share names one object, which is what a copy
+        identity is. The ISBN's index is partial, unique only among rows that
+        are no one's second copy, so it names the work and stays outside: the
+        `sqlite_where` is what tells the two apart, not the column's name."""
+        unconditional = {
+            column.name
+            for index in _books_table().indexes
+            if index.unique and index.dialect_kwargs.get("sqlite_where") is None
+            for column in index.columns
+        }
+
+        assert set(book_columns.COPY_IDENTITY) == unconditional
+
 
 class TestTheDoorsAreWhatTheWritersWalk:
     """Asked for, not written out again.

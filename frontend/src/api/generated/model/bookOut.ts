@@ -37,6 +37,7 @@ import type { UserOut } from "./userOut.ts";
  * alphabetical whatever this says.
  */
 export interface BookOut {
+  accession?: string | null;
   active_loan: LoanOut | null;
   added_at: string;
   added_by?: UserOut | null;

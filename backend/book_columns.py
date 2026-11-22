@@ -6,7 +6,7 @@ four to `Book`, so a column added to the schema joined none of them and no
 diagnostic said so. Completeness held by accident of nullability and by nobody
 noticing.
 
-**A partition, not a list of disciplines.** The seven sets below are disjoint and
+**A partition, not a list of disciplines.** The eight sets below are disjoint and
 their union is every column of `books`, checked against the mapper at import. What
 each writer then does with a set stays at that writer: fill only, overwrite on
 request, refuse. Those rules differ per writer and there is no enum over them.
@@ -111,6 +111,18 @@ COPY_DETAIL: Final[tuple[str, ...]] = (
 #: is where it is confirmed afterwards.
 COPY_STANDING: Final[tuple[str, ...]] = ("copy_group", "ownership")
 
+#: What names this physical object: the accession number on its label.
+#:
+#: Its own cell because its rules are its own. A **copy** starts with none, so
+#: it is not in `COPIED_FROM_THE_BOOK`: another object carries another label. A
+#: **merge** fills it but never overwrites it: a merge says the rows were one
+#: object, so the label on it is the loser's where the survivor has none, and a
+#: survivor with its own keeps it. It is not in `FILLABLE_FROM_ANOTHER_ROW`
+#: either, for the ISBN's reason: it is unique (`uq_books_accession`), so the
+#: losing row has to let go in its own flush first, which `folding.fold` does by
+#: hand. Copy side, so the item takes it when the instance is split out (#145).
+COPY_IDENTITY: Final[tuple[str, ...]] = ("accession",)
+
 #: Facts about the row rather than about the book, written by the database or by
 #: the act of filing, and never filled from a losing row by a merge: none is in
 #: `FILLABLE_FROM_ANOTHER_ROW`. A **copy** inherits `is_private` at the insert,
@@ -155,6 +167,7 @@ PARTITION: Final[tuple[tuple[str, ...], ...]] = (
     WORK_COVER,
     COPY_DETAIL,
     COPY_STANDING,
+    COPY_IDENTITY,
     ROW_KEEPING,
     RECORD_PROVENANCE,
 )

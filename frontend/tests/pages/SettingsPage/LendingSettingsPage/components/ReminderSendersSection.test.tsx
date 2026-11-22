@@ -83,6 +83,14 @@ describe("ReminderSendersSection", () => {
     expect(onSave).toHaveBeenCalledWith({ overdue_mail_enabled: true });
   });
 
+  it("switches the patron email on by itself", () => {
+    const { onSave } = renderSection();
+    fireEvent.click(
+      screen.getByLabelText("Email each patron about their own overdue loans"),
+    );
+    expect(onSave).toHaveBeenCalledWith({ overdue_patron_mail_enabled: true });
+  });
+
   it("switches Telegram on by itself", () => {
     const { onSave } = renderSection();
     fireEvent.click(

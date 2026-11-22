@@ -212,4 +212,18 @@ describe("CopyPanel", () => {
     expect(container.querySelector("details")).toBeNull();
     expect(screen.getByLabelText("Format")).toBeVisible();
   });
+
+  it("shows the copy's accession number, which it cannot edit", () => {
+    renderPanel({ accession: "200047116" });
+
+    expect(screen.getByRole("term")).toHaveTextContent("Accession number");
+    expect(screen.getByRole("definition")).toHaveTextContent("200047116");
+    expect(screen.queryByDisplayValue("200047116")).not.toBeInTheDocument();
+  });
+
+  it("shows no accession line on a copy that has none", () => {
+    renderPanel({ accession: null });
+
+    expect(screen.queryByText("Accession number")).not.toBeInTheDocument();
+  });
 });

@@ -1003,7 +1003,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **170** models under `schemas/`, **58** of
+    Measured on the tree as it stands: **171** models under `schemas/`, **58** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -4665,6 +4665,10 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
         # The column, in the admin's search. Off `Patron` only: a `user.email`
         # added to the same module is still reported.
         "patrons.py": ({"Patron"}, "the admin's patron search matches a patron's own address"),
+        # A patron's own overdue notice goes to the address on their record
+        # (#24). Off the one local, `patron`: a `user.email` here is reported,
+        # because a member is chased in the app and never by mail.
+        "notifications.py": ({"patron"}, "a patron's own overdue notice is sent to their address"),
     }
 
     #: The name an address goes by on the wire.
@@ -7137,6 +7141,11 @@ class TestOneInstanceIssuesALoan:
             "when a reminder last went out, which is delivery state rather "
             "than the loan: it says nothing about who has the book or when it "
             "is due, and it is stamped only after a send that succeeded"
+        ),
+        "notifications.py: writes loans.patron_notified_at": (
+            "the same delivery state for the patron's own notice, its own "
+            "column so a failure on one audience never silences the other "
+            "(owner's decision on #24)"
         ),
         "routers/patrons.py: builds a row shaped like a loan": (
             "not a write at all: `PatronLoanOut`, one loan on a patron's record, "

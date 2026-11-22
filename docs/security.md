@@ -609,18 +609,16 @@ for every member in library mode. **What widens is which loans a member reads, n
 books they may see**: both arms are built on `visible_to` before either is added, so no
 setting in the app lets one member read a private book another added.
 
-**A per borrower mail is the one audience that could carry a private book**, because being
-reminded of a book you borrowed is not a disclosure. **It is still not built, and the fact it
-was blocked on has changed.** `models.User` now carries an `email` column and the LDAP
-backend requests an attribute where one is configured, so an address can exist. Nothing in
-the reminder path reads it: `send_mail` takes its recipients from `mailer.checked_config`,
-which reads `overdue_mail_to` and nothing else. Mail therefore still goes to the household's
-own mailbox, which is a channel like the other two, and a member who has filled the field in
-is in exactly the position of one who has not.
+**The patron email is the one pushing audience that carries a private book**, because being
+reminded of a book you borrowed is not a disclosure. It goes to a patron's own address, with
+that patron's loans alone: `notifications.due_for_patrons` selects them and `_mail_patrons`
+sends each patron their own group, so no message names another patron's or member's loan.
+A member's `User.email` is still read by nothing in the reminder path: a member is chased in
+the app, and the household digest goes to `overdue_mail_to`.
 
 **Nothing else is in the payload.** One entry per loan: the book's title, the borrower's
 username or free-text name, the due date and the days overdue. No ISBNs, no notes, no
-member ids beyond the borrower's name, no private books at any privacy setting. The mail
+member ids beyond the borrower's name, and no private book except in the patron's own mail. The mail
 **subject** carries a count and no title, because a subject line is stored unencrypted by
 every hop and shows in a notification on a locked phone.
 
@@ -1171,7 +1169,7 @@ is how a secret reaches a log aggregator.
 
 ## Rate limiting
 
-**Fourteen counters, for five different reasons.** The count is not read off this
+**Fifteen counters, for five different reasons.** The count is not read off this
 page: the names `backend/ratelimit.py` binds to a limiter are counted on every
 run, pinned against a parse of the limiters that module constructs, which is
 why no date is attached to it. The method was added on 2026-08-28,
@@ -1199,6 +1197,7 @@ paragraph.
 | `GET /api/books/export` | 5 / min | username | **The import row's reason, not a new one**: the cost lands on this deployment's own resources rather than on a credential, a supplier or a stranger, which is the cost the `/api/imports/*` row above states and measures. One call walks the whole of one member's visible shelf, `marc.EXPORT_PAGE_RECORDS` rows at a time, holding a worker thread and a database session for the life of the response. Five a minute because a member comparing every format the menu offers spends one start on each, and five leaves at least one retry over that; `tests/test_ratelimit.py::TestTheExportDoorIsRationed` fails when a new format leaves none. **It counts starts, not responses in flight**, so five concurrent walks by one member are inside it and nothing counts across members at all; bounding that is a concurrency limit, which this is not. Keyed on the authenticated username rather than the address, because behind a reverse proxy an address collapses a household into one bucket and the retry hint is computed from that bucket's first hit, so a shared bucket would tell one member when another last exported |
 | `GET /api/backup` | 3 / min | username | The same reason and a different unit, which is why it is a second counter rather than a share of the one above: this builds the whole database and every cover image in one pass and holds the result in memory before a byte is sent. Sharing a budget would let a member's exports ration the administrator's backup. Three a minute is the impatient second click plus one. **It bounds how often an archive is built and neither how large one is nor how many are built at once**: the archive byte ceiling is the restore upload's cap and is not read on the way out, so the download is capped by nothing |
 | `POST /api/settings/catalogue-sources/{source}/test` | 10 / min | the deployment | An admin's **test this source** sends one lookup to a catalogue on demand, so the cost lands on somebody else's server, the metadata row's reason. **Keyed on the deployment rather than the admin**, because two admins pressing in turn are still one server asking. Admin only as well, since unbounded the button is a request generator with a friendly label |
+| `GET /api/books/{id}/headings/suggest` | 120 / min | username | **The import row's reason again**: each ask reads the local vocabulary copy and nothing outside it, so the cost is this deployment's own, a prefix scan holding the single SQLite connection. Two a second covers a cataloguer typing against the field's 300 ms pause; what it stops is a script asking in a loop |
 
 The last three of the first six are the ones that are not about this deployment: spending somebody else's
 quota is a way to get this deployment's address rate-limited upstream, which loses
@@ -2237,6 +2236,10 @@ Worth knowing before exposing this beyond a private network:
   is on by default and delivers nothing, so counting it would stamp every loan on every run
   and cut the three that do push from one attempt an hour to one per reminder interval,
   seven days by default.
+- **The patron email keeps its own stamp, `patron_notified_at`.** The channels share one
+  audience, the household, so one of them delivering is the household told; a patron is a
+  second audience, and sharing the stamp would let a digest that delivered silence a patron
+  whose mail failed, or the other way round, for the whole interval.
 - **One channel failing, in any way, does not stop the others.** A sender's refusal, its
   transport failure and any other exception it raises are all that channel's outcome: the
   senders after it still run, the loans the earlier ones delivered are still stamped, and

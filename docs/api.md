@@ -1363,10 +1363,10 @@ The loans list is not affected: a list of the household's loans is not the remin
 channel.
 
 `reason` is `disabled`, `no_url`, `nothing_due`, `unreachable`, `misconfigured`,
-`in_app_only` or `unexpected`, and is **null exactly when `sent` is true**. It is a closed
+`in_app_only`, `unexpected` or `no_address`, and is **null exactly when `sent` is true**. It is a closed
 set because a client has to render the difference and cannot branch on prose; `detail` is the
 same outcome as a sentence, for a log or a caller with no message catalogue. A 200 with
-`sent: false` is the ordinary answer for all seven: none of them is an error in the request.
+`sent: false` is the ordinary answer for all eight: none of them is an error in the request.
 `in_app_only` is the run where the in app notice is the only channel on, so nothing was sent
 anywhere and nothing was meant to be. `unexpected` is a sender that failed in a way the code
 does not anticipate, neither refused nor unreachable: it is that channel's failure, the
@@ -1374,7 +1374,7 @@ others still run, and the server log names the exception's type and where it was
 Its `detail` is a fixed sentence, never the exception's message.
 
 `senders` holds one `{sender, sent, loans, skipped_private, reason, detail}` per channel this
-run had something to report, in the order in app, webhook, email, Telegram. A pushing sender
+run had something to report, in the order in app, webhook, email, Telegram, patron email. A pushing sender
 is reported when it was **tried**, and a run with nothing overdue tries none, so the list is
 empty in two cases: every channel off, and nothing overdue while the in app notice is off.
 The in app row appears even on a run that pushed nothing, including one with nothing overdue,
@@ -1393,6 +1393,22 @@ same private books, because each goes to a channel rather than to a person, so t
 numbers agree. The in app row reports **0**: its audience is a member, so nothing is
 withheld from it.
 
+**The patron email** (`overdue_patron_mail_enabled`) sends each patron one message about
+the overdue loans that patron holds, to the address on their record, over the mail server
+the email channel uses. It has its own selection: a private book a patron borrowed is
+named to that patron, since a reminder about a book in your own hands discloses nothing,
+and never to anybody else, so its row reports a withheld count of **0**. A patron with no
+usable address is not skipped silently: the row reports `no_address`, and those loans are
+not stamped by it. **Each audience keeps its own stamp**: the patron email stamps
+`patron_notified_at` on the loans it delivered and the channels stamp `notified_at`, so each
+chases a loan at most once per reminder interval, and a failure on one never holds the other
+back. The patron email stops at its first failure that is not about one address, since any
+other failure would repeat for every patron: a refused recipient, and a non ASCII address on
+a server without `SMTPUTF8`, go on to the next patron. The message greets the patron by name
+and lists each loan with its due date. **Switching library mode on turns this and the
+email channel on, once**, leaving alone either one an admin has already set; a later switch
+on does not turn them on again, and switching the mode off changes neither.
+
 **A channel's standing record** is `GET /api/settings/sender-health`, admin only, one
 `{sender, last_run_at, sent, reason, detail, failing_since, failures, broken}` per channel
 that is switched on. Every run writes it, the manual one included, so a failure survives the
@@ -1400,7 +1416,7 @@ run that produced it rather than living only in the container log. `sent` is nul
 channel has run at all, because "not yet" and "fine" are different answers.
 
 `broken` is a judgement rather than a fact, and it is three rules. A refusal the app made
-itself (`no_url`, `misconfigured`) counts at once, since all of those are raised before a
+itself (`no_url`, `misconfigured`, `no_address`) counts at once, since all of those are raised before a
 socket is opened and nothing will work until a setting changes. An `unexpected` failure
 counts at once too: it is a case the code does not anticipate, and nothing says it will pass.
 A destination that could not be reached counts only after **24 hours** and at least **two**
@@ -1439,8 +1455,9 @@ warrants.
 ```
 
 Three properties of the request are load bearing. **Private books are excluded, on every
-channel that pushes**, in the query rather than afterwards: none of the three has a member
-identity behind it, and each lands where the whole household reads. The in app notice is
+channel that pushes to a channel**, in the query rather than afterwards: none of the three
+has a member identity behind it, and each lands where the whole household reads. The patron
+email is addressed to one person about their own loans, which is why it may name one. The in app notice is
 the exception and it is the rule rather than a hole in it: that query is rooted at the
 Shelf, so each reader gets what `visible_to()` already says they may see, their own private
 books included. `skipped_private` counts what

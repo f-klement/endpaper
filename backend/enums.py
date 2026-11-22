@@ -483,6 +483,23 @@ class HeadingKind(StrEnum):
     CARRIER = "carrier"
 
 
+class HeadingUse(StrEnum):
+    """What an authority heading may be used as: MARC 21 authority `008/14` to `16`.
+
+    The suggest field asks with the use of the field it fills, so a field adding
+    a subject is never offered a name heading: one would resolve and carry an
+    identifier, and still be filed under the wrong kind of thing, which nothing
+    downstream can detect. `vocabulary_copy.suggest` applies it.
+    """
+
+    #: `008/14`: valid as a main or added entry, a name.
+    NAME = "name"
+    #: `008/15`: valid as a subject added entry.
+    SUBJECT = "subject"
+    #: `008/16`: valid as a series added entry.
+    SERIES = "series"
+
+
 class LinkRelationship(StrEnum):
     """What an online link is to the Book that carries it: MARC 856's second indicator.
 
@@ -641,6 +658,47 @@ class AuthorityProvenance(StrEnum):
     #: A member confirmed a candidate that arrived from a search rather than
     #: from this book's record.
     MEMBER = "member"
+
+
+# **Beside `AuthorityProvenance`, not instead of it**, and the two answer
+# different questions about one row. Provenance says who tied the number to
+# this author: a record fetched for this book, or a person. This says which
+# file the number itself came from and which other file named it too. A cross
+# reference is `member` by provenance, because a person confirmed the record,
+# and `lobid` or `viaf` by supplier, because that file carried the number.
+# `ck_author_identifiers_supplier` couples them where they overlap: a
+# `catalogue` row is supplied by the catalogue and by nothing else.
+class AuthoritySupplier(StrEnum):
+    """Which file supplied an author identifier, or checked it.
+
+    `asserted_by` names the file the value came from and `checked_by` a
+    second file that tied the same value to the same person, or null where
+    none did: for a cross reference, a file whose own record carries the
+    value; for a member's GND number, lobid, where its record for that number
+    names the author. A reader can tell a number two files agree on from one
+    that a single file carried, which looked identical before either was
+    recorded.
+
+    `unrecorded` is a row stored before the supplier was recorded. It is never
+    a guess: the same scheme under the same provenance arrived by more than
+    one route, so the row cannot say which.
+    """
+
+    #: The catalogue record fetched for this book's own ISBN.
+    CATALOGUE = "catalogue"
+    #: A member's request named the value.
+    MEMBER = "member"
+    #: The GND, read through lobid.
+    LOBID = "lobid"
+    WIKIDATA = "wikidata"
+    VIAF = "viaf"
+    #: The Library of Congress name authority file.
+    LOC = "loc"
+    ORCID = "orcid"
+    #: The Biblioteca Nacional de Portugal.
+    BNP = "bnp"
+    #: Stored before the supplier was recorded.
+    UNRECORDED = "unrecorded"
 
 
 class ExportFormat(StrEnum):
@@ -833,6 +891,14 @@ class SettingKey(StrEnum):
     # the entire argument for its existence.
     OVERDUE_IN_APP_ENABLED = "overdue_in_app_enabled"
 
+    # The patron's own overdue notice: one mail per patron, about the loans
+    # that patron holds and nothing else, to the address on their record.
+    OVERDUE_PATRON_MAIL_ENABLED = "overdue_patron_mail_enabled"
+    # Whether switching library mode on has already turned on the patron
+    # notice and the service digest. Not a preference: written once, by the
+    # settings router, so a later switch on finds it set and changes nothing.
+    LIBRARY_MODE_NOTICES_DEFAULTED = "library_mode_notices_defaulted"
+
     # Library mode and the public catalogue. Two switches, nested, never one:
     # library mode changes what a **cataloguer** sees and publishes nothing,
     # and a library running it internally without publishing is the common
@@ -950,6 +1016,11 @@ class SettingKey(StrEnum):
     # it sooner.
     VOCABULARY_OFFER_DISMISSED = "vocabulary_offer_dismissed"
 
+    # Whether a book's heading field offers headings from the local vocabulary
+    # copies as a cataloguer types (#135). On by default and read with library
+    # mode, so a household never meets it: `settings_store.headings_from_vocabulary`.
+    HEADINGS_FROM_VOCABULARY = "headings_from_vocabulary"
+
 
 class OverdueSender(StrEnum):
     """Which channel a reminder went out on.
@@ -971,6 +1042,12 @@ class OverdueSender(StrEnum):
     WEBHOOK = "webhook"
     EMAIL = "email"
     TELEGRAM = "telegram"
+    #: One mail per patron, about that patron's own overdue loans, to the
+    #: address on their record. The one pushing sender whose audience is a
+    #: person rather than a channel, so the one that names a private Book: the
+    #: borrower holding it (owner's decision on #24). Its loans are its own selection,
+    #: `notifications.due_for_patrons`, not the digest the other three share.
+    PATRON_MAIL = "patron_mail"
 
 
 class OverdueNotifyReason(StrEnum):
@@ -1016,6 +1093,12 @@ class OverdueNotifyReason(StrEnum):
     #: because nothing says it is transient either. The server log names the
     #: exception's type and where it was raised; the loans are left to retry.
     UNEXPECTED = "unexpected"
+    #: A patron with an overdue loan has no usable email address, so the
+    #: patron notice for that loan was not sent. Reported rather than skipped,
+    #: so a notice nobody could address is never a notice nobody hears about.
+    #: Decided before any socket is opened, like `MISCONFIGURED`, and cleared by
+    #: a person: an address on the record, or the switch off.
+    NO_ADDRESS = "no_address"
 
 
 class Locale(StrEnum):
@@ -1056,6 +1139,9 @@ class BulkAction(StrEnum):
     # it, the same way SET_LOCATION's empty string unpacks a box.
     SET_COLLECTION = "set_collection"
     DELETE = "delete"
+    # Give each owned copy in the selection an accession number, minted from
+    # its row. Idempotent: a copy that has one keeps it.
+    ASSIGN_ACCESSION = "assign_accession"
 
 
 class CustomFieldKind(StrEnum):

@@ -307,6 +307,12 @@ BACKUP_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 # a held key from becoming a stream at one host.
 SOURCE_TEST_LIMIT = RateLimit(max_attempts=10, window_seconds=60)
 
+# The heading field asks once per pause in typing, and each ask reads the local
+# vocabulary copy and nothing outside it, so the cost is this server's own. Two a
+# second per member covers a cataloguer typing against the client's debounce;
+# what it stops is a script holding the one SQLite connection with prefix scans.
+HEADING_SUGGEST_LIMIT = RateLimit(max_attempts=120, window_seconds=60)
+
 
 #: How many distinct keys one limiter remembers at once.
 #:
@@ -486,6 +492,7 @@ public_catalogue_limiter = SlidingWindowLimiter(PUBLIC_CATALOGUE_LIMIT)
 export_limiter = SlidingWindowLimiter(EXPORT_LIMIT)
 backup_limiter = SlidingWindowLimiter(BACKUP_LIMIT)
 source_test_limiter = SlidingWindowLimiter(SOURCE_TEST_LIMIT)
+heading_suggest_limiter = SlidingWindowLimiter(HEADING_SUGGEST_LIMIT)
 recovery_request_address_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_request_account_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_code_limiter = SlidingWindowLimiter(RECOVERY_CODE_LIMIT)

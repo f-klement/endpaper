@@ -219,8 +219,13 @@ def _origin_format(scheme_id: str, value: object) -> tuple[str, ...]:
 #: here stores one to copy, since the Library of Congress MODS reader stores no
 #: identifier and 117 of 117 LCSH fields in LC MARC records measured 2026-11-20
 #: carried no `$0`.
+#:
+#: `_GND_STORED_PREFIX` is the same `(DE-588)` as `marc_fields.GND_PREFIX`,
+#: spelled here because this module imports nothing of the application;
+#: `tests/test_vocabularies.py` pins the two equal.
+_GND_STORED_PREFIX: Final = "(DE-588)"
 _URI_TO_STORED: Final[dict[str, tuple[re.Pattern[str], str]]] = {
-    "gnd": (re.compile(r"https?://d-nb\.info/gnd/(?P<number>[0-9X-]+)"), "(DE-588){number}"),
+    "gnd": (re.compile(r"https?://d-nb\.info/gnd/(?P<number>[0-9X-]+)"), _GND_STORED_PREFIX + "{number}"),
     "lcsh": (
         re.compile(r"https?://id\.loc\.gov/authorities/subjects/(?P<number>[a-z]+[0-9]+)"),
         "http://id.loc.gov/authorities/subjects/{number}",
@@ -236,6 +241,32 @@ def stored_identifier(scheme: str, raw: str) -> str:
     rule = _URI_TO_STORED.get(scheme)
     match = rule[0].fullmatch(raw.strip()) if rule else None
     return rule[1].format(number=match["number"]) if rule and match else raw.strip()
+
+
+def classification_row(scheme: str, identifier: str, label: str) -> tuple[str, str | None]:
+    """The `number` and `label` of the `classifications` row an import writes
+    for the entry of `scheme` stored as `identifier` under the preferred `label`.
+
+    **Not the entry's own form**, which is `stored_identifier`'s, a `$0`. The
+    column holds what the importers write, so a heading picked from a copy and
+    the same heading arriving on a record are one row under
+    `uq_classifications_book_scheme_number` rather than two:
+
+    - GND: the number bare, as `marc_fields.Subfields.gnd_identifier` stores
+      it, and the label. `marc` puts the prefix back on export; one left on
+      here would be written twice.
+    - LCSH: the authorised heading string as the number and no label, as
+      `marc._extra_headings` stores one. LCSH has no identifier on a record
+      (see `_URI_TO_STORED`), so the URI has nowhere to go.
+
+    A scheme with neither rule keeps the identifier as the number, as
+    `stored_identifier` keeps a spelling it has no rule for.
+    """
+    if scheme == "gnd":
+        return identifier.removeprefix(_GND_STORED_PREFIX), label
+    if scheme == "lcsh":
+        return label, None
+    return identifier, label
 
 
 def is_publisher_identifier(scheme: str, raw: str) -> bool:

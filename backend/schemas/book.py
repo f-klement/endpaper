@@ -918,6 +918,10 @@ class BookColumns(BaseModel):
     purchase_currency: str | None = None
     purchased_at: date | None = None
     purchase_source: str | None = None
+    #: The accession number on this copy's label, null until somebody assigns
+    #: one with `POST /api/books/bulk`. Member only: never on the public
+    #: catalogue, OAI-PMH or SRU (`tests/schemas/test_public.py`).
+    accession: str | None = None
     #: Where the record came from, null for a row written before anybody asked.
     record_origin: RecordOrigin | None = None
     #: Whether anything here changed the record since it arrived, null likewise.

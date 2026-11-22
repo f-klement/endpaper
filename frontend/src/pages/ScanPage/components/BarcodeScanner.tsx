@@ -46,6 +46,24 @@ const BOOK_FORMATS = [
   BarcodeFormat.UPC_E,
 ];
 
+/**
+ * The symbologies an accession label may carry, which the camera must read.
+ *
+ * Both, because which one a label prints is the label stock's (owner,
+ * 2026-11-22). Not yet in any reader's hints: which camera job reads labels is
+ * ticket 26's work, and the acquisition scanner keeps `BOOK_FORMATS`, since
+ * each extra format costs every frame. **Held to
+ * `conformance/cases/accession.json`** by `tests/conformance/accession.test.ts`,
+ * as `accession.LABEL_SYMBOLOGIES` is on the server. That holds a declaration,
+ * not a camera: ticket 26's label reader must take its hints from this set, or
+ * the guard stays green while a label fails at the shelf, where it looks like
+ * poor light.
+ */
+export const ACCESSION_FORMATS = [
+  BarcodeFormat.CODE_128,
+  BarcodeFormat.CODE_39,
+];
+
 function bookReaderHints(): Map<DecodeHintType, unknown> {
   const hints = new Map<DecodeHintType, unknown>();
   hints.set(DecodeHintType.POSSIBLE_FORMATS, BOOK_FORMATS);

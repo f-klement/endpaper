@@ -52,6 +52,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session
 
+import accession
 import classification_schemes
 import cover_store
 import covers
@@ -61,7 +62,7 @@ import harvest
 import settings_store
 from config import ALLOWED_IMAGE_EXTENSIONS
 from database import Base
-from enums import VerificationProvenance
+from enums import AuthoritySupplier, VerificationProvenance
 from models import (
     BLANK_IS_NULL,
     OPDS_CREDENTIAL_PREFIX,
@@ -119,7 +120,9 @@ logger = logging.getLogger("endpaper.backup")
 #: carry takes its database default, which is right for every one of them
 #: except `tags.is_predefined`; see `_repair_seeded_tags`.
 #: Still 1. The envelope has not changed: the manifest layout is the same, the
-#: table list is the same, and covers are the same files under `covers/`.
+#: table list is the same, and covers are the same files under `covers/`. The
+#: one key added since, `_HIGHEST_ISSUED`, is optional both ways: a reader
+#: before it ignores it, and `_issued_marks` restores an archive without it.
 FORMAT_VERSION = 1
 
 MANIFEST_NAME = "endpaper.json"
@@ -519,6 +522,7 @@ def _parse_row(
     _blank_currency_is_null(parsed, table)
     _fold_name(parsed, table)
     _blank_tag_key(parsed, table)
+    _unrecorded_supplier(parsed, table)
     _file_classification(parsed, table, filed_under or {})
     _refuse_a_bad_credential(parsed, table)
     return parsed
@@ -662,6 +666,20 @@ def _fold_name(parsed: dict[str, Any], table: Table) -> None:
                 f"{repr(written_name)[:120]}"
             )
         parsed["name_folded"] = fold_collection_name(written_name)
+
+
+def _unrecorded_supplier(parsed: dict[str, Any], table: Table) -> None:
+    """An author identifier from an archive written before suppliers were
+    recorded, read as `unrecorded`.
+
+    **Decided by the key's presence, never its value**: an archive carrying the
+    key says what it knows, and one written before the column cannot. Without
+    this the insert fails on `asserted_by`, which has no default, and the
+    whole restore of an older archive answers 500. `checked_by` needs nothing:
+    absent is null, which is what such a row knows.
+    """
+    if table.name == "author_identifiers" and "asserted_by" not in parsed:
+        parsed["asserted_by"] = AuthoritySupplier.UNRECORDED.value
 
 
 def _blank_tag_key(parsed: dict[str, Any], table: Table) -> None:
@@ -858,6 +876,7 @@ def build_archive(db: Session) -> bytes:
         # same thing.
         "created_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
         "tables": {},
+        _HIGHEST_ISSUED: _highest_issued(db),
     }
 
     for name, _model, table in _TABLES:
@@ -1210,6 +1229,7 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
 
     _refuse_a_colliding_pair(tables)
     lines = _lines_entries(tables, archive)
+    marks = _issued_marks(manifest)
 
     # `wholesale` because this replaces every record a harvester reads: it
     # stamps them all and tombstones what the archive does not publish, once,
@@ -1222,7 +1242,7 @@ def restore(db: Session, data: bytes) -> dict[str, int]:
             db.execute(delete(table))
 
         restored = _insert_rows(db, tables, lines, archive)
-        _raise_the_id_counters(db)
+        _raise_the_id_counters(db, marks)
 
     # After the new settings rows, not before: the archive carries its own
     # value for this key and would otherwise restore an older epoch, which is
@@ -1363,19 +1383,123 @@ _RAISE_A_SEQUENCE = (
 )
 
 
-def _raise_the_id_counters(db: Session) -> None:
-    """Every restored table's id counter above its highest restored row.
+#: Raise one SQLite `AUTOINCREMENT` table's counter to at least `:highest`.
+#: Two statements because `sqlite_sequence` has no unique key to upsert on, and
+#: the row is missing where the archive holds none of that table's rows: a
+#: library whose every copy was purged still carries its mark.
+_RAISE_AN_SQLITE_COUNTER: Final = (
+    "INSERT INTO sqlite_sequence (name, seq) SELECT :table, 0 "
+    "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = :table)",
+    "UPDATE sqlite_sequence SET seq = MAX(seq, :highest) WHERE name = :table",
+)
+
+#: The manifest key holding, for each table whose rows carry an accession
+#: number, the highest id its counter had issued when the archive was taken.
+_HIGHEST_ISSUED: Final = "highest_issued"
+
+#: The largest id a mark may name: Postgres's `integer`, the narrower engine's
+#: id. A mark past it would fail `setval` halfway through the restore. One at
+#: it restores and then fails every Postgres insert into the table, and one
+#: past `accession.MAX_SERIAL` ends numbering; a row with such an id does both.
+_ID_CEILING: Final = 2**31 - 1
+
+
+#: The last id a table's counter issued, keyed by whether the engine is
+#: Postgres; None where it has issued none. SQLite ignores the unused parameter.
+_READ_A_COUNTER: Final = {
+    True: text("SELECT pg_sequence_last_value(pg_get_serial_sequence(:table, :column)::regclass)"),
+    False: text("SELECT seq FROM sqlite_sequence WHERE name = :table"),
+}
+
+
+def _numbered_tables() -> Iterator[tuple[str, Table, Column[Any]]]:
+    """Each archived table whose rows carry an accession number, with its id."""
+    for name, _model, table in _TABLES:
+        column = table.autoincrement_column
+        if column is not None and "accession" in table.c:
+            yield name, table, column
+
+
+def _highest_issued(db: Session) -> dict[str, int]:
+    """Each numbered table's mark: its counter, or its highest row where that
+    is higher. The counter is what remembers a purged copy's id."""
+    postgres = db.get_bind().dialect.name == "postgresql"
+    marks = {}
+    for name, table, column in _numbered_tables():
+        counter = db.execute(_READ_A_COUNTER[postgres], {"table": table.name, "column": column.name}).scalar()
+        row = db.execute(select(func.max(column))).scalar()
+        issued = [value for value in (counter, row) if value is not None]
+        if issued:
+            marks[name] = max(issued)
+    return marks
+
+
+def _issued_marks(manifest: dict[str, Any]) -> dict[str, int]:
+    """The archive's marks, refused before anything is deleted where one is
+    not an id.
+
+    **An archive without them restores**, since one taken before they existed
+    must: each counter then goes past the highest restored row and the highest
+    serial a restored code carries, and no further. A copy purged before such
+    an archive was taken left no trace in it, so after a restore onto a fresh
+    database its id, and with it its accession number, may be issued again.
+    """
+    marks = manifest.get(_HIGHEST_ISSUED, {})
+    if not isinstance(marks, dict) or not all(
+        type(mark) is int and 0 <= mark <= _ID_CEILING for mark in marks.values()
+    ):
+        raise RestoreError("The backup's id counters are not the shape a backup writes.")
+    return marks
+
+
+def _raise_the_id_counters(db: Session, marks: dict[str, int]) -> None:
+    """Every restored table's id counter above its highest restored row, and
+    a numbered table's above its mark.
 
     The rows arrive with their ids and no counter, and Postgres moves a sequence
     only when it issues the id, so on a fresh database the next insert into any
-    table would take a restored row's id and fail. SQLite needs nothing: it issues
-    above the highest row, and an `AUTOINCREMENT` table's counter follows an
-    explicit id.
+    table would take a restored row's id and fail. SQLite needs nothing for that:
+    it issues above the highest row, and an `AUTOINCREMENT` table's counter
+    follows an explicit id.
+
+    **A numbered table goes past every id its counter had issued, on both
+    engines**, because an accession number is unique for life across a restore
+    (owner, 2026-11-22). A purged copy's id is above every restored row when it
+    was the last one added, and issued again it mints that copy's code for a new
+    one: a weeded copy's label would then scan as an unrelated Book.
     """
-    if db.get_bind().dialect.name != "postgresql":
-        return
-    for _name, _model, table in _TABLES:
-        _raise_one_id_counter(db, table)
+    postgres = db.get_bind().dialect.name == "postgresql"
+    if postgres:
+        for _name, _model, table in _TABLES:
+            _raise_one_id_counter(db, table)
+    for name, table, column in _numbered_tables():
+        highest = max(marks.get(name, 0), _highest_carried_serial(db, table))
+        if not highest:
+            continue
+        if postgres:
+            _raise_a_counter_to(db, table, column, highest)
+        else:
+            for statement in _RAISE_AN_SQLITE_COUNTER:
+                db.execute(text(statement), {"table": table.name, "highest": highest})
+
+
+def _highest_carried_serial(db: Session, table: Table) -> int:
+    """The highest serial `table`'s restored accession numbers carry, or 0.
+
+    What keeps an archive without marks from reissuing a code a merge carried:
+    a merge moves a deleted copy's code onto its keeper, so the code can name an
+    id above every restored row, and issued again it fails the unique index in
+    the bulk assign that numbers the new copy.
+
+    Read and checked here rather than taken as `MAX` in SQL: an archive decides
+    these values and nothing validates them on the way in, so a malformed one
+    would either sort above every real code or fail `int` and refuse the
+    restore. The restore already holds every row of the archive in memory.
+    """
+    codes = db.execute(select(table.c.accession).where(table.c.accession.is_not(None))).scalars()
+    end = accession.SERIAL_START + accession.SERIAL_DIGITS
+    serials = (int(code[accession.SERIAL_START : end]) for code in codes if accession.is_accession(code))
+    return max(serials, default=0)
 
 
 def _raise_one_id_counter(db: Session, table: Table) -> None:

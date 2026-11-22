@@ -20,4 +20,5 @@ export const OverdueSender = {
   webhook: "webhook",
   email: "email",
   telegram: "telegram",
+  patron_mail: "patron_mail",
 } as const;

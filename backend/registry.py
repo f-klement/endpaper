@@ -1,4 +1,5 @@
-"""The curated catalogue registry this build ships, and what picking an entry writes.
+"""The curated catalogue registry this build ships, what picking an entry writes,
+and the picks a lookup plan asks at its tail.
 
 ## Vendored, never fetched
 

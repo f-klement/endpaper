@@ -24,6 +24,7 @@ export const SENDER_LABELS: Record<OverdueSender, MessageKey> = {
   [OverdueSender.webhook]: "settings.overdueSenderWebhook",
   [OverdueSender.email]: "settings.overdueSenderEmail",
   [OverdueSender.telegram]: "settings.overdueSenderTelegram",
+  [OverdueSender.patron_mail]: "settings.overdueSenderPatronMail",
 };
 
 /**
@@ -55,4 +56,5 @@ export const SENDER_ROW_REASONS: Record<OverdueNotifyReason, MessageKey> = {
   [OverdueNotifyReason.misconfigured]: "settings.overdueRowMisconfigured",
   [OverdueNotifyReason.in_app_only]: "settings.overdueRowInAppOnly",
   [OverdueNotifyReason.unexpected]: "settings.overdueRowUnexpected",
+  [OverdueNotifyReason.no_address]: "settings.overdueRowNoAddress",
 };

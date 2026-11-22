@@ -158,6 +158,14 @@ export const en = {
     "Discard these suggestions? A later harvest of the same record will not suggest them again.",
   "pendingHeadings.discardConfirmOne":
     "Discard this suggestion? A later harvest of the same record will not suggest it again.",
+  "headingField.section": "Add a heading",
+  "headingField.label": "Find a heading",
+  "headingField.placeholder": "Type the start of a heading",
+  "headingField.vocabulary": "Vocabulary",
+  "headingField.settingTitle": "Heading field",
+  "headingField.setting": "Offer headings from the local vocabularies",
+  "headingField.settingHint":
+    "On a book, a heading field offers headings from a loaded copy of a vocabulary as you type. It reads only the copy on this server.",
   "onlineLinks.section": "Online links",
   "onlineLinks.relation.resource": "The resource itself",
   "onlineLinks.relation.version": "A version of it",
@@ -1184,6 +1192,25 @@ export const en = {
     "failed in a way the app did not expect. The server log names the cause.",
   "settings.overdueRowNothingSent": "nothing was sent.",
 
+  // ── The patron's own overdue notice (#24) ───────────────────────────────
+  //
+  // One mail per patron about the loans that patron holds. It goes to the
+  // borrower, so it names a private book they hold (owner's decision on #24).
+  "settings.overdueSenderPatronMail": "Patron email",
+  "settings.overdueNotSentNoAddress":
+    "Nothing was sent: a patron with an overdue loan has no usable email address. Add one to their record, or switch the patron email off.",
+  "settings.overdueRowNoAddress":
+    "a patron with an overdue loan has no usable email address.",
+  "settings.patronMail": "Email to each patron",
+  "settings.patronMailEnable":
+    "Email each patron about their own overdue loans",
+  "settings.patronMailHint":
+    "One message to each patron, at the address on their record, listing only the loans that patron holds. It uses the mail server above, and a loan is chased at most once per reminder interval. Switching library mode on turns this and the household email on, once, unless you have set either yourself; switching it off changes neither.",
+  "settings.public.modeTurnsOnNotices":
+    "The first time it is switched on, it also turns on the overdue emails to each patron and to the household, unless you have set them yourself. Both are under Lending.",
+  "settings.patronMailPrivacyNote":
+    "This one goes to the patron holding the book, so it names a private book they borrowed, and never anybody else's loan. A patron with no email address is reported here rather than skipped.",
+
   // ── In app reminders, and whether a channel is working ──────────────────
   //
   // The one channel that needs nothing obtained first, and the standing record
@@ -1826,6 +1853,10 @@ export const en = {
   "copy.purchaseSource": "Bought from",
   "copy.save": "Save copy details",
   "copy.purchaseSourcePlaceholder": "The Oxfam on the high street",
+
+  // ── Accession numbers ───────────────────────────────────────────────────
+  "accession.label": "Accession number",
+  "accession.assign": "Give accession numbers",
 
   // ── More than one copy of the same book ─────────────────────────────────
   "copies.title": "Copies",

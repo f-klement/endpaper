@@ -149,6 +149,40 @@ describe("LibrarySettingsPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("switches the heading field off from library mode", async () => {
+    stubLibraryMode(true);
+    api.on(/\/api\/settings$/, { body: SETTINGS }, "GET");
+    api.on(/\/api\/settings$/, { body: SETTINGS }, "PUT");
+    render();
+
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Offer headings from the local vocabularies",
+    });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(api.lastCall(/\/api\/settings$/, "PUT")?.body).toEqual({
+        headings_from_vocabulary: false,
+      }),
+    );
+  });
+
+  it("does not offer the heading field switch to a household", async () => {
+    stubLibraryMode(false);
+    render();
+
+    await waitFor(() =>
+      expect(api.lastCall(/\/api\/settings$/, "GET")).toBeDefined(),
+    );
+    await screen.findByRole("heading", { name: "Bring a library across" });
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Offer headings from the local vocabularies",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers a harvest once the harvester is switched on", async () => {
     stubLibraryMode(true);
     api.on(/\/api\/settings$/, {

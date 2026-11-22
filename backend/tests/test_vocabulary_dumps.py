@@ -94,6 +94,30 @@ class TestTheLibraryOfCongressSubjectHeadings:
             entry.subject for entry in vocabularies.read_entries(out, _schemes()["lcsh"], recorded)
         ]
 
+    def test_a_subdivision_record_is_passed_over_by_its_usage_note(self, tmp_path):
+        # The release's own `History` subdivision record of 2026-11-18, trimmed
+        # to the keys read, and a heading whose note says it may also subdivide.
+        subdivision = (
+            b'{"@graph": [{"@id": "http://id.loc.gov/authorities/subjects/sh99005024", '
+            b'"skos:prefLabel": {"@language": "en", "@value": "History"}, '
+            b'"skos:note": "Use as a topical subdivision under names of countries, cities, etc., '
+            b"and individual corporate bodies, uniform titles of sacred works, and under classes "
+            b'of persons, ethnic groups, and topical headings."}]}\n'
+        )
+        geographic = (
+            b'{"@graph": [{"@id": "http://id.loc.gov/authorities/subjects/sh00000000", '
+            b'"skos:prefLabel": "Somewhere", '
+            b'"skos:note": "As a geographic subdivision, this heading is used indirectly."}]}\n'
+        )
+        release = io.BytesIO(gzip.compress(LCSH.read_bytes() + subdivision + geographic))
+        out = tmp_path / "lcsh.jsonl"
+
+        recorded = vocabulary_dumps.convert(_schemes()["lcsh"], release, out)
+        subjects = [entry.subject for entry in vocabularies.read_entries(out, _schemes()["lcsh"], recorded)]
+
+        assert "History" not in subjects
+        assert "Somewhere" in subjects
+
     def test_the_nodes_passed_over_for_their_id_form_are_counted_in_one_warning(self, tmp_path, caplog):
         foreign = b'{"@id": "http://example.org/x", "skos:prefLabel": "Foreign"}\n' * 2
         release = io.BytesIO(gzip.compress(LCSH.read_bytes() + foreign))

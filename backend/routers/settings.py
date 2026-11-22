@@ -73,7 +73,7 @@ _SENDER_TEXT: Final[dict[str, SettingKey]] = {
 #: override to refuse and no sender health to forget.
 #:
 #: A table for the same reason `_SENDER_BOOL` is one, and separate from it
-#: because these are not senders: `notifications.sender_for` answers None for
+#: because these are not senders: `notifications.senders_for` answers none for
 #: every one of them, so routing them through `_SENDER_BOOL` would work and
 #: would file them under a heading they do not belong to.
 #:
@@ -112,6 +112,10 @@ _STORED_BOOL: Final[dict[str, SettingKey]] = {
     "public_availability_enabled": SettingKey.PUBLIC_AVAILABILITY_ENABLED,
     # The library page's vocabulary offer, put away for the installation.
     "vocabulary_offer_dismissed": SettingKey.VOCABULARY_OFFER_DISMISSED,
+    # Whether a book's heading field offers headings from the local vocabulary
+    # copies. Stored whatever library mode says: `settings_store.headings_from_vocabulary`
+    # reads both.
+    "headings_from_vocabulary": SettingKey.HEADINGS_FROM_VOCABULARY,
 }
 
 _SENDER_BOOL: Final[dict[str, SettingKey]] = {
@@ -122,7 +126,14 @@ _SENDER_BOOL: Final[dict[str, SettingKey]] = {
     # One field, because the channel is the app: no destination, no credential,
     # and nothing an operator can pin from the environment.
     "overdue_in_app_enabled": SettingKey.OVERDUE_IN_APP_ENABLED,
+    # The patron's own notice, over the mail server the digest uses.
+    "overdue_patron_mail_enabled": SettingKey.OVERDUE_PATRON_MAIL_ENABLED,
 }
+
+#: The two notices the first switch of library mode on turns on (#24): the
+#: patron's own, and the service digest to `overdue_mail_to`. An archive that
+#: switches the mode on is otherwise chasing nobody without being told.
+_LIBRARY_MODE_NOTICES: Final = (SettingKey.OVERDUE_PATRON_MAIL_ENABLED, SettingKey.OVERDUE_MAIL_ENABLED)
 
 
 def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
@@ -136,10 +147,10 @@ def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
     and a household with nothing overdue attempts no sender, so no later run
     overwrote it either. The banner was permanent.
 
-    `notifications.sender_for` is the single answer to "which channel does this
-    row configure", and it lives with the senders rather than here. A row that
-    configures nothing (the locale, the Google key, the reminder interval)
-    answers `None` and this is then an ordinary write.
+    `notifications.senders_for` is the single answer to "which channels does
+    this row configure", and it lives with the senders rather than here. A row
+    that configures nothing (the locale, the Google key, the reminder interval)
+    answers none and this is then an ordinary write.
 
     **A `dict` goes to `set_json` and a `str` to `set_value`, through this same
     door rather than a second one.** The provider list is the first row here
@@ -158,8 +169,7 @@ def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
         # A secret with no key to seal it with: refused, never written in
         # plaintext. The message says how to make a key.
         raise HTTPException(status_code=409, detail=str(refusal)) from None
-    sender = notifications.sender_for(key)
-    if sender is not None:
+    for sender in notifications.senders_for(key):
         notifications.forget_health(db, sender)
 
 
@@ -301,6 +311,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
         telegram_chat_id=settings_store.in_force(db, SettingKey.TELEGRAM_CHAT_ID),
         telegram_chat_id_from_env=settings_store.is_from_env(SettingKey.TELEGRAM_CHAT_ID),
         overdue_in_app_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_IN_APP_ENABLED),
+        overdue_patron_mail_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_PATRON_MAIL_ENABLED),
         unreadable_secrets=settings_store.unreadable_secrets(db, encryption_key),
         # The two switches as stored, so the form shows what an admin typed,
         # plus the conjunction that decides whether anything is actually
@@ -319,6 +330,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
         public_availability_enabled=settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED),
         accounts_open_to_outsiders=settings_store.accounts_are_open_to_outsiders(db),
         vocabulary_offer_dismissed=settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED),
+        headings_from_vocabulary=settings_store.get_bool(db, SettingKey.HEADINGS_FROM_VOCABULARY),
         # **The stored list, not the one in force.** An admin has to see what
         # they set: a screen that hid Google Books because no key is configured
         # would be one they cannot use, since they would switch it on and watch
@@ -443,8 +455,38 @@ def _write_reminder_settings(db: DbSession, payload: SettingsUpdate) -> None:
 
     if payload.overdue_reminder_days is not None:
         # Not a channel's configuration: it says how often a loan is chased, so
-        # `sender_for` answers None and no health record is dropped.
+        # `senders_for` answers none and no health record is dropped.
         _store(db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days))
+
+
+def _default_notices_on(db: DbSession, payload: SettingsUpdate) -> None:
+    """Turn both overdue notices on when library mode is switched on, the first time only.
+
+    **A default, not a rule.** Once, marked by `LIBRARY_MODE_NOTICES_DEFAULTED`,
+    so an operator who switches a notice off afterwards is not overridden by a
+    later toggle of the mode. **Switching the mode off touches neither**: a
+    mode switch must not be a hidden change to who gets mail.
+
+    **A default fills a value nobody chose, and never overrides one somebody
+    did**: a notice with a stored row is left as stored, so a household that
+    switched its email off before turning library mode on keeps it off. Each
+    toggle on the lending page writes its own key alone, so a stored row is a
+    choice rather than a side effect of saving another field.
+
+    Only on a switch from off, so an upgrade that finds the mode already on
+    changes nobody's mail by itself. Before `_SENDER_BOOL` is written, so a
+    payload that sets a notice in the same request has the last word; a notice
+    the environment pins is left to the environment. With no mail server set,
+    the next run with a loan overdue reports both mail senders `misconfigured`
+    at once, which is meant: a library chasing nobody should be told so.
+    """
+    if not payload.library_mode or settings_store.get_bool(db, SettingKey.LIBRARY_MODE):
+        return
+    if settings_store.get_bool(db, SettingKey.LIBRARY_MODE_NOTICES_DEFAULTED):
+        return
+    for key in settings_store.unchosen(db, _LIBRARY_MODE_NOTICES):
+        _store(db, key, _flag(True))
+    _store(db, SettingKey.LIBRARY_MODE_NOTICES_DEFAULTED, _flag(True))
 
 
 def _write_table[T](
@@ -625,6 +667,7 @@ def update_settings(
         # Trimmed by `SettingsUpdate`, checked by `harvester.is_harvestable`
         # above unless "", and refused empty while the switch is on.
         _store(db, SettingKey.OAI_HARVEST_BASE_URL, payload.oai_harvest_base_url)
+    _default_notices_on(db, payload)
     _write_table(db, payload, _STORED_BOOL, _flag, refuse_pinned=False)
     _write_table(db, payload, _SENDER_BOOL, _flag, refuse_pinned=True)
 

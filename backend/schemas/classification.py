@@ -28,8 +28,10 @@ from schemas.common import one_line
 #:
 #: **Both capped writers, and there are exactly two of those.**
 #: `classifications.add_headings` serves the create route directly, and the
-#: evidence module's two doors: `evidence.confirm` for a selected enrichment and
-#: `evidence.confirm_file_headings` for a MARC import.
+#: evidence module's doors: `evidence.confirm` for a selected enrichment,
+#: `evidence.confirm_file_headings` for a MARC import,
+#: `evidence.confirm_harvested_headings` for a harvest an admin confirmed, and
+#: `evidence.confirm_picked_heading` for a heading picked on a Book.
 #: The merge transfer in `folding.py` serves a merge. `backup.restore` is a third writer of
 #: this table (`backup.py`, through `_TABLES`) and is deliberately uncapped: it
 #: reinstates a whole database rather than adding to one, it is admin only, and
@@ -103,9 +105,9 @@ class ClassificationIn(BaseModel):
         a value the server can read perfectly well.
 
         What a stored `subject` would cost is `enums.HeadingKind`'s argument and
-        is not repeated here. What this site adds is the reach: both routes into
-        it, `POST /api/books` and `enrich/apply`, take this model from the
-        client.
+        is not repeated here. What this site adds is the reach: each route into
+        it, `POST /api/books`, `enrich/apply` and `POST /api/books/{id}/headings`,
+        takes this model from the client.
         """
         return None if value is HeadingKind.SUBJECT else value
 
@@ -241,6 +243,16 @@ class ClassificationOut(BaseModel):
     #: on the server and the two must not disagree.
     kind: HeadingKind | None = None
     model_config = {"from_attributes": True}
+
+
+class SuggestingVocabularyOut(BaseModel):
+    """A vocabulary a book's heading field offers headings from: one declared
+    in `vocabularies.yaml` with a local copy loaded."""
+
+    #: The code a heading picked from it carries, as `ClassificationOut.scheme`.
+    scheme: str
+    #: The vocabulary's own name, as its declaration gives it.
+    name: str
 
 
 class HeadingFacetOut(BaseModel):

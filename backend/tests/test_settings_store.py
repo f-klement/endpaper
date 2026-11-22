@@ -50,6 +50,20 @@ class TestReadAndWrite:
         settings_store.set_value(db, SettingKey.MAIL_SERVER, "second")
         assert settings_store.get_raw(db, SettingKey.MAIL_SERVER) == "second"
 
+    def test_a_value_equal_to_the_default_is_still_a_choice(self, db):
+        settings_store.set_value(db, SettingKey.OVERDUE_MAIL_ENABLED, "false")
+        keys = (SettingKey.OVERDUE_MAIL_ENABLED, SettingKey.OVERDUE_PATRON_MAIL_ENABLED)
+        assert settings_store.unchosen(db, keys) == (SettingKey.OVERDUE_PATRON_MAIL_ENABLED,)
+
+    def test_a_cleared_key_is_unchosen_again(self, db):
+        settings_store.set_value(db, SettingKey.MAIL_SERVER, "smtp.example.org")
+        settings_store.set_value(db, SettingKey.MAIL_SERVER, None)
+        assert settings_store.unchosen(db, (SettingKey.MAIL_SERVER,)) == (SettingKey.MAIL_SERVER,)
+
+    def test_a_key_the_environment_pins_is_chosen(self, db, monkeypatch):
+        monkeypatch.setenv("MAIL_SERVER", "smtp.example.org")
+        assert settings_store.unchosen(db, (SettingKey.MAIL_SERVER,)) == ()
+
     @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on"])
     def test_truthy_spellings(self, db, value):
         settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_ENABLED, value)
@@ -183,6 +197,14 @@ class TestLibraryModeAndThePublicCatalogue:
         settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
         settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
         assert settings_store.sru_is_served(db) is False
+
+    def test_headings_from_a_vocabulary_are_offered_by_default_in_library_mode_alone(self, db):
+        """Owner's decision on #135: on by default in a library, never in a household."""
+        assert settings_store.headings_from_vocabulary(db) is False
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+        assert settings_store.headings_from_vocabulary(db) is True
+        settings_store.set_value(db, SettingKey.HEADINGS_FROM_VOCABULARY, "false")
+        assert settings_store.headings_from_vocabulary(db) is False
 
     def test_the_oai_provider_starts_off(self):
         """Owner's decision: off on a fresh install and on an upgrade alike."""

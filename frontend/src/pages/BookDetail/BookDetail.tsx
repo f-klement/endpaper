@@ -28,6 +28,7 @@ import CollectionPicker from "./components/CollectionPicker";
 import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
 import ClassificationPanel from "./components/ClassificationPanel";
+import HeadingField from "./components/HeadingField";
 import PendingHeadingsPanel from "./components/PendingHeadingsPanel";
 import CustomFieldsPanel from "./components/CustomFieldsPanel";
 import CoverImagesPanel from "./components/CoverImagesPanel";
@@ -55,12 +56,14 @@ import {
   useBookLoan,
   useBookNotes,
   useBookPendingHeadings,
+  useBookHeadingField,
   useBookProgress,
   useBookQuotes,
   useBookSections,
   type UseBookAccessResult,
   type UseBookActionsResult,
   type UseBookPendingHeadingsResult,
+  type UseBookHeadingFieldResult,
   type UseBookCustomFieldsResult,
   type UseBookEnrichmentResult,
   type UseBookKosyncResult,
@@ -127,6 +130,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const coverImages = useBookCoverImages(bookId);
   const customFields = useBookCustomFields(bookId);
   const pendingHeadings = useBookPendingHeadings(bookId, currentUser.is_admin);
+  const headingField = useBookHeadingField(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
   // Above the early returns, because hooks are. Null until the book lands, and
   // the page shows a spinner until then, so no section is ever drawn against a
@@ -202,6 +206,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             sections={sections}
             canDeleteTags={currentUser.is_admin}
             pendingHeadings={pendingHeadings}
+            headingField={headingField}
           />
 
           <CollapsibleSection
@@ -463,6 +468,8 @@ interface FilingSectionProps {
   canDeleteTags: boolean;
   /** A harvest's suggestions, which only an admin is ever handed. */
   pendingHeadings: UseBookPendingHeadingsResult;
+  /** Headings offered from a local vocabulary copy, in library mode. */
+  headingField: UseBookHeadingFieldResult;
 }
 
 /** Where the book sits in this library: its tags, shelf and collection. */
@@ -476,6 +483,7 @@ function FilingSection({
   sections,
   canDeleteTags,
   pendingHeadings,
+  headingField,
 }: FilingSectionProps) {
   const { t } = useTranslation();
 
@@ -515,6 +523,20 @@ function FilingSection({
           claim, and the whole reason this is stored as a scheme, a number
           and a caption is that flattening them loses which is which. */}
       <ClassificationPanel classifications={book.classifications ?? []} />
+
+      {/* Under the headings it adds to, so a cataloguer sees what the book
+          carries before choosing another. */}
+      <HeadingField
+        vocabularies={headingField.vocabularies}
+        scheme={headingField.scheme}
+        onChooseScheme={headingField.chooseScheme}
+        typed={headingField.typed}
+        onType={headingField.type}
+        suggestions={headingField.suggestions}
+        onPick={headingField.pick}
+        isPicking={headingField.isPicking}
+        error={headingField.error}
+      />
 
       {/* Straight under the headings it would add to, so an admin reads
           what the book carries before what a harvest suggests. */}

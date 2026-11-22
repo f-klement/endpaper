@@ -48,6 +48,10 @@
 - A harvest cut short by a limit or a busy repository can now be carried on from where it stopped, from the harvest card.
 - Catalogue settings list a curated registry of national and union catalogues, each shipped with the date it was last checked answering, and every catalogue gains a Test action that reports only whether it answered, answered nothing, refused or could not be reached. A picked registry catalogue is asked last when a book is looked up by its ISBN, once the other catalogues missed, and a book it supplied names it as its record source.
 - The catalogue login settings offer and accept a login only for a catalogue that takes one; storing one for a catalogue that answers without a login, or that uses a key, is refused, since nothing would read it.
+- In library mode, a book's headings can be added from a local copy of GND or LCSH, offered as you type; an admin can switch it off.
+- Overdue reminders can now email each patron about the loans they hold, private books they borrowed included, on a reminder cadence of its own beside the household's. Switching library mode on turns that and the household email on once, leaving either alone if somebody already set it. A library already in library mode is not changed, so it switches them on itself.
+- An author's stored identifiers now say which authority file supplied each one and which second file, if any, tied the same number to the same person; a member's GND number counts as checked by lobid only where lobid's record for it names the author. Identifiers stored earlier read as unrecorded.
+- A copy can carry an accession number: select books and choose "Give accession numbers"; the number shows on the copy and finds the copy at /api/books/accession/{code}.
 
 ## v0.22.0
 

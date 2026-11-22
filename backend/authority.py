@@ -91,7 +91,7 @@ import metadata
 import xml_parse
 from bibliographic import strip_isbd_punctuation
 from deadline import in_
-from enums import AuthorityScheme
+from enums import AuthorityScheme, AuthoritySupplier
 
 logger = logging.getLogger("endpaper.authority")
 
@@ -505,6 +505,36 @@ class AuthorityCandidate:
     #: disambiguation only: see the refusal in the module docstring.
     description: str | None = None
     disagreements: tuple[Disagreement, ...] = ()
+    #: The `Disagreement.about` values where Wikidata named exactly the value
+    #: lobid's `sameAs` links: `viaf` and `isni`, compared on the resolve
+    #: branch only. Not served: it is what `cross_references` records as
+    #: `checked_by`, and silence here means unchecked, never disagreeing.
+    corroborated: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
+class SuppliedIdentifier:
+    """One identifier another file gave for a confirmed person, with the file
+    that supplied it and the second file that named it too, or None.
+
+    What `cross_references` and `national_identifiers` answer per scheme, and
+    what `Authorship.record_cross_references` stores as `asserted_by` and
+    `checked_by`. See `enums.AuthoritySupplier`.
+    """
+
+    identifier: str
+    asserted_by: AuthoritySupplier
+    checked_by: AuthoritySupplier | None
+
+    def unchecked(self) -> SuppliedIdentifier:
+        """The same identifier from the same supplier, with no second file.
+
+        **A method rather than a `replace` at the caller**, because the router
+        that needs it holds `catalogue.Record` too, and the house rule
+        `TestOnlyTheCatalogueBuildsAnUnfoldedRecord` refuses any `replace` in
+        such a module: it cannot tell this type from a `Record`.
+        """
+        return replace(self, checked_by=None)
 
 
 class AuthorityUnavailable(Exception):
@@ -826,6 +856,17 @@ def _disagreements(
     return tuple(row for row in compared if row is not None)
 
 
+def _corroborated(candidate: AuthorityCandidate, viaf: str | None, isni: str | None) -> frozenset[str]:
+    """The schemes where Wikidata's claim is the one value lobid's `sameAs`
+    links, by the rule `_disagreement` agrees by. Silence is not agreement."""
+    claims = ((AuthorityScheme.VIAF, _VIAF_URI, viaf), (AuthorityScheme.ISNI, _ISNI_URI, isni))
+    return frozenset(
+        scheme.value
+        for scheme, pattern, wikidata in claims
+        if wikidata is not None and _linked(pattern, candidate.same_as) == {wikidata}
+    )
+
+
 def _disagreement(
     candidate: AuthorityCandidate, about: AuthorityScheme, pattern: re.Pattern[str], wikidata: str | None
 ) -> Disagreement | None:
@@ -863,7 +904,7 @@ _CROSS_REFERENCE_URIS: Final = {
 }
 
 
-def cross_references(candidate: AuthorityCandidate) -> dict[AuthorityScheme, str]:
+def cross_references(candidate: AuthorityCandidate) -> dict[AuthorityScheme, SuppliedIdentifier]:
     """The other files' identifiers this GND record already carries.
 
     **Free.** Every one of these arrives in the `sameAs` block of a response
@@ -903,9 +944,14 @@ def cross_references(candidate: AuthorityCandidate) -> dict[AuthorityScheme, str
     `_claims` states, so none is written and every one stays in `same_as`.
     `_disagreement` compares by the same rule, so the record's order decides
     neither what is stored nor what is contested.
+
+    **Each value says who supplied it and who checked it.** lobid supplies
+    every one it links, and Wikidata checks the item, the VIAF cluster and the
+    ISNI where it named the same value; LCNAF and ORCID are never compared.
+    An item only Wikidata's reverse lookup found is Wikidata's, unchecked.
     """
     contested = {row.about for row in candidate.disagreements}
-    found: dict[AuthorityScheme, str] = {}
+    found: dict[AuthorityScheme, SuppliedIdentifier] = {}
     for scheme, pattern in _CROSS_REFERENCE_URIS.items():
         if scheme.value in contested:
             continue
@@ -917,12 +963,26 @@ def cross_references(candidate: AuthorityCandidate) -> dict[AuthorityScheme, str
 
 def _referenced(
     candidate: AuthorityCandidate, scheme: AuthorityScheme, pattern: re.Pattern[str]
-) -> str | None:
-    """One scheme's identifier among a candidate's cross references, by the two
+) -> SuppliedIdentifier | None:
+    """One scheme's identifier among a candidate's cross references, by the
     rules `cross_references` states, or None."""
+    lobid = _sole(pattern, candidate.same_as)
     if scheme is AuthorityScheme.WIKIDATA and candidate.wikidata_id is not None:
-        return candidate.wikidata_id
-    return _sole(pattern, candidate.same_as)
+        return _wikidata_item(candidate.wikidata_id, lobid)
+    if lobid is None:
+        return None
+    checked = AuthoritySupplier.WIKIDATA if scheme.value in candidate.corroborated else None
+    return SuppliedIdentifier(lobid, asserted_by=AuthoritySupplier.LOBID, checked_by=checked)
+
+
+def _wikidata_item(item: str, lobid: str | None) -> SuppliedIdentifier:
+    """Wikidata's own item for the person: lobid's and checked by Wikidata
+    where lobid links the same one, Wikidata's alone where lobid links none."""
+    if lobid == item:
+        return SuppliedIdentifier(
+            item, asserted_by=AuthoritySupplier.LOBID, checked_by=AuthoritySupplier.WIKIDATA
+        )
+    return SuppliedIdentifier(item, asserted_by=AuthoritySupplier.WIKIDATA, checked_by=None)
 
 
 def _sole(pattern: re.Pattern[str], uris: tuple[str, ...]) -> str | None:
@@ -1436,7 +1496,7 @@ async def _national_from_wikidata(
 
 async def national_identifiers(
     candidate: AuthorityCandidate, *, deadline: float | None = None
-) -> dict[AuthorityScheme, str]:
+) -> dict[AuthorityScheme, SuppliedIdentifier]:
     """The six national files' numbers for a person, which a GND record omits.
 
     **The half of the cross references that is not free.** A GND record's
@@ -1464,6 +1524,10 @@ async def national_identifiers(
     fallback, which are the cheap ones, plus one to the BNP where a PTBNP number
     came back. A member is not waiting on this: it runs after a confirmation
     rather than inside a lookup.
+
+    **Each number says which route supplied it**, VIAF or Wikidata. Neither
+    checks the number itself: the cluster naming the GND back verifies the
+    cluster, not what it lists. Only the BNP checks, and only PTBNP.
     """
     if not candidate.certain:
         return {}
@@ -1485,13 +1549,23 @@ async def national_identifiers(
 
     if sources is None:
         logger.info("VIAF produced no cluster; asking Wikidata for the national files")
-        found = await _national_from_wikidata(candidate, deadline)
+        found = _supplied_by(AuthoritySupplier.WIKIDATA, await _national_from_wikidata(candidate, deadline))
         return await _ptbnp_checked(candidate, found, deadline, cluster=None)
     # `cluster` is named only here: a number `_national_from_cluster` returns
     # came from a cluster that named the GND number back. On the Wikidata
     # route it may be lobid's, never verified.
-    found = _national_from_cluster(candidate, sources)
+    found = _supplied_by(AuthoritySupplier.VIAF, _national_from_cluster(candidate, sources))
     return await _ptbnp_checked(candidate, found, deadline, cluster=cluster)
+
+
+def _supplied_by(
+    supplier: AuthoritySupplier, values: dict[AuthorityScheme, str]
+) -> dict[AuthorityScheme, SuppliedIdentifier]:
+    """Each value as `supplier` gave it, unchecked."""
+    return {
+        scheme: SuppliedIdentifier(value, asserted_by=supplier, checked_by=None)
+        for scheme, value in values.items()
+    }
 
 
 async def _cluster_for(
@@ -1572,6 +1646,7 @@ async def _cross_check(
         wikidata_id=item,
         description=description,
         disagreements=_disagreements(candidate, item, viaf, isni),
+        corroborated=_corroborated(candidate, viaf, isni),
     )
 
 
@@ -2248,11 +2323,11 @@ async def _bnp_record(identifier: str, deadline: float | None) -> _BnpRecord | N
 
 async def _ptbnp_checked(
     confirmed: AuthorityCandidate,
-    found: dict[AuthorityScheme, str],
+    found: dict[AuthorityScheme, SuppliedIdentifier],
     deadline: float | None,
     *,
     cluster: str | None,
-) -> dict[AuthorityScheme, str]:
+) -> dict[AuthorityScheme, SuppliedIdentifier]:
     """`found`, less its PTBNP number unless the BNP's record by that number
     vouches for the confirmed person: `_bnp_vouches`.
 
@@ -2270,17 +2345,20 @@ async def _ptbnp_checked(
     `cluster` is the VIAF cluster that named the GND number back, or None
     where Wikidata supplied the number. One request, under the confirmation's
     own deadline: `DEADLINE_SECONDS` carries the cost.
+
+    **A vouched number is kept checked by the BNP**, and a kept unchecked one
+    stays unchecked, so the stored row says which of the two happened.
     """
     number = found.get(AuthorityScheme.PTBNP)
     if number is None:
         return found
     try:
-        record = await _bnp_record(number, deadline)
+        record = await _bnp_record(number.identifier, deadline)
     except AuthorityUnavailable:
         logger.info("The BNP did not answer; keeping its number as the supplier names it")
         return found
     if record is not None and _bnp_vouches(confirmed, record, cluster):
-        return found
+        return found | {AuthorityScheme.PTBNP: replace(number, checked_by=AuthoritySupplier.BNP)}
     logger.info("The BNP does not name the confirmed person by that number; not storing it")
     return {scheme: value for scheme, value in found.items() if scheme is not AuthorityScheme.PTBNP}
 
@@ -2316,6 +2394,21 @@ def _names_one_person(confirmed: AuthorityCandidate, record: AuthorityCandidate)
     so they do not measure that, and no wrong number was seen in the 19.
     """
     return not _name_forms(confirmed).isdisjoint(_name_forms(record))
+
+
+def names_the_spelling(candidate: AuthorityCandidate, spelling: str) -> bool:
+    """Whether the record's preferred name or a variant is this spelling, by
+    the fold `_names_one_person` uses: `authors.author_key`, words in any order.
+
+    **Word order ignored** because the GND heads a person `Stevenson, Robert
+    Louis` and a book credits `Robert Louis Stevenson`; the plain key would
+    tell them apart on nearly every confirmation. A namesake passes, as it
+    does there, and so does a person whose name is the same words in another
+    order: `Luther Martin` against `Luther, Martin`. This catches a number for
+    somebody differently named, no more.
+    """
+    form = tuple(sorted(authors.author_key(spelling).split()))
+    return bool(form) and form in _name_forms(candidate)
 
 
 def _name_forms(candidate: AuthorityCandidate) -> set[tuple[str, ...]]:

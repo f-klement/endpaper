@@ -1426,6 +1426,11 @@ WHOLE_BOOK_READERS: Final = {
     ],
     "notifications.py": [
         (
+            "due_for_patrons: db.query(Loan).join(Book, Loan.book_id == Book.id)",
+            "the same join, for the patron notice's own selection; `JOIN_CALLERS` again. Private Books "
+            "reach it by the owner's decision on #24: each patron is mailed their own loans.",
+        ),
+        (
             "count_private_overdue: db.query(Loan).join(Book, Loan.book_id == Book.id)",
             "a join, not a by key read: `JOIN_CALLERS` carries the reason this module reaches `books`.",
         ),
@@ -1528,10 +1533,19 @@ RELATIONSHIP_READERS: Final = {
         (
             "return ( lending.Loans.for_a_channel(db) .overdue(now) .as_query() "
             ".options(joinedload(Loan.book), joinedload(Loan.loaned_to)) "
-            ".filter((Loan.notified_at.is_(None)) | (Loan.notified_at < cutoff)) "
+            ".filter(_not_chased_since(Loan.notified_at, now, days)) "
             ".order_by(Loan.due_at, Loan.id) .all() )",
             "a loader option on a query `Loans.for_a_channel` already scoped to the public shelf. It "
             "says how to load the Book of each overdue loan and chooses no row itself.",
+        ),
+        (
+            "return ( db.query(Loan) .join(Book, Loan.book_id == Book.id) "
+            ".options(joinedload(Loan.book), joinedload(Loan.loaned_to_patron)) "
+            ".filter( *overdue_clauses(now), Loan.loaned_to_patron_id.isnot(None), "
+            "_not_chased_since(Loan.patron_notified_at, now, days), ) "
+            ".order_by(Loan.loaned_to_patron_id, Loan.due_at, Loan.id) .all() )",
+            "a loader option on the patron notice's own selection, whose rows the join above chose. It "
+            "says how to load the Book of each loan a patron holds and chooses no row itself.",
         ),
     ],
     "schemas/book.py": [
@@ -6727,3 +6741,31 @@ class TestTheModulesTheseRulesWalk:
         """Anti vacuity, and it names one module per shape the rules read: the
         seam itself, a router and a module reached only through a join."""
         assert {"shelf.py", "routers/books.py", "notifications.py"} <= set(application_sources())
+
+
+class TestALabelIsFoundOnlyWhereItsCopyIsSeen:
+    """`Shelf.labelled` narrows a shelf rather than looking a code up, so a scan
+    answers what an id in the path answers. The route's half is in
+    `tests/routers/test_books_accession.py`."""
+
+    def test_a_label_finds_its_own_copy_and_no_other(self, db, user):
+        db.add(Book(title="Labelled", added_by_user_id=user.id, accession="200047116"))
+        db.add(Book(title="Other", added_by_user_id=user.id, accession="200000018"))
+        db.commit()
+
+        found = Shelf.seen_by(db, user.id).labelled("200047116").all()
+
+        assert [book.title for book in found] == ["Labelled"]
+
+    def test_a_label_on_somebody_elses_private_copy_is_not_found(self, db, user, other):
+        db.add(Book(title="Private", added_by_user_id=user.id, is_private=True, accession="200047116"))
+        db.commit()
+
+        assert Shelf.seen_by(db, user.id).labelled("200047116").count() == 1
+        assert Shelf.seen_by(db, other.id).labelled("200047116").count() == 0
+
+    def test_a_label_on_a_trashed_copy_is_not_found(self, db, user):
+        db.add(_trashed(title="Gone", added_by_user_id=user.id, is_private=False, accession="200047116"))
+        db.commit()
+
+        assert Shelf.seen_by(db, user.id).labelled("200047116").count() == 0

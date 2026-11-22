@@ -39,6 +39,7 @@ from database import Base, engine
 from dialect import AddedRule, SwappedRule
 from enums import (
     AuthorityScheme,
+    AuthoritySupplier,
     BookFormat,
     BookIdentifierScheme,
     CatalogueSource,
@@ -2429,6 +2430,7 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
             "identifier": "'1042243212'",
             "provenance": "'catalogue'",
             "created_by_user_id": "NULL",
+            "asserted_by": "'catalogue'",
         } | dict(overrides)
         return (
             "INSERT INTO author_identifiers "
@@ -2490,7 +2492,7 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
         self._migrated()
 
         with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
-            connection.execute(text(self._insert(provenance="'robot'")))
+            connection.execute(text(self._insert(provenance="'robot'", asserted_by="'member'")))
 
         assert "ck_author_identifiers_provenance" in str(refusal.value)
 
@@ -2587,6 +2589,127 @@ class TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase:
             "the migrated ck_author_identifiers_scheme refuses a member "
             "AuthorityScheme offers:\n" + "\n".join(refused)
         )
+
+
+class TestAnAuthorIdentifierRecordsItsSupplier:
+    """Revision bb6650065133: `asserted_by` and `checked_by`, against the
+    migrated database, for the reason the class above gives."""
+
+    _insert = staticmethod(TestTheAuthorityIdentifierConstraintsOnAMigratedDatabase._insert)
+
+    #: A row as every writer before the revision stored it: no supplier.
+    _UNSUPPLIED = (
+        "INSERT INTO author_identifiers (author_key, scheme, identifier, provenance, created_by_user_id)"
+        " VALUES ('kane sean p', 'gnd', '1042243212', 'catalogue', NULL)"
+    )
+
+    def _refused_by(self, **overrides: object) -> str:
+        at_head()
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(self._insert(**overrides)))
+        return str(refusal.value)
+
+    def test_a_row_stored_before_the_revision_reads_unrecorded_and_unchecked(self):
+        """The owner's call: never guessed from provenance, even on a
+        `catalogue` row that could be."""
+        from alembic import command
+
+        drop_everything()
+        command.upgrade(schema._alembic_config(), "3091190ff9ad")
+        with engine.connect() as connection:
+            connection.execute(text(self._UNSUPPLIED))
+            connection.commit()
+
+        command.upgrade(schema._alembic_config(), "head")
+
+        with engine.connect() as connection:
+            stored = connection.execute(text("SELECT asserted_by, checked_by FROM author_identifiers")).one()
+        assert tuple(stored) == ("unrecorded", None)
+
+    def test_a_writer_that_names_no_supplier_is_refused(self):
+        """The backfill default is dropped in the same revision, so a new
+        writer that forgets fails at the insert rather than storing
+        `unrecorded` for a row that could have said."""
+        at_head()
+
+        with engine.connect() as connection, pytest.raises(IntegrityError) as refusal:
+            connection.execute(text(self._UNSUPPLIED))
+
+        assert "asserted_by" in str(refusal.value)
+
+    def test_a_supplier_outside_the_enum_is_refused(self):
+        assert "ck_author_identifiers_asserted_by" in self._refused_by(
+            provenance="'member'", asserted_by="'robot'"
+        )
+
+    def test_a_member_is_not_a_checker(self):
+        assert "ck_author_identifiers_checked_by" in self._refused_by(checked_by="'member'")
+
+    def test_unrecorded_is_not_a_checker(self):
+        assert "ck_author_identifiers_checked_by" in self._refused_by(checked_by="'unrecorded'")
+
+    def test_a_file_does_not_check_its_own_value(self):
+        assert "ck_author_identifiers_second_file" in self._refused_by(
+            provenance="'member'", asserted_by="'lobid'", checked_by="'lobid'"
+        )
+
+    def test_a_catalogue_row_is_supplied_by_nothing_but_the_catalogue(self):
+        assert "ck_author_identifiers_supplier" in self._refused_by(asserted_by="'lobid'")
+
+    def test_a_member_row_is_never_supplied_by_the_catalogue(self):
+        assert "ck_author_identifiers_supplier" in self._refused_by(provenance="'member'")
+
+    def test_every_supplier_the_enum_offers_is_storable_as_the_asserter(self):
+        """Driven off the enum, for the reason
+        `test_every_scheme_the_enum_offers_is_storable` gives. Each supplier
+        under the provenance `ck_author_identifiers_supplier` pairs it with."""
+        at_head()
+
+        refused: list[str] = []
+        for supplier in AuthoritySupplier:
+            provenance = "catalogue" if supplier is AuthoritySupplier.CATALOGUE else "member"
+            with engine.connect() as connection:
+                try:
+                    connection.execute(
+                        text(
+                            self._insert(
+                                author_key=f"'{supplier.value} person'",
+                                provenance=f"'{provenance}'",
+                                asserted_by=f"'{supplier.value}'",
+                            )
+                        )
+                    )
+                    connection.commit()
+                except IntegrityError as refusal:
+                    refused.append(f"{supplier.value}: {refusal}")
+
+        assert not refused, "\n".join(refused)
+
+    def test_every_file_the_enum_offers_is_storable_as_the_checker(self):
+        """Every supplier but the two that are not files, under a `member`
+        asserter so `ck_author_identifiers_second_file` cannot refuse."""
+        at_head()
+
+        refused: list[str] = []
+        not_files = {AuthoritySupplier.MEMBER, AuthoritySupplier.UNRECORDED}
+        for supplier in (member for member in AuthoritySupplier if member not in not_files):
+            with engine.connect() as connection:
+                try:
+                    connection.execute(
+                        text(
+                            self._insert(
+                                author_key=f"'{supplier.value} person'",
+                                provenance="'member'",
+                                asserted_by="'member'",
+                                checked_by=f"'{supplier.value}'",
+                            )
+                        )
+                    )
+                    connection.commit()
+                except IntegrityError as refusal:
+                    refused.append(f"{supplier.value}: {refusal}")
+
+        assert not refused, "\n".join(refused)
 
 
 class TestAnAddressPerMember:
@@ -4055,7 +4178,12 @@ _TEXT_CEILINGS: tuple[tuple[str, str, dict[str, object]], ...] = (
     (
         "author_identifiers",
         "identifier",
-        {"author_key": "borges-jorge-luis", "scheme": "gnd", "provenance": "catalogue"},
+        {
+            "author_key": "borges-jorge-luis",
+            "scheme": "gnd",
+            "provenance": "catalogue",
+            "asserted_by": "catalogue",
+        },
     ),
     ("custom_fields", "name", {"kind": "text"}),
     ("custom_field_values", "value", {"book_id": 1, "field_id": 1}),

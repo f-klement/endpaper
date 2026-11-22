@@ -396,6 +396,16 @@ class TestUpdateSettings:
         assert res.status_code == 403
         assert settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED) is False
 
+    def test_the_heading_field_switch_reads_back_as_stored_outside_library_mode(self, client, admin):
+        """The admin's intent, not what is in force: the field also needs library mode."""
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert (body["library_mode"], body["headings_from_vocabulary"]) == (False, True)
+
+        body = client.put(
+            "/api/settings", json={"headings_from_vocabulary": False}, headers=admin["headers"]
+        ).json()
+        assert body["headings_from_vocabulary"] is False
+
     def test_the_sru_switch_reads_back_as_stored_while_nothing_is_published(self, client, admin):
         """The admin's intent, not what is served: the route also needs the
         catalogue published, which `public_catalogue_published` reports."""
@@ -1281,7 +1291,7 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
 
         **This is one of two legs and it guards the near one.** A write reaching
         `_store` still clears nothing if its `SettingKey` is absent from
-        `notifications._CONFIGURED_BY`, because `sender_for` then answers `None`;
+        `notifications._CONFIGURED_BY`, because `senders_for` then answers none;
         that leg is held by
         `TestEverySenderSettingIsOwned::test_every_settings_row_the_senders_read_belongs_to_one`
         and is invisible from here. Named so a reader does not take a green run
@@ -1444,6 +1454,69 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
 
         after = client.get("/api/settings/sender-health", headers=admin["headers"]).json()
         assert next(e for e in after if e["sender"] == "telegram")["failures"] == 1
+
+
+def _notices(db) -> tuple[bool, bool]:
+    """The patron notice's switch and the service digest's, as stored."""
+    return (
+        settings_store.get_bool(db, SettingKey.OVERDUE_PATRON_MAIL_ENABLED),
+        settings_store.get_bool(db, SettingKey.OVERDUE_MAIL_ENABLED),
+    )
+
+
+class TestLibraryModeTurnsTheOverdueNoticesOnOnce:
+    """#24: both notices default on when library mode is switched on, once, and
+    a mode switch never turns them off."""
+
+    def test_switching_library_mode_on_turns_both_notices_on(self, client, admin, db):
+        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
+
+        assert _notices(db) == (True, True)
+
+    def test_a_later_switch_on_leaves_a_notice_the_operator_turned_off(self, client, admin, db):
+        for body in (
+            {"library_mode": True},
+            {"overdue_patron_mail_enabled": False, "overdue_mail_enabled": False},
+            {"library_mode": False},
+            {"library_mode": True},
+        ):
+            client.put("/api/settings", json=body, headers=admin["headers"])
+
+        assert _notices(db) == (False, False)
+
+    def test_switching_library_mode_off_leaves_both_notices_as_they_were(self, client, admin, db):
+        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
+        client.put("/api/settings", json={"library_mode": False}, headers=admin["headers"])
+
+        assert _notices(db) == (True, True)
+
+    def test_a_mode_already_on_is_not_a_switch(self, client, admin, db):
+        """An upgrade that finds library mode on changes nobody's mail by itself."""
+        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
+
+        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
+
+        assert _notices(db) == (False, False)
+
+    def test_the_first_switch_on_keeps_a_notice_switched_off_before_it(self, client, admin, db):
+        """A default fills a value nobody chose. The household email switched off
+        on purpose stays off; the patron notice, never set, still comes on."""
+        client.put("/api/settings", json={"overdue_mail_enabled": False}, headers=admin["headers"])
+        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
+
+        assert _notices(db) == (True, False)
+
+    def test_a_notice_set_in_the_same_request_has_the_last_word(self, client, admin, db):
+        body = {"library_mode": True, "overdue_patron_mail_enabled": False}
+        client.put("/api/settings", json=body, headers=admin["headers"])
+
+        assert _notices(db) == (False, True)
+
+    def test_the_patron_notice_reads_back_as_stored(self, client, admin):
+        client.put("/api/settings", json={"overdue_patron_mail_enabled": True}, headers=admin["headers"])
+
+        body = client.get("/api/settings", headers=admin["headers"]).json()
+        assert body["overdue_patron_mail_enabled"] is True
 
 
 class TestTheProviderList:

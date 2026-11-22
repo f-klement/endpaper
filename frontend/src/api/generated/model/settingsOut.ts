@@ -23,6 +23,7 @@ export interface SettingsOut {
   has_mail_password?: boolean;
   has_overdue_webhook_secret?: boolean;
   has_telegram_bot_token?: boolean;
+  headings_from_vocabulary?: boolean;
   library_mode?: boolean;
   mail_default_sender?: string;
   mail_from_env?: string[];
@@ -39,6 +40,7 @@ export interface SettingsOut {
   overdue_in_app_enabled?: boolean;
   overdue_mail_enabled?: boolean;
   overdue_mail_to?: string;
+  overdue_patron_mail_enabled?: boolean;
   /**
    * @minimum 1
    * @maximum 365

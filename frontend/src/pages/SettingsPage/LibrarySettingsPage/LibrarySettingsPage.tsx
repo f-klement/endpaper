@@ -1,12 +1,13 @@
 import { useNavigate } from "react-router-dom";
 
-import type { SettingsOut } from "../../../api/generated/model";
+import type { SettingsOut, SettingsUpdate } from "../../../api/generated/model";
 
 import { useLibraryMode } from "../../../app/hooks";
 import { useTranslation } from "../../../i18n";
 import { FolderSweepNotice, SettingsSection } from "../../components";
 import { useFolderSweep } from "../../hooks";
 import SettingsSubPage from "../components/SettingsSubPage";
+import ToggleField from "../components/ToggleField";
 import { useSettings } from "../hooks";
 import CalibreImport from "./components/CalibreImport";
 import ClassificationSchemesSection from "./components/ClassificationSchemesSection";
@@ -264,7 +265,46 @@ export default function LibrarySettingsPage() {
           onDownload={vocabularies.download}
         />
       )}
+
+      {/* Under the copies it reads from. */}
+      <HeadingFieldSetting
+        libraryMode={libraryMode}
+        settings={settings}
+        isSaving={settingsState.isSaving}
+        onSave={settingsState.save}
+      />
     </SettingsSubPage>
+  );
+}
+
+/**
+ * The switch for the book page's heading field. Library mode and admin only:
+ * the server offers a household no heading field whatever this says, and the
+ * switch is a settings write.
+ */
+function HeadingFieldSetting({
+  libraryMode,
+  settings,
+  isSaving,
+  onSave,
+}: {
+  libraryMode: boolean;
+  settings: SettingsOut | undefined;
+  isSaving: boolean;
+  onSave: (update: SettingsUpdate) => void;
+}) {
+  const { t } = useTranslation();
+  if (!libraryMode || settings === undefined) return null;
+  return (
+    <SettingsSection title={t("headingField.settingTitle")} icon="book">
+      <ToggleField
+        label={t("headingField.setting")}
+        hint={t("headingField.settingHint")}
+        checked={settings.headings_from_vocabulary ?? true}
+        disabled={isSaving}
+        onChange={(checked) => onSave({ headings_from_vocabulary: checked })}
+      />
+    </SettingsSection>
   );
 }
 

@@ -37,6 +37,7 @@ from sqlalchemy.types import TypeDecorator
 
 import covers
 import filing
+from accession import ACCESSION_LENGTH
 from authors import AUTHOR_NAME_MAX
 from database import Base
 from dialect import DialectSQL
@@ -45,6 +46,7 @@ from enums import (
     AuthMode,
     AuthorityProvenance,
     AuthorityScheme,
+    AuthoritySupplier,
     BookCondition,
     BookFormat,
     BookIdentifierScheme,
@@ -651,6 +653,37 @@ class AuthorIdentifier(Base):
             "provenance <> 'catalogue' OR created_by_user_id IS NULL",
             name="ck_author_identifiers_asserter",
         ),
+        CheckConstraint(
+            _enum_check("asserted_by", AuthoritySupplier),
+            name="ck_author_identifiers_asserted_by",
+        ),
+        # A check is a second file naming the same value. A member is not a
+        # file, and `unrecorded` is a gap in the record rather than a checker.
+        CheckConstraint(
+            _enum_check(
+                "checked_by",
+                AuthoritySupplier,
+                nullable=True,
+                excluding=(AuthoritySupplier.MEMBER, AuthoritySupplier.UNRECORDED),
+            ),
+            name="ck_author_identifiers_checked_by",
+        ),
+        # A file agreeing with itself is not a check. Without this a writer
+        # could stamp one file as both and the row would read as corroborated.
+        CheckConstraint(
+            "checked_by IS NULL OR checked_by <> asserted_by",
+            name="ck_author_identifiers_second_file",
+        ),
+        # Where provenance and supplier overlap they must agree: a `catalogue`
+        # row is supplied by the catalogue, and nothing else is. `unrecorded`
+        # is exempt because rows stored before this column were backfilled
+        # with it whatever their provenance, which is the owner's call.
+        CheckConstraint(
+            "asserted_by = 'unrecorded'"
+            " OR (provenance = 'catalogue' AND asserted_by = 'catalogue')"
+            " OR (provenance <> 'catalogue' AND asserted_by <> 'catalogue')",
+            name="ck_author_identifiers_supplier",
+        ),
         # The byte arm is what makes the ceiling bind on a Core insert; the
         # floor needs none, because a NUL shortens the count and so makes a
         # floor stricter rather than weaker. See `ck_digital_references_bounds`
@@ -692,6 +725,16 @@ class AuthorIdentifier(Base):
     identifier: Mapped[str] = mapped_column(String(AUTHORITY_IDENTIFIER_MAX), nullable=False)
 
     provenance: Mapped[AuthorityProvenance] = mapped_column(String(20), nullable=False)
+
+    # No default, in the model or the database: every writer names the file
+    # the value came from, so a new writer that forgets fails at the insert
+    # rather than storing `unrecorded` for a row that could have said. The
+    # revision that added the column used a server default only to backfill.
+    asserted_by: Mapped[AuthoritySupplier] = mapped_column(String(20), nullable=False)
+
+    # Null where no second file named the value. Set at the write or later by
+    # a recheck, never changed once set and never touching `identifier`.
+    checked_by: Mapped[AuthoritySupplier | None] = mapped_column(String(20), nullable=True)
 
     # Set only on a `MEMBER` row, and null on a `CATALOGUE` one by check
     # constraint. Deliberately not indexed, like `author_aliases`: no query
@@ -1208,6 +1251,12 @@ class Book(Base):
             sqlite_where=text("copy_group IS NULL"),
             postgresql_where=text("copy_group IS NULL"),
         ),
+        # **Unique over every row, trashed ones included**, so a restore can
+        # never be refused for a code the button says nothing about: the lesson
+        # `_normalise_copy_group` records. Minted codes cannot collide, since
+        # each is its row's id; the index is what makes a future writer that
+        # could (a typed code, an item table renumbered from 1) fail loudly.
+        Index("uq_books_accession", "accession", unique=True),
         # `backup.restore` inserts through Core, where no Pydantic model and no
         # `@validates` fires, so an archive decides this value. A value outside
         # the enum then raises in `OwnershipStatus(...)` at every read.
@@ -1390,6 +1439,16 @@ class Book(Base):
     # Indexed because "the other copies of this one" is the only question ever
     # asked of it, and it is asked on every book detail page.
     copy_group: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+
+    # The accession number: the code on this object's label, which names the
+    # copy rather than the book. `accession.py` holds its shape and is its one
+    # minting rule; `POST /api/books/bulk` with `ASSIGN_ACCESSION` is its one
+    # writer, so null means nobody asked for a label yet, which is every row
+    # that existed before the column (owner, 2026-11-22). Withheld from every
+    # public surface, since it is how the library handles an object rather than
+    # a fact about the work. A copy starts with none and a merge fills it but
+    # never overwrites it: `book_columns.COPY_IDENTITY`.
+    accession: Mapped[str | None] = mapped_column(String(ACCESSION_LENGTH), nullable=True)
 
     added_by_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True, index=True
@@ -2091,8 +2150,8 @@ class Loan(Base):
     # record a loan in the first place.
     due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # When an overdue reminder last went out for this loan, or null if none
-    # ever has. The whole state the digest keeps, and it is what makes the
+    # When the overdue digest last went out on a channel for this loan, or null
+    # if it never has. The whole state the digest keeps, and it is what makes the
     # difference between the two ways this feature goes wrong: without it the
     # digest either sends once and forgets a loan that is still out, or repeats
     # the same list into the library's channel every single run.
@@ -2101,6 +2160,13 @@ class Loan(Base):
     # the next tick retries, which is why it is a timestamp on the loan rather
     # than a "sent" flag set before the request.
     notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # The same, for the patron's own notice (#24): when a mail about this loan
+    # last reached the patron holding it. Its own column rather than
+    # `notified_at`, so a failure on one audience never silences the other: one
+    # stamp for both would let a digest that delivered hold back a patron whose
+    # mail failed, for the whole reminder interval (owner's decision on #24).
+    patron_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     book: Mapped[Book] = relationship("Book", back_populates="loans")
     loaned_to: Mapped[User | None] = relationship(

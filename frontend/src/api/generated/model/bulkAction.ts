@@ -23,4 +23,5 @@ export const BulkAction = {
   set_location: "set_location",
   set_collection: "set_collection",
   delete: "delete",
+  assign_accession: "assign_accession",
 } as const;

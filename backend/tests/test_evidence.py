@@ -667,6 +667,8 @@ HEADING_WRITES: Final[dict[str, dict[str, dict[str, int]]]] = {
         "confirm_file_headings": {"classifications.add_headings": 1},
         # A harvested Book's pending set, which an admin confirmed.
         "confirm_harvested_headings": {"classifications.add_headings": 1},
+        # A heading a Member picked on the Book's heading field.
+        "confirm_picked_heading": {"classifications.add_headings": 1},
     },
     # A MARC file a Member chose to import, through its door. A harvest's
     # headings take the other branch, to `pending_headings.raise_on`.
@@ -683,6 +685,8 @@ HEADING_WRITES: Final[dict[str, dict[str, dict[str, int]]]] = {
         "_create_book": {"classifications.add_headings": 1},
         # `POST /{book_id}/enrich/apply`: the record row a Member selected.
         "apply_enrichment": {"evidence.confirm": 1},
+        # `POST /{book_id}/headings`: the heading a Member picked.
+        "add_heading": {"evidence.confirm_picked_heading": 1},
     },
 }
 
@@ -694,6 +698,7 @@ _NAMED: Final[tuple[tuple[object, str], ...]] = (
     (evidence.confirm, "evidence.confirm"),
     (evidence.confirm_file_headings, "evidence.confirm_file_headings"),
     (evidence.confirm_harvested_headings, "evidence.confirm_harvested_headings"),
+    (evidence.confirm_picked_heading, "evidence.confirm_picked_heading"),
 )
 #: Called, because most names of the model are reads: a query's entity, a
 #: column, the restore's table list.

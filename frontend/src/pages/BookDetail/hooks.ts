@@ -11,7 +11,7 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useInvalidate } from "../../api/invalidate";
 import {
@@ -49,6 +49,9 @@ import {
   getRemoveBookTagMutationOptions,
   useAddBookTag,
   useAddCopy,
+  useAddHeading,
+  useListSuggestingVocabularies,
+  useSuggestHeadings,
   useConfirmPendingHeadings,
   useDiscardPendingHeadings,
   useListPendingHeadings,
@@ -106,7 +109,7 @@ import {
   useListKosyncInbox,
   useUnlinkKosyncDocument,
 } from "../../api/generated/endpoints/kosync/kosync";
-import { useGoogleBooksReady } from "../../app/hooks";
+import { useGoogleBooksReady, useLibraryMode } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
 import { useRowWrite } from "../hooks";
@@ -138,8 +141,9 @@ import type {
   TagOut,
   UserOut,
   KosyncDocumentOut,
+  SuggestingVocabularyOut,
 } from "../../api/generated/model";
-import { BookFormat } from "../../api/generated/model";
+import { BookFormat, HeadingUse } from "../../api/generated/model";
 
 export interface UseBookResult {
   book: BookOut | undefined;
@@ -820,6 +824,132 @@ export function useBookPendingHeadings(
     },
     isBusy: accept.isPending || reject.isPending,
     error: pending.error ?? accept.error ?? reject.error,
+  };
+}
+
+/**
+ * The fewest characters the heading field asks about: the server's
+ * `vocabulary_copy.SUGGEST_MIN`, which answers 422 below it.
+ */
+export const HEADING_QUERY_FLOOR = 2;
+
+/**
+ * How long typing must pause before the heading field asks. Shorter than the
+ * library search's `DEBOUNCE_MS`, because this reads a local copy rather than
+ * the catalogue and a dropdown that lags a word behind is not offering anything.
+ */
+export const HEADING_SUGGEST_DEBOUNCE_MS = 300;
+
+export interface UseBookHeadingFieldResult {
+  /** The vocabularies offered from. Empty draws no field: the setting is off,
+   * library mode is off, or no copy is loaded. */
+  vocabularies: SuggestingVocabularyOut[];
+  /** The vocabulary asked, the first offered until one is chosen. */
+  scheme: string;
+  chooseScheme: (scheme: string) => void;
+  typed: string;
+  type: (text: string) => void;
+  /** The headings offered for what was typed, after the pause. */
+  suggestions: ClassificationOut[];
+  /** Write the picked heading onto the book, and clear the field. */
+  pick: (heading: ClassificationOut) => void;
+  isPicking: boolean;
+  error: unknown;
+}
+
+/**
+ * The heading field: headings offered from a local vocabulary copy as the
+ * cataloguer types, and the one picked written onto the book.
+ *
+ * **Asks once typing pauses**, `HEADING_SUGGEST_DEBOUNCE_MS`, and not below
+ * `HEADING_QUERY_FLOOR` characters, so a word typed is one request rather than
+ * one per letter. Always for a subject, since that is what this field adds.
+ */
+export function useBookHeadingField(bookId: number): UseBookHeadingFieldResult {
+  const invalidate = useInvalidate();
+  // A household never has the field, so it never asks: the server would
+  // answer an empty list anyway.
+  const libraryMode = useLibraryMode();
+  const vocabularies = useListSuggestingVocabularies(bookId, {
+    query: { enabled: libraryMode },
+  });
+  const offered = vocabularies.data ?? [];
+  const [chosen, chooseScheme] = useState<string | undefined>(undefined);
+  const scheme = schemeAsked(chosen, offered);
+  const [typed, type] = useState("");
+  const [asked, setAsked] = useDebouncedText(typed);
+  const suggestions = useHeadingSuggestions(bookId, scheme, asked);
+  const add = useAddHeading({
+    mutation: {
+      onSuccess: () => {
+        type("");
+        setAsked("");
+        invalidate.catalogue();
+      },
+    },
+  });
+
+  return {
+    vocabularies: offered,
+    scheme,
+    chooseScheme,
+    typed,
+    type,
+    suggestions: suggestions.headings,
+    // The suggestion is already the row an import writes, so it is posted
+    // back as it came: the server, not this hook, owns that form.
+    pick: (heading) =>
+      add.mutate({
+        bookId,
+        data: {
+          scheme: heading.scheme,
+          number: heading.number,
+          label: heading.label,
+        },
+      }),
+    isPicking: add.isPending,
+    error: firstError(vocabularies.error, suggestions.error, add.error),
+  };
+}
+
+/** The vocabulary asked: the one chosen, else the first offered. */
+function schemeAsked(
+  chosen: string | undefined,
+  offered: SuggestingVocabularyOut[],
+): string {
+  return chosen ?? offered[0]?.scheme ?? "";
+}
+
+/** `typed` once it has stood for `HEADING_SUGGEST_DEBOUNCE_MS`, trimmed. */
+function useDebouncedText(typed: string): [string, (text: string) => void] {
+  const [settled, setSettled] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(
+      () => setSettled(typed.trim()),
+      HEADING_SUGGEST_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [typed]);
+  return [settled, setSettled];
+}
+
+/** The headings offered for `asked`, and nothing below the floor. */
+function useHeadingSuggestions(
+  bookId: number,
+  scheme: string,
+  asked: string,
+): { headings: ClassificationOut[]; error: unknown } {
+  const ready = scheme !== "" && asked.length >= HEADING_QUERY_FLOOR;
+  const suggestions = useSuggestHeadings(
+    bookId,
+    { scheme, q: asked, use: HeadingUse.subject },
+    { query: { enabled: ready } },
+  );
+  return {
+    // Only for what is asked now: a stale answer under a cleared field would
+    // offer headings for a word nobody is typing.
+    headings: ready ? (suggestions.data ?? []) : [],
+    error: suggestions.error,
   };
 }
 

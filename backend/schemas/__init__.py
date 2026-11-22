@@ -73,6 +73,7 @@ from schemas.classification import (
     ClassificationSchemeRename,
     DivisionFacetOut,
     HeadingFacetOut,
+    SuggestingVocabularyOut,
 )
 from schemas.collection import (
     CollectionAssign,
@@ -382,6 +383,7 @@ __all__ = [
     "SourceCredentialIn",
     "SourceTestIn",
     "StatsOut",
+    "SuggestingVocabularyOut",
     "SweepIn",
     "SweepOut",
     "TagCreate",

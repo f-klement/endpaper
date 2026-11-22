@@ -1142,4 +1142,13 @@ repeat the argument.
 |  | [The curated catalogue registry and the source test (2026-11-22)](decisions.md#the-curated-catalogue-registry-and-the-source-test-2026-11-22) | 529 |
 | The curated catalogue registry and the source test (2026-11-22) | [The catalogue registry is vendored, and a pick is a name](decisions.md#the-catalogue-registry-is-vendored-and-a-pick-is-a-name) | 338 |
 | The curated catalogue registry and the source test (2026-11-22) | [The test action is the scan's door](decisions.md#the-test-action-is-the-scans-door) | 143 |
+|  | [A heading's vocabulary filters what the field offers and refuses nothing on save (2026-11-22)](decisions.md#a-headings-vocabulary-filters-what-the-field-offers-and-refuses-nothing-on-save-2026-11-22) | 193 |
+|  | [A patron's own overdue notice names a private book the patron holds, and keeps its own reminder stamp (2026-11-22)](decisions.md#a-patrons-own-overdue-notice-names-a-private-book-the-patron-holds-and-keeps-its-own-reminder-stamp-2026-11-22) | 320 |
+|  | [Which file supplied an author identifier, and which checked it (2026-11-22)](decisions.md#which-file-supplied-an-author-identifier-and-which-checked-it-2026-11-22) | 360 |
+|  | [The accession number (2026-11-22)](decisions.md#the-accession-number-2026-11-22) | 461 |
+| The accession number (2026-11-22) | [Endpaper mints it, from the row](decisions.md#endpaper-mints-it-from-the-row) | 115 |
+| The accession number (2026-11-22) | [A label prints Code 128 or Code 39, as its stock says](decisions.md#a-label-prints-code-128-or-code-39-as-its-stock-says) | 36 |
+| The accession number (2026-11-22) | [Member only](decisions.md#member-only) | 60 |
+| The accession number (2026-11-22) | [None until assigned](decisions.md#none-until-assigned) | 48 |
+| The accession number (2026-11-22) | [A number is unique for life, across a restore](decisions.md#a-number-is-unique-for-life-across-a-restore) | 136 |
 <!-- index: end -->

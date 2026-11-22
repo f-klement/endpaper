@@ -28,6 +28,7 @@ import pytest
 from sqlalchemy import event
 
 import authorship as authorship_module
+from authority import SuppliedIdentifier
 from authors import AUTHOR_NAME_MAX, DEFAULT_MATCHER, EXACT_MATCHER, author_key, resolve_alias_map
 from authors import SuggestionReason as Reason
 from authorship import (
@@ -40,7 +41,7 @@ from authorship import (
 )
 from catalogue import AuthorityAssertion
 from database import Base, engine
-from enums import AuthorityProvenance, AuthorityScheme
+from enums import AuthorityProvenance, AuthorityScheme, AuthoritySupplier
 from models import (
     AUTHORITY_IDENTIFIER_MAX,
     AuthorAlias,
@@ -433,6 +434,12 @@ class TestStoringWhatACatalogueAsserted:
         assert row.provenance == AuthorityProvenance.CATALOGUE
         assert row.created_by_user_id is None
 
+    def test_a_machine_written_row_is_supplied_by_the_catalogue_and_checked_by_nobody(self, db, user):
+        Authorship.seen_by(db, user.id).record_catalogue_assertions([KANE], credited=KANE.name)
+
+        row = db.query(AuthorIdentifier).one()
+        assert (row.asserted_by, row.checked_by) == (AuthoritySupplier.CATALOGUE, None)
+
     def test_the_same_assertion_twice_stores_one_row(self, db, user):
         """A refresh runs whenever somebody presses the button."""
         authorship = Authorship.seen_by(db, user.id)
@@ -508,6 +515,48 @@ class TestACandidateIsNotStoredSilently:
         assert row.provenance == AuthorityProvenance.MEMBER
         assert row.created_by_user_id == user.id
 
+    def test_a_confirmed_value_is_the_members_word_and_unchecked(self, db, user):
+        """The request named the value. A file whose record names the author
+        is recorded afterwards by `record_check`, never at the write, so the
+        409 asks nobody."""
+        shelve(db, user, "Sean P. Kane")
+
+        row = Authorship.seen_by(db, user.id).confirm_identifier(
+            "Sean P. Kane", AuthorityScheme.GND, "1042243212", by_user_id=user.id
+        )
+
+        assert (row.asserted_by, row.checked_by) == (AuthoritySupplier.MEMBER, None)
+
+    def test_a_check_is_recorded_once_and_the_first_checker_stands(self, db, user):
+        shelve(db, user, "Sean P. Kane")
+        authorship = Authorship.seen_by(db, user.id)
+        row = authorship.confirm_identifier(
+            "Sean P. Kane", AuthorityScheme.GND, "1042243212", by_user_id=user.id
+        )
+
+        authorship.record_check(row, AuthoritySupplier.LOBID)
+        authorship.record_check(row, AuthoritySupplier.WIKIDATA)
+
+        db.expire_all()
+        stored = db.query(AuthorIdentifier).one()
+        assert (stored.checked_by, stored.identifier) == (AuthoritySupplier.LOBID, "1042243212")
+
+    def test_a_file_is_never_recorded_as_checking_what_it_supplied(self, db, user):
+        """`ck_author_identifiers_second_file` would refuse it with an
+        `IntegrityError`; this is the application's half, which skips it."""
+        shelve(db, user, "Jorge Luis Borges")
+        authorship = Authorship.seen_by(db, user.id)
+        [row] = authorship.record_cross_references(
+            "Jorge Luis Borges",
+            {AuthorityScheme.LCNAF: SuppliedIdentifier("n79007035", AuthoritySupplier.LOBID, None)},
+            by_user_id=user.id,
+        ).stored
+
+        authorship.record_check(row, AuthoritySupplier.LOBID)
+
+        db.expire_all()
+        assert db.query(AuthorIdentifier).one().checked_by is None
+
     def test_confirming_for_an_author_nobody_can_see_raises(self, db, user, other):
         shelve(db, other, "Sean P. Kane", private=True)
 
@@ -563,7 +612,9 @@ class TestASpellingNoKeyCanHoldIsNeverFiled:
 
         with pytest.raises(AuthorNotFound):
             Authorship.seen_by(db, user.id).record_cross_references(
-                self.LONG, {AuthorityScheme.VIAF: "88919448"}, by_user_id=user.id
+                self.LONG,
+                {AuthorityScheme.VIAF: SuppliedIdentifier("88919448", AuthoritySupplier.LOBID, None)},
+                by_user_id=user.id,
             )
 
 
@@ -1091,13 +1142,15 @@ class TestTheCrossReferencesStoredWithAConfirmation:
     """
 
     @staticmethod
-    def _references() -> dict[AuthorityScheme, str]:
-        """Borges as lobid answers, measured 2026-08-28 on GND `118513532`."""
+    def _references() -> dict[AuthorityScheme, SuppliedIdentifier]:
+        """Borges as lobid answers, measured 2026-08-28 on GND `118513532`,
+        with the suppliers `authority.cross_references` names for them."""
+        lobid, wikidata = AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA
         return {
-            AuthorityScheme.ISNI: "0000000121429031",
-            AuthorityScheme.LCNAF: "n79007035",
-            AuthorityScheme.VIAF: "88919448",
-            AuthorityScheme.WIKIDATA: "Q909",
+            AuthorityScheme.ISNI: SuppliedIdentifier("0000000121429031", lobid, wikidata),
+            AuthorityScheme.LCNAF: SuppliedIdentifier("n79007035", lobid, None),
+            AuthorityScheme.VIAF: SuppliedIdentifier("88919448", lobid, wikidata),
+            AuthorityScheme.WIKIDATA: SuppliedIdentifier("Q909", lobid, wikidata),
         }
 
     def test_every_scheme_lands_as_its_own_row(self, db, user):
@@ -1109,7 +1162,7 @@ class TestTheCrossReferencesStoredWithAConfirmation:
         )
 
         assert {(row.scheme, row.identifier) for row in recorded.stored} == {
-            (scheme, value) for scheme, value in self._references().items()
+            (scheme, supplied.identifier) for scheme, supplied in self._references().items()
         }
         assert recorded.refused == []
 
@@ -1127,6 +1180,43 @@ class TestTheCrossReferencesStoredWithAConfirmation:
 
         assert all(row.provenance == AuthorityProvenance.MEMBER for row in recorded.stored)
         assert all(row.created_by_user_id == user.id for row in recorded.stored)
+
+    def test_each_row_records_the_file_that_supplied_it_and_the_one_that_checked_it(self, db, user):
+        """Provenance says a person tied the record to the author; the supplier
+        says which file carried the number. An LCNAF number nothing compared
+        must read differently from an ISNI two files named."""
+        shelve(db, user, "Jorge Luis Borges")
+
+        recorded = Authorship.seen_by(db, user.id).record_cross_references(
+            "Jorge Luis Borges", self._references(), by_user_id=user.id
+        )
+
+        assert {(row.scheme, row.asserted_by, row.checked_by) for row in recorded.stored} == {
+            (AuthorityScheme.ISNI, AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA),
+            (AuthorityScheme.LCNAF, AuthoritySupplier.LOBID, None),
+            (AuthorityScheme.VIAF, AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA),
+            (AuthorityScheme.WIKIDATA, AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA),
+        }
+
+    def test_an_agreeing_row_gains_the_check_a_later_assertion_carries(self, db, user):
+        shelve(db, user, "Jorge Luis Borges")
+        authorship = Authorship.seen_by(db, user.id)
+        lobid, wikidata = AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA
+        authorship.record_cross_references(
+            "Jorge Luis Borges",
+            {AuthorityScheme.VIAF: SuppliedIdentifier("88919448", lobid, None)},
+            by_user_id=user.id,
+        )
+
+        authorship.record_cross_references(
+            "Jorge Luis Borges",
+            {AuthorityScheme.VIAF: SuppliedIdentifier("88919448", lobid, wikidata)},
+            by_user_id=user.id,
+        )
+
+        db.expire_all()
+        stored = db.query(AuthorIdentifier).one()
+        assert (stored.asserted_by, stored.checked_by) == (lobid, wikidata)
 
     def test_it_files_under_the_same_key_a_confirmation_does(self, db, user):
         """Both go through `_confirmable_key`, so a confirmation and the cross
@@ -1183,7 +1273,9 @@ class TestTheCrossReferencesStoredWithAConfirmation:
         )
 
         recorded = authorship.record_cross_references(
-            "Jorge Luis Borges", {AuthorityScheme.ISNI: "0000000121429031"}, by_user_id=user.id
+            "Jorge Luis Borges",
+            {AuthorityScheme.ISNI: SuppliedIdentifier("0000000121429031", AuthoritySupplier.LOBID, None)},
+            by_user_id=user.id,
         )
 
         assert recorded.stored == []
@@ -1221,7 +1313,10 @@ class TestTheCrossReferencesStoredWithAConfirmation:
 
         recorded = Authorship.seen_by(db, user.id).record_cross_references(
             "Jorge Luis Borges",
-            {AuthorityScheme.ISNI: "", AuthorityScheme.VIAF: "88919448"},
+            {
+                AuthorityScheme.ISNI: SuppliedIdentifier("", AuthoritySupplier.LOBID, None),
+                AuthorityScheme.VIAF: SuppliedIdentifier("88919448", AuthoritySupplier.LOBID, None),
+            },
             by_user_id=user.id,
         )
 

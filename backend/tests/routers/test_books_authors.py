@@ -1520,6 +1520,88 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
             "bnchl": "10000000000000000007303",
         }
 
+    def test_each_row_says_which_file_supplied_it(self, client, admin, make_book):
+        """The confirmed number is the member's word, checked by lobid whose
+        record names the author; the four from `sameAs` are lobid's and the six
+        from the cluster VIAF's."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_RECORD)
+            res = confirm(client, admin["headers"], "Robert Louis Stevenson", "118753711")
+
+        body = res.json()
+        assert (body["identifier"]["asserted_by"], body["identifier"]["checked_by"]) == ("member", "lobid")
+        assert {row["scheme"]: row["asserted_by"] for row in body["cross_references"]} == {
+            "isni": "lobid",
+            "lcnaf": "lobid",
+            "viaf": "lobid",
+            "wikidata": "lobid",
+            "blbnb": "viaf",
+            "arbabn": "viaf",
+            "bne": "viaf",
+            "ptbnp": "viaf",
+            "iccu": "viaf",
+            "bnchl": "viaf",
+        }
+
+    def test_an_existing_number_whose_record_names_somebody_else_stays_unchecked(
+        self, client, admin, make_book
+    ):
+        """lobid holds the number, but its record is Stevenson's, so it has not
+        named the author the member filed it under."""
+        make_book(admin["headers"], title="Tom Sawyer", author="Mark Twain")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_RECORD)
+            res = confirm(client, admin["headers"], "Mark Twain", "118753711")
+
+        assert res.status_code == 201, res.text
+        assert (res.json()["identifier"]["asserted_by"], res.json()["identifier"]["checked_by"]) == (
+            "member",
+            None,
+        )
+
+    def test_the_cross_references_of_a_record_naming_somebody_else_stay_unchecked(
+        self, client, admin, make_book
+    ):
+        """Wikidata and the BNP corroborate Stevenson's record, not Mark Twain,
+        so a check they gave there is no check here."""
+        make_book(admin["headers"], title="Tom Sawyer", author="Mark Twain")
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=LOBID_RECORD)
+            res = confirm(client, admin["headers"], "Mark Twain", "118753711")
+
+        checks = {row["scheme"]: row["checked_by"] for row in res.json()["cross_references"]}
+        assert checks
+        assert set(checks.values()) == {None}
+
+    def test_a_variant_name_on_the_record_is_the_author_named(self, client, admin, make_book):
+        make_book(admin["headers"], title="Kidnapped", author="R. L. Stevenson")
+        record = {**LOBID_RECORD, "variantName": ["Stevenson, R. L."]}
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=record)
+            res = confirm(client, admin["headers"], "R. L. Stevenson", "118753711")
+
+        assert res.status_code == 201, res.text
+        assert res.json()["identifier"]["checked_by"] == "lobid"
+
+    def test_a_number_lobid_answers_with_its_successor_stays_unchecked(self, client, admin, make_book):
+        """A retired number resolving to another record is not lobid naming
+        the value the member confirmed, even where that record names the
+        author."""
+        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
+        successor = {**LOBID_RECORD, "gndIdentifier": "131572873"}
+
+        with respx.mock(assert_all_called=False) as mock:
+            _authority_mock(mock, lobid=successor)
+            res = confirm(client, admin["headers"], "Robert Louis Stevenson", "118753711")
+
+        assert res.status_code == 201, res.text
+        assert res.json()["identifier"]["checked_by"] is None
+
     async def test_one_deadline_covers_all_three_hosts_a_confirmation_reaches(self):
         """**Two places can drop it and neither is observable through a result.**
         `_cross_references_for` builds one absolute deadline and hands it to
@@ -1557,7 +1639,7 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
         original_once, original_get = fetch.get_once, fetch.get
         fetch.get_once, fetch.get = once, get
         try:
-            await books_router._cross_references_for("118753711")
+            await books_router._cross_references_for("118753711", "robert louis stevenson")
         finally:
             fetch.get_once, fetch.get = original_once, original_get
 
@@ -1578,6 +1660,7 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
 
         assert res.status_code == 201, res.text
         assert res.json()["identifier"]["identifier"] == "118753711"
+        assert res.json()["identifier"]["checked_by"] is None
         assert res.json()["cross_references"] == []
 
     def test_viaf_being_down_costs_the_national_ones_and_nothing_else(self, client, admin, make_book):

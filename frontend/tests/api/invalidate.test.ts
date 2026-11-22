@@ -26,7 +26,7 @@ import * as settings from "../../src/api/generated/endpoints/settings/settings";
 import * as stats from "../../src/api/generated/endpoints/stats/stats";
 import * as system from "../../src/api/generated/endpoints/system/system";
 import * as users from "../../src/api/generated/endpoints/users/users";
-import { Locale } from "../../src/api/generated/model";
+import { HeadingUse, Locale } from "../../src/api/generated/model";
 import { invalidateWith, isCatalogueQuery } from "../../src/api/invalidate";
 
 /**
@@ -58,6 +58,7 @@ const KEYS: Record<string, readonly unknown[]> = {
   listBooks: books.getListBooksQueryKey(),
   listBooksInfinite: books.getListBooksInfiniteQueryKey(),
   getBook: books.getGetBookQueryKey(7),
+  getBookByAccession: books.getGetBookByAccessionQueryKey("200047116"),
   listCopies: books.getListCopiesQueryKey(7),
   getNotes: books.getGetNotesQueryKey(7),
   getCustomFields: books.getGetCustomFieldsQueryKey(7),
@@ -110,6 +111,15 @@ const KEYS: Record<string, readonly unknown[]> = {
   // and invalidates this key, and a harvest drops every book's from its own
   // hook. A merge calls `everything()`.
   listPendingHeadings: books.getListPendingHeadingsQueryKey(7),
+  // The heading field's vocabularies and suggestions, children of
+  // `/api/books/{id}` that read the local vocabulary copy and the setting,
+  // never the books table, so no book write moves them.
+  listSuggestingVocabularies: books.getListSuggestingVocabulariesQueryKey(7),
+  suggestHeadings: books.getSuggestHeadingsQueryKey(7, {
+    scheme: "gnd",
+    q: "Info",
+    use: HeadingUse.subject,
+  }),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -356,7 +366,13 @@ describe("the inventory is complete", () => {
     //
     // 74 on 2026-11-22, counted with that same command: the curated catalogue
     // registry, four routes, one of them a read.
-    expect(Object.keys(KEYS).length).toBe(74);
+    //
+    // 76 on 2026-11-22, counted with that same command: a book's heading
+    // field, three routes, two of them reads.
+    //
+    // 77 on 2026-11-22, counted with that same command: a copy found by the
+    // accession number on its label, one read.
+    expect(Object.keys(KEYS).length).toBe(77);
   });
 });
 
@@ -369,6 +385,9 @@ describe("the catalogue is everything derived from the books table", () => {
       // a stale "not held" hides the warning from the next copy scanned.
       "alreadyHeld",
       "getBook",
+      // The same record found by its label's accession number, so a bulk
+      // assign moves it as it moves the record.
+      "getBookByAccession",
       "getStats",
       "listAuthorSuggestions",
       "listAuthors",
@@ -478,6 +497,12 @@ describe("the catalogue is everything derived from the books table", () => {
       "listPendingHeadings",
       "listKosyncDocuments",
     ]) {
+      expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
+    }
+  });
+
+  it("leaves the heading field's reads of the vocabulary copy alone", () => {
+    for (const name of ["listSuggestingVocabularies", "suggestHeadings"]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }
   });

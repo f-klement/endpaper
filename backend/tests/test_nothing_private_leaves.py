@@ -103,13 +103,14 @@ from tests.schemas.test_public import WITHHELD
 
 #: A string that occurs in no fixture, no seeded tag and no real library.
 #:
-#: **Ten characters, and the length is load bearing.** At eleven it did not fit
-#: `books.language`, which is `String(10)`, so that column was silently dropped
+#: **Nine characters, and the length is load bearing.** At eleven it did not fit
+#: `books.language`, which is `String(10)`, and at ten it did not fit
+#: `books.accession`, `String(9)`; each time that column was silently dropped
 #: from the marked set while this file claimed to mark every free text column.
 #: `test_the_only_column_too_short_for_the_marker_is_the_currency` is what says
-#: so now, derived from the table rather than from this comment. No substring of
-#: it is a word, so a match is this marker rather than a collision.
-MARKER = "ZQPRIVATEQ"
+#: so now, derived from the table rather than from this comment. The `ZQ` it
+#: opens with starts no word, so a match is this marker rather than a collision.
+MARKER = "ZQPRIVATQ"
 
 #: The same, for the Book a reader with no account is entitled to see.
 #:
@@ -127,8 +128,8 @@ PUBLIC_MARKER = "ZQPUBLICQZ"
 SHARED_TERM = "catalogued"
 
 #: The same again, for the columns the public Book carries and its public record
-#: withholds. Ten characters for `MARKER`'s reason.
-WITHHELD_MARKER = "ZQXWTHLDQZ"
+#: withholds. Nine characters for `MARKER`'s reason.
+WITHHELD_MARKER = "ZQXWTHLDQ"
 
 #: A value no fixture and no real library holds, for each withheld column of
 #: the public Book that is a number or a date, where the marker cannot go.
@@ -723,6 +724,10 @@ class TestTheMarkedColumns:
         free text column. Asserting one name would not have caught it; asserting
         the whole short set does.
         """
+        # Both markers a column holds, the private Book's and the public one's
+        # withheld: measured by one alone, the other could outgrow a column and
+        # leave the sweep with only the control still passing.
+        longest = max(len(MARKER), len(WITHHELD_MARKER))
         table = cast(Table, Book.__table__)
         too_short = {
             column.name
@@ -730,10 +735,10 @@ class TestTheMarkedColumns:
             if isinstance(column.type, String | Text)
             and not column.primary_key
             and not column.foreign_keys
-            and (getattr(column.type, "length", None) or 10**6) < len(MARKER)
+            and (getattr(column.type, "length", None) or 10**6) < longest
         }
         assert too_short == {"purchase_currency"}, (
             f"{sorted(too_short)} are too short to hold the marker, so the "
-            "sweep cannot see a leak through them. Shorten MARKER, or say here "
+            "sweep cannot see a leak through them. Shorten the marker, or say here "
             "which column is being given up and why."
         )

@@ -182,10 +182,11 @@ def _addresses(raw: str) -> tuple[str, ...]:
 def checked_config(db: Session, *, recipients: tuple[str, ...] | None = None) -> MailConfig:
     """The mail configuration in force, or a refusal naming what is wrong.
 
-    **`recipients` overrides the household address, and only two callers may
+    **`recipients` overrides the household address, and only two kinds of mail
     pass it.** `overdue_mail_to` is where a reminder about the library goes; a
-    verification code goes to the one person being verified, and there is no
-    other address it could be sent to. Passing the recipient in keeps that a
+    verification code goes to the one person being verified, and a patron's own
+    overdue notice to that patron, and there is no other address either could
+    be sent to. Passing the recipient in keeps that a
     decision the caller makes and states, rather than this function growing a
     second source of addresses: everything else about the transport, including
     the refusals, is unchanged and shared.

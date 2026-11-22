@@ -58,6 +58,7 @@ import type {
   BulkRequest,
   BulkResult,
   ClassificationFacets,
+  ClassificationIn,
   ClassificationOut,
   CollectionAssign,
   ConfirmedIdentifierOut,
@@ -108,6 +109,8 @@ import type {
   Refusal,
   SearchBooksParams,
   SeriesOut,
+  SuggestHeadingsParams,
+  SuggestingVocabularyOut,
   SweepIn,
   SweepOut,
   TagCreate,
@@ -606,6 +609,233 @@ export const useAddBook = <
 > => {
   return useMutation(getAddBookMutationOptions(options), queryClient);
 };
+export const getGetBookByAccessionUrl = (code: string) => {
+  return `/api/books/accession/${code}`;
+};
+
+/**
+ * The copy whose label carries this accession number.
+ *
+ * What a scanned label resolves through, so it answers what `GET /{book_id}`
+ * answers: **404 for a copy the caller may not see**, private to somebody
+ * else or in the trash, never 403, since a 403 would confirm the label
+ * exists. A string that is not an accession number at all, a mistyped check
+ * digit included, is 400, the house status for a refused value: that says
+ * nothing about any Book.
+ *
+ * Declared before `/{book_id}`, which would otherwise take `accession` as an id.
+ * @summary Get Book By Accession
+ */
+export const getBookByAccession = async (
+  code: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getGetBookByAccessionUrl(code), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBookByAccessionQueryKey = (code: string) => {
+  return [`/api/books/accession/${code}`] as const;
+};
+
+export const getGetBookByAccessionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBookByAccession>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getBookByAccession>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBookByAccessionQueryKey(code);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBookByAccession>>
+  > = ({ signal }) => getBookByAccession(code, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: code !== null && code !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBookByAccession>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetBookByAccessionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBookByAccession>>
+>;
+export type GetBookByAccessionQueryError = Refusal | HTTPValidationError;
+
+/**
+ * The copy whose label carries this accession number.
+ *
+ * What a scanned label resolves through, so it answers what `GET /{book_id}`
+ * answers: **404 for a copy the caller may not see**, private to somebody
+ * else or in the trash, never 403, since a 403 would confirm the label
+ * exists. A string that is not an accession number at all, a mistyped check
+ * digit included, is 400, the house status for a refused value: that says
+ * nothing about any Book.
+ *
+ * Declared before `/{book_id}`, which would otherwise take `accession` as an id.
+ * @summary Get Book By Accession
+ */
+export function useGetBookByAccession<
+  TData = Awaited<ReturnType<typeof getBookByAccession>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  code: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getBookByAccession>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBookByAccession>>,
+          TError,
+          Awaited<ReturnType<typeof getBookByAccession>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The copy whose label carries this accession number.
+ *
+ * What a scanned label resolves through, so it answers what `GET /{book_id}`
+ * answers: **404 for a copy the caller may not see**, private to somebody
+ * else or in the trash, never 403, since a 403 would confirm the label
+ * exists. A string that is not an accession number at all, a mistyped check
+ * digit included, is 400, the house status for a refused value: that says
+ * nothing about any Book.
+ *
+ * Declared before `/{book_id}`, which would otherwise take `accession` as an id.
+ * @summary Get Book By Accession
+ */
+export function useGetBookByAccession<
+  TData = Awaited<ReturnType<typeof getBookByAccession>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getBookByAccession>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getBookByAccession>>,
+          TError,
+          Awaited<ReturnType<typeof getBookByAccession>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The copy whose label carries this accession number.
+ *
+ * What a scanned label resolves through, so it answers what `GET /{book_id}`
+ * answers: **404 for a copy the caller may not see**, private to somebody
+ * else or in the trash, never 403, since a 403 would confirm the label
+ * exists. A string that is not an accession number at all, a mistyped check
+ * digit included, is 400, the house status for a refused value: that says
+ * nothing about any Book.
+ *
+ * Declared before `/{book_id}`, which would otherwise take `accession` as an id.
+ * @summary Get Book By Accession
+ */
+export function useGetBookByAccession<
+  TData = Awaited<ReturnType<typeof getBookByAccession>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getBookByAccession>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The copy whose label carries this accession number.
+ *
+ * What a scanned label resolves through, so it answers what `GET /{book_id}`
+ * answers: **404 for a copy the caller may not see**, private to somebody
+ * else or in the trash, never 403, since a 403 would confirm the label
+ * exists. A string that is not an accession number at all, a mistyped check
+ * digit included, is 400, the house status for a refused value: that says
+ * nothing about any Book.
+ *
+ * Declared before `/{book_id}`, which would otherwise take `accession` as an id.
+ * @summary Get Book By Accession
+ */
+export function useGetBookByAccession<
+  TData = Awaited<ReturnType<typeof getBookByAccession>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getBookByAccession>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetBookByAccessionQueryOptions(code, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getAlreadyHeldUrl = (params: AlreadyHeldParams) => {
   const normalizedParams = new URLSearchParams();
 
@@ -1490,7 +1720,9 @@ export const getConfirmAuthorIdentifierUrl = () => {
  * than something a lookup does on the way past.
  *
  * **The cross references only for `gnd`.** An LCNAF or ORCID record is
- * stored as confirmed and nothing else is read from it.
+ * stored as confirmed and nothing else is read from it. A GND number whose
+ * lobid record names the author is recorded as checked by lobid; any other
+ * confirmation is the member's word, unchecked.
  *
  * **A cross reference colliding with a stored value is reported, not raised.**
  * The confirmation is already committed, so failing here would report a write
@@ -1580,7 +1812,9 @@ export type ConfirmAuthorIdentifierMutationVariables = {
  * than something a lookup does on the way past.
  *
  * **The cross references only for `gnd`.** An LCNAF or ORCID record is
- * stored as confirmed and nothing else is read from it.
+ * stored as confirmed and nothing else is read from it. A GND number whose
+ * lobid record names the author is recorded as checked by lobid; any other
+ * confirmation is the member's word, unchecked.
  *
  * **A cross reference colliding with a stored value is reported, not raised.**
  * The confirmation is already committed, so failing here would report a write
@@ -11510,6 +11744,623 @@ export function useEnrichmentCandidates<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getEnrichmentCandidatesQueryOptions(bookId, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAddHeadingUrl = (bookId: number) => {
+  return `/api/books/${bookId}/headings`;
+};
+
+/**
+ * Add the heading a Member picked on this Book's heading field, and answer the Book.
+ *
+ * **Not checked against a copy**: the setting filters what the field offers
+ * and refuses nothing here, as `docs/decisions.md` records for #135, until a
+ * batch matcher can mark a heading no copy holds rather than refuse it. A
+ * heading the Book carries already, or one past the ceiling, changes nothing;
+ * a scheme with no row is a 422. 403 while the setting is not in force, since
+ * the field this serves is not drawn then.
+ * @summary Add Heading
+ */
+export const addHeading = async (
+  bookId: number,
+  classificationIn: ClassificationIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<BookOut> => {
+  return customFetch<BookOut>(getAddHeadingUrl(bookId), {
+    ...options,
+    method: "POST",
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
+    body: JSON.stringify(classificationIn),
+  });
+};
+
+export const getAddHeadingMutationKey = () => ["addHeading"] as const;
+
+export const getAddHeadingMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof addHeading>>,
+    TError,
+    AddHeadingMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof addHeading>>,
+  TError,
+  AddHeadingMutationVariables,
+  TContext
+> => {
+  const mutationKey = getAddHeadingMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof addHeading>>,
+    AddHeadingMutationVariables
+  > = (props) => {
+    const { bookId, data } = props ?? {};
+
+    return addHeading(bookId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AddHeadingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof addHeading>>
+>;
+export type AddHeadingMutationBody = ClassificationIn;
+export type AddHeadingMutationError = Refusal | HTTPValidationError;
+export type AddHeadingMutationVariables = {
+  bookId: number;
+  data: ClassificationIn;
+};
+
+/**
+ * Add the heading a Member picked on this Book's heading field, and answer the Book.
+ *
+ * **Not checked against a copy**: the setting filters what the field offers
+ * and refuses nothing here, as `docs/decisions.md` records for #135, until a
+ * batch matcher can mark a heading no copy holds rather than refuse it. A
+ * heading the Book carries already, or one past the ceiling, changes nothing;
+ * a scheme with no row is a 422. 403 while the setting is not in force, since
+ * the field this serves is not drawn then.
+ * @summary Add Heading
+ */
+export const useAddHeading = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof addHeading>>,
+      TError,
+      AddHeadingMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof addHeading>>,
+  TError,
+  AddHeadingMutationVariables,
+  TContext
+> => {
+  return useMutation(getAddHeadingMutationOptions(options), queryClient);
+};
+export const getSuggestHeadingsUrl = (
+  bookId: number,
+  params: SuggestHeadingsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/books/${bookId}/headings/suggest?${stringifiedParams}`
+    : `/api/books/${bookId}/headings/suggest`;
+};
+
+/**
+ * Headings from `scheme`'s local copy with a label beginning with `q`, as
+ * the heading field offers them while a cataloguer types.
+ *
+ * **The local copy only**, never a vocabulary service, so a keystroke costs
+ * this server and nobody else. Bounded three ways: `q` of at least
+ * `SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and
+ * `ratelimit.HEADING_SUGGEST_LIMIT` per member.
+ *
+ * `use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the
+ * copies cannot serve as it is never offered. Empty for a vocabulary with no
+ * copy loaded; 403 while the setting is not in force.
+ *
+ * **Each heading is the row a pick writes**, already in the form an import of
+ * it writes (`vocabularies.classification_row`), so a pick posts it back
+ * unchanged and lands on the row an imported record of the same heading
+ * holds, rather than beside it under the copy's `$0` spelling.
+ * @summary Suggest Headings
+ */
+export const suggestHeadings = async (
+  bookId: number,
+  params: SuggestHeadingsParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ClassificationOut[]> => {
+  return customFetch<ClassificationOut[]>(
+    getSuggestHeadingsUrl(bookId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getSuggestHeadingsQueryKey = (
+  bookId: number,
+  params?: SuggestHeadingsParams,
+) => {
+  return [
+    `/api/books/${bookId}/headings/suggest`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getSuggestHeadingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof suggestHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  params: SuggestHeadingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof suggestHeadings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getSuggestHeadingsQueryKey(bookId, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof suggestHeadings>>> = ({
+    signal,
+  }) => suggestHeadings(bookId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof suggestHeadings>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type SuggestHeadingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof suggestHeadings>>
+>;
+export type SuggestHeadingsQueryError = Refusal | HTTPValidationError;
+
+/**
+ * Headings from `scheme`'s local copy with a label beginning with `q`, as
+ * the heading field offers them while a cataloguer types.
+ *
+ * **The local copy only**, never a vocabulary service, so a keystroke costs
+ * this server and nobody else. Bounded three ways: `q` of at least
+ * `SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and
+ * `ratelimit.HEADING_SUGGEST_LIMIT` per member.
+ *
+ * `use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the
+ * copies cannot serve as it is never offered. Empty for a vocabulary with no
+ * copy loaded; 403 while the setting is not in force.
+ *
+ * **Each heading is the row a pick writes**, already in the form an import of
+ * it writes (`vocabularies.classification_row`), so a pick posts it back
+ * unchanged and lands on the row an imported record of the same heading
+ * holds, rather than beside it under the copy's `$0` spelling.
+ * @summary Suggest Headings
+ */
+export function useSuggestHeadings<
+  TData = Awaited<ReturnType<typeof suggestHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  params: SuggestHeadingsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof suggestHeadings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof suggestHeadings>>,
+          TError,
+          Awaited<ReturnType<typeof suggestHeadings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Headings from `scheme`'s local copy with a label beginning with `q`, as
+ * the heading field offers them while a cataloguer types.
+ *
+ * **The local copy only**, never a vocabulary service, so a keystroke costs
+ * this server and nobody else. Bounded three ways: `q` of at least
+ * `SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and
+ * `ratelimit.HEADING_SUGGEST_LIMIT` per member.
+ *
+ * `use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the
+ * copies cannot serve as it is never offered. Empty for a vocabulary with no
+ * copy loaded; 403 while the setting is not in force.
+ *
+ * **Each heading is the row a pick writes**, already in the form an import of
+ * it writes (`vocabularies.classification_row`), so a pick posts it back
+ * unchanged and lands on the row an imported record of the same heading
+ * holds, rather than beside it under the copy's `$0` spelling.
+ * @summary Suggest Headings
+ */
+export function useSuggestHeadings<
+  TData = Awaited<ReturnType<typeof suggestHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  params: SuggestHeadingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof suggestHeadings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof suggestHeadings>>,
+          TError,
+          Awaited<ReturnType<typeof suggestHeadings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Headings from `scheme`'s local copy with a label beginning with `q`, as
+ * the heading field offers them while a cataloguer types.
+ *
+ * **The local copy only**, never a vocabulary service, so a keystroke costs
+ * this server and nobody else. Bounded three ways: `q` of at least
+ * `SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and
+ * `ratelimit.HEADING_SUGGEST_LIMIT` per member.
+ *
+ * `use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the
+ * copies cannot serve as it is never offered. Empty for a vocabulary with no
+ * copy loaded; 403 while the setting is not in force.
+ *
+ * **Each heading is the row a pick writes**, already in the form an import of
+ * it writes (`vocabularies.classification_row`), so a pick posts it back
+ * unchanged and lands on the row an imported record of the same heading
+ * holds, rather than beside it under the copy's `$0` spelling.
+ * @summary Suggest Headings
+ */
+export function useSuggestHeadings<
+  TData = Awaited<ReturnType<typeof suggestHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  params: SuggestHeadingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof suggestHeadings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Headings from `scheme`'s local copy with a label beginning with `q`, as
+ * the heading field offers them while a cataloguer types.
+ *
+ * **The local copy only**, never a vocabulary service, so a keystroke costs
+ * this server and nobody else. Bounded three ways: `q` of at least
+ * `SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and
+ * `ratelimit.HEADING_SUGGEST_LIMIT` per member.
+ *
+ * `use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the
+ * copies cannot serve as it is never offered. Empty for a vocabulary with no
+ * copy loaded; 403 while the setting is not in force.
+ *
+ * **Each heading is the row a pick writes**, already in the form an import of
+ * it writes (`vocabularies.classification_row`), so a pick posts it back
+ * unchanged and lands on the row an imported record of the same heading
+ * holds, rather than beside it under the copy's `$0` spelling.
+ * @summary Suggest Headings
+ */
+export function useSuggestHeadings<
+  TData = Awaited<ReturnType<typeof suggestHeadings>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  params: SuggestHeadingsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof suggestHeadings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getSuggestHeadingsQueryOptions(bookId, params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListSuggestingVocabulariesUrl = (bookId: number) => {
+  return `/api/books/${bookId}/headings/vocabularies`;
+};
+
+/**
+ * The vocabularies this Book's heading field offers headings from.
+ *
+ * Those with a local copy loaded, and **none while the setting is not in
+ * force**: library mode off, or `headings_from_vocabulary` switched off. An
+ * empty list is how a client knows to draw no field, so it is an answer
+ * rather than a refusal.
+ * @summary List Suggesting Vocabularies
+ */
+export const listSuggestingVocabularies = async (
+  bookId: number,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<SuggestingVocabularyOut[]> => {
+  return customFetch<SuggestingVocabularyOut[]>(
+    getListSuggestingVocabulariesUrl(bookId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListSuggestingVocabulariesQueryKey = (bookId: number) => {
+  return [`/api/books/${bookId}/headings/vocabularies`] as const;
+};
+
+export const getListSuggestingVocabulariesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListSuggestingVocabulariesQueryKey(bookId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSuggestingVocabularies>>
+  > = ({ signal }) =>
+    listSuggestingVocabularies(bookId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: bookId !== null && bookId !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListSuggestingVocabulariesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSuggestingVocabularies>>
+>;
+export type ListSuggestingVocabulariesQueryError =
+  | Refusal
+  | HTTPValidationError;
+
+/**
+ * The vocabularies this Book's heading field offers headings from.
+ *
+ * Those with a local copy loaded, and **none while the setting is not in
+ * force**: library mode off, or `headings_from_vocabulary` switched off. An
+ * empty list is how a client knows to draw no field, so it is an answer
+ * rather than a refusal.
+ * @summary List Suggesting Vocabularies
+ */
+export function useListSuggestingVocabularies<
+  TData = Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+          TError,
+          Awaited<ReturnType<typeof listSuggestingVocabularies>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The vocabularies this Book's heading field offers headings from.
+ *
+ * Those with a local copy loaded, and **none while the setting is not in
+ * force**: library mode off, or `headings_from_vocabulary` switched off. An
+ * empty list is how a client knows to draw no field, so it is an answer
+ * rather than a refusal.
+ * @summary List Suggesting Vocabularies
+ */
+export function useListSuggestingVocabularies<
+  TData = Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+          TError,
+          Awaited<ReturnType<typeof listSuggestingVocabularies>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The vocabularies this Book's heading field offers headings from.
+ *
+ * Those with a local copy loaded, and **none while the setting is not in
+ * force**: library mode off, or `headings_from_vocabulary` switched off. An
+ * empty list is how a client knows to draw no field, so it is an answer
+ * rather than a refusal.
+ * @summary List Suggesting Vocabularies
+ */
+export function useListSuggestingVocabularies<
+  TData = Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The vocabularies this Book's heading field offers headings from.
+ *
+ * Those with a local copy loaded, and **none while the setting is not in
+ * force**: library mode off, or `headings_from_vocabulary` switched off. An
+ * empty list is how a client knows to draw no field, so it is an answer
+ * rather than a refusal.
+ * @summary List Suggesting Vocabularies
+ */
+export function useListSuggestingVocabularies<
+  TData = Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+  TError = Refusal | HTTPValidationError,
+>(
+  bookId: number,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSuggestingVocabularies>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListSuggestingVocabulariesQueryOptions(
+    bookId,
+    options,
+  );
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,

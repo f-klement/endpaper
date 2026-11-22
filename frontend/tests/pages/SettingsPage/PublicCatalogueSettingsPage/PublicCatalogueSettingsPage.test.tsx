@@ -276,6 +276,28 @@ describe("PublicCatalogueSettingsPage", () => {
     expect(await screen.findByText(/It publishes nothing/)).toBeInTheDocument();
   });
 
+  it("says before library mode goes on that it turns the overdue emails on", async () => {
+    // #24: the first switch on also turns on mail to patrons and the
+    // household, and the admin flipping it is told at that moment.
+    settings({ library_mode: false });
+    render();
+
+    expect(
+      await screen.findByText(/also turns on the overdue emails/i),
+    ).toBeInTheDocument();
+  });
+
+  it("stops saying so once library mode is on", async () => {
+    // The diagonal: a mode already on turns nothing on by being shown.
+    settings({ library_mode: true });
+    render();
+
+    await screen.findByText(/It publishes nothing/);
+    expect(
+      screen.queryByText(/also turns on the overdue emails/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("turns library mode off without a confirmation", async () => {
     // Only publishing is confirmed. Making something less public never is.
     settings({ library_mode: true, public_catalogue_enabled: true });

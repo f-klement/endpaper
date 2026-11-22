@@ -99,6 +99,11 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # household that has configured nothing being told nothing is the whole
     # complaint this channel answers, and an off switch would reproduce it.
     SettingKey.OVERDUE_IN_APP_ENABLED: "true",
+    # The patron's own notice, off like the other pushing senders: it sends a
+    # patron's address and their loans to a mail server. Switching library mode
+    # on turns it on, once: see `routers/settings._default_notices_on`.
+    SettingKey.OVERDUE_PATRON_MAIL_ENABLED: "false",
+    SettingKey.LIBRARY_MODE_NOTICES_DEFAULTED: "false",
     # Library mode and the public catalogue, both off. The second is the only
     # setting in this table that makes catalogue rows readable **without a
     # session at all**, so its default is the one that matters most here: a
@@ -148,6 +153,10 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # Not dismissed: an installation with no copy is offered one until an
     # admin loads a copy or says no.
     SettingKey.VOCABULARY_OFFER_DISMISSED: "false",
+    # On: the owner's decision on #135 is that a library offers controlled
+    # headings unless an admin says otherwise. Read with library mode, so a
+    # household that reads no setting never meets it.
+    SettingKey.HEADINGS_FROM_VOCABULARY: "true",
 }
 
 # Settings whose value must never be sent back to a browser in full, and which are
@@ -190,6 +199,22 @@ def get_raw(db: Session, key: SettingKey) -> str:
 
 def get_bool(db: Session, key: SettingKey) -> bool:
     return get_raw(db, key).strip().lower() in _TRUE_VALUES
+
+
+def unchosen(db: Session, keys: tuple[SettingKey, ...]) -> tuple[SettingKey, ...]:
+    """Those of `keys` nobody chose: neither pinned by the environment nor stored.
+
+    What a default may fill, and the difference `get_raw` cannot see between a
+    value nobody chose and a choice that happens to equal the default. A row
+    cleared to `None` by `set_value` reads as unchosen, as it reads the default.
+    Takes the keys together, so a caller names them as one table rather than
+    through a loop variable no reader rule can read.
+    """
+    rows = db.query(Setting.key).filter(
+        Setting.key.in_([key.value for key in keys]), Setting.value.isnot(None)
+    )
+    stored = {row.key for row in rows}
+    return tuple(key for key in keys if key.value not in stored and not is_from_env(key))
 
 
 def get_int(db: Session, key: SettingKey, *, minimum: int, maximum: int) -> int:
@@ -924,3 +949,17 @@ def bump_token_epoch(db: Session) -> str:
     fresh = secrets.token_hex(8)
     set_value(db, SettingKey.TOKEN_EPOCH, fresh)
     return fresh
+
+
+def headings_from_vocabulary(db: Session) -> bool:
+    """Whether a book's heading field offers headings from the local vocabulary copies.
+
+    **Its own switch and library mode**, the conjunction `public_catalogue_is_published`
+    makes for the same reason: the row defaults on, so without library mode in
+    it every household would be offered a cataloguer's field.
+
+    **It filters what the field offers and refuses nothing.** A heading posted
+    that no copy holds is written as any member's heading is, as
+    `docs/decisions.md` records for #135; `routers.books.add_heading` says why.
+    """
+    return library_mode(db) and get_bool(db, SettingKey.HEADINGS_FROM_VOCABULARY)
