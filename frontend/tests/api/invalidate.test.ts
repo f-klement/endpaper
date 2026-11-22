@@ -155,6 +155,10 @@ const KEYS: Record<string, readonly unknown[]> = {
   // schemes above; only its own section starts a download, and it refreshes
   // this key itself.
   listVocabularies: settings.getListVocabulariesQueryKey(),
+  // The curated catalogue registry, admin only. Configuration under
+  // `/api/settings`, so a catalogue write leaves it; a pick or a drop answers
+  // with the whole registry, which its hook writes into this key itself.
+  getCatalogueRegistry: settings.getGetCatalogueRegistryQueryKey(),
   // The admin's patron register. Under `/api/patrons`, so a catalogue write
   // leaves it; only its own routes write a patron.
   searchPatrons: patrons.getSearchPatronsQueryKey({ q: "pat" }),
@@ -349,7 +353,10 @@ describe("the inventory is complete", () => {
     //
     // 73 on 2026-11-22, counted with that same command: the truncated harvest
     // run a harvest may carry on from, the first read under `imports`.
-    expect(Object.keys(KEYS).length).toBe(73);
+    //
+    // 74 on 2026-11-22, counted with that same command: the curated catalogue
+    // registry, four routes, one of them a read.
+    expect(Object.keys(KEYS).length).toBe(74);
   });
 });
 

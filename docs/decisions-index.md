@@ -1138,4 +1138,7 @@ repeat the argument.
 | Lending to a patron (2026-11-20) | [An expired registration still lends](decisions.md#an-expired-registration-still-lends) | 106 |
 | Lending to a patron (2026-11-20) | [Registering at the loan is two requests, not one](decisions.md#registering-at-the-loan-is-two-requests-not-one) | 57 |
 | Lending to a patron (2026-11-20) | [The patron form and search are one copy, in the middle tier](decisions.md#the-patron-form-and-search-are-one-copy-in-the-middle-tier) | 23 |
+|  | [The curated catalogue registry and the source test (2026-11-22)](decisions.md#the-curated-catalogue-registry-and-the-source-test-2026-11-22) | 371 |
+| The curated catalogue registry and the source test (2026-11-22) | [The catalogue registry is vendored, and a pick is a name](decisions.md#the-catalogue-registry-is-vendored-and-a-pick-is-a-name) | 180 |
+| The curated catalogue registry and the source test (2026-11-22) | [The test action is the scan's door](decisions.md#the-test-action-is-the-scans-door) | 143 |
 <!-- index: end -->

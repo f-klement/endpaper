@@ -257,6 +257,7 @@ listed.
 | Domain | [`pending_headings.py`](../backend/pending_headings.py) | A harvest's headings, held on the Book until an admin confirms or discards them. |
 | Domain | [`reading.py`](../backend/reading.py) | One Member's reading of the Books in this Library, and the only place a `user_books` row is read or written. |
 | Domain | [`recognition.py`](../backend/recognition.py) | Which existing Book a record is, as one Member sees it. |
+| Domain | [`registry.py`](../backend/registry.py) | The curated catalogue registry this build ships, and what picking an entry writes. |
 | Domain | [`shelf.py`](../backend/shelf.py) | Every query that returns or counts many Books, and the only place the privacy predicate is applied. |
 | Domain | [`shelving.py`](../backend/shelving.py) | Which named parts of the shelf one Member may be told exist, and which they may file a Book into. |
 | Domain | [`tags.py`](../backend/tags.py) | Deciding a tag from a name, how many one Book may carry, and who may be told one exists. |
@@ -317,7 +318,7 @@ flowchart TB
   identity["Identity, 3 modules"]
   protocols["Protocols and notifications, 8 modules"]
   files["Imports and files, 6 modules"]
-  domain["Domain, 24 modules"]
+  domain["Domain, 25 modules"]
   settings["Settings, 2 modules"]
   catalogue["Catalogue, 17 modules"]
   contracts["Contracts, 1 module"]
@@ -521,6 +522,48 @@ credential, which that door cannot carry. Four seeded targets use it, the SBN, P
 OSZK and the SNK, each for ISBN lookups only. PORBASE answers in UNIMARC alone, which
 `metadata._marc21_from_unimarc` maps onto MARC21 before the MARC21 reader sees it.
 
+### The curated registry and the source test
+
+`registry.py` is a second, closed list of catalogues the build ships, `registry.ENTRIES`,
+keyed by `enums.RegisteredCatalogue` rather than `CatalogueSource`, so no entry is in a
+library's plan until somebody chooses it. `targets.Target.source` is the union of the two
+enums; `targets.SEEDED` holds the first kind only. Each entry is a `targets.Target` and the
+evidence of the probe it shipped on, and the module refuses at import an entry whose evidence
+is not `answered`, a bespoke, metered or credentialled one, and a snapshot not dated by its
+newest probe. Nothing in it opens a connection: the snapshot changes by a commit.
+
+**A pick is a name, never an address.** `registry.pick` writes `RegisteredCatalogue` values
+into one settings row, `SettingKey.PICKED_CATALOGUES`, and wherever a picked entry is reached
+its target is read from `ENTRIES`. No `catalogue_targets` row holds an entry. A picked entry
+is listed as chosen and tested, and is not yet asked when a book is scanned.
+
+The admin's **test** action asks one source, seeded or from the registry, and returns how it
+answered and never what it said:
+
+```mermaid
+sequenceDiagram
+  participant A as admin
+  participant R as routers/settings.probe_catalogue_source
+  participant C as catalogue_access.probe
+  participant M as metadata.probe
+  participant D as the row's door
+  A->>R: POST /api/settings/catalogue-sources/name/test
+  R->>R: _testable, a CatalogueSource or else a RegisteredCatalogue, or 404
+  R->>C: source and ISBN
+  C->>C: charge source_test_limiter, then resolve the access
+  C->>M: target, ISBN, access
+  M->>D: _lookup_one, the scan's own call
+  D-->>M: Lookup, with refused
+  M-->>C: Disposition
+  C-->>R: registry.Evidence
+  R-->>A: date, ISBN asked, disposition
+```
+
+`metadata.probe` reads the key and the login off the access and does not consult its plan,
+because an admin tests a catalogue to decide whether to switch it on. Its four dispositions
+are `enums.Disposition`; `Lookup.refused` is what separates a host that replied with a no
+from one that never replied, at every door.
+
 ## Imports and files
 
 **A member's book files never reach the server.** The browser reads them: EPUB, PDF, MOBI,
@@ -653,7 +696,9 @@ flowchart TB
 4. `upgrade_to_head()`: create or migrate the database with Alembic (see below).
 5. `seed_tags()`: insert any predefined tag that is missing.
 6. `seed_catalogue_targets()`: write the catalogue roster `targets.SEEDED` holds, updating
-   any row whose constants have moved.
+   any row whose constants have moved, and run `metadata.resolve` over every
+   `registry.ENTRIES` target, so an entry no reader can read fails the boot. An entry gets
+   no row.
 
 Steps 3 to 6 are idempotent, so a restart is always safe and a fresh volume
 self-initialises. There is no bootstrap command.

@@ -25,7 +25,7 @@ import {
 } from "../../../../../src/api/generated/model";
 import { de, en } from "../../../../../src/i18n";
 import ProviderSection from "../../../../../src/pages/SettingsPage/CatalogueSettingsPage/components/ProviderSection";
-import { renderLocalised } from "../../../../utils";
+import { renderWithProviders } from "../../../../utils";
 
 /** The seeded roster, in the order a new install asks it. */
 const ROSTER: CatalogueSourceOut[] = [
@@ -87,7 +87,7 @@ function row(
 
 function draw(sources: CatalogueSourceOut[] = ROSTER) {
   const onSave = vi.fn<(data: SettingsUpdate) => void>();
-  renderLocalised(
+  renderWithProviders(
     <ProviderSection
       settings={{ catalogue_sources: sources } as SettingsOut}
       onSave={onSave}
@@ -449,7 +449,7 @@ describe("ProviderSection", () => {
     // re-seeds from the server depends on its identity, so the pair would
     // render forever. This test times out rather than failing if that returns.
     const onSave = vi.fn<(data: SettingsUpdate) => void>();
-    renderLocalised(
+    renderWithProviders(
       <ProviderSection settings={{} as SettingsOut} onSave={onSave} />,
     );
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
@@ -531,7 +531,7 @@ function mount() {
       onSave={onSave}
     />
   );
-  const view = renderLocalised(section(ROSTER));
+  const view = renderWithProviders(section(ROSTER));
   return { onSave, view, section };
 }
 
@@ -611,7 +611,7 @@ describe("how each catalogue is asked", () => {
   });
 
   it("says it in German", () => {
-    renderLocalised(
+    renderWithProviders(
       <ProviderSection
         settings={{ catalogue_sources: ROSTER } as SettingsOut}
         onSave={vi.fn<(data: SettingsUpdate) => void>()}

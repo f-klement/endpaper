@@ -23,6 +23,7 @@ import type {
 
 import type {
   BodySetLoginImage,
+  CatalogueRegistryOut,
   ClassificationSchemeCreate,
   ClassificationSchemeOut,
   ClassificationSchemeRename,
@@ -30,6 +31,7 @@ import type {
   FeatureFlagsOut,
   HTTPValidationError,
   LoginImageOut,
+  ProbeEvidenceOut,
   RecoveryPhraseIn,
   RecoveryPhraseOut,
   Refusal,
@@ -37,6 +39,7 @@ import type {
   SettingsOut,
   SettingsUpdate,
   SourceCredentialIn,
+  SourceTestIn,
   VocabularyOut,
 } from "../../model";
 
@@ -331,6 +334,391 @@ export const useUpdateSettings = <
 > => {
   return useMutation(getUpdateSettingsMutationOptions(options), queryClient);
 };
+export const getGetCatalogueRegistryUrl = () => {
+  return `/api/settings/catalogue-registry`;
+};
+
+/**
+ * The curated catalogues this build ships, each with the evidence it was
+ * shipped on, and which of them this library picked. **Admin only**, beside
+ * the pick it is read to make. `aged` says the snapshot's evidence is older
+ * than it is trusted; nothing is fetched to find that out.
+ * @summary Get Catalogue Registry
+ */
+export const getCatalogueRegistry = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CatalogueRegistryOut> => {
+  return customFetch<CatalogueRegistryOut>(getGetCatalogueRegistryUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCatalogueRegistryQueryKey = () => {
+  return [`/api/settings/catalogue-registry`] as const;
+};
+
+export const getGetCatalogueRegistryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
+  TError = Refusal,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof getCatalogueRegistry>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCatalogueRegistryQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCatalogueRegistry>>
+  > = ({ signal }) => getCatalogueRegistry({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCatalogueRegistry>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetCatalogueRegistryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCatalogueRegistry>>
+>;
+export type GetCatalogueRegistryQueryError = Refusal;
+
+/**
+ * The curated catalogues this build ships, each with the evidence it was
+ * shipped on, and which of them this library picked. **Admin only**, beside
+ * the pick it is read to make. `aged` says the snapshot's evidence is older
+ * than it is trusted; nothing is fetched to find that out.
+ * @summary Get Catalogue Registry
+ */
+export function useGetCatalogueRegistry<
+  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
+  TError = Refusal,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCatalogueRegistry>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCatalogueRegistry>>,
+          TError,
+          Awaited<ReturnType<typeof getCatalogueRegistry>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The curated catalogues this build ships, each with the evidence it was
+ * shipped on, and which of them this library picked. **Admin only**, beside
+ * the pick it is read to make. `aged` says the snapshot's evidence is older
+ * than it is trusted; nothing is fetched to find that out.
+ * @summary Get Catalogue Registry
+ */
+export function useGetCatalogueRegistry<
+  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCatalogueRegistry>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getCatalogueRegistry>>,
+          TError,
+          Awaited<ReturnType<typeof getCatalogueRegistry>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The curated catalogues this build ships, each with the evidence it was
+ * shipped on, and which of them this library picked. **Admin only**, beside
+ * the pick it is read to make. `aged` says the snapshot's evidence is older
+ * than it is trusted; nothing is fetched to find that out.
+ * @summary Get Catalogue Registry
+ */
+export function useGetCatalogueRegistry<
+  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCatalogueRegistry>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The curated catalogues this build ships, each with the evidence it was
+ * shipped on, and which of them this library picked. **Admin only**, beside
+ * the pick it is read to make. `aged` says the snapshot's evidence is older
+ * than it is trusted; nothing is fetched to find that out.
+ * @summary Get Catalogue Registry
+ */
+export function useGetCatalogueRegistry<
+  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getCatalogueRegistry>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetCatalogueRegistryQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getDropRegistryCatalogueUrl = (source: string) => {
+  return `/api/settings/catalogue-registry/${source}`;
+};
+
+/**
+ * Forget a pick. Dropping one never picked changes nothing.
+ * @summary Drop Registry Catalogue
+ */
+export const dropRegistryCatalogue = async (
+  source: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CatalogueRegistryOut> => {
+  return customFetch<CatalogueRegistryOut>(
+    getDropRegistryCatalogueUrl(source),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getDropRegistryCatalogueMutationKey = () =>
+  ["dropRegistryCatalogue"] as const;
+
+export const getDropRegistryCatalogueMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dropRegistryCatalogue>>,
+    TError,
+    DropRegistryCatalogueMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof dropRegistryCatalogue>>,
+  TError,
+  DropRegistryCatalogueMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDropRegistryCatalogueMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof dropRegistryCatalogue>>,
+    DropRegistryCatalogueMutationVariables
+  > = (props) => {
+    const { source } = props ?? {};
+
+    return dropRegistryCatalogue(source, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DropRegistryCatalogueMutationResult = NonNullable<
+  Awaited<ReturnType<typeof dropRegistryCatalogue>>
+>;
+
+export type DropRegistryCatalogueMutationError = Refusal | HTTPValidationError;
+export type DropRegistryCatalogueMutationVariables = { source: string };
+
+/**
+ * Forget a pick. Dropping one never picked changes nothing.
+ * @summary Drop Registry Catalogue
+ */
+export const useDropRegistryCatalogue = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof dropRegistryCatalogue>>,
+      TError,
+      DropRegistryCatalogueMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof dropRegistryCatalogue>>,
+  TError,
+  DropRegistryCatalogueMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getDropRegistryCatalogueMutationOptions(options),
+    queryClient,
+  );
+};
+export const getPickRegistryCatalogueUrl = (source: string) => {
+  return `/api/settings/catalogue-registry/${source}`;
+};
+
+/**
+ * Pick one registry catalogue. Picking it again changes nothing.
+ *
+ * A pick records the choice and does not yet add the catalogue to the
+ * lookup order; `registry` says why.
+ * @summary Pick Registry Catalogue
+ */
+export const pickRegistryCatalogue = async (
+  source: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<CatalogueRegistryOut> => {
+  return customFetch<CatalogueRegistryOut>(
+    getPickRegistryCatalogueUrl(source),
+    {
+      ...options,
+      method: "PUT",
+    },
+  );
+};
+
+export const getPickRegistryCatalogueMutationKey = () =>
+  ["pickRegistryCatalogue"] as const;
+
+export const getPickRegistryCatalogueMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pickRegistryCatalogue>>,
+    TError,
+    PickRegistryCatalogueMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof pickRegistryCatalogue>>,
+  TError,
+  PickRegistryCatalogueMutationVariables,
+  TContext
+> => {
+  const mutationKey = getPickRegistryCatalogueMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof pickRegistryCatalogue>>,
+    PickRegistryCatalogueMutationVariables
+  > = (props) => {
+    const { source } = props ?? {};
+
+    return pickRegistryCatalogue(source, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PickRegistryCatalogueMutationResult = NonNullable<
+  Awaited<ReturnType<typeof pickRegistryCatalogue>>
+>;
+
+export type PickRegistryCatalogueMutationError = Refusal | HTTPValidationError;
+export type PickRegistryCatalogueMutationVariables = { source: string };
+
+/**
+ * Pick one registry catalogue. Picking it again changes nothing.
+ *
+ * A pick records the choice and does not yet add the catalogue to the
+ * lookup order; `registry` says why.
+ * @summary Pick Registry Catalogue
+ */
+export const usePickRegistryCatalogue = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof pickRegistryCatalogue>>,
+      TError,
+      PickRegistryCatalogueMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof pickRegistryCatalogue>>,
+  TError,
+  PickRegistryCatalogueMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getPickRegistryCatalogueMutationOptions(options),
+    queryClient,
+  );
+};
 export const getForgetSourceCredentialUrl = (source: string) => {
   return `/api/settings/catalogue-sources/${source}/credential`;
 };
@@ -603,6 +991,124 @@ export const useSetSourceCredential = <
 > => {
   return useMutation(
     getSetSourceCredentialMutationOptions(options),
+    queryClient,
+  );
+};
+export const getProbeCatalogueSourceUrl = (source: string) => {
+  return `/api/settings/catalogue-sources/${source}/test`;
+};
+
+/**
+ * Ask one catalogue about one ISBN the way a scan would, and say how it answered.
+ *
+ * **A disposition and never what the catalogue returned**: answered,
+ * answered nothing, refused or unreachable. **Admin only and rate limited for
+ * the whole deployment**, a 429 past `ratelimit.SOURCE_TEST_LIMIT`, because
+ * each test is a request to somebody else's server. A switched off source is
+ * tested too. With no ISBN, a registry entry is asked the one its shipped
+ * evidence names, so the result compares with that evidence directly.
+ * @summary Probe Catalogue Source
+ */
+export const probeCatalogueSource = async (
+  source: string,
+  sourceTestIn: SourceTestIn,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ProbeEvidenceOut> => {
+  return customFetch<ProbeEvidenceOut>(getProbeCatalogueSourceUrl(source), {
+    ...options,
+    method: "POST",
+    headers: getHeaders(
+      { "Content-Type": "application/json" },
+      options?.headers,
+    ),
+    body: JSON.stringify(sourceTestIn),
+  });
+};
+
+export const getProbeCatalogueSourceMutationKey = () =>
+  ["probeCatalogueSource"] as const;
+
+export const getProbeCatalogueSourceMutationOptions = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof probeCatalogueSource>>,
+    TError,
+    ProbeCatalogueSourceMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof probeCatalogueSource>>,
+  TError,
+  ProbeCatalogueSourceMutationVariables,
+  TContext
+> => {
+  const mutationKey = getProbeCatalogueSourceMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof probeCatalogueSource>>,
+    ProbeCatalogueSourceMutationVariables
+  > = (props) => {
+    const { source, data } = props ?? {};
+
+    return probeCatalogueSource(source, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ProbeCatalogueSourceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof probeCatalogueSource>>
+>;
+export type ProbeCatalogueSourceMutationBody = SourceTestIn;
+export type ProbeCatalogueSourceMutationError = Refusal | HTTPValidationError;
+export type ProbeCatalogueSourceMutationVariables = {
+  source: string;
+  data: SourceTestIn;
+};
+
+/**
+ * Ask one catalogue about one ISBN the way a scan would, and say how it answered.
+ *
+ * **A disposition and never what the catalogue returned**: answered,
+ * answered nothing, refused or unreachable. **Admin only and rate limited for
+ * the whole deployment**, a 429 past `ratelimit.SOURCE_TEST_LIMIT`, because
+ * each test is a request to somebody else's server. A switched off source is
+ * tested too. With no ISBN, a registry entry is asked the one its shipped
+ * evidence names, so the result compares with that evidence directly.
+ * @summary Probe Catalogue Source
+ */
+export const useProbeCatalogueSource = <
+  TError = Refusal | HTTPValidationError,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof probeCatalogueSource>>,
+      TError,
+      ProbeCatalogueSourceMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof probeCatalogueSource>>,
+  TError,
+  ProbeCatalogueSourceMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getProbeCatalogueSourceMutationOptions(options),
     queryClient,
   );
 };

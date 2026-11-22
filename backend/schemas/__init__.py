@@ -154,6 +154,7 @@ from schemas.readwise import (
     ReadwiseTokenIn,
     ReadwiseWaitingOut,
 )
+from schemas.registry import CatalogueRegistryOut, ProbeEvidenceOut, RegistryEntryOut, SourceTestIn
 from schemas.settings import (
     CatalogueSourceOut,
     CatalogueSourcePreference,
@@ -256,6 +257,7 @@ __all__ = [
     "BookStatusUpdate",
     "BulkRequest",
     "BulkResult",
+    "CatalogueRegistryOut",
     "CatalogueSourceOut",
     "CatalogueSourcePreference",
     "ClassificationFacets",
@@ -343,6 +345,7 @@ __all__ = [
     "PatronUpdate",
     "PerUserStat",
     "PrivacyUpdate",
+    "ProbeEvidenceOut",
     "ProgressCreate",
     "ProgressOut",
     "PublicAvailability",
@@ -363,6 +366,7 @@ __all__ = [
     "RecoveryPhraseOut",
     "RefusedAssertionOut",
     "RegistrationOut",
+    "RegistryEntryOut",
     "ResetCodeOut",
     "ResetRedeem",
     "ResetRequest",
@@ -376,6 +380,7 @@ __all__ = [
     "SettingsUpdate",
     "SightingIn",
     "SourceCredentialIn",
+    "SourceTestIn",
     "StatsOut",
     "SweepIn",
     "SweepOut",

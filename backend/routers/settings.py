@@ -1,9 +1,11 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+import catalogue_access
 import classification_schemes
 import config
 import cover_store
@@ -12,16 +14,18 @@ import credentials
 import harvester
 import metadata
 import notifications
+import registry
 import settings_store
 import sources
 import targets
 import vocabulary_copy
 from auth import require_admin
 from dependencies import CurrentUser, DbSession
-from enums import CatalogueSource, SettingKey
+from enums import CatalogueSource, RegisteredCatalogue, SettingKey
 from models import ClassificationSchemeRow, User
 from refusals import refuses
 from schemas import (
+    CatalogueRegistryOut,
     CatalogueSourceOut,
     CatalogueSourcePreference,
     ClassificationSchemeCreate,
@@ -30,12 +34,15 @@ from schemas import (
     CredentialKeyOut,
     FeatureFlagsOut,
     LoginImageOut,
+    ProbeEvidenceOut,
     RecoveryPhraseIn,
     RecoveryPhraseOut,
+    RegistryEntryOut,
     SenderHealth,
     SettingsOut,
     SettingsUpdate,
     SourceCredentialIn,
+    SourceTestIn,
     VocabularyOut,
     VocabularyProgressOut,
 )
@@ -892,6 +899,110 @@ def forget_source_credential(
     credentials.forget(db, source)
     metadata.clear_cache()
     return _read_settings(db)
+
+
+def _registry_out(db: DbSession) -> CatalogueRegistryOut:
+    chosen = registry.picked(db)
+    return CatalogueRegistryOut(
+        listed_by=list(registry.LISTED_BY),
+        taken_on=registry.TAKEN_ON,
+        aged=registry.aged(datetime.now(UTC).date()),
+        entries=[_entry_out(which, entry, which in chosen) for which, entry in registry.ENTRIES.items()],
+    )
+
+
+def _entry_out(which: RegisteredCatalogue, entry: registry.Entry, picked: bool) -> RegistryEntryOut:
+    return RegistryEntryOut(
+        source=which,
+        name=entry.name,
+        country=entry.country,
+        kind=entry.kind,
+        host=urlparse(entry.target.base_url).hostname or "",
+        picked=picked,
+        evidence=_evidence_out(entry.evidence),
+    )
+
+
+def _evidence_out(evidence: registry.Evidence) -> ProbeEvidenceOut:
+    return ProbeEvidenceOut(
+        probed_on=evidence.probed_on, isbn=evidence.isbn, disposition=evidence.disposition
+    )
+
+
+def _registered(source: str) -> RegisteredCatalogue:
+    """The registry entry this path names, or 404, for `_known_source`'s reason."""
+    try:
+        return RegisteredCatalogue(source)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="No such catalogue in the registry.") from None
+
+
+@router.get("/catalogue-registry", response_model=CatalogueRegistryOut)
+def get_catalogue_registry(
+    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> CatalogueRegistryOut:
+    """The curated catalogues this build ships, each with the evidence it was
+    shipped on, and which of them this library picked. **Admin only**, beside
+    the pick it is read to make. `aged` says the snapshot's evidence is older
+    than it is trusted; nothing is fetched to find that out."""
+    return _registry_out(db)
+
+
+@router.put("/catalogue-registry/{source}", response_model=CatalogueRegistryOut)
+@refuses(404)
+def pick_registry_catalogue(
+    source: str, db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> CatalogueRegistryOut:
+    """Pick one registry catalogue. Picking it again changes nothing.
+
+    A pick records the choice and does not yet add the catalogue to the
+    lookup order; `registry` says why.
+    """
+    registry.pick(db, _registered(source))
+    return _registry_out(db)
+
+
+@router.delete("/catalogue-registry/{source}", response_model=CatalogueRegistryOut)
+@refuses(404)
+def drop_registry_catalogue(
+    source: str, db: DbSession, current_user: Annotated[User, Depends(require_admin)]
+) -> CatalogueRegistryOut:
+    """Forget a pick. Dropping one never picked changes nothing."""
+    registry.drop(db, _registered(source))
+    return _registry_out(db)
+
+
+def _testable(source: str) -> CatalogueSource | RegisteredCatalogue:
+    """A seeded source or a registry entry, or 404.
+
+    **The only route that admits both**, because testing is the one thing a
+    registry entry and a seeded source share. The credential routes stay on
+    `_known_source`, so a registry entry can never be handed a login.
+    """
+    try:
+        return CatalogueSource(source)
+    except ValueError:
+        return _registered(source)
+
+
+@router.post("/catalogue-sources/{source}/test", response_model=ProbeEvidenceOut)
+@refuses(404)
+async def probe_catalogue_source(
+    source: str,
+    payload: SourceTestIn,
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> ProbeEvidenceOut:
+    """Ask one catalogue about one ISBN the way a scan would, and say how it answered.
+
+    **A disposition and never what the catalogue returned**: answered,
+    answered nothing, refused or unreachable. **Admin only and rate limited for
+    the whole deployment**, a 429 past `ratelimit.SOURCE_TEST_LIMIT`, because
+    each test is a request to somebody else's server. A switched off source is
+    tested too. With no ISBN, a registry entry is asked the one its shipped
+    evidence names, so the result compares with that evidence directly.
+    """
+    return _evidence_out(await catalogue_access.probe(db, _testable(source), payload.isbn))
 
 
 #: The `code` of a delete refused because books quote the scheme. The client

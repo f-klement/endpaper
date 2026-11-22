@@ -60,6 +60,7 @@ credential properties above is that it is only that one.
 import dataclasses
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Final, Self
 
 from fastapi import HTTPException, status
@@ -68,10 +69,12 @@ from sqlalchemy.orm import Session
 import catalogue
 import credentials
 import metadata
+import registry
 import settings_store
 import sources
-from enums import CatalogueSource
-from ratelimit import identifier_backfill_limiter, metadata_limiter
+import targets
+from enums import CatalogueSource, RegisteredCatalogue
+from ratelimit import identifier_backfill_limiter, metadata_limiter, source_test_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -193,9 +196,11 @@ def _resolved_access(db: Session) -> metadata.Access:
     subject; what this adds is that the three are one value and are read together.
 
     **The logins are resolved whatever the plan says, and travel no further than a
-    source the plan admits.** `metadata._lookup_one` hands a credential to a bespoke
-    adapter and `_search_one` to a metered one, and neither is constructed for a source
-    the plan left out.
+    source the plan admits**, with one exception: `probe`, the admin's test of one
+    named source, sends that source's own login to its own origin whether or not the
+    plan asks it, and its docstring argues why. Otherwise `metadata._lookup_one` hands
+    a credential to a bespoke adapter and `_search_one` to a metered one, and neither is
+    constructed for a source the plan left out.
 
     **The key is resolved once here and handed to all three**, because each opens
     something sealed: the logins, a credentialled source's readiness, and the Google
@@ -243,6 +248,50 @@ def _narrowed_access(
     return metadata.Access(
         plan=sources.in_force(access.plan, only), api_key=access.api_key, logins=access.logins
     )
+
+
+#: The one key `source_test_limiter` is charged under. See `ratelimit.SOURCE_TEST_LIMIT`.
+_THIS_DEPLOYMENT: Final = "deployment"
+
+#: What a seeded source is asked when the admin names no ISBN.
+#:
+#: **One the DNB holds, measured 2026-08-23** (`metadata.py` records the
+#: measurement). A seeded catalogue that does not hold it answers nothing,
+#: which still says what the test is for, that the host replies and its reply
+#: reads; an admin who wants `answered` names an ISBN that catalogue holds.
+DEFAULT_TEST_ISBN: Final = "9783446249974"
+
+
+async def probe(
+    db: Session, source: CatalogueSource | RegisteredCatalogue, isbn: str | None
+) -> registry.Evidence:
+    """Test one source, seeded or from the registry, as a scan would ask it.
+
+    **Charged before anything is resolved**, so a refused test costs no keychain
+    round trip and sends nothing. The call underneath is `metadata.probe`, which
+    is `_lookup_one`, the scan's own: no second path and no second set of bounds.
+
+    **Whether this library asks the source does not matter here**, which is the
+    one way this differs from a lookup. An admin tests a catalogue to decide
+    whether to switch it on, so a switched off source is tested too, with its own
+    stored login where it has one: a login is sealed to its source's origin, so
+    sending it to that origin is the use it was stored for. A registry entry has
+    no login, because the registry ships none and the logins are keyed by the
+    seeded roster; the access is resolved for it all the same, so there is one
+    way an access reaches the door.
+
+    `isbn` is normalised already, or None for the source's default: a registry
+    entry's own evidence ISBN, so a test re-runs the shipped probe, and
+    `DEFAULT_TEST_ISBN` for a seeded source.
+    """
+    source_test_limiter.check(_THIS_DEPLOYMENT)
+    if isinstance(source, RegisteredCatalogue):
+        entry = registry.ENTRIES[source]
+        target, asked = entry.target, isbn or entry.evidence.isbn
+    else:
+        target, asked = targets.SEEDED[source], isbn or DEFAULT_TEST_ISBN
+    disposition = await metadata.probe(target, asked, access=_resolved_access(db))
+    return registry.Evidence(datetime.now(UTC).date(), asked, disposition)
 
 
 def _warn_about_any_source_asked_with_no_login(access: metadata.Access) -> None:

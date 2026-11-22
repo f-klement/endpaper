@@ -2366,6 +2366,23 @@ export const en = {
   "providers.moveUp": "Move {name} up",
   "providers.moveDown": "Move {name} down",
   "providers.moved": "{name} moved to position {position} of {total}.",
+  "providers.test": "Test",
+  "providers.testLabel": "Test {name}",
+  "providers.testing": "Testing",
+  "providers.testFailed": "The test could not be run.",
+  "providers.disposition.answered": "Answered: it holds ISBN {isbn}.",
+  "providers.disposition.answered_nothing":
+    "Replied, with no record for ISBN {isbn}.",
+  "providers.disposition.refused":
+    "Refused: it replied with an error when asked about ISBN {isbn}.",
+  "providers.disposition.unreachable":
+    "Unreachable: no reply in time when asked about ISBN {isbn}.",
+  "registry.title": "More catalogues",
+  "registry.hint":
+    "National and union catalogues this release ships, each checked answering on the date shown. Picking one records your choice; it is not yet asked when a book is added.",
+  "registry.aged":
+    "This list was checked on {date} and is due for a recheck, so an entry may no longer answer.",
+  "registry.evidence": "{country}, {host}. Checked on {date}: {answer}",
   "providers.name.open_library": "Open Library",
   "providers.name.google_books": "Google Books",
   "providers.name.dnb": "German National Library",

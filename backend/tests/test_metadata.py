@@ -60,6 +60,7 @@ import fetch
 import google_books
 import marc_fields
 import metadata
+import registry
 import sources
 import targets
 import xml_parse
@@ -70,7 +71,9 @@ from enums import (
     Capability,
     CatalogueSource,
     ClassificationScheme,
+    Disposition,
     HeadingKind,
+    RegisteredCatalogue,
 )
 from isbn import registration_group
 from marc_fields import Fields
@@ -3303,7 +3306,8 @@ class TestARecordedSearchComesBackInItsPinnedOrder:
             *,
             credential: fetch.Credential | None,
         ) -> list[Record]:
-            asked.append(target.source)
+            # A search asks the seeded roster alone, so the cast is the roster's.
+            asked.append(CatalogueSource(target.source))
             if target.source not in recordings:
                 return []
             if target.transport not in self.MOCKED_TRANSPORTS:
@@ -8224,7 +8228,9 @@ class TestThePlaintextSourcesAreCounted:
 
     def test_a_z3950_row_is_counted_as_plaintext(self, monkeypatch):
         row = z3950_row()
-        monkeypatch.setattr(targets, "SEEDED", {**targets.SEEDED, row.source: row})
+        seeded: dict[CatalogueSource | RegisteredCatalogue, targets.Target] = dict(targets.SEEDED.items())
+        seeded[row.source] = row
+        monkeypatch.setattr(targets, "SEEDED", seeded)
         assert self.plaintext()[f"{row.source.value}.base_url"] == row.base_url
 
     @staticmethod
@@ -9696,7 +9702,7 @@ class TestEveryDoorThatNeedsALoginDeclaresOneAndEveryRouteSuppliesIt:
     """
 
     #: Every public entry point in `metadata.py` a login has to reach.
-    DOORS = frozenset({"lookup", "search", "title_search", "candidates"})
+    DOORS = frozenset({"lookup", "search", "title_search", "candidates", "probe"})
 
     #: Every other public coroutine there, mapped to why a login is not its
     #: business. A door added and left out of either set fails the union arm.
@@ -10299,3 +10305,137 @@ class TestTheDublinCoreCataloguesReadTheSharedFreeListRules:
 
         assert record is not None
         assert record.language == "en"
+
+
+#: An SRU reply holding no record: the target answered, and held nothing.
+_SRU_NO_RECORDS = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<searchRetrieveResponse xmlns="http://www.loc.gov/zing/srw/">'
+    "<version>1.2</version><numberOfRecords>0</numberOfRecords>"
+    "</searchRetrieveResponse>"
+)
+
+
+class TestProbe:
+    """`metadata.probe` through the scan's own SRU door, with what each reply reads as.
+
+    A registry entry is the target, because it is what the test action asks
+    with no login: an Alma SRU server in the profile every entry shares.
+    """
+
+    TARGET = registry.ENTRIES[RegisteredCatalogue.NLS].target
+    ISBN = registry.ENTRIES[RegisteredCatalogue.NLS].evidence.isbn
+
+    async def _probed(self, reply: httpx.Response | Exception) -> Disposition:
+        with respx.mock(assert_all_called=True) as mock:
+            mock.get(url__startswith=self.TARGET.base_url).mock(side_effect=[reply])
+            return await metadata.probe(self.TARGET, self.ISBN, access=access())
+
+    async def test_a_reply_holding_no_record_is_answered_nothing(self):
+        disposition = await self._probed(httpx.Response(200, text=_SRU_NO_RECORDS))
+        assert disposition is Disposition.ANSWERED_NOTHING
+
+    async def test_a_diagnostic_is_a_refusal(self):
+        disposition = await self._probed(httpx.Response(200, text=BNA_UNAUTHENTICATED))
+        assert disposition is Disposition.REFUSED
+
+    async def test_an_error_status_is_a_refusal(self):
+        disposition = await self._probed(httpx.Response(500, text="no"))
+        assert disposition is Disposition.REFUSED
+
+    async def test_a_connection_that_fails_is_unreachable(self):
+        disposition = await self._probed(httpx.ConnectError("refused"))
+        assert disposition is Disposition.UNREACHABLE
+
+    async def test_a_rate_limit_is_a_refusal(self):
+        disposition = await self._probed(httpx.Response(429, text="slow down"))
+        assert disposition is Disposition.REFUSED
+
+    async def test_a_reply_that_is_not_xml_is_a_refusal(self):
+        disposition = await self._probed(httpx.Response(200, text="<html><p>Service page"))
+        assert disposition is Disposition.REFUSED
+
+    @pytest.mark.parametrize(
+        "refusal",
+        [fetch.ResponseTooLarge, fetch.RedirectedOffHost, fetch.TooManyRedirects, fetch.UnrequestedEncoding],
+    )
+    async def test_a_reply_fetch_refuses_to_read_is_a_refusal(self, refusal):
+        disposition = await self._probed(refusal("refused"))
+        assert disposition is Disposition.REFUSED
+
+    async def test_a_missed_deadline_is_unreachable(self):
+        disposition = await self._probed(fetch.DeadlineExceeded("late"))
+        assert disposition is Disposition.UNREACHABLE
+
+    async def test_a_login_reaches_a_seeded_sources_door_from_the_access(self):
+        target = dataclasses.replace(self.TARGET, source=CatalogueSource.DNB)
+        login = credentials.Credential(credentials.origin_of(target.base_url), "alice", "hunter2")
+        with respx.mock(assert_all_called=True) as mock:
+            route = mock.get(url__startswith=target.base_url).mock(
+                side_effect=[httpx.Response(200, text=_SRU_NO_RECORDS)]
+            )
+            await metadata.probe(target, self.ISBN, access=access(logins={CatalogueSource.DNB: login}))
+            assert "authorization" in route.calls.last.request.headers
+
+
+@dataclass
+class _SearchRaises(FakeSession):
+    """A Z39.50 target whose every search fails with `failure`."""
+
+    failure: Exception = field(default_factory=lambda: z3950.Refused(101, "Access-control failure"))
+
+    def search(self, pqf: str) -> int:
+        super().search(pqf)
+        raise self.failure
+
+
+class TestProbeAtTheOtherDoors:
+    """The refused and unreachable split where it is not the SRU door's: Z39.50 and the web APIs."""
+
+    ISBN = "9780743273565"
+
+    @pytest.mark.parametrize(
+        ("failure", "disposition"),
+        [
+            (z3950.Refused(101, "Access-control failure"), Disposition.REFUSED),
+            (z3950.Unrenderable("no syntax it can render"), Disposition.REFUSED),
+            (z3950.ResponseTooLarge("past the cap"), Disposition.REFUSED),
+            (UnicodeDecodeError("utf-8", b"\xff", 0, 1, "not UTF-8"), Disposition.REFUSED),
+            (z3950.Unreachable("no route"), Disposition.UNREACHABLE),
+            (z3950.DeadlineExceeded("late"), Disposition.UNREACHABLE),
+            (z3950.Closed("hung up"), Disposition.UNREACHABLE),
+        ],
+    )
+    async def test_a_z3950_failure_reads_as_what_it_was(self, monkeypatch, failure, disposition):
+        client = FakeClient(session=_SearchRaises(failure=failure))
+        monkeypatch.setattr(z3950, "_default_client", lambda: client)
+        assert await metadata.probe(z3950_row(), self.ISBN, access=access()) is disposition
+
+    @pytest.mark.parametrize(
+        ("reply", "disposition"),
+        [
+            (httpx.Response(403, json={}), Disposition.REFUSED),
+            (fetch.ResponseTooLarge("past the cap"), Disposition.REFUSED),
+            (httpx.ConnectError("refused"), Disposition.UNREACHABLE),
+        ],
+    )
+    async def test_a_google_books_failure_reads_as_what_it_was(self, reply, disposition):
+        target = targets.SEEDED[CatalogueSource.GOOGLE_BOOKS]
+        with respx.mock(assert_all_called=True) as mock:
+            mock.get(url__startswith=target.base_url).mock(side_effect=[reply])
+            assert await metadata.probe(target, self.ISBN, access=access(api_key="a-key")) is disposition
+
+    @pytest.mark.parametrize(
+        ("reply", "disposition"),
+        [
+            (httpx.Response(500, text="no"), Disposition.REFUSED),
+            (httpx.Response(200, text="not json"), Disposition.REFUSED),
+            (fetch.ResponseTooLarge("past the cap"), Disposition.REFUSED),
+            (httpx.ConnectError("refused"), Disposition.UNREACHABLE),
+        ],
+    )
+    async def test_an_open_library_failure_reads_as_what_it_was(self, reply, disposition):
+        target = targets.SEEDED[CatalogueSource.OPEN_LIBRARY]
+        with respx.mock(assert_all_called=True) as mock:
+            mock.get(url__startswith=target.base_url).mock(side_effect=[reply])
+            assert await metadata.probe(target, self.ISBN, access=access()) is disposition

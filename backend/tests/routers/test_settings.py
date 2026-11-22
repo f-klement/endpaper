@@ -14,7 +14,7 @@ import notifications
 import settings_store
 import sources
 import targets
-from enums import CatalogueSource, OverdueNotifyReason, OverdueSender, SettingKey
+from enums import CatalogueSource, Disposition, OverdueNotifyReason, OverdueSender, SettingKey
 from routers import settings as settings_router
 from schemas import RecoveryPhraseOut
 from tests.conftest import forget_any_encryption_key
@@ -2295,3 +2295,60 @@ class TestASettingsSecretIsSealedOnTheScreen:
         assert response.status_code == 200, response.text
         db.expire_all()
         assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.TELEGRAM_BOT_TOKEN))
+
+
+class TestCatalogueRegistry:
+    """The registry routes and the source test, admin only."""
+
+    @pytest.fixture
+    def answering(self, monkeypatch) -> None:
+        async def probe(target, isbn, *, access):
+            return Disposition.ANSWERED
+
+        monkeypatch.setattr(metadata, "probe", probe)
+
+    def test_a_member_may_not_read_the_registry(self, client, member):
+        assert client.get("/api/settings/catalogue-registry", headers=member["headers"]).status_code == 403
+
+    def test_a_member_may_not_test_a_source(self, client, member, answering):
+        response = client.post("/api/settings/catalogue-sources/nls/test", json={}, headers=member["headers"])
+        assert response.status_code == 403
+
+    def test_a_pick_shows_on_the_registry(self, client, admin):
+        client.put("/api/settings/catalogue-registry/csic", headers=admin["headers"])
+        entries = client.get("/api/settings/catalogue-registry", headers=admin["headers"]).json()["entries"]
+        assert {entry["source"] for entry in entries if entry["picked"]} == {"csic"}
+
+    def test_picking_a_name_the_registry_does_not_hold_is_a_404(self, client, admin):
+        assert client.put("/api/settings/catalogue-registry/bne", headers=admin["headers"]).status_code == 404
+
+    def test_a_registry_entry_cannot_be_handed_a_login(self, client, admin):
+        response = client.put(
+            "/api/settings/catalogue-sources/nls/credential",
+            json={"username": "alice", "password": "hunter2"},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 404
+
+    def test_testing_a_source_nobody_ships_is_a_404(self, client, admin, answering):
+        response = client.post("/api/settings/catalogue-sources/nope/test", json={}, headers=admin["headers"])
+        assert response.status_code == 404
+
+    def test_testing_with_a_string_that_is_no_isbn_is_a_422(self, client, admin, answering):
+        response = client.post(
+            "/api/settings/catalogue-sources/dnb/test", json={"isbn": "123"}, headers=admin["headers"]
+        )
+        assert response.status_code == 422
+
+    def test_a_test_reports_a_disposition_and_nothing_the_host_said(self, client, admin, answering):
+        response = client.post(
+            "/api/settings/catalogue-sources/nls/test",
+            json={"isbn": "978-0-9713390-8-8"},
+            headers=admin["headers"],
+        )
+        assert response.status_code == 200
+        assert response.json() | {"probed_on": None} == {
+            "probed_on": None,
+            "isbn": "9780971339088",
+            "disposition": "answered",
+        }

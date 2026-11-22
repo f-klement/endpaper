@@ -22,12 +22,17 @@ import logging
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
 import catalogue_access
+import isbn
 import metadata
 import ratelimit
+import registry
 import settings_store
 import sources
+import targets
+from enums import CatalogueSource, Disposition, RegisteredCatalogue
 from tests.bindings import SourceNames
 from tests.corpus import application_sources
 from tests.helpers import enable_google_books
@@ -66,7 +71,7 @@ DOOR = "catalogue_access.py"
 #: `test_metadata.py` is: deriving the subject from "which functions take an access"
 #: means removing the parameter removes the function from the guard's subject in the
 #: same edit, and the guard stays green on the change that broke it.
-DOORS_TAKING_AN_ACCESS = frozenset({"lookup", "search", "title_search", "candidates"})
+DOORS_TAKING_AN_ACCESS = frozenset({"lookup", "search", "title_search", "candidates", "probe"})
 
 #: The door that takes the key and the plan apart instead, and still may not be
 #: called from outside.
@@ -837,3 +842,64 @@ class TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead:
 
         assert anybody.status_code == 200
         assert anybody.json()["google_books_ready"] is not refused
+
+
+class TestTheSourceTest:
+    """`catalogue_access.probe`: charged before anything is sent, and what it asks by default."""
+
+    @pytest.fixture
+    def asked(self, monkeypatch) -> list[tuple[str, str]]:
+        """Each `(base_url, isbn)` handed to `metadata.probe`, which answers `answered`."""
+        calls: list[tuple[str, str]] = []
+
+        async def probe(target, isbn, *, access):
+            calls.append((target.base_url, isbn))
+            return Disposition.ANSWERED
+
+        monkeypatch.setattr(metadata, "probe", probe)
+        return calls
+
+    @pytest.fixture
+    def handed(self, monkeypatch) -> list[metadata.Access]:
+        """Each access handed to `metadata.probe`, which answers `answered`."""
+        accesses: list[metadata.Access] = []
+
+        async def probe(target, isbn, *, access):
+            accesses.append(access)
+            return Disposition.ANSWERED
+
+        monkeypatch.setattr(metadata, "probe", probe)
+        return accesses
+
+    async def test_a_seeded_source_is_handed_the_resolved_logins_and_key(self, db, handed):
+        """The access as a lookup would resolve it, not an empty one.
+
+        Without the login a credentialled source is tested anonymously, and
+        without the key Google Books is: either reads REFUSED for a catalogue that
+        answers the scan. The logins are the roster's shipped ones.
+        """
+        enable_google_books(db, "a-stored-key")
+        await catalogue_access.probe(db, min(sources.SHIPS_A_CREDENTIAL), None)
+        (access,) = handed
+        assert (access.api_key, frozenset(access.logins)) == ("a-stored-key", sources.SHIPS_A_CREDENTIAL)
+
+    async def test_past_the_limit_nothing_is_sent(self, db, asked):
+        for _ in range(ratelimit.SOURCE_TEST_LIMIT.max_attempts):
+            await catalogue_access.probe(db, RegisteredCatalogue.NLS, None)
+        with pytest.raises(HTTPException) as refused:
+            await catalogue_access.probe(db, RegisteredCatalogue.NLS, None)
+        assert refused.value.status_code == 429
+        assert len(asked) == ratelimit.SOURCE_TEST_LIMIT.max_attempts
+
+    async def test_a_registry_entry_is_asked_its_own_evidence_isbn_by_default(self, db, asked):
+        entry = registry.ENTRIES[RegisteredCatalogue.CSIC]
+        evidence = await catalogue_access.probe(db, RegisteredCatalogue.CSIC, None)
+        assert asked == [(entry.target.base_url, entry.evidence.isbn)]
+        assert (evidence.isbn, evidence.disposition) == (entry.evidence.isbn, Disposition.ANSWERED)
+
+    async def test_a_seeded_source_is_asked_the_default_isbn(self, db, asked):
+        await catalogue_access.probe(db, CatalogueSource.DNB, None)
+        assert asked == [(targets.SEEDED[CatalogueSource.DNB].base_url, catalogue_access.DEFAULT_TEST_ISBN)]
+
+    def test_the_default_isbn_is_a_normalised_isbn(self):
+        assert isbn.parse(catalogue_access.DEFAULT_TEST_ISBN) == catalogue_access.DEFAULT_TEST_ISBN

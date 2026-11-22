@@ -519,7 +519,7 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
 #: a different question, and `metadata.resolve` is where it went: whether the
 #: reader a row names can actually read what the target answers with.
 LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.can(Capability.ANSWERS_ISBN)
+    source for source, target in targets.SEEDED.items() if target.can(Capability.ANSWERS_ISBN)
 )
 
 #: The sources that can answer a title search.
@@ -559,7 +559,7 @@ LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
 #: `targets.SEEDED[CatalogueSource.NKP]` does not declare
 #: `Capability.ANSWERS_TITLE_SEARCH`, on the row, with the measurement beside it.
 SEARCH_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.can(Capability.ANSWERS_TITLE_SEARCH)
+    source for source, target in targets.SEEDED.items() if target.can(Capability.ANSWERS_TITLE_SEARCH)
 )
 
 #: Catalogues whose title search does not fit the default deadline, so the
@@ -577,7 +577,7 @@ SLOW_SEARCHES: Final[frozenset[CatalogueSource]] = frozenset()
 #: Sources that cost money per request, so asking one for a book another source
 #: already answered is a bill for nothing. See `Plan.lookup_together`.
 METERED: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.can(Capability.METERED)
+    source for source, target in targets.SEEDED.items() if target.can(Capability.METERED)
 )
 
 #: Sources that need a credential the household supplies, so an install without
@@ -633,7 +633,7 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
 NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.can(Capability.NEEDS_A_CREDENTIAL)
+    source for source, target in targets.SEEDED.items() if target.can(Capability.NEEDS_A_CREDENTIAL)
 )
 
 #: The sources this build carries a login for, because their library publishes
@@ -648,7 +648,7 @@ NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
 #: `targets.ShippedCredential` is why any of these exist. Derived from the rows,
 #: so a second one is a field on a row rather than a list to remember.
 SHIPS_A_CREDENTIAL: Final[frozenset[CatalogueSource]] = frozenset(
-    target.source for target in targets.SEEDED.values() if target.shipped_credential is not None
+    source for source, target in targets.SEEDED.items() if target.shipped_credential is not None
 )
 
 #: The lookup sources a household that has configured nothing actually asks.
@@ -823,7 +823,7 @@ ALWAYS_ASKED: Final = 2
 #: which is what keeps `_serves` reading "no row" and "no groups" as one thing;
 #: its docstring's last paragraph is the argument.
 SERVES_GROUPS: Final[dict[CatalogueSource, frozenset[str]]] = {
-    target.source: target.serves_groups for target in targets.SEEDED.values() if target.serves_groups
+    source: target.serves_groups for source, target in targets.SEEDED.items() if target.serves_groups
 }
 
 

@@ -79,6 +79,7 @@ from enums import (
     Capability,
     CatalogueSource,
     ClassificationScheme,
+    Disposition,
 )
 from isbn import parse as parse_isbn
 from isbn import registration_group
@@ -195,6 +196,17 @@ class Lookup:
     #: Every source that was tried, in order, with its own outcome. Kept so a
     #: failure can be explained rather than only reported.
     attempts: list[tuple[str, Outcome]] = field(default_factory=list)
+    #: Whether the target replied and the reply was a no: a diagnostic, an HTTP
+    #: error status, a Z39.50 refusal, or bytes no reader could take.
+    #:
+    #: **Read by `probe` alone, and only on an answer that is not `FOUND` or
+    #: `NOT_FOUND`.** `UNAVAILABLE` folds a host that said no into a host that
+    #: never replied, which is right for a scan, where either way nobody knows
+    #: yet, and wrong for an admin choosing a catalogue: a refusal is a wrong
+    #: database name or a missing login, and silence is a host that is down.
+    #: `z3950.py` keeps the two apart for that reason, and this carries the split
+    #: out of the door rather than a second door re-deriving it.
+    refused: bool = False
 
     @property
     def found(self) -> bool:
@@ -589,7 +601,8 @@ async def _open_library(isbn: str) -> Lookup:
             response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
             missed = _open_library_miss(response.status_code)
             if missed is not None:
-                return Lookup(missed, source="open_library")
+                # A status is a reply, so anything but a miss is a refusal.
+                return Lookup(missed, source="open_library", refused=True)
             data = _open_library_object(response)
             if not data:
                 # A 200 carrying no object at all is a fault at the other end
@@ -597,7 +610,7 @@ async def _open_library(isbn: str) -> Lookup:
                 # `NOT_FOUND`: the difference is whether the reader is told to
                 # type the book in by hand or to try again.
                 logger.info("Open Library answered %s with no record object", isbn)
-                return Lookup(Outcome.UNAVAILABLE, source="open_library")
+                return Lookup(Outcome.UNAVAILABLE, source="open_library", refused=True)
 
             # The work first, because it is the fallback for the author: an
             # edition record names one on a minority of records and the work
@@ -607,9 +620,12 @@ async def _open_library(isbn: str) -> Lookup:
                 client,
                 _open_library_author_key(data.get("authors")) or _open_library_work_author_key(work),
             )
-    except httpx.HTTPError, ValueError:
+    except (httpx.HTTPError, ValueError) as failure:
         logger.warning("Open Library lookup failed for %s", isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source="open_library")
+        # A body that does not parse, or one `fetch` refused, is a reply; any
+        # other transport error is silence. `_FETCH_REPLIES` says which.
+        refused = isinstance(failure, (ValueError, *_FETCH_REPLIES))
+        return Lookup(Outcome.UNAVAILABLE, source="open_library", refused=refused)
 
     publishers = data.get("publishers", [])
 
@@ -675,10 +691,13 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
         # message is the only thing carrying which one it was.
         outcome = Outcome.RATE_LIMITED if "rate limiting" in str(error) else Outcome.UNAVAILABLE
         logger.info("Google Books declined %s: %s", isbn, error)
-        return Lookup(outcome, source="google_books")
-    except httpx.HTTPError, ValueError:
+        # Every `GoogleBooksError` is raised on a status or a body Google sent,
+        # a rejected key among them, so it is a refusal and never silence.
+        return Lookup(outcome, source="google_books", refused=True)
+    except (httpx.HTTPError, ValueError) as failure:
         logger.warning("Google Books lookup failed for %s", isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source="google_books")
+        refused = isinstance(failure, (ValueError, *_FETCH_REPLIES))
+        return Lookup(Outcome.UNAVAILABLE, source="google_books", refused=refused)
 
     if fields is None:
         return Lookup(Outcome.NOT_FOUND, source="google_books")
@@ -3992,6 +4011,18 @@ async def _sru_lookup(
     )
 
 
+#: The `fetch` refusals that are a reply from the target rather than its
+#: absence, which `Lookup.refused` records, at the SRU door and the bespoke
+#: one. A deadline and a refused address are not here: the first is silence,
+#: and the second never reached the host.
+_FETCH_REPLIES: Final = (
+    fetch.ResponseTooLarge,
+    fetch.RedirectedOffHost,
+    fetch.TooManyRedirects,
+    fetch.UnrequestedEncoding,
+)
+
+
 async def _sru_ask(
     target: targets.Target, isbn: str, asked: str, credential: fetch.Credential | None, deadline: float | None
 ) -> Lookup:
@@ -4015,13 +4046,17 @@ async def _sru_ask(
             target.base_url, params=params, deadline=deadline, credential=credential
         )
         if response.status_code == 429:
-            return Lookup(Outcome.RATE_LIMITED, source=name)
+            return Lookup(Outcome.RATE_LIMITED, source=name, refused=True)
         if response.status_code != 200:
-            return Lookup(Outcome.UNAVAILABLE, source=name)
+            return Lookup(Outcome.UNAVAILABLE, source=name, refused=True)
         root = _parsed(response.text)
+    except (ElementTree.ParseError, *_FETCH_REPLIES):
+        # It replied, with something this door will not read: not XML, too
+        # large, compressed unasked, or a redirect. A reply, so a refusal.
+        logger.warning("%s lookup failed for %s", name, isbn, exc_info=True)
+        return Lookup(Outcome.UNAVAILABLE, source=name, refused=True)
     except (
         httpx.HTTPError,
-        ElementTree.ParseError,
         targets.BadQuery,
         z3950.BadQuery,
     ):
@@ -4038,7 +4073,7 @@ async def _sru_ask(
     # the only part of a diagnostic that is ever written down, and what `_worst`
     # then does with this one source's answer.
     logger.warning("%s refused a lookup: %r", name, refusal)
-    return Lookup(Outcome.UNAVAILABLE, source=name)
+    return Lookup(Outcome.UNAVAILABLE, source=name, refused=True)
 
 
 async def _sru_search(
@@ -4080,6 +4115,17 @@ async def _sru_search(
 #: the seam raises, a record that is not XML or not UTF-8, and a query a row
 #: could not build. Each is "this source is unavailable", never a 500.
 _Z3950_FAILURES: Final = (z3950.Z3950Error, ElementTree.ParseError, UnicodeDecodeError, targets.BadQuery)
+
+#: The failures above that are a reply from the target rather than its absence,
+#: which `Lookup.refused` records. `Unreachable`, `DeadlineExceeded` and
+#: `Closed` are silence; `BadQuery` is ours and never left the process.
+_Z3950_REPLIES: Final = (
+    z3950.Refused,
+    z3950.Unrenderable,
+    z3950.ResponseTooLarge,
+    ElementTree.ParseError,
+    UnicodeDecodeError,
+)
 
 #: How many times one search is put again after a temporary refusal
 #: (a `z3950.Refused` marked `temporary`), on the same association and inside its deadline.
@@ -4162,9 +4208,13 @@ async def _z3950_lookup(target: targets.Target, isbn: str, *, deadline: float | 
             return await _first_answer(
                 target.isbn_forms(isbn), lambda asked: _z3950_ask(open_, target, isbn, asked)
             )
-    except _Z3950_FAILURES:
+    except _Z3950_FAILURES as failure:
         logger.warning("%s lookup failed for %s", target.source.value, isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source=target.source.value)
+        return Lookup(
+            Outcome.UNAVAILABLE,
+            source=target.source.value,
+            refused=isinstance(failure, _Z3950_REPLIES),
+        )
 
 
 async def _z3950_ask(open_: z3950.Association, target: targets.Target, isbn: str, asked: str) -> Lookup:
@@ -4406,6 +4456,54 @@ async def _lookup_one(
         lambda ends: door.lookup(target, isbn, api_key, credential, ends),
         Lookup(Outcome.UNAVAILABLE, source=target.source.value),
     )
+
+
+async def probe(target: targets.Target, isbn: str, *, access: Access) -> Disposition:
+    """Ask one target about one ISBN exactly as a scan would, and say only how it answered.
+
+    **The same call a lookup makes, `_lookup_one`, and no second path.** So the
+    door, the row's own deadline, the byte cap, the redirect rule and the
+    identity check a reader applies are the ones a scan gets, and a bound added
+    to the door later reaches this without anybody remembering it. The owner's
+    rule for the test action, 2026-09-05: a second path is a second set of bounds
+    to forget.
+
+    **A disposition and never the record**, which is the other half of that rule.
+    What came back stays in this function: echoing it would make an admin's test
+    button an oracle for reading whatever the address serves. `isbn` must be
+    normalised already; the caller refuses one that is not.
+
+    **The key and the login arrive in one `Access`**, as at every other door
+    that sends one, so this cannot be handed a key the resolver never checked.
+    **Its plan is not consulted**, and that is the one way this differs from a
+    lookup: the caller names the target, because an admin tests a catalogue to
+    decide whether to switch it on. `catalogue_access.probe`, admin only and
+    rate limited, is the only caller in the application, which `tests/test_catalogue_access.py`
+    holds. A registry entry is never handed a login: `access.logins` is keyed by
+    the seeded roster alone.
+    """
+    login = access.logins.get(target.source) if isinstance(target.source, CatalogueSource) else None
+    return _disposition(await _lookup_one(target, isbn, access.api_key, credential=login))
+
+
+def _disposition(answer: Lookup) -> Disposition:
+    """What one target's answer says about the target, in `z3950.py`'s vocabulary.
+
+    A record that failed its identity check is `NOT_FOUND` by then, so it reads
+    as answered nothing: the target replied and gave nothing this build believes.
+    """
+    match answer.outcome:
+        case Outcome.FOUND:
+            return Disposition.ANSWERED
+        case Outcome.NOT_FOUND:
+            return Disposition.ANSWERED_NOTHING
+        case Outcome.RATE_LIMITED:
+            return Disposition.REFUSED
+        # `NO_SOURCES` is a chain's answer and one target never gives it; it is
+        # here so a new `Outcome` member is a mypy error at this match.
+        case Outcome.UNAVAILABLE | Outcome.NO_SOURCES:
+            return Disposition.REFUSED if answer.refused else Disposition.UNREACHABLE
+    assert_never(answer.outcome)
 
 
 async def _within_its_own_bound[T](

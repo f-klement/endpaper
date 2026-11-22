@@ -917,6 +917,12 @@ class SettingKey(StrEnum):
     # `targets.SEEDED` has no entry for. See `settings_store.catalogue_sources`.
     CATALOGUE_SOURCES = "catalogue_sources"
 
+    # Which entries of the curated registry this library has picked, as
+    # `RegisteredCatalogue` names and nothing else. **Names, never addresses**:
+    # an entry's address is always `registry.ENTRIES`, so no row holds one and
+    # nothing reads one back. See `registry.picked`.
+    PICKED_CATALOGUES = "picked_catalogues"
+
     # Whether accounts here are held by people outside the household.
     #
     # **Its own row, deliberately, and derived from nothing.** It draws a line
@@ -1155,6 +1161,53 @@ class CatalogueSource(StrEnum):
     #: The Slovenská národná knižnica, Slovakia's national library. Z39.50 and
     #: MARC21.
     SNK = "snk"
+
+
+class RegisteredCatalogue(StrEnum):
+    """A catalogue in the curated registry this build ships: `registry.ENTRIES`.
+
+    **Closed, and a second enum rather than more `CatalogueSource` members.** A
+    `CatalogueSource` is asked by default and has a measured place in
+    `sources.DEFAULT_ORDER`; one of these is asked by nobody until an admin
+    picks it, and has no measurement to place it by. Folding them would put an
+    unmeasured catalogue into every household's roster on upgrade.
+
+    **Closed because the registry is vendored**: a member is a reachable host
+    this build ships, so adding one is a diff somebody reads, which is the
+    property ticket 148 exists for. `registry` refuses at import a member with
+    no entry and an entry with no member, and a value one `CatalogueSource`
+    already spells: the test route tries `CatalogueSource` first, so the entry
+    could not be named, and logins and `sources.Plan` key on the same string.
+    """
+
+    #: The National Library of Scotland. Alma SRU, MARC21.
+    NLS = "nls"
+    #: The National Library of Israel. Alma SRU, MARC21.
+    NLI = "nli"
+    #: The CSIC library network, the union catalogue of Spain's National
+    #: Research Council. Alma SRU, MARC21.
+    CSIC = "csic"
+
+
+class Disposition(StrEnum):
+    """How one catalogue answered one question, and nothing about what it said.
+
+    **The vocabulary `z3950.py` names**, refused, unreachable and answered
+    nothing, plus the case those three are the failures of. A registry entry's
+    evidence and an admin's test of a source both report one, so a curation
+    record and a probe result are one shape (owner, 2026-09-05).
+    """
+
+    #: It returned a record for the ISBN asked that the reader believed.
+    ANSWERED = "answered"
+    #: It replied and returned nothing this build believes: no record, or one
+    #: whose identity check failed.
+    ANSWERED_NOTHING = "answered_nothing"
+    #: It replied, and the reply was a no: a diagnostic, an error status, a
+    #: rate limit, or bytes no reader could take.
+    REFUSED = "refused"
+    #: Nothing replied inside the bound: no connection, or no answer in time.
+    UNREACHABLE = "unreachable"
 
 
 # A member per `CatalogueSource` is checked below the class rather than

@@ -31,6 +31,7 @@ import metadata
 import notifications
 import readwise as readwise_pull
 import refusals
+import registry
 import settings_store
 import targets
 from auth import get_current_user
@@ -332,6 +333,10 @@ def seed_catalogue_targets() -> None:
             else:
                 for name, value in fields.items():
                     setattr(row, name, value)
+        # The registry's entries are constants too, so a disagreement among them
+        # fails the boot the same way. They have no row: `registry` says why.
+        for entry in registry.ENTRIES.values():
+            metadata.resolve(entry.target)
         db.commit()
 
 

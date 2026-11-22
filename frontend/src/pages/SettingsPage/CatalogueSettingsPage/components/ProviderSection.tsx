@@ -16,6 +16,7 @@ import { catalogueName } from "../../../../lib/catalogueName";
 import { statusOf } from "../../../../lib/providerStatus";
 import { SettingsSection } from "../../../components";
 import ToggleField from "../../components/ToggleField";
+import SourceTest from "./SourceTest";
 
 interface ProviderSectionProps {
   settings: SettingsOut;
@@ -221,6 +222,7 @@ function ProviderRow({
           </p>
         )}
         <HowAsked row={row} together={together} />
+        <SourceTest source={row.source} name={name} />
       </div>
       <div className="flex shrink-0 gap-1">
         {/* **Not disabled while a save is in flight.** The local list is

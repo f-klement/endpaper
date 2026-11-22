@@ -137,6 +137,9 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # out, because `sources.parse` already answers "absent means the defaults"
     # and writing them twice is two places for the default order to drift.
     SettingKey.CATALOGUE_SOURCES: "{}",
+    # Nothing picked: no registry entry is asked or listed as chosen until an
+    # admin picks it.
+    SettingKey.PICKED_CATALOGUES: "{}",
     # Off, so a household that reads no setting asks nobody to prove anything.
     # On, it means accounts here are held by people outside the household, and
     # a new local account cannot sign in until its address is verified or an
@@ -743,15 +746,15 @@ def catalogue_logins(
     Written for the set rather than for its members because the next source to
     declare that capability is the reason this plumbing exists.
     """
-    doors = [targets.SEEDED[source] for source in sources_whose_door_carries_a_login()]
+    doors = sources_whose_door_carries_a_login()
     if not doors:
         return {}
     key = _resolved(state)
     resolved: dict[CatalogueSource, credentials.Credential] = {}
-    for target in doors:
-        login = credentials.for_request(db, target.source.value, target.base_url, key)
+    for source in doors:
+        login = credentials.for_request(db, source.value, targets.SEEDED[source].base_url, key)
         if login is not None:
-            resolved[target.source] = login
+            resolved[source] = login
     return resolved
 
 

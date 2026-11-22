@@ -2083,6 +2083,24 @@ export const de: Messages = {
   "providers.moveUp": "{name} nach oben schieben",
   "providers.moveDown": "{name} nach unten schieben",
   "providers.moved": "{name} steht jetzt an Position {position} von {total}.",
+  "providers.test": "Testen",
+  "providers.testLabel": "{name} testen",
+  "providers.testing": "Wird getestet",
+  "providers.testFailed": "Der Test konnte nicht ausgeführt werden.",
+  "providers.disposition.answered":
+    "Geantwortet: Der Katalog führt die ISBN {isbn}.",
+  "providers.disposition.answered_nothing":
+    "Geantwortet, aber ohne Datensatz zur ISBN {isbn}.",
+  "providers.disposition.refused":
+    "Abgelehnt: Auf die Frage nach der ISBN {isbn} kam eine Fehlermeldung.",
+  "providers.disposition.unreachable":
+    "Nicht erreichbar: Auf die Frage nach der ISBN {isbn} kam keine Antwort in der Zeit.",
+  "registry.title": "Weitere Kataloge",
+  "registry.hint":
+    "Nationalkataloge und Verbundkataloge, die diese Version mitliefert, jeder am angegebenen Datum als antwortend geprüft. Eine Auswahl wird gespeichert; beim Hinzufügen eines Buchs wird der Katalog noch nicht gefragt.",
+  "registry.aged":
+    "Diese Liste wurde am {date} geprüft und muss neu geprüft werden; ein Eintrag antwortet womöglich nicht mehr.",
+  "registry.evidence": "{country}, {host}. Geprüft am {date}: {answer}",
   "providers.name.open_library": "Open Library",
   "providers.name.google_books": "Google Books",
   "providers.name.dnb": "Deutsche Nationalbibliothek",

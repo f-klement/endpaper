@@ -2840,6 +2840,42 @@
         "title": "BulkResult",
         "type": "object"
       },
+      "CatalogueRegistryOut": {
+        "description": "The whole registry this build ships, with its provenance and its age.",
+        "properties": {
+          "aged": {
+            "title": "Aged",
+            "type": "boolean"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RegistryEntryOut"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "listed_by": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Listed By",
+            "type": "array"
+          },
+          "taken_on": {
+            "format": "date",
+            "title": "Taken On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "listed_by",
+          "taken_on",
+          "aged",
+          "entries"
+        ],
+        "title": "CatalogueRegistryOut",
+        "type": "object"
+      },
       "CatalogueSource": {
         "description": "A catalogue this build can ask about a book.\n\n**The values are the strings `metadata.py` already used**, because they are\nnot only a settings vocabulary: `catalogue.Record.source` and\n`Record.sources` carry them, `targets.SEEDED` is keyed on them, and\n`metadata._MATCH_PRECEDENCE` names them. Declaring the set changes nothing\ndownstream and buys two things: a closed union in the generated client, and\na roster `sources.parse` can validate a stored row against.\n\n**Not every source answers every question**, and the split is real rather\nthan incidental. BNF and LOC are title search only, because neither was\nworth an ISBN request. NKP, BNE, BNA, BNU, BN_PL, LIBRIS, KB_DK, BIBSYS,\nMELINDA, SBN, PORBASE, OSZK and SNK are the other way round, **lookup only**, and\nfor two different reasons. The NKP's,\nthe BNA's and the BNU's is the server's: each renders one populated record\nper response whatever page size is asked for, so a search for ten\ncandidates would be ten requests. The rest is ours: nobody has measured\nwhat a search at any of them would find, so each holds the conservative\ndefault. See `sources.LOOKUP_SOURCES` and\n`SEARCH_SOURCES`, which is why those are two sets and not one.\n\n**Two members need a credential and are free**: the BNA and the BNU. What\nthat costs the roster's rules is on `sources.NEEDS_A_KEY`.",
         "enum": [
@@ -3856,6 +3892,17 @@
         ],
         "title": "DigitalReferenceOut",
         "type": "object"
+      },
+      "Disposition": {
+        "description": "How one catalogue answered one question, and nothing about what it said.\n\n**The vocabulary `z3950.py` names**, refused, unreachable and answered\nnothing, plus the case those three are the failures of. A registry entry's\nevidence and an admin's test of a source both report one, so a curation\nrecord and a probe result are one shape (owner, 2026-09-05).",
+        "enum": [
+          "answered",
+          "answered_nothing",
+          "refused",
+          "unreachable"
+        ],
+        "title": "Disposition",
+        "type": "string"
       },
       "DivisionFacetOut": {
         "description": "One Dewey division in the library, with how many Books fall in it.",
@@ -7076,6 +7123,30 @@
         "title": "PrivacyUpdate",
         "type": "object"
       },
+      "ProbeEvidenceOut": {
+        "description": "One probe of one catalogue: when, what was asked, and how it answered.\n\n**A disposition and never what came back**, and the same shape a shipped\nregistry entry's evidence has: `registry.Evidence`.",
+        "properties": {
+          "disposition": {
+            "$ref": "#/components/schemas/Disposition"
+          },
+          "isbn": {
+            "title": "Isbn",
+            "type": "string"
+          },
+          "probed_on": {
+            "format": "date",
+            "title": "Probed On",
+            "type": "string"
+          }
+        },
+        "required": [
+          "probed_on",
+          "isbn",
+          "disposition"
+        ],
+        "title": "ProbeEvidenceOut",
+        "type": "object"
+      },
       "ProgressCreate": {
         "description": "A position in a book, in exactly one unit.\n\nThe database says the same thing (`ck_reading_progress_one_unit`). This\nlayer exists so the caller gets a 422 naming the fields rather than a 500\nout of a constraint violation.",
         "properties": {
@@ -8039,6 +8110,16 @@
         "title": "RefusedAssertionOut",
         "type": "object"
       },
+      "RegisteredCatalogue": {
+        "description": "A catalogue in the curated registry this build ships: `registry.ENTRIES`.\n\n**Closed, and a second enum rather than more `CatalogueSource` members.** A\n`CatalogueSource` is asked by default and has a measured place in\n`sources.DEFAULT_ORDER`; one of these is asked by nobody until an admin\npicks it, and has no measurement to place it by. Folding them would put an\nunmeasured catalogue into every household's roster on upgrade.\n\n**Closed because the registry is vendored**: a member is a reachable host\nthis build ships, so adding one is a diff somebody reads, which is the\nproperty ticket 148 exists for. `registry` refuses at import a member with\nno entry and an entry with no member, and a value one `CatalogueSource`\nalready spells: the test route tries `CatalogueSource` first, so the entry\ncould not be named, and logins and `sources.Plan` key on the same string.",
+        "enum": [
+          "nls",
+          "nli",
+          "csic"
+        ],
+        "title": "RegisteredCatalogue",
+        "type": "string"
+      },
       "RegistrationOut": {
         "description": "What registering produced: a session, or an account with something to prove.\n\n**The token is optional and that is the whole shape of the account policy.**\nWhere accounts are open to people outside the household, a new account may do\nnothing until its address is confirmed, so handing back a session would hand\nback the thing the policy exists to withhold. Where the policy is off,\nnothing changes and the token is there, exactly as this route has always\nanswered.\n\nTwo fields rather than a nullable token alone, because \"there is no token\"\nand \"you have something to do next\" are different sentences and only the\nsecond is one a screen can render.",
         "properties": {
@@ -8061,6 +8142,52 @@
           "verification_required"
         ],
         "title": "RegistrationOut",
+        "type": "object"
+      },
+      "RegistryEntryOut": {
+        "description": "One catalogue the registry ships, and whether this library picked it.",
+        "properties": {
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/ProbeEvidenceOut"
+          },
+          "host": {
+            "title": "Host",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "national",
+              "union"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "picked": {
+            "title": "Picked",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/RegisteredCatalogue"
+          }
+        },
+        "required": [
+          "source",
+          "name",
+          "country",
+          "kind",
+          "host",
+          "picked",
+          "evidence"
+        ],
+        "title": "RegistryEntryOut",
         "type": "object"
       },
       "ResetCodeOut": {
@@ -9169,6 +9296,25 @@
           "password"
         ],
         "title": "SourceCredentialIn",
+        "type": "object"
+      },
+      "SourceTestIn": {
+        "description": "What to ask a source when an admin tests it.\n\n**No `source` field**: the source is the path, for `SourceCredentialIn`'s\nreason. `isbn` is optional: left out, a registry entry is asked its own\nevidence ISBN and a seeded source `catalogue_access.DEFAULT_TEST_ISBN`.",
+        "properties": {
+          "isbn": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isbn"
+          }
+        },
+        "title": "SourceTestIn",
         "type": "object"
       },
       "StatsOut": {
@@ -20405,6 +20551,207 @@
         ]
       }
     },
+    "/api/settings/catalogue-registry": {
+      "get": {
+        "description": "The curated catalogues this build ships, each with the evidence it was\nshipped on, and which of them this library picked. **Admin only**, beside\nthe pick it is read to make. `aged` says the snapshot's evidence is older\nthan it is trusted; nothing is fetched to find that out.",
+        "operationId": "get_catalogue_registry",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueRegistryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Catalogue Registry",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/catalogue-registry/{source}": {
+      "delete": {
+        "description": "Forget a pick. Dropping one never picked changes nothing.",
+        "operationId": "drop_registry_catalogue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueRegistryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Drop Registry Catalogue",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "description": "Pick one registry catalogue. Picking it again changes nothing.\n\nA pick records the choice and does not yet add the catalogue to the\nlookup order; `registry` says why.",
+        "operationId": "pick_registry_catalogue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueRegistryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Pick Registry Catalogue",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/api/settings/catalogue-sources/{source}/credential": {
       "delete": {
         "description": "Drop a stored login for one catalogue.\n\n**Succeeds whether or not one was stored**, and needs no key to do it: a\ncredential nobody can read is exactly the one somebody most wants to be rid\nof, and requiring the key to delete it would make a rotated key\nunrecoverable without a database edit. It is also what lets somebody who\nlost the recovery phrase reach a state where a new key may be made.\n\n**Reaches a row whose catalogue is no longer in the roster**, which the\nwrite above does not. `catalogue_credentials` carries no foreign key, on\npurpose, so that one credential for a source a later release dropped cannot\nfail an entire restore; the cost of that is an orphan, and an orphan nothing\ncan delete would be a row needing a database edit to remove. Deleting sends\nnothing anywhere, so the roster check buys nothing here and costs that.\n\n**The pinned check fires only when nothing is stored, and that ordering is\nload bearing.** It read \"there is nothing stored to remove\", which stopped\nbeing true the moment `unreadable_sources` began counting a pinned source's\nsealed row: a login stored for a source the environment also pins **blocks\nkey creation**, and refusing to delete it made that a dead end whose only\nexit was unsetting the variable, deleting, and setting it again, with\nnothing on screen saying so. An archive carries `catalogue_credentials`, so\na restore onto a deployment that pins that source arrives there without\nanybody doing anything unusual.\n\nSo: a row is a row, pinned or not, and deleting one sends nothing anywhere\nand does not touch the environment. With nothing stored the 409 is honest\nagain, because then there really is nothing here to remove and the\nenvironment's is not this route's to clear.",
@@ -20564,6 +20911,94 @@
           }
         ],
         "summary": "Set Source Credential",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/api/settings/catalogue-sources/{source}/test": {
+      "post": {
+        "description": "Ask one catalogue about one ISBN the way a scan would, and say how it answered.\n\n**A disposition and never what the catalogue returned**: answered,\nanswered nothing, refused or unreachable. **Admin only and rate limited for\nthe whole deployment**, a 429 past `ratelimit.SOURCE_TEST_LIMIT`, because\neach test is a request to somebody else's server. A switched off source is\ntested too. With no ISBN, a registry entry is asked the one its shipped\nevidence names, so the result compares with that evidence directly.",
+        "operationId": "probe_catalogue_source",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "title": "Source",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceTestIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeEvidenceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Probe Catalogue Source",
         "tags": [
           "settings"
         ]

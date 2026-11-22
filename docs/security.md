@@ -1171,7 +1171,7 @@ is how a secret reaches a log aggregator.
 
 ## Rate limiting
 
-**Thirteen counters, for five different reasons.** The count is not read off this
+**Fourteen counters, for five different reasons.** The count is not read off this
 page: the names `backend/ratelimit.py` binds to a limiter are counted on every
 run, pinned against a parse of the limiters that module constructs, which is
 why no date is attached to it. The method was added on 2026-08-28,
@@ -1198,6 +1198,7 @@ paragraph.
 | `/auth/reset/redeem`, `/auth/verify` | 10 / hour | username + address | Guessing a one time code. The code is 60 bits, so the keyspace is not what is doing the work here and this is: an approved reset code lives one hour. Keyed like a sign in rather than on the account alone, because an account-only key would let anybody lock a member out of the recovery they had just been granted |
 | `GET /api/books/export` | 5 / min | username | **The import row's reason, not a new one**: the cost lands on this deployment's own resources rather than on a credential, a supplier or a stranger, which is the cost the `/api/imports/*` row above states and measures. One call walks the whole of one member's visible shelf, `marc.EXPORT_PAGE_RECORDS` rows at a time, holding a worker thread and a database session for the life of the response. Five a minute because a member comparing every format the menu offers spends one start on each, and five leaves at least one retry over that; `tests/test_ratelimit.py::TestTheExportDoorIsRationed` fails when a new format leaves none. **It counts starts, not responses in flight**, so five concurrent walks by one member are inside it and nothing counts across members at all; bounding that is a concurrency limit, which this is not. Keyed on the authenticated username rather than the address, because behind a reverse proxy an address collapses a household into one bucket and the retry hint is computed from that bucket's first hit, so a shared bucket would tell one member when another last exported |
 | `GET /api/backup` | 3 / min | username | The same reason and a different unit, which is why it is a second counter rather than a share of the one above: this builds the whole database and every cover image in one pass and holds the result in memory before a byte is sent. Sharing a budget would let a member's exports ration the administrator's backup. Three a minute is the impatient second click plus one. **It bounds how often an archive is built and neither how large one is nor how many are built at once**: the archive byte ceiling is the restore upload's cap and is not read on the way out, so the download is capped by nothing |
+| `POST /api/settings/catalogue-sources/{source}/test` | 10 / min | the deployment | An admin's **test this source** sends one lookup to a catalogue on demand, so the cost lands on somebody else's server, the metadata row's reason. **Keyed on the deployment rather than the admin**, because two admins pressing in turn are still one server asking. Admin only as well, since unbounded the button is a request generator with a friendly label |
 
 The last three of the first six are the ones that are not about this deployment: spending somebody else's
 quota is a way to get this deployment's address rate-limited upstream, which loses

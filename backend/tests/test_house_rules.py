@@ -1003,7 +1003,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **166** models under `schemas/`, **57** of
+    Measured on the tree as it stands: **170** models under `schemas/`, **58** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -5488,7 +5488,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
     #: that only checks what it finds passes happily on a file whose subject has
     #: been deleted, which has happened twice in this suite.
     #:
-    #: **Two spellings, because a door takes one or the other.** Four take a
+    #: **Two spellings, because a door takes one or the other.** Five take a
     #: `metadata.Access`, which carries the plan along with the key and the
     #: logins; the two that send no login take the plan alone. Which is which is
     #: `tests/test_metadata.py::TestNoDoorTakesTheKeyAndThePlanApart`, with the
@@ -5501,6 +5501,10 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
         "title_search": "access",
         "editions": "plan",
         "candidates": "access",
+        # It reads the key and the login off the access and asks the one target
+        # its caller names, so the plan arrives and is not consulted: the
+        # admin's test of a switched off source. Its docstring has the reason.
+        "probe": "access",
     }
 
     def _public_coroutines(self) -> dict[str, set[str]]:
@@ -5868,9 +5872,9 @@ class TestOneReaderPerAmbiguousSubfield:
 
     **Identity is the path, not `path.stem`.** That is the same defect one level
     down and it came through the rewrite untouched from the first version.
-    `application_modules()` already holds **thirteen** colliding stems, `auth`,
+    `application_modules()` already holds **fourteen** colliding stems, `auth`,
     `backup`, `covers`, `imports`, `kosync`, `oai`, `opds`, `patrons`, `public`,
-    `readwise`, `settings`, `sru` and `stats`, each
+    `readwise`, `registry`, `settings`, `sru` and `stats`, each
     a module at the root and one under `routers/` or `schemas/`. Neither
     `metadata` nor `marc` collides today, which is why nothing failed; a reader
     added to `routers/metadata.py` would have been indistinguishable from the
@@ -5979,7 +5983,7 @@ class TestOneReaderPerAmbiguousSubfield:
         assert set(found) == {("metadata.py", "_subject_vocabulary")}
 
     def test_two_files_of_one_stem_are_two_sites(self):
-        """`path.stem` was the identity and thirteen stems already collide.
+        """`path.stem` was the identity and fourteen stems already collide.
 
         `metadata` is not one of them today, so nothing failed; a reader added
         to `routers/metadata.py` would have been indistinguishable from the
@@ -5992,11 +5996,12 @@ class TestOneReaderPerAmbiguousSubfield:
     def test_the_stems_that_already_collide_are_still_only_these(self):
         """A count in prose does not recount itself, so this recounts it.
 
-        The docstring names thirteen, and it named seven until `sru.py` arrived
+        The docstring names fourteen, and it named seven until `sru.py` arrived
         beside `routers/sru.py`, eight until `opds.py`, nine until `kosync.py`,
-        ten until `readwise.py`, eleven until `oai.py` and twelve until
-        `patrons.py` did. If a fourteenth appears the number above is stale, and
-        this says so at the rule rather than leaving the next reader to trust it.
+        ten until `readwise.py`, eleven until `oai.py`, twelve until
+        `patrons.py` and thirteen until `registry.py` did. If a fifteenth
+        appears the number above is stale, and this says so at the rule rather
+        than leaving the next reader to trust it.
         """
         stems: dict[str, list[str]] = {}
         for path in application_modules():
@@ -6014,6 +6019,7 @@ class TestOneReaderPerAmbiguousSubfield:
             "patrons",
             "public",
             "readwise",
+            "registry",
             "settings",
             "sru",
             "stats",

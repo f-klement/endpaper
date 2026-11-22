@@ -46,6 +46,7 @@
 - A harvest's result links to the books that run added.
 - The books list filters by origin and by harvest run in library mode, so a member can review the books harvesting, or one run, brought in.
 - A harvest cut short by a limit or a busy repository can now be carried on from where it stopped, from the harvest card.
+- Catalogue settings list a curated registry of national and union catalogues, each shipped with the date it was last checked answering, and every catalogue gains a Test action that reports only whether it answered, answered nothing, refused or could not be reached. A picked registry entry is not yet asked when a book is added.
 
 ## v0.22.0
 

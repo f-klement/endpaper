@@ -27940,3 +27940,39 @@ record and its 409.
 
 `PatronForm` is in `pages/components/`, the search and register hooks in `pages/hooks.ts`, and
 the draft helpers in `pages/types.ts`, since two pages now hold them.
+
+## The curated catalogue registry and the source test (2026-11-22)
+
+Catalogue settings list a registry of national and union catalogues this release ships, which
+an admin can pick, and every catalogue, seeded or registered, gains a Test action.
+
+### The catalogue registry is vendored, and a pick is a name
+
+The registry is a committed snapshot, `registry.py`, refreshed by a commit and never at
+runtime: a list fetched live would let a third party's page decide which addresses this server
+asks. An entry ships only once it was probed answering, with its date, its ISBN and its
+disposition. `TAKEN_ON` must equal the newest probe, and any other date, earlier or later, is
+refused at import, because the snapshot counts as aged 183 days after `TAKEN_ON` and a date
+later than every probe would hide an old one. The snapshot is checked again at each release.
+
+**A pick is a `RegisteredCatalogue` name in `SettingKey.PICKED_CATALOGUES`, never a
+`catalogue_targets` row**, so no table holds a picked address and the roster table stays a
+copy of the seeded targets. **A picked entry is not asked on a scan until ticket 820** (owner,
+2026-11-22): this release lists, picks and tests, and the lookup chain does not read a pick.
+
+The National Library of Wales was a candidate; on 2026-11-22 no Alma host gave a record of it
+to probe with, so it is not listed.
+
+### The test action is the scan's door
+
+`metadata.probe` is `_lookup_one`, the call a lookup makes, so the deadline, the byte cap, the
+redirect rule and the identity check a test meets are the scan's own. It takes the one resolved
+`Access`, so it cannot be handed a key the resolver never checked, but it does not consult that
+access's plan: an admin tests a catalogue to decide whether to switch it on. It returns a
+`Disposition` and never the record, since echoing the body would make the button an oracle for
+whatever an address serves.
+
+**Refused and unreachable are told apart at every door**, the bespoke Open Library and Google
+Books replies included, each arm under a test: a rejected key and a dead host need different
+fixes. The action is admin only and limited to 10 a minute for the deployment, which is per
+process; the image runs one.

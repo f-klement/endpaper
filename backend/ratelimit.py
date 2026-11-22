@@ -293,6 +293,17 @@ EXPORT_LIMIT = RateLimit(max_attempts=5, window_seconds=60)
 # that is where somebody reads the limit and concludes the download is capped.
 BACKUP_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
+# The admin's **test this source** action, and the unit is one lookup sent to a
+# third party's catalogue on demand. Unbounded, that button is a request
+# generator with a friendly label (owner, ticket 148), so it is bounded even
+# though every caller is an admin.
+#
+# **Keyed on the deployment, not on the admin**: the cost lands on the
+# catalogues, and two admins pressing in turn are still one server asking. Ten
+# a minute tests every source this build ships inside a few minutes and keeps
+# a held key from becoming a stream at one host.
+SOURCE_TEST_LIMIT = RateLimit(max_attempts=10, window_seconds=60)
+
 
 #: How many distinct keys one limiter remembers at once.
 #:
@@ -471,6 +482,7 @@ identifier_backfill_limiter = SlidingWindowLimiter(IDENTIFIER_BACKFILL_LIMIT)
 public_catalogue_limiter = SlidingWindowLimiter(PUBLIC_CATALOGUE_LIMIT)
 export_limiter = SlidingWindowLimiter(EXPORT_LIMIT)
 backup_limiter = SlidingWindowLimiter(BACKUP_LIMIT)
+source_test_limiter = SlidingWindowLimiter(SOURCE_TEST_LIMIT)
 recovery_request_address_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_request_account_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_code_limiter = SlidingWindowLimiter(RECOVERY_CODE_LIMIT)

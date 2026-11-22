@@ -67,7 +67,7 @@ import z3950
 # mistake; building a decoder from anything but `Target.decoding` is.
 from decoders import IMPORT_READERS, MARC_READERS, Decoding
 from decoders import Reader as Reader
-from enums import Capability, CatalogueSource, RecordCharset, SourceFamily
+from enums import Capability, CatalogueSource, RecordCharset, RegisteredCatalogue, SourceFamily
 
 # Re-exported for the reason `Reader` is: `Target.transport` is typed on it, and
 # `enums.Transport` says why it lives there.
@@ -377,7 +377,12 @@ class Target:
     #: Which source this is. The primary key, and closed: `sources.Plan.parse`
     #: validates a stored settings row against `CatalogueSource`, so the roster
     #: cannot grow here without growing there.
-    source: CatalogueSource
+    #:
+    #: **Or a `RegisteredCatalogue`**, for an entry of the curated registry this
+    #: build ships, `registry.ENTRIES`. That set is closed too, and keyed apart so
+    #: that no registry entry is in any household's roster until an admin picks
+    #: it. `SEEDED` holds the first kind only.
+    source: CatalogueSource | RegisteredCatalogue
     #: Position in `sources.DEFAULT_ORDER`, seeded from it.
     #:
     #: **Not read at runtime, and reserved for #130**, which is where a row
