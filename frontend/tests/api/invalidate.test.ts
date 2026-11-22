@@ -15,6 +15,7 @@ import * as backup from "../../src/api/generated/endpoints/backup/backup";
 import * as books from "../../src/api/generated/endpoints/books/books";
 import * as collections from "../../src/api/generated/endpoints/collections/collections";
 import * as covers from "../../src/api/generated/endpoints/covers/covers";
+import * as imports from "../../src/api/generated/endpoints/imports/imports";
 import * as kosync from "../../src/api/generated/endpoints/kosync/kosync";
 import * as loans from "../../src/api/generated/endpoints/loans/loans";
 import * as opds from "../../src/api/generated/endpoints/opds/opds";
@@ -194,6 +195,10 @@ const KEYS: Record<string, readonly unknown[]> = {
   // pull hooks refresh it themselves. A book gaining a match shows here only
   // after the next pull, which is when the server learns of it too.
   getReadwiseAccount: readwise.getGetReadwiseAccountQueryKey(),
+  // The truncated harvest run the card offers to carry on from. Not under
+  // `/api/books`, so a catalogue write leaves it: only a harvest moves it, and
+  // `useHarvestImport` asks it again after every apply and every refused read.
+  resumableHarvest: imports.getResumableHarvestQueryKey(),
 };
 
 /**
@@ -341,7 +346,10 @@ describe("the inventory is complete", () => {
     //
     // 72 on 2026-11-21, counted with that same command: a book's headings a
     // harvest suggested, three routes, one of them a read.
-    expect(Object.keys(KEYS).length).toBe(72);
+    //
+    // 73 on 2026-11-22, counted with that same command: the truncated harvest
+    // run a harvest may carry on from, the first read under `imports`.
+    expect(Object.keys(KEYS).length).toBe(73);
   });
 });
 

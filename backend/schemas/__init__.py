@@ -124,6 +124,7 @@ from schemas.imports import (
     ImportResultOut,
     MarcPreviewOut,
     MarcPreviewRow,
+    ResumableHarvestOut,
 )
 from schemas.kosync import KosyncAccountOut, KosyncDocumentOut, KosyncPasswordOut
 from schemas.loan import LoanCreate, LoanOut, MyOverdueOut
@@ -367,6 +368,7 @@ __all__ = [
     "ResetRequest",
     "ResetRequestOut",
     "RestoreResult",
+    "ResumableHarvestOut",
     "SenderHealth",
     "SenderOutcome",
     "SeriesOut",

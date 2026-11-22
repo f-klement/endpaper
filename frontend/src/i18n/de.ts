@@ -2205,19 +2205,26 @@ export const de: Messages = {
   "harvestRun.readDublinCore":
     "Als Dublin Core gelesen, weil das Repository kein MARCXML anbietet, das diese App abfragen kann. Dublin Core enthält weniger: keine Schlagwörter oder Notationen, keine Reihe und keine Rollen der genannten Personen. Die angelegten Bücher enthalten also weniger Angaben.",
   "harvestRun.truncatedPreview":
-    "Der Lauf hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war, diese Zahlen umfassen also nur einen Teil davon. Jede Übernahme beginnt wieder von vorn; eine Teilmenge grenzt sie ein.",
+    "Der Lauf hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war, diese Zahlen umfassen also nur einen Teil davon. Ist dies übernommen, kann der nächste Lauf dort weitermachen, wo dieser angehalten hat.",
   "harvestRun.confirm": "{count} Datensätze übernehmen",
   "harvestRun.importing": "Wird übernommen...",
   "harvestRun.resultHeadings":
     "Vorgeschlagene Schlagwörter und Notationen, die an den Büchern darauf warten, dass ein Admin sie bestätigt oder verwirft: {count}.",
   "harvestRun.truncatedResult":
-    "Die Übernahme hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war. Was gelesen wurde, bleibt erhalten. Ein neuer Lauf beginnt wieder von vorn; eine Teilmenge grenzt ihn ein.",
+    "Die Übernahme hat vor dem Ende des Repositorys angehalten, an einer Grenze oder weil das Repository ausgelastet war. Was gelesen wurde, bleibt erhalten, und der nächste Lauf kann dort weitermachen, wo dieser angehalten hat.",
   "harvestRun.off":
     "Die Übernahme ist ausgeschaltet, oder es ist keine Adresse eines Repositorys gespeichert. Bitte oben einschalten und die Adresse speichern.",
   "harvestRun.running":
     "Es läuft bereits eine Übernahme. Bitte warten, bis sie abgeschlossen ist, und es dann erneut versuchen.",
   "harvestRun.lostRace":
     "Eine andere Änderung an denselben Büchern kam dieser Übernahme dazwischen, und es wurde nichts übernommen. Bitte erneut übernehmen.",
+  "harvestRun.resumable":
+    "Die Übernahme vom {date} hat vor dem Ende des Repositorys angehalten, nachdem sie in diesem Lauf {count} Datensätze gelesen hatte. Der nächste Lauf kann dort weitermachen, wo sie angehalten hat.",
+  "harvestRun.resumableSet":
+    "Die Teilmenge {set} wurde gelesen, und das Weitermachen liest dieselbe Teilmenge.",
+  "harvestRun.carryOn": "Dort weitermachen, wo sie angehalten hat",
+  "harvestRun.notResumable":
+    "Dieser Lauf kann nicht mehr fortgesetzt werden: Das Repository wurde seitdem erneut übernommen, oder der Lauf wurde nicht vorzeitig beendet. Es wurde nichts übernommen.",
   "harvestRun.repositoryChanged":
     "Das gespeicherte Repository ist nicht das, das diese Seite gelesen hat, und es wurde nichts übernommen. Bitte das Repository erneut lesen.",
 };

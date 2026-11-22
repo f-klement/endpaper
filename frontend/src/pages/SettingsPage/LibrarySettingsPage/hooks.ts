@@ -31,12 +31,14 @@ import {
   useScanAdd,
 } from "../../../api/generated/endpoints/books/books";
 import {
+  getResumableHarvestQueryKey,
   useApplyHarvest,
   useImportCsv,
   useImportMarc,
   usePreviewHarvest,
   usePreviewImport,
   usePreviewMarc,
+  useResumableHarvest,
 } from "../../../api/generated/endpoints/imports/imports";
 import {
   getListClassificationSchemesQueryKey,
@@ -65,6 +67,7 @@ import type {
   ImportResultOut,
   KoreaderHighlightIn,
   MarcPreviewOut,
+  ResumableHarvestOut,
   VocabularyOut,
 } from "../../../api/generated/model";
 import { useInvalidate } from "../../../api/invalidate";
@@ -536,7 +539,14 @@ export interface UseHarvestImportResult {
   result: HarvestResultOut | null;
   /** Read the repository, or only the named set of it. Writes nothing. */
   read: (setSpec: string) => void;
-  /** Harvest the set the preview read. Does nothing before a preview. */
+  /**
+   * The last run of the repository, while it was cut short and may be carried
+   * on from. Null otherwise, and while the switch is off.
+   */
+  resumable: ResumableHarvestOut | null;
+  /** Read on from where `resumable` stopped, in its set. Writes nothing. */
+  carryOn: () => void;
+  /** Harvest what the preview read. Does nothing before a preview. */
   confirm: () => void;
   isPreviewing: boolean;
   isImporting: boolean;
@@ -550,10 +560,14 @@ export interface UseHarvestImportResult {
   reset: () => void;
 }
 
-/** One read of the repository: the address and set it asked, and its answer. */
+/**
+ * One read of the repository: the address and set it asked, the truncated run
+ * it carries on from if any, and its answer.
+ */
 interface HarvestRead {
   repository: string | null;
   setSpec: string | undefined;
+  continues: number | undefined;
   preview: HarvestPreviewOut | null;
 }
 
@@ -576,6 +590,11 @@ interface HarvestRead {
  * `repository_changed` when another is stored, whether that one was saved
  * before the read or after it; that refusal drops the read and asks the
  * settings again.
+ *
+ * **A run cut short may be carried on from**, as a new run starting where it
+ * stopped: `resumable` is the server's answer to which run that is, asked
+ * again after every apply and every refusal, since either may have changed it
+ * (a run made in another tab is refused as `not_resumable`).
  */
 export function useHarvestImport(
   repository: string | null,
@@ -596,9 +615,20 @@ export function useHarvestImport(
     setResult(null);
   }
 
-  const previewing = usePreviewHarvest();
+  const resumable = useResumableHarvest({
+    query: { enabled: repository !== null },
+  });
+  const askResumableAgain = () =>
+    void queryClient.invalidateQueries({
+      queryKey: getResumableHarvestQueryKey(),
+    });
+
+  const previewing = usePreviewHarvest({
+    mutation: { onError: askResumableAgain },
+  });
   const harvesting = useApplyHarvest({
     mutation: {
+      onSettled: askResumableAgain,
       onSuccess: (data: HarvestResultOut) => {
         setResult(data);
         setHeld(spent);
@@ -618,24 +648,31 @@ export function useHarvestImport(
     },
   });
 
+  const ask = (asked: HarvestRead) => {
+    setHeld(asked);
+    setResult(null);
+    harvesting.reset();
+    previewing.mutate(
+      { params: paramsOf(asked) },
+      {
+        // Kept only while this read is still the one held: a reset or a
+        // changed address since has replaced it.
+        onSuccess: (data: HarvestPreviewOut) =>
+          setHeld((now) => landed(now, asked, data)),
+      },
+    );
+  };
+  const offered = repository === null ? null : (resumable.data ?? null);
+
   return {
     preview: previewOf(held),
     result,
+    resumable: offered,
 
-    read: (typed: string) => {
-      const asked = readOf(repository, typed);
-      setHeld(asked);
-      setResult(null);
-      harvesting.reset();
-      previewing.mutate(
-        { params: paramsFor(asked.setSpec) },
-        {
-          // Kept only while this read is still the one held: a reset or a
-          // changed address since has replaced it.
-          onSuccess: (data: HarvestPreviewOut) =>
-            setHeld((now) => landed(now, asked, data)),
-        },
-      );
+    read: (typed: string) => ask(readOf(repository, typed)),
+
+    carryOn: () => {
+      if (offered !== null) ask(continuationOf(repository, offered));
     },
 
     confirm: () => {
@@ -665,6 +702,23 @@ function readOf(repository: string | null, typed: string): HarvestRead {
   return {
     repository,
     setSpec: trimmed === "" ? undefined : trimmed,
+    continues: undefined,
+    preview: null,
+  };
+}
+
+/**
+ * The read carrying on from `run`. No set of its own: the server reads the
+ * set the run read, and refuses one named beside it.
+ */
+function continuationOf(
+  repository: string | null,
+  run: ResumableHarvestOut,
+): HarvestRead {
+  return {
+    repository,
+    setSpec: undefined,
+    continues: run.harvest_id,
     preview: null,
   };
 }
@@ -694,9 +748,9 @@ function previewOf(held: HarvestRead | null): HarvestPreviewOut | null {
  */
 function applyParamsOf(
   held: HarvestRead | null,
-): { repository: string; set_spec?: string } | undefined {
+): { repository: string; set_spec?: string; continues?: number } | undefined {
   if (held?.preview == null || held.repository === null) return undefined;
-  return { repository: held.repository, ...paramsFor(held.setSpec) };
+  return { repository: held.repository, ...paramsOf(held) };
 }
 
 /** The apply's refusal for an address stored since this tab read it. */
@@ -704,9 +758,19 @@ function isRepositoryChanged(error: unknown): boolean {
   return error instanceof ApiError && error.code === "repository_changed";
 }
 
-/** No `set_spec` at all for the whole repository, rather than an empty one. */
-function paramsFor(setSpec: string | undefined): { set_spec?: string } {
-  return setSpec === undefined ? {} : { set_spec: setSpec };
+/**
+ * What a read asks beside the address: no `set_spec` at all for the whole
+ * repository, rather than an empty one, and `continues` only on a
+ * continuation.
+ */
+function paramsOf(read: HarvestRead): {
+  set_spec?: string;
+  continues?: number;
+} {
+  return {
+    ...(read.setSpec === undefined ? {} : { set_spec: read.setSpec }),
+    ...(read.continues === undefined ? {} : { continues: read.continues }),
+  };
 }
 
 /**

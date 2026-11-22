@@ -5,12 +5,20 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseQueryResult,
   MutationFunction,
   QueryClient,
+  QueryFunction,
+  QueryKey,
+  UndefinedInitialDataOptions,
   UseMutationOptions,
   UseMutationResult,
+  UseQueryOptions,
+  UseQueryResult,
 } from "@tanstack/react-query";
 
 import type {
@@ -30,11 +38,30 @@ import type {
   PreviewHarvestParams,
   PreviewImportParams,
   Refusal,
+  ResumableHarvestOut,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+const withQueryKey = <T extends object, K>(
+  query: T,
+  queryKey: K,
+): T & { queryKey: K } => {
+  const result = { queryKey } as T & { queryKey: K };
+  for (const key of Object.keys(query)) {
+    // The explicit queryKey always wins, matching the previous
+    // `{ ...query, queryKey }` spread where it was set last.
+    if (key === "queryKey") continue;
+    Object.defineProperty(result, key, {
+      enumerable: true,
+      configurable: true,
+      get: () => (query as Record<string, unknown>)[key],
+    });
+  }
+  return result;
+};
 
 export const getImportCsvUrl = (params?: ImportCsvParams) => {
   const normalizedParams = new URLSearchParams();
@@ -257,6 +284,11 @@ export const getApplyHarvestUrl = (params: ApplyHarvestParams) => {
  * read the preview, whether the stored one was saved before that read or after
  * it, so the preview it showed was labelled with an address this would not
  * harvest.
+ *
+ * **A truncated run records where it stopped**, and `continues` carries on
+ * from there as a new run, which records where it stopped in turn: the
+ * preview's `not_resumable` 409 applies here too, checked again under the
+ * one run lock, so two tabs cannot both continue one run.
  * @summary Apply Harvest
  */
 export const applyHarvest = async (
@@ -338,6 +370,11 @@ export type ApplyHarvestMutationVariables = { params: ApplyHarvestParams };
  * read the preview, whether the stored one was saved before that read or after
  * it, so the preview it showed was labelled with an address this would not
  * harvest.
+ *
+ * **A truncated run records where it stopped**, and `continues` carries on
+ * from there as a new run, which records where it stopped in turn: the
+ * preview's `not_resumable` 409 applies here too, checked again under the
+ * one run lock, so two tabs cannot both continue one run.
  * @summary Apply Harvest
  */
 export const useApplyHarvest = <
@@ -386,6 +423,8 @@ export const getPreviewHarvestUrl = (params?: PreviewHarvestParams) => {
  * harvest of this repository created counted as already held, as the apply
  * matches it; `deleted` and `truncated` are the run's own. Rate limited with
  * the imports, and a 409 while another harvest, preview or apply, is running.
+ * With `continues`, it reads on from where that truncated run stopped, and a
+ * 409 `not_resumable` when that run is not `resumable_harvest`'s.
  *
  * **`async`, unlike the file routes**, because the wait is the network: the
  * fetch runs on the event loop through `fetch.py`, and the counting, which
@@ -457,6 +496,8 @@ export type PreviewHarvestMutationVariables = { params?: PreviewHarvestParams };
  * harvest of this repository created counted as already held, as the apply
  * matches it; `deleted` and `truncated` are the run's own. Rate limited with
  * the imports, and a 409 while another harvest, preview or apply, is running.
+ * With `continues`, it reads on from where that truncated run stopped, and a
+ * 409 `not_resumable` when that run is not `resumable_harvest`'s.
  *
  * **`async`, unlike the file routes**, because the wait is the network: the
  * fetch runs on the event loop through `fetch.py`, and the counting, which
@@ -485,6 +526,195 @@ export const usePreviewHarvest = <
 > => {
   return useMutation(getPreviewHarvestMutationOptions(options), queryClient);
 };
+export const getResumableHarvestUrl = () => {
+  return `/api/imports/harvest/resumable`;
+};
+
+/**
+ * The run of the stored repository a harvest may carry on from, or null.
+ *
+ * Admin only, library mode and the harvester's switch required. The latest
+ * run of the repository, offered only while a cap, the deadline or a busy
+ * repository cut it short: pass its id as `continues` to the preview and the
+ * apply. Reads the database alone; the repository is not asked.
+ * @summary Resumable Harvest
+ */
+export const resumableHarvest = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<ResumableHarvestOut | null> => {
+  return customFetch<ResumableHarvestOut | null>(getResumableHarvestUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getResumableHarvestQueryKey = () => {
+  return [`/api/imports/harvest/resumable`] as const;
+};
+
+export const getResumableHarvestQueryOptions = <
+  TData = Awaited<ReturnType<typeof resumableHarvest>>,
+  TError = Refusal,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof resumableHarvest>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getResumableHarvestQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof resumableHarvest>>
+  > = ({ signal }) => resumableHarvest({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof resumableHarvest>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ResumableHarvestQueryResult = NonNullable<
+  Awaited<ReturnType<typeof resumableHarvest>>
+>;
+export type ResumableHarvestQueryError = Refusal;
+
+/**
+ * The run of the stored repository a harvest may carry on from, or null.
+ *
+ * Admin only, library mode and the harvester's switch required. The latest
+ * run of the repository, offered only while a cap, the deadline or a busy
+ * repository cut it short: pass its id as `continues` to the preview and the
+ * apply. Reads the database alone; the repository is not asked.
+ * @summary Resumable Harvest
+ */
+export function useResumableHarvest<
+  TData = Awaited<ReturnType<typeof resumableHarvest>>,
+  TError = Refusal,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof resumableHarvest>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof resumableHarvest>>,
+          TError,
+          Awaited<ReturnType<typeof resumableHarvest>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The run of the stored repository a harvest may carry on from, or null.
+ *
+ * Admin only, library mode and the harvester's switch required. The latest
+ * run of the repository, offered only while a cap, the deadline or a busy
+ * repository cut it short: pass its id as `continues` to the preview and the
+ * apply. Reads the database alone; the repository is not asked.
+ * @summary Resumable Harvest
+ */
+export function useResumableHarvest<
+  TData = Awaited<ReturnType<typeof resumableHarvest>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof resumableHarvest>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof resumableHarvest>>,
+          TError,
+          Awaited<ReturnType<typeof resumableHarvest>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The run of the stored repository a harvest may carry on from, or null.
+ *
+ * Admin only, library mode and the harvester's switch required. The latest
+ * run of the repository, offered only while a cap, the deadline or a busy
+ * repository cut it short: pass its id as `continues` to the preview and the
+ * apply. Reads the database alone; the repository is not asked.
+ * @summary Resumable Harvest
+ */
+export function useResumableHarvest<
+  TData = Awaited<ReturnType<typeof resumableHarvest>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof resumableHarvest>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * The run of the stored repository a harvest may carry on from, or null.
+ *
+ * Admin only, library mode and the harvester's switch required. The latest
+ * run of the repository, offered only while a cap, the deadline or a busy
+ * repository cut it short: pass its id as `continues` to the preview and the
+ * apply. Reads the database alone; the repository is not asked.
+ * @summary Resumable Harvest
+ */
+export function useResumableHarvest<
+  TData = Awaited<ReturnType<typeof resumableHarvest>>,
+  TError = Refusal,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof resumableHarvest>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getResumableHarvestQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getImportMarcUrl = (params?: ImportMarcParams) => {
   const normalizedParams = new URLSearchParams();
 

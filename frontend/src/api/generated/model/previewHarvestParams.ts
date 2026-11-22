@@ -9,4 +9,6 @@
 export type PreviewHarvestParams = {
   /** Harvest only this set of the repository */
   set_spec?: string | null;
+  /** Carry on where this truncated run stopped, in its format and set, rather than from the start */
+  continues?: number | null;
 };

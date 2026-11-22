@@ -7,9 +7,11 @@ import {
   type HarvestPreviewOut,
   type HarvestResultOut,
   type MarcPreviewRow,
+  type ResumableHarvestOut,
 } from "../../../../api/generated/model";
 import { Button } from "../../../../components";
 import { type MessageKey, useTranslation } from "../../../../i18n";
+import { shortMonthDate } from "../../../../lib/date";
 import {
   ConfirmRow,
   ImportAlert,
@@ -26,12 +28,16 @@ interface HarvestImportProps {
   /** What a run over the repository read. Shown before anything is written. */
   preview: HarvestPreviewOut | null;
   result: HarvestResultOut | null;
+  /** The last run, while it was cut short and may be carried on from. */
+  resumable: ResumableHarvestOut | null;
   /** Whatever the read was refused with. */
   readError: unknown;
   /** Whatever the harvest was refused with. */
   harvestError: unknown;
   /** Read the repository, or only the typed set of it. */
   onRead: (setSpec: string) => void;
+  /** Read on from where `resumable` stopped. */
+  onCarryOn: () => void;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -54,9 +60,11 @@ export default function HarvestImport({
   isImporting,
   preview,
   result,
+  resumable,
   readError,
   harvestError,
   onRead,
+  onCarryOn,
   onConfirm,
   onCancel,
 }: HarvestImportProps) {
@@ -68,6 +76,10 @@ export default function HarvestImport({
       <p className="text-xs text-paper-600 leading-relaxed dark:text-paper-400">
         {t("harvestRun.explain")}
       </p>
+
+      {!preview && resumable && (
+        <CarryOn run={resumable} busy={isPreviewing} onCarryOn={onCarryOn} />
+      )}
 
       {!preview && (
         <SetField
@@ -90,6 +102,41 @@ export default function HarvestImport({
       <HarvestRefusal readError={readError} harvestError={harvestError} />
 
       {result && <HarvestResult result={result} />}
+    </div>
+  );
+}
+
+/**
+ * The offer to carry on from a run cut short, beside the read from the start
+ * rather than instead of it: an admin whose repository forgot where the run
+ * stopped starts over, and that is the other button.
+ */
+function CarryOn({
+  run,
+  busy,
+  onCarryOn,
+}: {
+  run: ResumableHarvestOut;
+  busy: boolean;
+  onCarryOn: () => void;
+}) {
+  const { t, locale } = useTranslation();
+  return (
+    <div className="space-y-1.5 text-sm text-paper-700 bg-paper-50 border border-paper-200 rounded-xl p-3 dark:text-paper-200 dark:bg-paper-900 dark:border-paper-700">
+      <p>
+        {t("harvestRun.resumable", {
+          date: shortMonthDate(run.started_at, locale),
+          count: run.records_seen,
+        })}
+      </p>
+      {run.set_spec && (
+        <p className="text-xs text-paper-600 dark:text-paper-400">
+          {t("harvestRun.resumableSet", { set: run.set_spec })}
+        </p>
+      )}
+      <Button size="sm" disabled={busy} onClick={onCarryOn}>
+        {busy ? t("harvestRun.reading") : t("harvestRun.carryOn")}
+      </Button>
     </div>
   );
 }
@@ -308,10 +355,11 @@ function Caution({ message }: { message: string }) {
  * address.
  *
  * **A 409 is worded by its `code`**, which `backend/routers/imports.py` puts on
- * the two refusals of the harvester's own: another harvest running, at either
- * step, and a stored repository other than the address this tab held when it
- * read, at the apply. A 409 with no code is the apply's lost race with another change
- * to the same books.
+ * the refusals of the harvester's own: another harvest running, at either
+ * step, a run no longer to be carried on from, at either step, and a stored
+ * repository other than the address this tab held when it read, at the apply.
+ * A 409 with no code is the apply's lost race with another change to the same
+ * books.
  */
 function HarvestRefusal({
   readError,
@@ -329,6 +377,7 @@ function HarvestRefusal({
 
 const REFUSAL_BY_CODE: Readonly<Record<string, MessageKey>> = {
   harvest_running: "harvestRun.running",
+  not_resumable: "harvestRun.notResumable",
   repository_changed: "harvestRun.repositoryChanged",
 };
 

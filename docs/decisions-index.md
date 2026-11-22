@@ -579,14 +579,15 @@ repeat the argument.
 |  | [An excluded row is counted in the open, where a blocked row is not](decisions.md#an-excluded-row-is-counted-in-the-open-where-a-blocked-row-is-not) | 68 |
 |  | [A source carries a remit, so a catalogue is asked about books it might hold](decisions.md#a-source-carries-a-remit-so-a-catalogue-is-asked-about-books-it-might-hold) | 185 |
 |  | [Provenance is published, because a catalogue that hides its sources is not a catalogue](decisions.md#provenance-is-published-because-a-catalogue-that-hides-its-sources-is-not-a-catalogue) | 127 |
-|  | [Harvesting an OAI-PMH repository (owner, 2026-11-20)](decisions.md#harvesting-an-oai-pmh-repository-owner-2026-11-20) | 1,690 |
+|  | [Harvesting an OAI-PMH repository (owner, 2026-11-20)](decisions.md#harvesting-an-oai-pmh-repository-owner-2026-11-20) | 2,264 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvested Book has no owner, points at its harvest run, and is never private](decisions.md#a-harvested-book-has-no-owner-points-at-its-harvest-run-and-is-never-private) | 175 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [The repository may be a household address, over http or https](decisions.md#the-repository-may-be-a-household-address-over-http-or-https) | 153 |
-| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest reads MARCXML where offered, and Dublin Core where not](decisions.md#a-harvest-reads-marcxml-where-offered-and-dublin-core-where-not) | 395 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest reads MARCXML where offered, and Dublin Core where not](decisions.md#a-harvest-reads-marcxml-where-offered-and-dublin-core-where-not) | 443 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A harvest's headings wait as suggestions](decisions.md#a-harvests-headings-wait-as-suggestions) | 320 |
 | Harvesting an OAI-PMH repository (owner, 2026-11-20) | [How a harvested record is matched](decisions.md#how-a-harvested-record-is-matched) | 177 |
-| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A run is cut short rather than failed, and does not resume](decisions.md#a-run-is-cut-short-rather-than-failed-and-does-not-resume) | 226 |
-| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [The books list filters by origin and by harvest run](decisions.md#the-books-list-filters-by-origin-and-by-harvest-run) | 166 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A run is cut short rather than failed](decisions.md#a-run-is-cut-short-rather-than-failed) | 229 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [A truncated harvest carries on as a new run](decisions.md#a-truncated-harvest-carries-on-as-a-new-run) | 480 |
+| Harvesting an OAI-PMH repository (owner, 2026-11-20) | [The books list filters by origin and by harvest run](decisions.md#the-books-list-filters-by-origin-and-by-harvest-run) | 203 |
 |  | [The competitor register's reference counts get a stated command and no guard](decisions.md#the-competitor-registers-reference-counts-get-a-stated-command-and-no-guard) | 248 |
 |  | [A household's own OPDS server is its own table, not a row in `catalogue_targets`](decisions.md#a-households-own-opds-server-is-its-own-table-not-a-row-in-catalogue_targets) | 170 |
 |  | [An OPDS server is refused link local after resolution, and admitted everywhere else private](decisions.md#an-opds-server-is-refused-link-local-after-resolution-and-admitted-everywhere-else-private) | 276 |

@@ -205,9 +205,11 @@ export default function LibrarySettingsPage() {
             isImporting={harvestImport.isImporting}
             preview={harvestImport.preview}
             result={harvestImport.result}
+            resumable={harvestImport.resumable}
             readError={harvestImport.readError}
             harvestError={harvestImport.harvestError}
             onRead={harvestImport.read}
+            onCarryOn={harvestImport.carryOn}
             onConfirm={harvestImport.confirm}
             onCancel={harvestImport.reset}
           />

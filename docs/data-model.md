@@ -776,8 +776,15 @@ gets a row, and neither does one that left before the provider first answered a 
 **`harvests`.** One row per run of the OAI-PMH harvester, the import that reads another
 repository: its `base_url`, `set_spec` and `metadata_prefix`, the admin who started it
 (`run_by_user_id`, nullable like every adder), `started_at`, `finished_at` (null while it
-runs) and two counts, `records_seen` and `records_added`. It stands where an owner would on
-each Book it created (`books.harvest_id`), because an account standing there would be
+runs) and two counts, `records_seen` and `records_added`. A run also keeps the format it
+read (`metadata_format`, null on a row from before the column) and, when a cap, the deadline
+or a busy repository cut it short, where it stopped: `resume_token`, the token that asks for
+the page it stopped in or before (null for the first request), and `resume_skip`, the records
+of that page it had read, null on a run read to the end. A run that carried on from one cut
+short names it in `continues_harvest_id`, with no foreign key, because a restore inserts this
+table's rows in no particular order; see [decisions.md](decisions.md), *A truncated harvest
+carries on as a new run*. It stands where an owner would on each Book it created
+(`books.harvest_id`), because an account standing there would be
 adopted, with its Books, by any proxy or LDAP identity of the same name. Not the
 `oai_tombstones` above, which belong to this server's own provider. The repository is a
 setting, `oai_harvest_base_url`, beside its switch `oai_harvest_enabled`: refused on

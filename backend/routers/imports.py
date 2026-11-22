@@ -35,6 +35,7 @@ from typing import Annotated, Final
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import csv_import
@@ -54,6 +55,7 @@ from models import HARVEST_BASE_URL_MAX, HARVEST_SET_SPEC_MAX, Harvest, User
 from ratelimit import import_limiter
 from refusals import refuses
 from schemas import (
+    MAX_ROW_ID,
     HarvestPreviewOut,
     HarvestResultOut,
     ImportPreviewOut,
@@ -61,6 +63,7 @@ from schemas import (
     ImportResultOut,
     MarcPreviewOut,
     MarcPreviewRow,
+    ResumableHarvestOut,
 )
 
 logger = logging.getLogger("endpaper.imports")
@@ -461,7 +464,8 @@ _MET_ANOTHER_CHANGE = (
 # Another repository read in as a MARC import (ticket 177): `harvester.py`
 # fetches, in MARCXML or else Dublin Core, and `MarcImport.for_harvest`
 # applies. A preview then an apply, as for a file, and the two fetch the
-# repository each, since nothing is kept between.
+# repository each, since nothing is kept between. Either may carry on where
+# a truncated run stopped (ticket 818): `continues` names that run.
 
 
 #: The `detail.code` on the 409 a harvest meets while another runs, preview or
@@ -479,6 +483,12 @@ HARVEST_RUNNING: Final = "harvest_running"
 #: the read on it.
 REPOSITORY_CHANGED: Final = "repository_changed"
 
+#: The `detail.code` on the 409 a continuation meets when the run it names is no
+#: longer the one to carry on from: a later run of the repository has been made
+#: since, in this tab or another, or the run was not cut short. The card words
+#: it by this code and asks again which run it may continue.
+NOT_RESUMABLE: Final = "not_resumable"
+
 
 def _harvest_repository(db: Session) -> str:
     """The repository an admin may harvest, or 404.
@@ -494,16 +504,72 @@ def _harvest_repository(db: Session) -> str:
     return address
 
 
-async def _harvested(base_url: str, set_spec: str | None) -> tuple[harvester.Identity, harvester.Harvested]:
+async def _harvested(
+    base_url: str, set_spec: str | None, continuing: harvester.Continuation | None
+) -> tuple[harvester.Identity, harvester.Harvested]:
     """One run over the repository, or a 502 naming what went wrong.
 
     502 for `opds.py`'s reason: the repository answered, or refused to, and it is
     not this application that is broken. The message never names the address.
+    A continuation whose token the repository has forgotten is one of these,
+    worded by `harvester.FORGOTTEN_POINT`.
     """
     try:
-        return await harvester.harvest(base_url, set_spec=set_spec)
+        return await harvester.harvest(base_url, set_spec=set_spec, continuing=continuing)
     except harvester.HarvestError as failure:
         raise HTTPException(status_code=502, detail=str(failure)) from None
+
+
+def _resumable(db: Session, base_url: str) -> tuple[Harvest, harvester.Continuation] | None:
+    """The run of `base_url` a harvest may carry on from, and where it stopped, or None.
+
+    **The latest run of the repository, and only that one**: a continuation is
+    itself a run, so once one is made the run it carried on from is no longer
+    latest and is not offered twice, and a run from the start since replaces
+    whatever an older one left. Any set, since the latest run is what the admin
+    last did. A run recorded before the format was kept has no point to resume.
+    """
+    latest = db.scalars(
+        select(Harvest).where(Harvest.base_url == base_url).order_by(Harvest.id.desc()).limit(1)
+    ).first()
+    if latest is None or latest.resume_skip is None or latest.metadata_format is None:
+        return None
+    return latest, harvester.Continuation(
+        chosen=harvester.Chosen(latest.metadata_prefix, latest.metadata_format),
+        set_spec=latest.set_spec,
+        start=harvester.Resume(latest.resume_token, latest.resume_skip),
+    )
+
+
+def _continuation(
+    db: Session, base_url: str, continues: int | None, set_spec: str | None
+) -> tuple[Harvest, harvester.Continuation] | None:
+    """The run `continues` names and where to carry on from it, or None for a
+    run from the start.
+
+    A 409 `NOT_RESUMABLE` unless it is `_resumable`'s run, and a 400 for a set
+    named beside it: a continuation reads the set its run read, since the token
+    is the repository's position in that list and in no other.
+    """
+    if continues is None:
+        return None
+    if set_spec is not None:
+        raise HTTPException(
+            status_code=400, detail="A continued run reads the set its run read; name no set."
+        )
+    found = _resumable(db, base_url)
+    if found is None or found[0].id != continues:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    "That run can no longer be carried on: the repository has been harvested since, or the"
+                    " run was not cut short. Nothing was harvested."
+                ),
+                "code": NOT_RESUMABLE,
+            },
+        )
+    return found
 
 
 @contextmanager
@@ -525,6 +591,44 @@ _SetSpec = Annotated[
     Query(max_length=HARVEST_SET_SPEC_MAX, description="Harvest only this set of the repository"),
 ]
 
+#: The truncated run to carry on from, as `resumable_harvest` names it.
+_Continues = Annotated[
+    int | None,
+    Query(
+        ge=1,
+        le=MAX_ROW_ID,
+        description=(
+            "Carry on where this truncated run stopped, in its format and set, rather than from the start"
+        ),
+    ),
+]
+
+
+@router.get("/harvest/resumable", response_model=ResumableHarvestOut | None)
+@refuses(404)
+def resumable_harvest(
+    db: DbSession,
+    current_user: Annotated[User, Depends(require_admin)],
+) -> ResumableHarvestOut | None:
+    """The run of the stored repository a harvest may carry on from, or null.
+
+    Admin only, library mode and the harvester's switch required. The latest
+    run of the repository, offered only while a cap, the deadline or a busy
+    repository cut it short: pass its id as `continues` to the preview and the
+    apply. Reads the database alone; the repository is not asked.
+    """
+    found = _resumable(db, _harvest_repository(db))
+    if found is None:
+        return None
+    run, continuing = found
+    return ResumableHarvestOut(
+        harvest_id=run.id,
+        started_at=run.started_at,
+        set_spec=run.set_spec,
+        metadata_format=continuing.chosen.read_as,
+        records_seen=run.records_seen,
+    )
+
 
 @router.post("/harvest/preview", response_model=HarvestPreviewOut)
 @refuses(404)
@@ -532,6 +636,7 @@ async def preview_harvest(
     db: DbSession,
     current_user: Annotated[User, Depends(require_admin)],
     set_spec: _SetSpec = None,
+    continues: _Continues = None,
 ) -> HarvestPreviewOut:
     """Harvest the configured repository and report what an apply would do, writing nothing.
 
@@ -540,6 +645,8 @@ async def preview_harvest(
     harvest of this repository created counted as already held, as the apply
     matches it; `deleted` and `truncated` are the run's own. Rate limited with
     the imports, and a 409 while another harvest, preview or apply, is running.
+    With `continues`, it reads on from where that truncated run stopped, and a
+    409 `not_resumable` when that run is not `resumable_harvest`'s.
 
     **`async`, unlike the file routes**, because the wait is the network: the
     fetch runs on the event loop through `fetch.py`, and the counting, which
@@ -549,7 +656,8 @@ async def preview_harvest(
     import_limiter.check(current_user.username)
 
     with _the_only_harvest():
-        identity, run = await _harvested(base_url, set_spec)
+        continued = _continuation(db, base_url, continues, set_spec)
+        identity, run = await _harvested(base_url, set_spec, continued[1] if continued else None)
         previewed = await anyio.to_thread.run_sync(
             lambda: _previewed_harvest(db, current_user.id, base_url, run)
         )
@@ -600,6 +708,7 @@ async def apply_harvest(
         ),
     ],
     set_spec: _SetSpec = None,
+    continues: _Continues = None,
 ) -> HarvestResultOut:
     """Harvest the configured repository into the catalogue.
 
@@ -622,28 +731,46 @@ async def apply_harvest(
     read the preview, whether the stored one was saved before that read or after
     it, so the preview it showed was labelled with an address this would not
     harvest.
+
+    **A truncated run records where it stopped**, and `continues` carries on
+    from there as a new run, which records where it stopped in turn: the
+    preview's `not_resumable` 409 applies here too, checked again under the
+    one run lock, so two tabs cannot both continue one run.
     """
     base_url = _harvest_repository(db)
     _the_previewed_repository(base_url, repository)
     import_limiter.check(current_user.username)
 
     with _the_only_harvest():
-        return await _applied(db, current_user.id, base_url, set_spec)
+        continued = _continuation(db, base_url, continues, set_spec)
+        if continued is None:
+            return await _applied(db, current_user.id, base_url, set_spec)
+        return await _applied(db, current_user.id, base_url, continued[1].set_spec, continued)
 
 
-async def _applied(db: Session, admin_id: int, base_url: str, set_spec: str | None) -> HarvestResultOut:
+async def _applied(
+    db: Session,
+    admin_id: int,
+    base_url: str,
+    set_spec: str | None,
+    continued: tuple[Harvest, harvester.Continuation] | None = None,
+) -> HarvestResultOut:
     """`apply_harvest`'s run and its one transaction, under `_the_only_harvest`."""
     started = datetime.now(UTC).replace(tzinfo=None)
-    _, run = await _harvested(base_url, set_spec)
+    _, run = await _harvested(base_url, set_spec, continued[1] if continued else None)
 
     def apply() -> HarvestResultOut:
         row = Harvest(
             base_url=base_url,
             set_spec=set_spec,
             metadata_prefix=run.prefix,
+            metadata_format=run.read_as,
             run_by_user_id=admin_id,
             started_at=started,
             records_seen=run.seen,
+            resume_token=run.resume.token if run.resume else None,
+            resume_skip=run.resume.skip if run.resume else None,
+            continues_harvest_id=continued[0].id if continued else None,
         )
         db.add(row)
         db.flush()

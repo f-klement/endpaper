@@ -50,6 +50,7 @@ from enums import (
     BookIdentifierScheme,
     CustomFieldKind,
     FilingRuleName,
+    HarvestFormat,
     HeadingKind,
     HighlightSource,
     ImageExtension,
@@ -228,6 +229,16 @@ MAX_SERIES_INDEX = 1000
 #: interpolates it into SQL, and a CHECK constraint that disagreed with the
 #: schema would turn a 422 into a 500 for exactly the values in between.
 MAX_PAGE_NUMBER_IN_A_BOOK = 100_000
+
+#: The years `books.year` takes. Loose bounds, meant to catch a typo or a scanner
+#: misread rather than to adjudicate publishing history.
+#:
+#: Here rather than in `schemas/book.py`, which bounds its bodies by them, to
+#: break an import cycle: `bibliographic.earliest_year` filters by the range, and
+#: `schemas.book` imports `bibliographic`, so `bibliographic` cannot import the
+#: schema module.
+MIN_YEAR = 1
+MAX_YEAR = 2200
 
 
 class Collection(Base):
@@ -1040,6 +1051,10 @@ HARVEST_METADATA_PREFIX_MAX = 32
 #: An OAI-PMH record identifier is a URI, usually `oai:<host>:<local id>`. One
 #: wider is not kept, and its record is then matched as a file's record is.
 HARVESTED_IDENTIFIER_MAX = 255
+#: The widest resumption token a run keeps, which `harvester.MAX_TOKEN_LENGTH`
+#: names: a wider one is refused while the run reads it, so every token a row
+#: stores fits. A real token is an offset or a cursor, a few dozen characters.
+HARVEST_RESUMPTION_TOKEN_MAX = 2_000
 
 
 #: The free text columns of `books` where a blank string and a null would
@@ -1143,6 +1158,27 @@ class Harvest(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     records_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     records_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # Null on a run recorded before the column, which no resume reads: such a
+    # run kept no resumption point either.
+    metadata_format: Mapped[HarvestFormat | None] = mapped_column(
+        DegradingEnum(HarvestFormat, 20), nullable=True
+    )
+    # **Where the run stopped, kept so the next run can carry on from there.**
+    # `resume_skip` is null on a run that read the repository to its end, and
+    # set on one a cap, the deadline or a busy repository cut short: the
+    # records of the page `resume_token` asks for that this run already read.
+    # A null token with a skip is the run's first request, cut inside its first
+    # page. `harvester.Resume` is the pair, and `docs/decisions.md`, *A
+    # truncated harvest carries on as a new run*, says why a new row.
+    resume_token: Mapped[str | None] = mapped_column(String(HARVEST_RESUMPTION_TOKEN_MAX), nullable=True)
+    resume_skip: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The run this one carried on from, or null for a run from the start.
+    # **No foreign key, deliberately**: `backup.restore` inserts a table's rows
+    # in the order the archive holds them, which nothing orders, so a key into
+    # this same table could refuse a restore whenever a later run came first.
+    # Nothing reads it to decide anything; it is the audit fact that this run's
+    # counts start part way through the repository.
+    continues_harvest_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Book(Base):

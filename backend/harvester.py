@@ -33,6 +33,16 @@ this exists for, and a run that threw its pages away at the deadline could
 never harvest it. Before the first
 `ListRecords` page there is nothing to keep, so the same cut is refused.
 
+**A truncated run says where it stopped**, as a `Resume`, and the next run may
+carry on from there (`Continuation`) rather than start over, so a repository
+larger than one run's bounds is harvested whole over several. The point is the
+token that asked for the page the run stopped in or before, and how many of
+that page's records it read: a cap cuts inside a page, and the rest of that page
+would otherwise be lost between the two runs. A repository forgets its tokens
+after a while; a continuation it refuses with `badResumptionToken` is told to
+start over, which costs nothing twice, since a rerun matches what an earlier run
+harvested by its record identifiers.
+
 **A repeated token is refused rather than ending the walk quietly**: a
 repository handing back a token it already gave is broken, and an import of the
 pages before it would look complete when it is not.
@@ -49,8 +59,10 @@ not** (owner, 2026-11-21): `oai_dc` is the protocol's mandatory format, so every
 repository has it, and it carries less. A format is chosen by namespace rather
 than by prefix, since a repository names its own formats (`oai.py` serves
 `marc21`; others say `marcxml`), and `oai_dc` is also taken by its prefix, which
-the protocol reserves for it. `Harvested.read_as` says which a run read, and the
-preview and the result say it to the admin.
+the protocol reserves for it. A repository listing MARCXML and refusing it at the
+first `ListRecords` is read in Dublin Core, as if it had not listed it.
+`Harvested.read_as` says which a run read, and the preview and the result say it
+to the admin.
 
 A MARC record goes through `marc.read`, the upload reader, so a harvested record
 is read exactly as a file's. A Dublin Core record goes through
@@ -88,7 +100,7 @@ import xml_parse
 from catalogue import Record, uncontrolled
 from deadline import in_, left
 from enums import HarvestFormat
-from models import HARVEST_METADATA_PREFIX_MAX, HARVESTED_IDENTIFIER_MAX
+from models import HARVEST_METADATA_PREFIX_MAX, HARVEST_RESUMPTION_TOKEN_MAX, HARVESTED_IDENTIFIER_MAX
 
 logger = logging.getLogger("endpaper.harvester")
 
@@ -142,8 +154,10 @@ RUN_DEADLINE_SECONDS: Final = 120
 #: sent back as a query string. Unbounded, a hostile repository answering
 #: `MAX_PAGES` pages, each a fresh token as wide as `fetch.MAX_RESPONSE_BYTES`,
 #: would have this server hold hundreds of megabytes for the run. A real token
-#: is an offset or a cursor, a few dozen characters.
-MAX_TOKEN_LENGTH: Final = 2_000
+#: is an offset or a cursor, a few dozen characters. **The width of
+#: `harvests.resume_token`**, so the token a truncated run stores always fits:
+#: one wider is refused here, before any run could stop on it.
+MAX_TOKEN_LENGTH: Final = HARVEST_RESUMPTION_TOKEN_MAX
 
 #: This door's half of its allocation bound: a call of `read_response` peaks, by
 #: `tracemalloc`, under this times the bytes of the body plus
@@ -174,10 +188,35 @@ _ERROR_CODES: Final = frozenset(
 #: The one error code `ListRecords` reads as an answer: nothing in that range.
 _EMPTY_IS_AN_ANSWER: Final = frozenset({"noRecordsMatch"})
 
+#: What an admin is told when a repository no longer knows where the last run
+#: stopped. The protocol lets a repository expire a token, and most do within
+#: hours or days.
+FORGOTTEN_POINT: Final = (
+    "The repository no longer knows where the last run stopped: its resumption token has expired."
+    " Read the repository again from the start. Records an earlier run harvested are matched by"
+    " their identifiers, so none is added twice."
+)
+
 
 class HarvestError(Exception):
     """A run this module refuses to finish. The message is for the admin, and
     never carries the repository's address, which goes to the log only."""
+
+
+class _Refused(HarvestError):
+    """A repository's OAI-PMH error, by its code. Only `Repository._page` reads
+    the code, on a run's first request: a continuation's token expired, or a
+    format listed and then refused."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(f"The repository refused the request: {code}.")
+        self.code = code
+
+
+class _FormatRefused(HarvestError):
+    """`cannotDisseminateFormat` on a run's first `ListRecords` request: the
+    repository listed the format and will not serve it. `Repository.harvested`
+    then reads the next format it lists."""
 
 
 class _RunCut(HarvestError):
@@ -243,6 +282,36 @@ class Chosen:
 
 
 @dataclass(frozen=True, slots=True)
+class Resume:
+    """Where a run stopped, and so where the next may start.
+
+    `token` asked for the page the run stopped in or before, and is None for
+    the run's first request, which a continuation repeats from the stored set
+    and prefix. `skip` is how many of that page's records the run already read:
+    zero where it stopped between pages.
+
+    **The skip trusts the repository to answer a token with the same page
+    twice**, which a token being a cursor or an offset gives. A repository that
+    re-pages in between moves the cut: a record read twice is matched by its
+    identifier and adds nothing, and one passed over is read by the next run
+    from the start.
+    """
+
+    token: str | None
+    skip: int
+
+
+@dataclass(frozen=True, slots=True)
+class Continuation:
+    """A run carrying on where a truncated one stopped: its format and set, kept
+    on its `harvests` row, and where it stopped."""
+
+    chosen: Chosen
+    set_spec: str | None
+    start: Resume
+
+
+@dataclass(frozen=True, slots=True)
 class Harvested:
     """What one run read: the records as an upload reads a file, and the counts."""
 
@@ -261,6 +330,8 @@ class Harvested:
     #: or None where the header names none that fits
     #: `models.HARVESTED_IDENTIFIER_MAX`. What a re-run matches first.
     identifiers: tuple[str | None, ...] = ()
+    #: Where a truncated run stopped, None on one that read to the end.
+    resume: Resume | None = None
 
 
 @dataclass
@@ -279,8 +350,9 @@ class _Walk:
     def full(self) -> bool:
         return self.seen >= self.max_records
 
-    def take(self, records: list[ElementTree.Element]) -> None:
-        """One page's `<record>` elements, as far as the cap admits.
+    def take(self, records: list[ElementTree.Element]) -> int:
+        """One page's `<record>` elements, as far as the cap admits, and how
+        many of them that was.
 
         **A MARC record holding another is unreadable, and none of it is kept**:
         `marc.read` reads every `<record>` beneath what it is handed, so the
@@ -307,6 +379,7 @@ class _Walk:
                 kept.append((_identifier(header), node))
         if kept:
             self._read(kept)
+        return len(records)
 
     def _read(self, kept: list[tuple[str | None, ElementTree.Element]]) -> None:
         """One page's records, each kept beside its identifier."""
@@ -348,7 +421,7 @@ class _Walk:
             self.pages.append(one)
             self.identifiers.extend([key] * len(one.records))
 
-    def harvested(self, prefix: str, pages_read: int) -> Harvested:
+    def harvested(self, prefix: str, pages_read: int, resume: Resume | None = None) -> Harvested:
         records = tuple(record for page in self.pages for record in page.records)
         links = tuple(entry for page in self.pages for entry in page.links)
         skipped = self.unreadable + sum(page.skipped for page in self.pages)
@@ -359,8 +432,9 @@ class _Walk:
             seen=self.seen,
             deleted=self.deleted,
             pages_read=pages_read,
-            truncated=self.truncated,
+            truncated=resume is not None,
             identifiers=tuple(self.identifiers),
+            resume=resume,
         )
 
 
@@ -544,7 +618,7 @@ def read_response(body: str, *, allow: frozenset[str] = frozenset()) -> ElementT
         raise HarvestError("The repository did not answer with an OAI-PMH response.")
     code = _error_code(root)
     if code is not None and code not in allow:
-        raise HarvestError(f"The repository refused the request: {code}.")
+        raise _Refused(code)
     return root
 
 
@@ -577,6 +651,25 @@ def _next_token(root: ElementTree.Element, seen: set[str]) -> str | None:
         raise HarvestError("The repository handed back a resumption token it had already given.")
     seen.add(token)
     return token
+
+
+def _listing(prefix: str, set_spec: str | None) -> dict[str, str]:
+    """A run's first `ListRecords` request, narrowed to `set_spec` where one is named."""
+    return {"verb": "ListRecords", "metadataPrefix": prefix} | ({"set": set_spec} if set_spec else {})
+
+
+def _asking(first: Mapping[str, str], token: str | None) -> Mapping[str, str]:
+    """The `ListRecords` request for the page `token` names, or the first."""
+    return first if token is None else {"verb": "ListRecords", "resumptionToken": token}
+
+
+def _refused_first(refused: _Refused, params: Mapping[str, str]) -> None:
+    """A run's first request refused: an expired continuation or a refused
+    format raised as its own, anything else left to the caller to raise."""
+    if refused.code == "badResumptionToken" and "resumptionToken" in params:
+        raise HarvestError(FORGOTTEN_POINT) from refused
+    if refused.code == "cannotDisseminateFormat":
+        raise _FormatRefused(str(refused)) from refused
 
 
 def _reads_as(entry: Format, namespace: str, read_as: HarvestFormat) -> bool:
@@ -617,8 +710,8 @@ class Repository:
             if prefix
         )
 
-    async def chosen_format(self) -> Chosen:
-        """MARC21 slim where the repository offers it, else Dublin Core.
+    async def chosen_formats(self) -> tuple[Chosen, ...]:
+        """MARC21 slim where the repository offers it, then Dublin Core.
 
         **By namespace**, because the prefix is the repository's own name for
         it, except that `oai_dc` is also taken by its prefix, which the protocol
@@ -628,22 +721,49 @@ class Repository:
         Core, and the admin is told it offers no MARCXML this app can ask for.
         A repository offering neither is broken, since `oai_dc` is mandatory.
 
-        **MARCXML listed and then refused at `ListRecords` fails the run**
-        rather than falling back: the choice is made once, from what the
-        repository lists, and a repository refusing a format it lists is
-        broken in a way the admin should hear about.
+        **Both, where both are listed**, because a repository may list MARCXML
+        and then refuse it at `ListRecords`: `harvested` then reads Dublin Core,
+        as it would had MARCXML not been listed.
         """
         offered = [
             entry
             for entry in await self.metadata_formats()
             if len(entry.prefix) <= HARVEST_METADATA_PREFIX_MAX
         ]
-        for namespace, read_as in _PREFERRED:
-            for entry in offered:
-                if _reads_as(entry, namespace, read_as):
-                    return Chosen(entry.prefix, read_as)
-        raise HarvestError(
-            "The repository offers neither MARCXML nor Dublin Core, which every repository must offer."
+        chosen = tuple(
+            Chosen(found.prefix, read_as)
+            for namespace, read_as in _PREFERRED
+            if (found := next((entry for entry in offered if _reads_as(entry, namespace, read_as)), None))
+        )
+        if not chosen:
+            raise HarvestError(
+                "The repository offers neither MARCXML nor Dublin Core, which every repository must offer."
+            )
+        return chosen
+
+    async def harvested(self, set_spec: str | None = None) -> Harvested:
+        """A run from the start, in the first format the repository will serve.
+
+        **A format listed and then refused on the first request falls to the
+        next**, since nothing has been read and the one request is all it
+        costs. Refused after a page was read, it fails the run as any other
+        refusal does: the run's pages are in the refused format.
+        """
+        *preferred, last = await self.chosen_formats()
+        for chosen in preferred:
+            try:
+                return await self.list_records(chosen.prefix, read_as=chosen.read_as, set_spec=set_spec)
+            except _FormatRefused:
+                logger.info(
+                    "OAI-PMH repository at %s refused %s, which it lists", self._base_url, chosen.prefix
+                )
+        return await self.list_records(last.prefix, read_as=last.read_as, set_spec=set_spec)
+
+    async def continued(self, continuation: Continuation) -> Harvested:
+        """A run carrying on where a truncated one stopped, in its format and set."""
+        chosen = continuation.chosen
+        return await self.list_records(
+            chosen.prefix, read_as=chosen.read_as, set_spec=continuation.set_spec, start=continuation.start
         )
 
     async def list_records(
@@ -652,39 +772,61 @@ class Repository:
         *,
         read_as: HarvestFormat = HarvestFormat.MARCXML,
         set_spec: str | None = None,
+        start: Resume | None = None,
         max_records: int = MAX_RECORDS,
         max_pages: int = MAX_PAGES,
     ) -> Harvested:
-        """Every record the repository lists, page by page, within the run's bounds.
+        """Every record the repository lists from `start`, page by page, within
+        the run's bounds.
 
         `noRecordsMatch` is an empty repository or set, and answers no records
         rather than an error. Every way out of the loop but the last page is a
-        truncation, and keeps the pages read.
+        truncation, keeps the pages read, and says where it stopped.
         """
         walk = _Walk(max_records, read_as)
-        params = {"verb": "ListRecords", "metadataPrefix": prefix} | ({"set": set_spec} if set_spec else {})
-        tokens: set[str] = set()
+        first = _listing(prefix, set_spec)
+        at = start or Resume(None, 0)
+        # The stored token counts as given, so a repository handing it back
+        # again is refused as any repeated token is.
+        tokens = {at.token} if at.token is not None else set()
         pages = 0
-        while (root := await self._page(params, pages)) is not None:
+        while (root := await self._page(_asking(first, at.token), pages)) is not None:
             pages += 1
-            await anyio.to_thread.run_sync(walk.take, root.findall(f"{_OAI}ListRecords/{_OAI}record"))
+            listed = root.findall(f"{_OAI}ListRecords/{_OAI}record")[at.skip :]
+            taken = await anyio.to_thread.run_sync(walk.take, listed)
+            if walk.truncated:
+                return walk.harvested(prefix, pages, Resume(at.token, at.skip + taken))
             token = _next_token(root, tokens)
             if token is None:
                 return walk.harvested(prefix, pages)
-            if walk.full() or pages >= max_pages or left(self._ends) <= 0:
+            at = Resume(token, 0)
+            if self._bounded(walk, pages, max_pages):
                 break
-            params = {"verb": "ListRecords", "resumptionToken": token}
-        walk.truncated = True
-        return walk.harvested(prefix, pages)
+        return walk.harvested(prefix, pages, at)
+
+    def _bounded(self, walk: _Walk, pages: int, max_pages: int) -> bool:
+        """Whether a run with a next page stops before asking it: at the record
+        cap, the page cap or the run's deadline, each a truncation."""
+        return walk.full() or pages >= max_pages or left(self._ends) <= 0
 
     async def _page(self, params: Mapping[str, str], pages_read: int) -> ElementTree.Element | None:
-        """One `ListRecords` page, or None where the run was cut after a page was read."""
+        """One `ListRecords` page, or None where the run was cut after a page was read.
+
+        **A run's first request is read for two refusals of its own**: an
+        expired token on a continuation, which the admin is told to start over
+        from, and a refused format, which `harvested` falls back from. Past the
+        first page either is the repository failing mid run, refused as any.
+        """
         try:
             return await self._ask(params, allow=_EMPTY_IS_AN_ANSWER)
         except _RunCut:
             if pages_read == 0:
                 raise
             return None
+        except _Refused as refused:
+            if pages_read == 0:
+                _refused_first(refused, params)
+            raise
 
     async def get_record(
         self, identifier: str, prefix: str, read_as: HarvestFormat = HarvestFormat.MARCXML
@@ -766,11 +908,14 @@ async def harvest(
     base_url: str,
     *,
     set_spec: str | None = None,
+    continuing: Continuation | None = None,
     resolver: fetch.Resolver = fetch.system_resolver,
 ) -> tuple[Identity, Harvested]:
     """One run over `base_url`: who it is, then every record it lists, in MARCXML
-    where it offers that and in Dublin Core where it does not."""
+    where it offers that and in Dublin Core where it does not, or carrying on
+    where a truncated run stopped, in that run's format and set."""
     async with repository(base_url, resolver=resolver) as source:
         identity = await source.identify()
-        chosen = await source.chosen_format()
-        return identity, await source.list_records(chosen.prefix, read_as=chosen.read_as, set_spec=set_spec)
+        if continuing is not None:
+            return identity, await source.continued(continuing)
+        return identity, await source.harvested(set_spec)

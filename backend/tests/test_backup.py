@@ -40,7 +40,14 @@ from authors import author_key
 from backup import RestoreError
 from config import ALLOWED_IMAGE_EXTENSIONS, COVERS_DIR
 from database import Base, SessionLocal
-from enums import CatalogueSource, ClassificationScheme, FilingRuleName, SettingKey, TagCategory
+from enums import (
+    CatalogueSource,
+    ClassificationScheme,
+    FilingRuleName,
+    HarvestFormat,
+    SettingKey,
+    TagCategory,
+)
 from migrations.versions import (
     b7d4e6f01a95_a_catalogue_source_becomes_a_row as a_catalogue_source_becomes_a_row,
 )
@@ -52,6 +59,7 @@ from models import (
     CatalogueCredential,
     Classification,
     ClassificationSchemeRow,
+    Harvest,
     Loan,
     Note,
     OpdsServer,
@@ -3263,3 +3271,61 @@ class TestARestoreLeavesTheEventLoopFree:
 
         assert _restore(client, admin, data).status_code == 200
         assert where == ["off the loop"]
+
+
+class TestAHarvestRunComesBack:
+    """`harvests` goes back through a Core insert, so its `DegradingEnum`
+    column is bound from the archive's string, and an archive written before
+    a run kept where it stopped has rows without those keys."""
+
+    @staticmethod
+    def _runs(db) -> list[tuple]:
+        db.expire_all()
+        return [
+            (run.id, run.metadata_format, run.resume_token, run.resume_skip, run.continues_harvest_id)
+            for run in db.scalars(select(Harvest).order_by(Harvest.id))
+        ]
+
+    def test_a_truncated_run_and_the_run_carrying_it_on_come_back(self, client, admin, library, db):
+        cut = Harvest(
+            base_url="http://10.0.9.9:8080/oai",
+            metadata_prefix="marcxml",
+            metadata_format=HarvestFormat.MARCXML,
+            resume_token="t1",
+            resume_skip=3,
+        )
+        db.add(cut)
+        db.flush()
+        db.add(
+            Harvest(
+                base_url=cut.base_url,
+                metadata_prefix="oai_dc",
+                metadata_format=HarvestFormat.DUBLIN_CORE,
+                resume_token="t2",
+                resume_skip=0,
+                continues_harvest_id=cut.id,
+            )
+        )
+        db.commit()
+        before = self._runs(db)
+        data = client.get("/api/backup", headers=admin["headers"]).content
+
+        backup.restore(db, data)
+
+        assert self._runs(db) == before
+        assert [row[1] for row in before] == [HarvestFormat.MARCXML, HarvestFormat.DUBLIN_CORE]
+
+    def test_an_archive_from_before_a_run_kept_where_it_stopped_still_restores(
+        self, client, admin, library, db
+    ):
+        db.add(Harvest(base_url="http://10.0.9.9:8080/oai", metadata_prefix="marcxml"))
+        db.commit()
+        data = client.get("/api/backup", headers=admin["headers"]).content
+        manifest = read_manifest(data)
+        new = {"metadata_format", "resume_token", "resume_skip", "continues_harvest_id"}
+        rows = manifest["tables"]["harvests"]
+        manifest["tables"]["harvests"] = [{k: v for k, v in row.items() if k not in new} for row in rows]
+
+        backup.restore(db, rewrite(data, manifest))
+
+        assert [row[1:] for row in self._runs(db)] == [(None, None, None, None)]

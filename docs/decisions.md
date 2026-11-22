@@ -13500,8 +13500,11 @@ blank address again at every harvest, and `harvester.configured_repository` appl
 is still harvestable; it is known by the `oai_dc` namespace or by the prefix the protocol
 reserves. MARC is known by its namespace whatever the repository calls it, and a prefix wider
 than `harvests.metadata_prefix` is passed over, since the run could not record it. The choice
-is made once, from what the repository lists, so MARCXML listed and then refused at
-`ListRecords` fails the run rather than falling back. The preview and the result name the
+is made once, from what the repository lists. A repository listing MARCXML and refusing it
+with `cannotDisseminateFormat` on the first `ListRecords` request of a run from the start is
+read in Dublin Core, as if it had not listed it: nothing has been read and the fallback costs
+one request. Refused after a page was read, or on a continuation's first request, it fails the
+run. The preview and the result name the
 format read, and a Dublin Core run says it carries less.
 
 A MARC record goes through `marc.read`, as a file's records are read. A Dublin Core record is
@@ -13521,9 +13524,9 @@ dates beside the issue date, and a year nought or one is passed over as a date n
 Every creator is an author in record order, since Dublin Core has no role, and contributors
 are authors only where no creator is named, as MARC credits everybody only where nobody is the
 author. No series, since `dc:relation` is any relation, and no links, since an identifier URL
-is as often the repository's landing page. These value rules live in `bibliographic.py`, which
-states where and why the catalogue readers' rules differ: looser for an identifier and a date,
-stricter for a language.
+is as often the repository's landing page. These value rules live in `bibliographic.py`, and
+the BnF's and the NKP's catalogue readers, which answer in Dublin Core, read by them too; the
+NKP's stamps the ISBN it was asked for.
 
 ### A harvest's headings wait as suggestions
 
@@ -13567,11 +13570,11 @@ on the first run. The rule stands because it is the one a file's records are mat
 harvest is a bulk import like a file: a harvest matching by a looser or stricter ladder would
 make the same record two Books depending on how it arrived.
 
-### A run is cut short rather than failed, and does not resume
+### A run is cut short rather than failed
 
 The run deadline, a request's timeout or a 503 after the first page ends a run truncated with
-the pages read, and `Retry-After` is not honoured. A re-run starts at the first page, so a
-repository too large for one run is narrowed by a set. **The preview and the apply each fetch
+the pages read, and `Retry-After` is not honoured. Where it stopped is kept, and the next run
+may carry on from there: *A truncated harvest carries on as a new run*. **The preview and the apply each fetch
 the repository**, and nothing is kept between them, so with truncation the two can read
 different spans. **One run at a time**, preview or apply, a second answered 409. A failed run
 leaves no `harvests` row, so the table records the runs that wrote.
@@ -13586,6 +13589,47 @@ needs two saves elsewhere.
 **The preview's two count panels repeat four count rows between the MARC file card and the
 harvest card.** Sharing them needs one shape over two preview types with different extra rows
 (would add, deleted), which costs more than the four rows it saves.
+
+### A truncated harvest carries on as a new run
+
+A run a cap, the deadline or a busy repository cuts short records where it stopped on its
+`harvests` row: the resumption token that asked for the page it stopped in or before (null for
+the first request) and how many of that page's records it read, since the record cap cuts
+inside a page and the rest of it would otherwise fall between the two runs. It records the
+format it read too, because the token is the repository's position in that format's list and
+set.
+
+**A continuation is a new row pointing at the old one (`continues_harvest_id`), not the old
+row extended.** Each row stays a true record of one run: who pressed the button, when, what it
+read and what it added; and `/?harvest=<id>` lists the Books that run added, as the result's
+link says. It is also the reversible choice: rows can later be merged into a chain by rewriting
+`books.harvest_id`, while one row holding several runs can never be split again. The pointer
+carries no foreign key, because `backup.restore` inserts a table's rows in an order nothing
+fixes, so a key into the same table could refuse a restore.
+
+**No CHECK holds `resume_skip` non negative or pairs it with the token.** Every write is
+`_applied`'s, which writes the pair together from `harvester.Resume`, whose skip is the stored
+skip plus the records taken, both non negative. Only a hand edited archive reaches the table
+otherwise, a restore is admin only, and a negative skip there reads the tail of one page.
+
+**Only the latest run of the stored repository is offered**, of any set, matched by its exact
+address, so a token is never sent to a repository that did not issue it. A continuation
+becomes the latest, so a run is never continued twice, and a run from the start made since
+replaces whatever an older run left. The offer is checked again under `one_run`: a second tab
+pressing while the first continuation runs is told `harvest_running`, and one pressing after
+it is told `not_resumable`.
+
+**A token the repository has forgotten (`badResumptionToken` on the continuation's first
+request) is a 502 telling the admin to read the repository again from the start.** Nothing is
+lost by that: a rerun matches what an earlier run harvested by its record identifiers and adds
+none of it twice. The stored point is left as it was, so the card keeps offering to carry on,
+and each press costs one Identify and one request for the same 502, until the next run from
+the start replaces the point. A preview writes nothing, so leaving it costs requests and no
+data.
+
+**`MAX_TOKEN_LENGTH` is the column's width**, so any token a run could stop on fits; a wider
+one is refused while it is read, before any run could store it. The one run rule applies
+unchanged: a continuation is a run.
 
 ### The books list filters by origin and by harvest run
 
@@ -13602,6 +13646,10 @@ one select.
 are, rather than answered with the whole shelf. The library page draws the select only in
 library mode and holds both filters at null in a household, so a link or a saved search
 carrying one never turns the grid into an error.
+
+**A listing whose filters name an origin or a harvest run waits for the feature flags before
+it asks**, so a deep link does not paint the unfiltered shelf first; a listing naming neither
+does not wait.
 
 ## The competitor register's reference counts get a stated command and no guard
 

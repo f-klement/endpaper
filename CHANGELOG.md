@@ -45,6 +45,7 @@
 - A harvest reads a repository that offers no MARCXML in Dublin Core, and the preview and result say which format it read.
 - A harvest's result links to the books that run added.
 - The books list filters by origin and by harvest run in library mode, so a member can review the books harvesting, or one run, brought in.
+- A harvest cut short by a limit or a busy repository can now be carried on from where it stopped, from the harvest card.
 
 ## v0.22.0
 

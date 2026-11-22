@@ -10257,3 +10257,45 @@ class TestAUnimarcRecordIsReadThroughTheCrosswalk:
         found = metadata._SEARCH_READERS[decoders.Reader.UNIMARC](root, _UNIMARC)
 
         assert [record.isbn for record in found] == ["9788842080510", "9788845926839"]
+
+
+class TestTheDublinCoreCataloguesReadTheSharedFreeListRules:
+    """The BnF reads `identifier`, `date` and `language` by `bibliographic`'s
+    rules, the ones the harvester reads; the NKP reads `date` and `language` by
+    them and stamps the ISBN it was asked for."""
+
+    @staticmethod
+    def _bnf(*elements: str) -> Any:
+        return metadata._bnf_record(
+            ElementTree.fromstring(
+                '<record xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                "<dc:title>Un livre</dc:title><dc:type>text</dc:type>"
+                "<dc:format>200 p.</dc:format>" + "".join(elements) + "</record>"
+            ),
+            source="bnf",
+        )
+
+    def test_a_bare_ten_digits_is_not_the_bnf_record_s_isbn(self):
+        record = self._bnf("<dc:identifier>0441172717</dc:identifier>")
+
+        assert record is not None
+        assert record.isbn is None
+
+    def test_the_nkp_record_s_year_is_its_earliest_date(self):
+        record = metadata._nkp_record(
+            ElementTree.fromstring(
+                "<dc-record><title>Kniha</title><type>text</type><format>200 s.</format>"
+                "<date>2003</date><date>©2002</date></dc-record>"
+            ),
+            "9788072033034",
+            source="nkp",
+        )
+
+        assert record is not None
+        assert record.year == 2002
+
+    def test_a_language_tag_is_read_from_a_bnf_record(self):
+        record = self._bnf("<dc:language>en-GB</dc:language>")
+
+        assert record is not None
+        assert record.language == "en"

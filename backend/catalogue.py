@@ -49,6 +49,8 @@ from models import (
     LANGUAGE_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     MAX_SERIES_INDEX,
+    MAX_YEAR,
+    MIN_YEAR,
     ONLINE_LINK_LABEL_MAX,
     ONLINE_LINK_URL_MAX_BYTES,
     PUBLISHER_MAX,
@@ -56,7 +58,6 @@ from models import (
     SUBTITLE_MAX,
     TITLE_MAX,
 )
-from schemas.book import MAX_YEAR, MIN_YEAR
 from schemas.classification import MAX_CLASSIFICATIONS_PER_BOOK
 
 logger = logging.getLogger("endpaper.catalogue")

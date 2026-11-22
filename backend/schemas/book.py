@@ -40,6 +40,8 @@ from models import (
     LOCATION_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     MAX_SERIES_INDEX,
+    MAX_YEAR,
+    MIN_YEAR,
     PUBLISHER_MAX,
     PURCHASE_SOURCE_MAX,
     SERIES_NAME_MAX,
@@ -77,11 +79,6 @@ if TYPE_CHECKING:
     # part of why this package requires 3.14. `__init__.py` then resolves it
     # with model_rebuild() once both modules are loaded.
     from schemas.loan import LoanOut
-
-# Loose bounds, meant to catch a typo or a scanner misread rather than to
-# adjudicate publishing history.
-MIN_YEAR = 1
-MAX_YEAR = 2200
 
 # A price in minor units (cents). The ceiling is 100 million cents, which is a
 # million in any ordinary currency: high enough for a genuinely rare book, low

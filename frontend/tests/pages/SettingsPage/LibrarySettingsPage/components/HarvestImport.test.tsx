@@ -68,9 +68,11 @@ function renderHarvest(
     isImporting: false,
     preview: null,
     result: null,
+    resumable: null,
     readError: null,
     harvestError: null,
     onRead: vi.fn<HarvestProps["onRead"]>(),
+    onCarryOn: vi.fn<HarvestProps["onCarryOn"]>(),
     onConfirm: vi.fn<HarvestProps["onConfirm"]>(),
     onCancel: vi.fn<HarvestProps["onCancel"]>(),
     ...overrides,
@@ -214,11 +216,11 @@ describe("HarvestImport", () => {
     );
   });
 
-  it("says a preview cut short covers part of the repository and how to narrow it", () => {
+  it("says a preview cut short covers part of the repository and can be carried on", () => {
     renderHarvest({ preview: preview({ truncated: true }) });
 
     expect(
-      screen.getByText(/cover only part of it.*starts over.*naming a set/),
+      screen.getByText(/cover only part of it.*the next run can carry on/),
     ).toBeInTheDocument();
   });
 
@@ -288,12 +290,49 @@ describe("HarvestImport", () => {
     expect(screen.queryByText(/Headings and shelf notations/)).toBeNull();
   });
 
-  it("says a harvest cut short kept what it read and starts over next time", () => {
+  it("says a harvest cut short kept what it read and can be carried on", () => {
     renderHarvest({ result: outcome({ truncated: true }) });
 
     expect(
-      screen.getByText(/What was read is kept\. A re-run starts over/),
+      screen.getByText(/What was read is kept, and the next run can carry on/),
     ).toBeInTheDocument();
+  });
+
+  it("offers to carry on from a run cut short, and asks for it on a press", () => {
+    const props = renderHarvest({
+      resumable: {
+        harvest_id: 4,
+        started_at: "2026-11-20T10:00:00",
+        set_spec: "theses",
+        metadata_format: HarvestFormat.marcxml,
+        records_seen: 10000,
+      },
+    });
+
+    expect(
+      screen.getByText(/after reading 10,000 records in that run/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/It read the set theses/)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Carry on from where it stopped" }),
+    );
+    expect(props.onCarryOn).toHaveBeenCalledOnce();
+  });
+
+  it("offers nothing to carry on from when no run was cut short", () => {
+    renderHarvest();
+
+    expect(
+      screen.queryByRole("button", { name: "Carry on from where it stopped" }),
+    ).toBeNull();
+  });
+
+  it("says a run can no longer be carried on on a 409 coded so", () => {
+    renderHarvest({
+      readError: new ApiError("x", 409, undefined, "not_resumable"),
+    });
+
+    expect(screen.getByText(/can no longer be carried on/)).toBeInTheDocument();
   });
 
   it("says the harvester is off on a 404", () => {

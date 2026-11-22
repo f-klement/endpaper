@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 
 from enums import HarvestFormat
 from import_readers import ImportReader
+from schemas.common import UtcDateTime
 
 
 class ImportResultOut(BaseModel):
@@ -279,3 +280,14 @@ class HarvestResultOut(ImportResultOut, _HarvestRun):
             "confirms no record, so it writes none"
         ),
     )
+
+
+class ResumableHarvestOut(BaseModel):
+    """The run of the stored repository a harvest may carry on from: the latest,
+    and only while a cap, the deadline or a busy repository cut it short."""
+
+    harvest_id: int = Field(description="The truncated run; pass it as `continues` to carry on from it")
+    started_at: UtcDateTime = Field(description="When the truncated run started")
+    set_spec: str | None = Field(description="The set it read, which a continuation reads too")
+    metadata_format: HarvestFormat = Field(description="The format it read, which a continuation reads too")
+    records_seen: int = Field(ge=0, description="Record headers the truncated run itself read")

@@ -8270,6 +8270,53 @@
         "title": "RestoreResult",
         "type": "object"
       },
+      "ResumableHarvestOut": {
+        "description": "The run of the stored repository a harvest may carry on from: the latest,\nand only while a cap, the deadline or a busy repository cut it short.",
+        "properties": {
+          "harvest_id": {
+            "description": "The truncated run; pass it as `continues` to carry on from it",
+            "title": "Harvest Id",
+            "type": "integer"
+          },
+          "metadata_format": {
+            "$ref": "#/components/schemas/HarvestFormat",
+            "description": "The format it read, which a continuation reads too"
+          },
+          "records_seen": {
+            "description": "Record headers the truncated run itself read",
+            "minimum": 0.0,
+            "title": "Records Seen",
+            "type": "integer"
+          },
+          "set_spec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The set it read, which a continuation reads too",
+            "title": "Set Spec"
+          },
+          "started_at": {
+            "description": "When the truncated run started",
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "harvest_id",
+          "started_at",
+          "set_spec",
+          "metadata_format",
+          "records_seen"
+        ],
+        "title": "ResumableHarvestOut",
+        "type": "object"
+      },
       "SenderHealth": {
         "description": "What one switched-on channel last did, as a standing record.\n\n#82. The per run report above says what happened on the run you are looking\nat; this says what has been happening. Without it a household running mail\nand Telegram whose bot token expires gets mail delivered, the loan stamped,\neverything apparently normal, and Telegram failing hourly with nothing\nanywhere but the container log.\n\nOnly channels that are switched on are reported: a line about a webhook\nsomebody turned off a month ago is a line about nothing.",
         "properties": {
@@ -17499,7 +17546,7 @@
     },
     "/api/imports/harvest": {
       "post": {
-        "description": "Harvest the configured repository into the catalogue.\n\nMatching asks first for the Book an earlier harvest of this repository\ncreated from the same record, by its OAI identifier, so a Book corrected\nhere since that run is still found. Then it is `import_marc`'s, as this admin sees\nthe shelf: ISBN, then author and title together, so a record crediting\nsomebody never matches on its title alone, while a record crediting nobody\nmatches a Book crediting nobody by its title. A matched Book has its gaps\nfilled and nothing overwritten. **A created Book is nobody's, public, keeps\nits record's identifier and points at the run** this records in `harvests`.\n**No heading is written**: a harvest confirms no record (owner, 2026-11-20),\nso a created Book's headings, and those of a Book keyed by the same\nidentifier, wait as suggestions an admin confirms or discards on the Book,\ncounted in `headings_pending`. A Book matched by ISBN or by author and\ntitle gets none, and a run read in Dublin Core, whose subjects name no\nscheme, raises none at all. A deleted record is counted\nand deletes nothing. A 409 while another harvest is running, and one when\n`repository` is not the address stored now: the client held another when it\nread the preview, whether the stored one was saved before that read or after\nit, so the preview it showed was labelled with an address this would not\nharvest.",
+        "description": "Harvest the configured repository into the catalogue.\n\nMatching asks first for the Book an earlier harvest of this repository\ncreated from the same record, by its OAI identifier, so a Book corrected\nhere since that run is still found. Then it is `import_marc`'s, as this admin sees\nthe shelf: ISBN, then author and title together, so a record crediting\nsomebody never matches on its title alone, while a record crediting nobody\nmatches a Book crediting nobody by its title. A matched Book has its gaps\nfilled and nothing overwritten. **A created Book is nobody's, public, keeps\nits record's identifier and points at the run** this records in `harvests`.\n**No heading is written**: a harvest confirms no record (owner, 2026-11-20),\nso a created Book's headings, and those of a Book keyed by the same\nidentifier, wait as suggestions an admin confirms or discards on the Book,\ncounted in `headings_pending`. A Book matched by ISBN or by author and\ntitle gets none, and a run read in Dublin Core, whose subjects name no\nscheme, raises none at all. A deleted record is counted\nand deletes nothing. A 409 while another harvest is running, and one when\n`repository` is not the address stored now: the client held another when it\nread the preview, whether the stored one was saved before that read or after\nit, so the preview it showed was labelled with an address this would not\nharvest.\n\n**A truncated run records where it stopped**, and `continues` carries on\nfrom there as a new run, which records where it stopped in turn: the\npreview's `not_resumable` 409 applies here too, checked again under the\none run lock, so two tabs cannot both continue one run.",
         "operationId": "apply_harvest",
         "parameters": [
           {
@@ -17531,6 +17578,26 @@
               ],
               "description": "Harvest only this set of the repository",
               "title": "Set Spec"
+            }
+          },
+          {
+            "description": "Carry on where this truncated run stopped, in its format and set, rather than from the start",
+            "in": "query",
+            "name": "continues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2147483647,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Carry on where this truncated run stopped, in its format and set, rather than from the start",
+              "title": "Continues"
             }
           }
         ],
@@ -17599,7 +17666,7 @@
     },
     "/api/imports/harvest/preview": {
       "post": {
-        "description": "Harvest the configured repository and report what an apply would do, writing nothing.\n\nAdmin only, library mode and the harvester's switch required. The counts are\n`preview_marc`'s, over the harvested records, with a record an earlier\nharvest of this repository created counted as already held, as the apply\nmatches it; `deleted` and `truncated` are the run's own. Rate limited with\nthe imports, and a 409 while another harvest, preview or apply, is running.\n\n**`async`, unlike the file routes**, because the wait is the network: the\nfetch runs on the event loop through `fetch.py`, and the counting, which\nblocks on the database, runs in a thread, as `routers/opds.py::sync` does.",
+        "description": "Harvest the configured repository and report what an apply would do, writing nothing.\n\nAdmin only, library mode and the harvester's switch required. The counts are\n`preview_marc`'s, over the harvested records, with a record an earlier\nharvest of this repository created counted as already held, as the apply\nmatches it; `deleted` and `truncated` are the run's own. Rate limited with\nthe imports, and a 409 while another harvest, preview or apply, is running.\nWith `continues`, it reads on from where that truncated run stopped, and a\n409 `not_resumable` when that run is not `resumable_harvest`'s.\n\n**`async`, unlike the file routes**, because the wait is the network: the\nfetch runs on the event loop through `fetch.py`, and the counting, which\nblocks on the database, runs in a thread, as `routers/opds.py::sync` does.",
         "operationId": "preview_harvest",
         "parameters": [
           {
@@ -17619,6 +17686,26 @@
               ],
               "description": "Harvest only this set of the repository",
               "title": "Set Spec"
+            }
+          },
+          {
+            "description": "Carry on where this truncated run stopped, in its format and set, rather than from the start",
+            "in": "query",
+            "name": "continues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 2147483647,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Carry on where this truncated run stopped, in its format and set, rather than from the start",
+              "title": "Continues"
             }
           }
         ],
@@ -17680,6 +17767,71 @@
           }
         ],
         "summary": "Preview Harvest",
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/imports/harvest/resumable": {
+      "get": {
+        "description": "The run of the stored repository a harvest may carry on from, or null.\n\nAdmin only, library mode and the harvester's switch required. The latest\nrun of the repository, offered only while a cap, the deadline or a busy\nrepository cut it short: pass its id as `continues` to the preview and the\napply. Reads the database alone; the repository is not asked.",
+        "operationId": "resumable_harvest",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ResumableHarvestOut"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Resumable Harvest"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Resumable Harvest",
         "tags": [
           "imports"
         ]

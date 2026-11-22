@@ -2505,19 +2505,26 @@ export const en = {
   "harvestRun.readDublinCore":
     "Read as Dublin Core, because the repository offers no MARCXML this app can ask for. Dublin Core carries less: no headings or shelf notations, no series, and no roles for the people it names, so the books it adds are thinner.",
   "harvestRun.truncatedPreview":
-    "The run stopped before the end of the repository, at a limit or because the repository was busy, so these counts cover only part of it. Every harvest starts over from the beginning; naming a set narrows it.",
+    "The run stopped before the end of the repository, at a limit or because the repository was busy, so these counts cover only part of it. Once this is harvested, the next run can carry on from where it stopped.",
   "harvestRun.confirm": "Harvest {count} records",
   "harvestRun.importing": "Harvesting...",
   "harvestRun.resultHeadings":
     "Headings and shelf notations suggested, waiting on their books for an admin to confirm or discard: {count}.",
   "harvestRun.truncatedResult":
-    "The harvest stopped before the end of the repository, at a limit or because the repository was busy. What was read is kept. A re-run starts over from the beginning; naming a set narrows it.",
+    "The harvest stopped before the end of the repository, at a limit or because the repository was busy. What was read is kept, and the next run can carry on from where this one stopped.",
   "harvestRun.off":
     "The harvester is off, or no repository address is stored. Turn it on and save the address above.",
   "harvestRun.running":
     "A harvest is already running. Wait until it finishes, then try again.",
   "harvestRun.lostRace":
     "Another change to the same books met this harvest, and nothing was harvested. Harvest again.",
+  "harvestRun.resumable":
+    "The harvest of {date} stopped before the end of the repository, after reading {count} records in that run. The next run can carry on from where it stopped.",
+  "harvestRun.resumableSet":
+    "It read the set {set}, and carrying on reads that set too.",
+  "harvestRun.carryOn": "Carry on from where it stopped",
+  "harvestRun.notResumable":
+    "That run can no longer be carried on: the repository has been harvested since, or the run was not cut short. Nothing was harvested.",
   "harvestRun.repositoryChanged":
     "The stored repository is not the one this page read, and nothing was harvested. Read the repository again.",
 } as const;

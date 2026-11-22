@@ -593,8 +593,8 @@ class TestTheOtherVerbs:
 
     @staticmethod
     def _offering(*formats: tuple[str, str | None]) -> harvester.Chosen:
-        """The format a run chooses from a repository listing `formats`, each
-        a prefix and its namespace or None for none."""
+        """The format a run asks for first from a repository listing `formats`,
+        each a prefix and its namespace or None for none."""
         listed = "".join(
             f"<metadataFormat><metadataPrefix>{prefix}</metadataPrefix>"
             + (f"<metadataNamespace>{namespace}</metadataNamespace>" if namespace else "")
@@ -607,7 +607,7 @@ class TestTheOtherVerbs:
 
         async def chosen() -> harvester.Chosen:
             async with harvester.repository(BASE) as source:
-                return await source.chosen_format()
+                return (await source.chosen_formats())[0]
 
         return run(chosen())
 
@@ -877,3 +877,179 @@ class TestTheConfiguredRepository:
         restore can store what the route would refuse."""
         self._stored(db, "http://169.254.169.254/latest")
         assert harvester.configured_repository(db) is None
+
+
+def refusing(code: str) -> str:
+    return response(f'<error code="{code}">refused</error>')
+
+
+def formats_listed(*formats: tuple[str, str]) -> None:
+    listed = "".join(
+        f"<metadataFormat><metadataPrefix>{prefix}</metadataPrefix>"
+        f"<metadataNamespace>{namespace}</metadataNamespace></metadataFormat>"
+        for prefix, namespace in formats
+    )
+    respx.get(BASE, params={"verb": "ListMetadataFormats"}).respond(
+        text=response(f"<ListMetadataFormats>{listed}</ListMetadataFormats>")
+    )
+
+
+async def harvested_from_the_start() -> harvester.Harvested:
+    async with harvester.repository(BASE) as source:
+        return await source.harvested()
+
+
+class TestATruncatedRunSaysWhereItStopped:
+    @respx.mock
+    def test_a_cap_inside_the_first_page_resumes_at_the_first_request_past_what_it_read(self):
+        respx.get(BASE, params=first_page()).respond(
+            text=list_records(oai_record("One"), oai_record("Two"), oai_record("Three"), token="t1")
+        )
+
+        assert run(listed(max_records=2)).resume == harvester.Resume(None, 2)
+
+    @respx.mock
+    def test_a_cap_inside_a_later_page_resumes_at_the_token_that_asked_for_it(self):
+        respx.get(BASE, params=first_page()).respond(text=list_records(oai_record("One"), token="t1"))
+        respx.get(BASE, params=page_after("t1")).respond(
+            text=list_records(oai_record("Two"), oai_record("Three"), token="t2")
+        )
+
+        assert run(listed(max_records=2)).resume == harvester.Resume("t1", 1)
+
+    @respx.mock
+    def test_the_page_cap_resumes_at_the_next_token_with_nothing_to_skip(self):
+        respx.get(BASE, params=first_page()).respond(text=list_records(oai_record("One"), token="t1"))
+        respx.get(BASE, params=page_after("t1")).respond(text=list_records(oai_record("Two"), token="t2"))
+
+        assert run(listed(max_pages=2)).resume == harvester.Resume("t2", 0)
+
+    @respx.mock
+    def test_a_busy_repository_resumes_at_the_page_it_refused(self):
+        respx.get(BASE, params=first_page()).respond(text=list_records(oai_record("One"), token="t1"))
+        respx.get(BASE, params=page_after("t1")).respond(status_code=503)
+
+        got = run(listed())
+
+        assert (got.truncated, got.resume) == (True, harvester.Resume("t1", 0))
+
+    @respx.mock
+    def test_a_run_read_to_the_end_has_nowhere_to_resume(self):
+        """Anti vacuity for the four above."""
+        respx.get(BASE, params=first_page()).respond(text=list_records(oai_record("One"), token="t1"))
+        respx.get(BASE, params=page_after("t1")).respond(text=list_records(oai_record("Two")))
+
+        got = run(listed())
+
+        assert (got.truncated, got.resume) == (False, None)
+
+
+class TestARunCarriesOnWhereAnotherStopped:
+    @respx.mock
+    def test_it_asks_for_the_stored_token_and_passes_over_what_was_read(self):
+        respx.get(BASE, params=page_after("t1")).respond(
+            text=list_records(oai_record("Two"), oai_record("Three"))
+        )
+
+        got = run(listed(start=harvester.Resume("t1", 1)))
+
+        assert [record.title for record in got.parsed.records] == ["Three"]
+        assert (got.seen, got.truncated) == (1, False)
+
+    @respx.mock
+    def test_a_cut_inside_the_first_page_repeats_the_first_request(self):
+        respx.get(BASE, params=first_page(set="theses")).respond(
+            text=list_records(oai_record("One"), oai_record("Two"), oai_record("Three"))
+        )
+
+        got = run(listed(set_spec="theses", start=harvester.Resume(None, 2)))
+
+        assert [record.title for record in got.parsed.records] == ["Three"]
+
+    @respx.mock
+    def test_a_continuation_cut_again_inside_its_first_page_counts_both_runs_reads(self):
+        """The skip is into the page, so the second cut adds to the first."""
+        respx.get(BASE, params=page_after("t1")).respond(
+            text=list_records(oai_record("Two"), oai_record("Three"), oai_record("Four"), token="t2")
+        )
+
+        assert run(listed(max_records=1, start=harvester.Resume("t1", 1))).resume == harvester.Resume("t1", 2)
+
+    @respx.mock
+    def test_a_repository_handing_the_stored_token_back_is_refused(self):
+        respx.get(BASE, params=page_after("t1")).respond(text=list_records(oai_record("Two"), token="t1"))
+
+        with pytest.raises(harvester.HarvestError, match="already given"):
+            run(listed(start=harvester.Resume("t1", 0)))
+
+    @respx.mock
+    def test_a_forgotten_token_tells_the_admin_to_start_over(self):
+        respx.get(BASE, params=page_after("t1")).respond(text=refusing("badResumptionToken"))
+
+        with pytest.raises(harvester.HarvestError) as refused:
+            run(listed(start=harvester.Resume("t1", 0)))
+
+        assert str(refused.value) == harvester.FORGOTTEN_POINT
+
+    @respx.mock
+    def test_a_token_refused_past_the_first_page_is_not_called_expired(self):
+        """Anti vacuity: a token the repository gave in this run and then
+        refused is the repository failing, not the stored point gone stale."""
+        respx.get(BASE, params=first_page()).respond(text=list_records(oai_record("One"), token="t1"))
+        respx.get(BASE, params=page_after("t1")).respond(text=refusing("badResumptionToken"))
+
+        with pytest.raises(harvester.HarvestError, match="refused the request: badResumptionToken"):
+            run(listed())
+
+    @respx.mock
+    def test_a_first_request_carrying_no_token_is_not_called_expired(self):
+        """A run from the start has no stored point to have gone stale, so the
+        same code on its first request is the repository failing."""
+        respx.get(BASE, params=first_page()).respond(text=refusing("badResumptionToken"))
+
+        with pytest.raises(harvester.HarvestError, match="refused the request: badResumptionToken"):
+            run(listed())
+
+
+class TestAFormatListedAndRefused:
+    @respx.mock
+    def test_marc_refused_at_the_first_request_is_read_as_dublin_core(self):
+        formats_listed(("marcxml", MARC), ("oai_dc", harvester.OAI_DC))
+        respx.get(BASE, params=first_page()).respond(text=refusing("cannotDisseminateFormat"))
+        respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": "oai_dc"}).respond(
+            text=list_records(oai_dc_record("Dune"))
+        )
+
+        got = run(harvested_from_the_start())
+
+        assert (got.read_as, got.prefix) == (HarvestFormat.DUBLIN_CORE, "oai_dc")
+        assert [record.title for record in got.parsed.records] == ["Dune"]
+
+    @respx.mock
+    def test_marc_served_is_read_as_marc(self):
+        """Anti vacuity for the fallback."""
+        formats_listed(("marcxml", MARC), ("oai_dc", harvester.OAI_DC))
+        respx.get(BASE, params=first_page()).respond(text=list_records(oai_record("Dune")))
+
+        assert run(harvested_from_the_start()).read_as is HarvestFormat.MARCXML
+
+    @respx.mock
+    def test_marc_refused_after_a_page_was_read_fails_the_run(self):
+        formats_listed(("marcxml", MARC), ("oai_dc", harvester.OAI_DC))
+        respx.get(BASE, params=first_page()).respond(text=list_records(oai_record("One"), token="t1"))
+        respx.get(BASE, params=page_after("t1")).respond(text=refusing("cannotDisseminateFormat"))
+        dublin_core = respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": "oai_dc"})
+
+        with pytest.raises(harvester.HarvestError, match="cannotDisseminateFormat"):
+            run(harvested_from_the_start())
+        assert dublin_core.call_count == 0
+
+    @respx.mock
+    def test_the_last_format_refused_is_refused_by_name(self):
+        formats_listed(("oai_dc", harvester.OAI_DC))
+        respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": "oai_dc"}).respond(
+            text=refusing("cannotDisseminateFormat")
+        )
+
+        with pytest.raises(harvester.HarvestError, match="cannotDisseminateFormat"):
+            run(harvested_from_the_start())

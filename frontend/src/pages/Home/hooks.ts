@@ -171,18 +171,22 @@ export function useLibrary(): UseLibraryResult {
   // carrying either would otherwise turn a household's whole grid into an
   // error. Masked on the way out rather than written back, so a deep link
   // opened before the flags arrive keeps its filter once they say library mode.
-  // The price is one unfiltered listing while the flags load, painted and then
-  // replaced; waiting on the flags instead would hold every listing back.
+  //
+  // **Only a listing carrying either waits for the flags**, so a household's
+  // first paint, which carries neither, waits for nothing. Without the wait a
+  // deep link painted the whole unfiltered shelf first and then replaced it.
   const offersOrigin = useLibraryMode();
+  const flagsSettled = useCatalogueScope() !== undefined;
+  const byOrigin = filters.origin !== null || filters.harvest !== null;
   const shown = useMemo(
     () =>
-      offersOrigin || (filters.origin === null && filters.harvest === null)
+      offersOrigin || !byOrigin
         ? filters
         : { ...filters, origin: null, harvest: null },
-    [filters, offersOrigin],
+    [filters, offersOrigin, byOrigin],
   );
 
-  const pages = useBookPages(shown);
+  const pages = useBookPages(shown, flagsSettled || !byOrigin);
   const lists = useFilterPanelLists();
   return { filters: shown, update, offersOrigin, ...lists, ...pages };
 }
@@ -221,9 +225,13 @@ function useFilterPanelLists(): Pick<
   };
 }
 
-/** The books matching `filters`, a page at a time, and the state of the request. */
+/**
+ * The books matching `filters`, a page at a time, and the state of the
+ * request. Nothing is asked while `enabled` is false.
+ */
 function useBookPages(
   filters: BookFilters,
+  enabled: boolean,
 ): Omit<
   UseLibraryResult,
   | "filters"
@@ -238,6 +246,7 @@ function useBookPages(
 
   const books = useListBooksInfinite(params, {
     query: {
+      enabled,
       initialPageParam: 1,
       // Keep the current results on screen while a new query runs.
       //

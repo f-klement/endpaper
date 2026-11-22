@@ -62,13 +62,16 @@ from authors import join_authors
 from bibliographic import (
     LANGUAGES,
     credit_line,
+    earliest_year,
     flip_catalogue_name,
     is_a_disc,
     is_physical_book,
     is_placeholder_title,
+    isbn_among_identifiers,
     pages_from_extent,
     split_title_statement,
     strip_isbd_punctuation,
+    two_letter_language,
 )
 from catalogue import Heading, Record, Subject, uncontrolled
 from deadline import in_, left
@@ -429,9 +432,9 @@ def _open_library_year(raw: object) -> int | None:
 def _year_in(text: str) -> int | None:
     """The first run of four digits in free text, as a year.
 
-    Every reader in this module whose source writes its date as prose rather
-    than a code reads it this way: Open Library's `publish_date`, a Dublin Core `date` and a MODS
-    `dateIssued`, each joined into one string first where the record repeats it.
+    Open Library's `publish_date` and a MODS `dateIssued` are read this way,
+    joined into one string first where the record repeats it. A Dublin Core
+    `date` is read by `bibliographic.earliest_year`.
     """
     match = re.search(r"\d{4}", text)
     return int(match.group()) if match else None
@@ -1497,11 +1500,6 @@ def _dc_says_online(extent: str | None, online: re.Pattern[str]) -> bool:
     return extent is not None and online.search(extent) is not None
 
 
-def _dc_language(values: list[str]) -> str | None:
-    """The first Dublin Core `language` value through the shared table, or None."""
-    return LANGUAGES.get((values or [""])[0].lower())
-
-
 def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
     """Whether this record names the ISBN that was asked for.
 
@@ -1596,8 +1594,8 @@ def _nkp_record(record: ElementTree.Element, isbn: str, *, source: str) -> Recor
         subtitle=subtitle,
         author=flip_catalogue_name(contributors[0]) if contributors else None,
         publisher=strip_isbd_punctuation(publisher) if publisher else None,
-        year=_year_in(" ".join(_dc_text(record, "date"))),
-        language=_dc_language(_dc_text(record, "language")),
+        year=earliest_year(_dc_text(record, "date")),
+        language=two_letter_language(_dc_text(record, "language")),
         page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn),
         # The un-namespaced dialect, and it has no more room for a stamp than
@@ -2767,7 +2765,7 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     if not is_physical_book(extent, title) or _dc_says_online(extent, _BNF_ONLINE):
         return None
 
-    isbn = _bnf_isbn(texts("identifier"))
+    isbn = isbn_among_identifiers(texts("identifier"))
     # "M. J. Minard, Lettres modernes (Paris)" is publisher then place.
     publisher = next(iter(texts("publisher")), None)
 
@@ -2778,8 +2776,8 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
         subtitle=subtitle,
         author=_bnf_authors(texts("creator")),
         publisher=_without_trailing_place(publisher) if publisher else None,
-        year=_year_in(" ".join(texts("date"))),
-        language=_dc_language(texts("language")),
+        year=earliest_year(texts("date")),
+        language=two_letter_language(texts("language")),
         page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn) if isbn else None,
         # Dublin Core names no vocabulary and carries no identifier, in either
@@ -2813,23 +2811,6 @@ def _bnf_says_printed(record: ElementTree.Element) -> bool:
     # And not printed, which is a separate question from not being printed:
     # the DCMI `text` on an ebook satisfies the first test. See the constant.
     return _dc_says_printed(kinds) and _BNF_NOT_PRINTED not in kinds
-
-
-def _bnf_isbn(identifiers: list[str]) -> str | None:
-    """The first ISBN among a BnF record's `dc:identifier` values.
-
-    They hold an ARK URL and sometimes "ISBN 0333532945", so the prefix is
-    dropped and anything that does not parse is passed over.
-    """
-    return next(
-        (
-            parsed
-            for value in identifiers
-            for parsed in [parse_isbn(value.replace("ISBN", "").strip())]
-            if parsed is not None
-        ),
-        None,
-    )
 
 
 def _without_trailing_place(publisher: str) -> str:

@@ -22,6 +22,7 @@ import {
   useBookSelection,
   useColumnChoice,
   useLibrary,
+  useMyOverdue,
   useSavedSearches,
   useUnconfirmedCount,
   useViewChoice,
@@ -67,6 +68,13 @@ beforeEach(() => {
     body: makeBookPage([makeBook({ title: "Dune" })]),
   });
 });
+
+/** The query string of every books listing request so far, in order. */
+function booksListings(): URLSearchParams[] {
+  return api.calls
+    .filter((call) => /\/api\/books(\?|$)/.test(call.url))
+    .map((call) => new URL(call.url, "http://localhost").searchParams);
+}
 
 /** The query string of the most recent books listing request. */
 function lastQuery(): URLSearchParams {
@@ -144,6 +152,27 @@ describe("useLibrary", () => {
 
       await waitFor(() => expect(result.current.offersOrigin).toBe(true));
       await waitFor(() => expect(lastQuery().get("harvest")).toBe("12"));
+    });
+
+    it("asks for no unfiltered listing while a deep link waits on the flags", async () => {
+      const release = heldFlags();
+      const { result } = renderLibrary("/?harvest=12");
+      await waitFor(() => expect(result.current.isLoading).toBe(true));
+      expect(booksListings()).toEqual([]);
+
+      await act(async () => release(true));
+
+      await waitFor(() => expect(booksListings()).not.toEqual([]));
+      expect(booksListings().map((query) => query.get("harvest"))).toEqual([
+        "12",
+      ]);
+    });
+
+    it("lets a listing naming no origin go before the flags answer", async () => {
+      heldFlags();
+      renderLibrary();
+
+      await waitFor(() => expect(booksListings()).toHaveLength(1));
     });
 
     it("holds the harvest run back in a household, where the API refuses it", async () => {
@@ -1124,6 +1153,37 @@ describe("useBookSelection", () => {
       await waitFor(() => expect(result.current.error).toBeTruthy());
       expect(result.current.selectedIds).toEqual([4]);
     });
+  });
+});
+
+describe("useMyOverdue", () => {
+  const MINE = "/api/loans/overdue/mine";
+
+  async function overdueOnceAnswered(reply: StubResponse) {
+    api.on(MINE, reply, "GET");
+    const rendered = renderHookWithProviders(() => useMyOverdue());
+    await waitFor(() =>
+      expect(rendered.queryClient.getQueryState([MINE])?.status).toBe(
+        "success",
+      ),
+    );
+    return rendered.result;
+  }
+
+  it("counts the reader's overdue loans while the channel is on", async () => {
+    const result = await overdueOnceAnswered({
+      body: { enabled: true, count: 3 },
+    });
+
+    expect(result.current).toBe(3);
+  });
+
+  it("is zero while the household has switched the channel off", async () => {
+    const result = await overdueOnceAnswered({
+      body: { enabled: false, count: 3 },
+    });
+
+    expect(result.current).toBe(0);
   });
 });
 

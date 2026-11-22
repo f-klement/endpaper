@@ -36,8 +36,7 @@ from bibliographic import (
     strip_isbd_punctuation,
     two_letter_language,
 )
-from models import MAX_PAGE_NUMBER_IN_A_BOOK
-from schemas.book import MIN_YEAR
+from models import MAX_PAGE_NUMBER_IN_A_BOOK, MAX_YEAR
 from tests.corpus import BACKEND, application_modules
 from tests.strategies import text_around, witness
 
@@ -476,10 +475,8 @@ class TestTheEarliestYear:
         """`0001-01-01` is the minimum date of .NET and several ORMs."""
         assert earliest_year(["0001-01-01", "1965"]) == 1965
 
-    def test_the_column_starts_at_year_one(self):
-        """`earliest_year` passes over years nought and one, which covers the whole
-        column range a minimum can fall below only while the range starts at 1."""
-        assert MIN_YEAR == 1
+    def test_a_year_past_the_column_is_not_a_candidate(self):
+        assert earliest_year([str(MAX_YEAR + 1)]) is None
 
 
 class TestATwoLetterLanguage:

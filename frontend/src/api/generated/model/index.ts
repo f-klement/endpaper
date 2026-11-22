@@ -223,6 +223,7 @@ export * from "./resetRequest.ts";
 export * from "./resetRequestOut.ts";
 export * from "./restoreBackupParams.ts";
 export * from "./restoreResult.ts";
+export * from "./resumableHarvestOut.ts";
 export * from "./searchBooksParams.ts";
 export * from "./senderHealth.ts";
 export * from "./senderOutcome.ts";

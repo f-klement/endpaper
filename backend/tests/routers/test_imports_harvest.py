@@ -13,9 +13,9 @@ from sqlalchemy import select
 
 import harvester
 import settings_store
-from enums import OwnershipStatus, RecordOrigin, SettingKey
+from enums import HarvestFormat, OwnershipStatus, RecordOrigin, SettingKey
 from models import Book, Classification, Harvest, PendingHeading
-from routers.imports import HARVEST_RUNNING, REPOSITORY_CHANGED
+from routers.imports import HARVEST_RUNNING, NOT_RESUMABLE, REPOSITORY_CHANGED
 from tests.corpus import REPO
 from tests.test_harvester import BASE, MARC, list_records, oai_dc_record, oai_record, response
 
@@ -172,7 +172,7 @@ class TestTheGates:
         assert refused == [409] * 4
         assert client.post(APPLY, headers=admin["headers"]).status_code == 200
 
-    def test_the_card_words_both_codes_as_the_route_spells_them(self):
+    def test_the_card_words_every_code_as_the_route_spells_it(self):
         """Each side's tests spell the codes with their own literal, so a code
         respelt on one side stays green on both while the card reads a running
         harvest as a lost race. This holds the keys of `REFUSAL_BY_CODE`."""
@@ -180,7 +180,7 @@ class TestTheGates:
 
         assert body is not None
         assert sorted(re.findall(r"^\s*(\w+):", body.group(1), re.MULTILINE)) == sorted(
-            [HARVEST_RUNNING, REPOSITORY_CHANGED]
+            [HARVEST_RUNNING, NOT_RESUMABLE, REPOSITORY_CHANGED]
         )
 
     def test_the_hook_drops_its_read_on_the_code_the_route_spells(self):
@@ -532,3 +532,186 @@ class TestADublinCoreRun:
         body = client.post(APPLY, headers=admin["headers"]).json()
 
         assert (body["created"], body["deleted"], body["records_seen"]) == (1, 1, 2)
+
+
+RESUMABLE = "/api/imports/harvest/resumable"
+
+
+def a_busy_repository(*records: str, prefix: str = "marcxml") -> None:
+    """`a_repository` whose one page hands back token `t1`, and which answers
+    503 for it: every run of it stops after its first page."""
+    a_repository(*records, prefix=prefix)
+    respx.get(BASE, params={"verb": "ListRecords", "metadataPrefix": prefix}).respond(
+        text=list_records(*records, token="t1")
+    )
+    respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(status_code=503)
+
+
+def continuing(harvest_id: int, path: str = APPLY) -> str:
+    return f"{path}{'&' if '?' in path else '?'}continues={harvest_id}"
+
+
+class TestATruncatedRunIsKept:
+    @respx.mock
+    def test_the_run_records_where_it_stopped_and_the_format_it_read(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        run = db.get_one(Harvest, body["harvest_id"])
+        assert body["truncated"] is True
+        assert (run.metadata_format, run.resume_token, run.resume_skip) == (HarvestFormat.MARCXML, "t1", 0)
+        assert run.continues_harvest_id is None
+
+    @respx.mock
+    def test_a_run_read_to_the_end_records_nowhere_to_resume(self, client, admin, harvesting, db):
+        """Anti vacuity for the above."""
+        a_repository(oai_record("One"))
+
+        body = client.post(APPLY, headers=admin["headers"]).json()
+
+        run = db.get_one(Harvest, body["harvest_id"])
+        assert (run.metadata_format, run.resume_token, run.resume_skip) == (HarvestFormat.MARCXML, None, None)
+
+    @respx.mock
+    def test_it_is_offered_for_continuing(self, client, admin, harvesting):
+        a_busy_repository(oai_record("One"))
+        harvest_id = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+
+        body = client.get(RESUMABLE, headers=admin["headers"]).json()
+
+        assert (body["harvest_id"], body["metadata_format"]) == (harvest_id, "marcxml")
+        assert body["records_seen"] == 1
+
+    @respx.mock
+    def test_a_run_read_to_the_end_offers_nothing(self, client, admin, harvesting):
+        a_repository(oai_record("One"))
+        client.post(APPLY, headers=admin["headers"])
+
+        res = client.get(RESUMABLE, headers=admin["headers"])
+
+        assert (res.status_code, res.json()) == (200, None)
+
+    def test_the_offer_is_refused_to_a_member_and_absent_with_the_switch_off(self, client, admin, member, db):
+        switched_on(db, harvester=False)
+        assert client.get(RESUMABLE, headers=admin["headers"]).status_code == 404
+        switched_on(db)
+        assert client.get(RESUMABLE, headers=member["headers"]).status_code == 403
+
+
+class TestCarryingOnATruncatedRun:
+    @respx.mock
+    def test_it_reads_on_from_the_stored_token_as_a_new_run_pointing_at_the_old(
+        self, client, admin, harvesting, db
+    ):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"))
+        )
+
+        body = client.post(continuing(first), headers=admin["headers"]).json()
+
+        run = db.get_one(Harvest, body["harvest_id"])
+        assert (body["created"], body["truncated"]) == (1, False)
+        assert (run.continues_harvest_id, run.resume_skip) == (first, None)
+        assert db.scalars(select(Book.title).where(Book.harvest_id == run.id)).all() == ["Two"]
+
+    @respx.mock
+    def test_the_preview_reads_on_from_the_stored_token_and_writes_nothing(
+        self, client, admin, harvesting, db
+    ):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"), oai_record("Three"))
+        )
+
+        body = client.post(continuing(first, PREVIEW), headers=admin["headers"]).json()
+
+        assert (body["records_seen"], body["readable"]) == (2, 2)
+        assert db.scalars(select(Harvest.id)).all() == [first]
+
+    @respx.mock
+    def test_a_continued_run_is_no_longer_offered(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"))
+        )
+        client.post(continuing(first), headers=admin["headers"])
+
+        again = client.post(continuing(first), headers=admin["headers"])
+
+        assert again.status_code == 409
+        assert again.json()["detail"]["code"] == NOT_RESUMABLE
+        assert client.get(RESUMABLE, headers=admin["headers"]).json() is None
+
+    @respx.mock
+    def test_a_run_that_was_not_cut_short_is_refused_and_nothing_is_fetched(
+        self, client, admin, harvesting, db
+    ):
+        a_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        asked = respx.calls.call_count
+
+        res = client.post(continuing(first, PREVIEW), headers=admin["headers"])
+
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, NOT_RESUMABLE)
+        assert respx.calls.call_count == asked
+
+    @respx.mock
+    def test_a_set_named_beside_a_continuation_is_refused(self, client, admin, harvesting):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+
+        res = client.post(f"{continuing(first)}&set_spec=theses", headers=admin["headers"])
+
+        assert res.status_code == 400
+
+    @respx.mock
+    def test_a_continuation_reads_the_set_its_run_read(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(f"{APPLY}&set_spec=theses", headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=list_records(oai_record("Two"))
+        )
+
+        body = client.post(continuing(first), headers=admin["headers"]).json()
+
+        assert db.get_one(Harvest, body["harvest_id"]).set_spec == "theses"
+
+    @respx.mock
+    def test_a_forgotten_token_is_a_502_telling_the_admin_to_start_over(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        respx.get(BASE, params={"verb": "ListRecords", "resumptionToken": "t1"}).respond(
+            text=response('<error code="badResumptionToken">gone</error>')
+        )
+
+        res = client.post(continuing(first), headers=admin["headers"])
+
+        assert (res.status_code, res.json()["detail"]) == (502, harvester.FORGOTTEN_POINT)
+        assert db.scalars(select(Harvest.id)).all() == [first]
+
+
+class TestTheOfferIsBoundToTheStoredAddress:
+    """A token is one repository's position in its own list. Replayed to
+    another, it would disclose that position to a host that never issued it and
+    read nonsense, so a run is offered only under the address it read."""
+
+    OTHER = "http://10.0.9.10:8080/oai"
+
+    @respx.mock
+    def test_a_run_of_another_address_is_neither_offered_nor_carried_on(self, client, admin, harvesting, db):
+        a_busy_repository(oai_record("One"))
+        first = client.post(APPLY, headers=admin["headers"]).json()["harvest_id"]
+        settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, self.OTHER)
+        asked = respx.calls.call_count
+
+        offered = client.get(RESUMABLE, headers=admin["headers"])
+        res = client.post(continuing(first, PREVIEW), headers=admin["headers"])
+
+        assert (offered.status_code, offered.json()) == (200, None)
+        assert (res.status_code, res.json()["detail"]["code"]) == (409, NOT_RESUMABLE)
+        assert respx.calls.call_count == asked

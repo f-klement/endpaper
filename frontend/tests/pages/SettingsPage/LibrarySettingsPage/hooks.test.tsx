@@ -45,6 +45,7 @@ import type {
   ImportPreviewOut,
   ImportResultOut,
   MarcPreviewOut,
+  ResumableHarvestOut,
   VocabularyOut,
 } from "../../../../src/api/generated/model";
 import { ApiError } from "../../../../src/api/mutator";
@@ -2074,12 +2075,56 @@ describe("which set a harvest asks the repository for", () => {
 
   const REPOSITORY = "https://repository.example/oai";
 
-  function stubHarvest(): MockApi {
+  const CUT_SHORT: ResumableHarvestOut = {
+    harvest_id: 4,
+    started_at: "2026-11-20T10:00:00",
+    set_spec: "theses",
+    metadata_format: "marcxml",
+    records_seen: 10000,
+  };
+
+  /** A repository whose last run was `resumable`: none by default. */
+  function stubHarvest(resumable: ResumableHarvestOut | null = null): MockApi {
     const api = mockApi();
     api.on("/api/imports/harvest", { body: HARVESTED }, "POST");
     api.on("/api/imports/harvest/preview", { body: HARVEST_PREVIEW }, "POST");
+    api.on("/api/imports/harvest/resumable", { body: resumable }, "GET");
     return api;
   }
+
+  it("carries on from the run cut short in the preview, naming no set", async () => {
+    // The run's own set is read again server side; one sent beside it is refused.
+    const api = stubHarvest(CUT_SHORT);
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+    await waitFor(() => expect(result.current.resumable).not.toBeNull());
+
+    await act(async () => result.current.carryOn());
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest/preview")).toEqual({
+      continues: "4",
+    });
+  });
+
+  it("carries on from the run cut short in the apply as well, naming no set", async () => {
+    const api = stubHarvest(CUT_SHORT);
+    const { result } = renderHookWithProviders(() =>
+      useHarvestImport(REPOSITORY),
+    );
+    await waitFor(() => expect(result.current.resumable).not.toBeNull());
+
+    await act(async () => result.current.carryOn());
+    await waitFor(() => expect(result.current.preview).not.toBeNull());
+    await act(async () => result.current.confirm());
+    await waitFor(() => expect(result.current.result).not.toBeNull());
+
+    expect(queryOf(api, "/api/imports/harvest")).toEqual({
+      repository: REPOSITORY,
+      continues: "4",
+    });
+  });
 
   it("asks for the typed set, trimmed, in the preview and the apply", async () => {
     const api = stubHarvest();
