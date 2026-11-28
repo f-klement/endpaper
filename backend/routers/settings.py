@@ -1,50 +1,35 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any, Final
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
-import catalogue_access
-import classification_schemes
 import config
 import cover_store
 import covers
 import credentials
-import harvester
 import metadata
 import notifications
-import registry
 import settings_store
 import sources
 import targets
-import vocabulary_copy
 from auth import require_admin
-from dependencies import CurrentUser, DbSession
-from enums import CatalogueSource, CredentialKind, RegisteredCatalogue, SettingKey
-from models import ClassificationSchemeRow, User
+from dependencies import DbSession
+from enums import CatalogueSource, SettingKey
+from models import User
 from refusals import refuses
 from schemas import (
-    CatalogueRegistryOut,
     CatalogueSourceOut,
     CatalogueSourcePreference,
-    ClassificationSchemeCreate,
-    ClassificationSchemeOut,
-    ClassificationSchemeRename,
     CredentialKeyOut,
     FeatureFlagsOut,
     LoginImageOut,
-    ProbeEvidenceOut,
     RecoveryPhraseIn,
     RecoveryPhraseOut,
-    RegistryEntryOut,
     SenderHealth,
     SettingsOut,
     SettingsUpdate,
     SourceCredentialIn,
-    SourceTestIn,
-    VocabularyOut,
-    VocabularyProgressOut,
 )
 from uploads import read_image_upload
 
@@ -73,7 +58,7 @@ _SENDER_TEXT: Final[dict[str, SettingKey]] = {
 #: override to refuse and no sender health to forget.
 #:
 #: A table for the same reason `_SENDER_BOOL` is one, and separate from it
-#: because these are not senders: `notifications.senders_for` answers none for
+#: because these are not senders: `notifications.sender_for` answers None for
 #: every one of them, so routing them through `_SENDER_BOOL` would work and
 #: would file them under a heading they do not belong to.
 #:
@@ -97,25 +82,6 @@ _STORED_BOOL: Final[dict[str, SettingKey]] = {
     # reason: an account policy turned on by mistake has to be correctable
     # without a redeploy.
     "accounts_open_to_outsiders": SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS,
-    # The SRU server's switch. Stored whatever the publish state, like the
-    # publish row: `settings_store.sru_is_served` reads both.
-    "sru_server_enabled": SettingKey.SRU_SERVER_ENABLED,
-    # The OAI-PMH provider's switch, stored the same way and read by
-    # `settings_store.oai_is_served` with the publish state.
-    "oai_provider_enabled": SettingKey.OAI_PROVIDER_ENABLED,
-    # The OAI-PMH harvester's switch. Refused on without a repository by
-    # `_refuse_harvest_without_a_repository`, and read by
-    # `settings_store.harvest_repository` with library mode.
-    "oai_harvest_enabled": SettingKey.OAI_HARVEST_ENABLED,
-    # Whether a public record shows on the shelf or on loan. Stored whatever
-    # the publish state: `settings_store.availability_is_shown` reads both.
-    "public_availability_enabled": SettingKey.PUBLIC_AVAILABILITY_ENABLED,
-    # The library page's vocabulary offer, put away for the installation.
-    "vocabulary_offer_dismissed": SettingKey.VOCABULARY_OFFER_DISMISSED,
-    # Whether a book's heading field offers headings from the local vocabulary
-    # copies. Stored whatever library mode says: `settings_store.headings_from_vocabulary`
-    # reads both.
-    "headings_from_vocabulary": SettingKey.HEADINGS_FROM_VOCABULARY,
 }
 
 _SENDER_BOOL: Final[dict[str, SettingKey]] = {
@@ -126,14 +92,7 @@ _SENDER_BOOL: Final[dict[str, SettingKey]] = {
     # One field, because the channel is the app: no destination, no credential,
     # and nothing an operator can pin from the environment.
     "overdue_in_app_enabled": SettingKey.OVERDUE_IN_APP_ENABLED,
-    # The patron's own notice, over the mail server the digest uses.
-    "overdue_patron_mail_enabled": SettingKey.OVERDUE_PATRON_MAIL_ENABLED,
 }
-
-#: The two notices the first switch of library mode on turns on (#24): the
-#: patron's own, and the service digest to `overdue_mail_to`. An archive that
-#: switches the mode on is otherwise chasing nobody without being told.
-_LIBRARY_MODE_NOTICES: Final = (SettingKey.OVERDUE_PATRON_MAIL_ENABLED, SettingKey.OVERDUE_MAIL_ENABLED)
 
 
 def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
@@ -147,10 +106,10 @@ def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
     and a household with nothing overdue attempts no sender, so no later run
     overwrote it either. The banner was permanent.
 
-    `notifications.senders_for` is the single answer to "which channels does
-    this row configure", and it lives with the senders rather than here. A row
-    that configures nothing (the locale, the Google key, the reminder interval)
-    answers none and this is then an ordinary write.
+    `notifications.sender_for` is the single answer to "which channel does this
+    row configure", and it lives with the senders rather than here. A row that
+    configures nothing (the locale, the Google key, the reminder interval)
+    answers `None` and this is then an ordinary write.
 
     **A `dict` goes to `set_json` and a `str` to `set_value`, through this same
     door rather than a second one.** The provider list is the first row here
@@ -169,7 +128,8 @@ def _store(db: DbSession, key: SettingKey, value: str | dict[str, Any]) -> None:
         # A secret with no key to seal it with: refused, never written in
         # plaintext. The message says how to make a key.
         raise HTTPException(status_code=409, detail=str(refusal)) from None
-    for sender in notifications.senders_for(key):
+    sender = notifications.sender_for(key)
+    if sender is not None:
         notifications.forget_health(db, sender)
 
 
@@ -311,7 +271,6 @@ def _read_settings(db: DbSession) -> SettingsOut:
         telegram_chat_id=settings_store.in_force(db, SettingKey.TELEGRAM_CHAT_ID),
         telegram_chat_id_from_env=settings_store.is_from_env(SettingKey.TELEGRAM_CHAT_ID),
         overdue_in_app_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_IN_APP_ENABLED),
-        overdue_patron_mail_enabled=settings_store.get_bool(db, SettingKey.OVERDUE_PATRON_MAIL_ENABLED),
         unreadable_secrets=settings_store.unreadable_secrets(db, encryption_key),
         # The two switches as stored, so the form shows what an admin typed,
         # plus the conjunction that decides whether anything is actually
@@ -322,15 +281,7 @@ def _read_settings(db: DbSession) -> SettingsOut:
             db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED
         ),
         public_catalogue_published=settings_store.public_catalogue_is_published(db),
-        sru_server_enabled=settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED),
-        oai_provider_enabled=settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED),
-        oai_admin_email=settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL),
-        oai_harvest_enabled=settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED),
-        oai_harvest_base_url=settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL),
-        public_availability_enabled=settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED),
         accounts_open_to_outsiders=settings_store.accounts_are_open_to_outsiders(db),
-        vocabulary_offer_dismissed=settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED),
-        headings_from_vocabulary=settings_store.get_bool(db, SettingKey.HEADINGS_FROM_VOCABULARY),
         # **The stored list, not the one in force.** An admin has to see what
         # they set: a screen that hid Google Books because no key is configured
         # would be one they cannot use, since they would switch it on and watch
@@ -358,11 +309,8 @@ def get_feature_flags(db: DbSession) -> FeatureFlagsOut:
     has_key = bool(settings_store.google_books_api_key(db))
 
     return FeatureFlagsOut(
-        # The conjunction alone; the raw toggle is admin-only: see
-        # `FeatureFlagsOut.google_books_ready`. Public deliberately, and
-        # `catalogue_access.GOOGLE_BOOKS_IS_NOT_ASKED` relies on it: that refusal tells a
-        # member no more than this tells anybody. Narrowing this fails
-        # `TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`, and the refusal goes with it.
+        # The conjunction alone. The raw toggle is admin-only on purpose: see
+        # `FeatureFlagsOut.google_books_ready`.
         google_books_ready=google_books_enabled and has_key,
         goodreads_lookup_enabled=settings_store.get_bool(db, SettingKey.GOODREADS_LOOKUP_ENABLED),
         default_locale=settings_store.get_locale(db, SettingKey.DEFAULT_LOCALE),
@@ -455,38 +403,8 @@ def _write_reminder_settings(db: DbSession, payload: SettingsUpdate) -> None:
 
     if payload.overdue_reminder_days is not None:
         # Not a channel's configuration: it says how often a loan is chased, so
-        # `senders_for` answers none and no health record is dropped.
+        # `sender_for` answers None and no health record is dropped.
         _store(db, SettingKey.OVERDUE_REMINDER_DAYS, str(payload.overdue_reminder_days))
-
-
-def _default_notices_on(db: DbSession, payload: SettingsUpdate) -> None:
-    """Turn both overdue notices on when library mode is switched on, the first time only.
-
-    **A default, not a rule.** Once, marked by `LIBRARY_MODE_NOTICES_DEFAULTED`,
-    so an operator who switches a notice off afterwards is not overridden by a
-    later toggle of the mode. **Switching the mode off touches neither**: a
-    mode switch must not be a hidden change to who gets mail.
-
-    **A default fills a value nobody chose, and never overrides one somebody
-    did**: a notice with a stored row is left as stored, so a household that
-    switched its email off before turning library mode on keeps it off. Each
-    toggle on the lending page writes its own key alone, so a stored row is a
-    choice rather than a side effect of saving another field.
-
-    Only on a switch from off, so an upgrade that finds the mode already on
-    changes nobody's mail by itself. Before `_SENDER_BOOL` is written, so a
-    payload that sets a notice in the same request has the last word; a notice
-    the environment pins is left to the environment. With no mail server set,
-    the next run with a loan overdue reports both mail senders `misconfigured`
-    at once, which is meant: a library chasing nobody should be told so.
-    """
-    if not payload.library_mode or settings_store.get_bool(db, SettingKey.LIBRARY_MODE):
-        return
-    if settings_store.get_bool(db, SettingKey.LIBRARY_MODE_NOTICES_DEFAULTED):
-        return
-    for key in settings_store.unchosen(db, _LIBRARY_MODE_NOTICES):
-        _store(db, key, _flag(True))
-    _store(db, SettingKey.LIBRARY_MODE_NOTICES_DEFAULTED, _flag(True))
 
 
 def _write_table[T](
@@ -511,91 +429,6 @@ def _write_table[T](
         if refuse_pinned:
             _refuse_if_pinned(key)
         _store(db, key, encode(value))
-
-
-#: Why the OAI-PMH switch was refused. Named in the UI's hint as well.
-_OAI_NEEDS_AN_ADDRESS: Final = (
-    "OAI-PMH needs a repository contact address before it can be turned on, because every "
-    "harvester is told one. Enter it first."
-)
-
-
-def _refuse_oai_without_an_address(db: DbSession, payload: SettingsUpdate) -> None:
-    """409 for a write that would leave the OAI-PMH switch on with no address.
-
-    Owner's decision on issue #176: `Identify` must name a contact, and a role
-    address chosen on purpose is the only one this app publishes. Checked
-    before any field is written, so a refused request changes nothing. Only a
-    write naming either field is checked: one that names neither leaves the
-    pair as it was.
-    """
-    if payload.oai_provider_enabled is None and payload.oai_admin_email is None:
-        return
-    switched_on = (
-        payload.oai_provider_enabled
-        if payload.oai_provider_enabled is not None
-        else settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED)
-    )
-    address = (
-        payload.oai_admin_email
-        if payload.oai_admin_email is not None
-        else settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL).strip()
-    )
-    if switched_on and not address:
-        raise HTTPException(status_code=409, detail=_OAI_NEEDS_AN_ADDRESS)
-
-
-#: Why the harvester's switch was refused. Named in the UI's hint as well.
-_HARVEST_NEEDS_A_REPOSITORY: Final = (
-    "The OAI-PMH harvester needs a repository address before it can be turned on. Enter it first."
-)
-
-
-def _refuse_harvest_without_a_repository(db: DbSession, payload: SettingsUpdate) -> None:
-    """409 for a write that would leave the harvester on with no repository.
-
-    The import half of issue #178: a switch with no endpoint turns on nothing,
-    so it is refused where it is set rather than found broken at the harvest.
-    The shape of `_refuse_oai_without_an_address`, for its reasons: checked
-    before any field is written, and only for a write naming either field.
-    """
-    if payload.oai_harvest_enabled is None and payload.oai_harvest_base_url is None:
-        return
-    switched_on = (
-        payload.oai_harvest_enabled
-        if payload.oai_harvest_enabled is not None
-        else settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED)
-    )
-    address = (
-        payload.oai_harvest_base_url
-        if payload.oai_harvest_base_url is not None
-        else settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL).strip()
-    )
-    if switched_on and not address:
-        raise HTTPException(status_code=409, detail=_HARVEST_NEEDS_A_REPOSITORY)
-
-
-#: Why a repository address was refused. **A constant sentence**: the 400 never
-#: echoes what was typed.
-_REPOSITORY_NOT_HARVESTABLE: Final = (
-    "The repository address must be an http or https address with no username, password, query or fragment."
-)
-
-
-def _refuse_an_unharvestable_repository(payload: SettingsUpdate) -> None:
-    """400 for a repository address `harvester.is_harvestable` refuses.
-
-    Here rather than in `SettingsUpdate`, which only trims it: the rule reaches
-    `fetch`, and a schema sits below it. The same rule
-    `harvester.configured_repository` reads the stored row with, so a row this
-    write accepts is never one the harvester then refuses. Checked before any
-    field is written. 400 rather than 422: the schema types a 422's `detail`
-    as a list of validation entries, and this one is a sentence
-    (`tests/test_errors.py`).
-    """
-    address = payload.oai_harvest_base_url
-    if address and not harvester.is_harvestable(address):
-        raise HTTPException(status_code=400, detail=_REPOSITORY_NOT_HARVESTABLE)
 
 
 def _write_catalogue_sources(db: DbSession, wire: list[CatalogueSourcePreference]) -> None:
@@ -648,9 +481,6 @@ def update_settings(
     submit without the API key: the browser never received the real value, so
     sending the field back would blank it.
     """
-    _refuse_oai_without_an_address(db, payload)
-    _refuse_an_unharvestable_repository(payload)
-    _refuse_harvest_without_a_repository(db, payload)
     _write_lookup_settings(db, payload)
     _write_reminder_settings(db, payload)
     # An empty string is a deliberate clear, like the Google key and the
@@ -660,14 +490,6 @@ def update_settings(
     if payload.catalogue_sources is not None:
         _write_catalogue_sources(db, payload.catalogue_sources)
 
-    if payload.oai_admin_email is not None:
-        # Already checked as an address, or "", by `SettingsUpdate`.
-        _store(db, SettingKey.OAI_ADMIN_EMAIL, payload.oai_admin_email)
-    if payload.oai_harvest_base_url is not None:
-        # Trimmed by `SettingsUpdate`, checked by `harvester.is_harvestable`
-        # above unless "", and refused empty while the switch is on.
-        _store(db, SettingKey.OAI_HARVEST_BASE_URL, payload.oai_harvest_base_url)
-    _default_notices_on(db, payload)
     _write_table(db, payload, _STORED_BOOL, _flag, refuse_pinned=False)
     _write_table(db, payload, _SENDER_BOOL, _flag, refuse_pinned=True)
 
@@ -849,11 +671,10 @@ def set_source_credential(
 ) -> SettingsOut:
     """Store a login for one catalogue, sealed.
 
-    **Only a source whose credential is a login**, `targets.Target.credential_kind`.
-    `settings_store.catalogue_logins` resolves a login for those and no other, so
-    a login stored for a catalogue that answers anonymously, or for one whose
-    credential is this deployment's key, would be sealed and read by nothing.
-    409 names that the source takes none.
+    **Any roster source, not only one that declares it needs a credential.** A
+    library may hold an account at a catalogue that also answers anonymously,
+    and refusing it would be the storage deciding who may have an account
+    somewhere else.
 
     409 when the deployment pinned this source's credential, the same rule and
     the same reason `_refuse_if_pinned` states for a settings row: a value the
@@ -861,10 +682,6 @@ def set_source_credential(
     disagrees with what the next request actually sends.
     """
     known = _known_source(source)
-    if targets.SEEDED[known].credential_kind is not CredentialKind.LOGIN:
-        raise HTTPException(
-            status_code=409, detail=f"{known.value} takes no login, so none can be stored for it."
-        )
     if credentials.is_from_env(known.value):
         raise HTTPException(
             status_code=409,
@@ -947,260 +764,3 @@ def forget_source_credential(
     credentials.forget(db, source)
     metadata.clear_cache()
     return _read_settings(db)
-
-
-def _registry_out(db: DbSession) -> CatalogueRegistryOut:
-    chosen = registry.picked(db)
-    return CatalogueRegistryOut(
-        listed_by=list(registry.LISTED_BY),
-        taken_on=registry.TAKEN_ON,
-        aged=registry.aged(datetime.now(UTC).date()),
-        entries=[_entry_out(which, entry, which in chosen) for which, entry in registry.ENTRIES.items()],
-    )
-
-
-def _entry_out(which: RegisteredCatalogue, entry: registry.Entry, picked: bool) -> RegistryEntryOut:
-    return RegistryEntryOut(
-        source=which,
-        name=entry.name,
-        country=entry.country,
-        kind=entry.kind,
-        host=urlparse(entry.target.base_url).hostname or "",
-        picked=picked,
-        evidence=_evidence_out(entry.evidence),
-    )
-
-
-def _evidence_out(evidence: registry.Evidence) -> ProbeEvidenceOut:
-    return ProbeEvidenceOut(
-        probed_on=evidence.probed_on, isbn=evidence.isbn, disposition=evidence.disposition
-    )
-
-
-def _registered(source: str) -> RegisteredCatalogue:
-    """The registry entry this path names, or 404, for `_known_source`'s reason."""
-    try:
-        return RegisteredCatalogue(source)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="No such catalogue in the registry.") from None
-
-
-@router.get("/catalogue-registry", response_model=CatalogueRegistryOut)
-def get_catalogue_registry(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> CatalogueRegistryOut:
-    """The curated catalogues this build ships, each with the evidence it was
-    shipped on, and which of them this library picked. **Admin only**, beside
-    the pick it is read to make. `aged` says the snapshot's evidence is older
-    than it is trusted; nothing is fetched to find that out."""
-    return _registry_out(db)
-
-
-@router.put("/catalogue-registry/{source}", response_model=CatalogueRegistryOut)
-@refuses(404)
-def pick_registry_catalogue(
-    source: str, db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> CatalogueRegistryOut:
-    """Pick one registry catalogue. Picking it again changes nothing.
-
-    A picked catalogue is asked when a book is added by its ISBN, after every
-    catalogue in the lookup order missed, and never in a title search;
-    `registry` says why.
-    """
-    registry.pick(db, _registered(source))
-    return _registry_out(db)
-
-
-@router.delete("/catalogue-registry/{source}", response_model=CatalogueRegistryOut)
-@refuses(404)
-def drop_registry_catalogue(
-    source: str, db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> CatalogueRegistryOut:
-    """Forget a pick. Dropping one never picked changes nothing."""
-    registry.drop(db, _registered(source))
-    return _registry_out(db)
-
-
-def _testable(source: str) -> CatalogueSource | RegisteredCatalogue:
-    """A seeded source or a registry entry, or 404.
-
-    **The only route that admits both**, because testing is the one thing a
-    registry entry and a seeded source share. The credential routes stay on
-    `_known_source`, so a registry entry can never be handed a login.
-    """
-    try:
-        return CatalogueSource(source)
-    except ValueError:
-        return _registered(source)
-
-
-@router.post("/catalogue-sources/{source}/test", response_model=ProbeEvidenceOut)
-@refuses(404)
-async def probe_catalogue_source(
-    source: str,
-    payload: SourceTestIn,
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> ProbeEvidenceOut:
-    """Ask one catalogue about one ISBN the way a scan would, and say how it answered.
-
-    **A disposition and never what the catalogue returned**: answered,
-    answered nothing, refused or unreachable. **Admin only and rate limited for
-    the whole deployment**, a 429 past `ratelimit.SOURCE_TEST_LIMIT`, because
-    each test is a request to somebody else's server. A switched off source is
-    tested too. With no ISBN, a registry entry is asked the one its shipped
-    evidence names, so the result compares with that evidence directly.
-    """
-    return _evidence_out(await catalogue_access.probe(db, _testable(source), payload.isbn))
-
-
-#: The `code` of a delete refused because books quote the scheme. The client
-#: reads it with the `count` beside it to word the refusal in the reader's
-#: language; `SCHEME_IN_USE` in the frontend's `ClassificationSchemesSection`.
-SCHEME_IN_USE: Final = "scheme_in_use"
-
-
-def _scheme_out(row: ClassificationSchemeRow) -> ClassificationSchemeOut:
-    return ClassificationSchemeOut(
-        scheme=row.code,
-        name=row.name,
-        filing=row.filing,
-        built_in=classification_schemes.is_built_in(row.code),
-    )
-
-
-@refuses(404)
-def _scheme(scheme: str, db: DbSession) -> ClassificationSchemeRow:
-    """The scheme whose code is `scheme`, or a 404."""
-    row = db.get(ClassificationSchemeRow, scheme)
-    if row is None:
-        raise HTTPException(status_code=404, detail="No such classification scheme.")
-    return row
-
-
-@router.get("/classification-schemes", response_model=list[ClassificationSchemeOut])
-def list_classification_schemes(db: DbSession, current_user: CurrentUser) -> list[ClassificationSchemeOut]:
-    """Every scheme a heading may quote: the built in four, then the library's own.
-
-    **Any member**, because a book page names each heading's scheme from this
-    list. It says nothing about a book: no count, and no scheme is hidden for
-    being quoted only by somebody's private one.
-    """
-    return [_scheme_out(row) for row in classification_schemes.listing(db)]
-
-
-@router.post("/classification-schemes", response_model=ClassificationSchemeOut, status_code=201)
-def define_classification_scheme(
-    payload: ClassificationSchemeCreate,
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> ClassificationSchemeOut:
-    """Add a scheme. A code already taken is a 409.
-
-    **Admin only**, unlike defining a custom field: a scheme's filing rule is
-    fixed once defined, and what it files under orders a library's shelves.
-    """
-    try:
-        row = classification_schemes.define(db, payload.scheme, payload.name, payload.filing)
-    except classification_schemes.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    db.commit()
-    return _scheme_out(row)
-
-
-@router.patch("/classification-schemes/{scheme}", response_model=ClassificationSchemeOut)
-def rename_classification_scheme(
-    payload: ClassificationSchemeRename,
-    row: Annotated[ClassificationSchemeRow, Depends(_scheme)],
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> ClassificationSchemeOut:
-    """Rename a library's own scheme. A built in one is a 409."""
-    try:
-        classification_schemes.rename(db, row, payload.name)
-    except classification_schemes.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    db.commit()
-    return _scheme_out(row)
-
-
-@router.delete("/classification-schemes/{scheme}", status_code=204)
-def delete_classification_scheme(
-    row: Annotated[ClassificationSchemeRow, Depends(_scheme)],
-    db: DbSession,
-    current_user: Annotated[User, Depends(require_admin)],
-) -> None:
-    """Delete a scheme no heading quotes.
-
-    **A 409 naming how many books still quote it**, the owner's rule: no soft
-    delete and no reassignment. Its `detail` carries `code` `scheme_in_use` and
-    the `count` apart from the English sentence, for a client to word;
-    `classification_schemes.remove` says what the count covers. A built in
-    scheme is a 409 too, with a sentence only.
-    """
-    try:
-        classification_schemes.remove(db, row, current_user.id)
-    except classification_schemes.StillQuoted as refusal:
-        raise HTTPException(
-            status_code=409,
-            detail={"message": str(refusal), "code": SCHEME_IN_USE, "count": refusal.count},
-        ) from refusal
-    except classification_schemes.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    db.commit()
-
-
-# ── The local copy of each subject vocabulary ────────────────────────────────
-
-
-def _vocabulary_out(status: vocabulary_copy.Status) -> VocabularyOut:
-    copy, progress = status.copy, status.progress
-    return VocabularyOut(
-        scheme=status.scheme.id,
-        name=status.scheme.name,
-        licence=status.scheme.licence,
-        copyable=status.copyable,
-        entries=copy.entries if copy else None,
-        fetched_at=copy.fetched_at if copy else None,
-        released=copy.released if copy else None,
-        progress=(
-            VocabularyProgressOut(
-                phase=progress.phase, done=progress.done, total=progress.total, error=progress.error
-            )
-            if progress
-            else None
-        ),
-    )
-
-
-@router.get("/vocabularies", response_model=list[VocabularyOut])
-def list_vocabularies(
-    db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> list[VocabularyOut]:
-    """Every declared subject vocabulary: its licence, what is loaded of it and
-    when, and any download under way. **Admin only**, beside the download it
-    is read to start."""
-    return [_vocabulary_out(status) for status in vocabulary_copy.statuses(db)]
-
-
-@router.post("/vocabularies/{scheme}/download", response_model=VocabularyOut, status_code=202)
-@refuses(404)
-def download_vocabulary(
-    scheme: str, db: DbSession, current_user: Annotated[User, Depends(require_admin)]
-) -> VocabularyOut:
-    """Fetch the vocabulary's release and load it in the background, replacing
-    the copy in use only once the new one is complete. The first download and
-    every refresh are this one request.
-
-    A 404 for a vocabulary nobody declared. A 409 where its licence permits no
-    local copy, or a download of it is already under way.
-    """
-    try:
-        vocabulary_copy.start(scheme)
-    except vocabulary_copy.Unknown as unknown:
-        raise HTTPException(status_code=404, detail="No such vocabulary.") from unknown
-    except vocabulary_copy.Refused as refusal:
-        raise HTTPException(status_code=409, detail=str(refusal)) from refusal
-    return next(
-        _vocabulary_out(status) for status in vocabulary_copy.statuses(db) if status.scheme.id == scheme
-    )

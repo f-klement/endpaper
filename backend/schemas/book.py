@@ -40,8 +40,6 @@ from models import (
     LOCATION_MAX,
     MAX_PAGE_NUMBER_IN_A_BOOK,
     MAX_SERIES_INDEX,
-    MAX_YEAR,
-    MIN_YEAR,
     PUBLISHER_MAX,
     PURCHASE_SOURCE_MAX,
     SERIES_NAME_MAX,
@@ -79,6 +77,11 @@ if TYPE_CHECKING:
     # part of why this package requires 3.14. `__init__.py` then resolves it
     # with model_rebuild() once both modules are loaded.
     from schemas.loan import LoanOut
+
+# Loose bounds, meant to catch a typo or a scanner misread rather than to
+# adjudicate publishing history.
+MIN_YEAR = 1
+MAX_YEAR = 2200
 
 # A price in minor units (cents). The ceiling is 100 million cents, which is a
 # million in any ordinary currency: high enough for a genuinely rare book, low
@@ -918,10 +921,6 @@ class BookColumns(BaseModel):
     purchase_currency: str | None = None
     purchased_at: date | None = None
     purchase_source: str | None = None
-    #: The accession number on this copy's label, null until somebody assigns
-    #: one with `POST /api/books/bulk`. Member only: never on the public
-    #: catalogue, OAI-PMH or SRU (`tests/schemas/test_public.py`).
-    accession: str | None = None
     #: Where the record came from, null for a row written before anybody asked.
     record_origin: RecordOrigin | None = None
     #: Whether anything here changed the record since it arrived, null likewise.
@@ -1351,20 +1350,6 @@ class BookSearchOut(BaseModel):
     #: is exactly what asking harder would add. Empty means asking again would
     #: ask nothing new, whatever the reader presses.
     unasked: list[CatalogueSource]
-
-
-class NarrowableCatalogue(BaseModel):
-    """One catalogue a cataloguer may narrow a lookup or a search to.
-
-    **Only the catalogues this Library asks**, in its order, because a narrowing
-    naming any other is refused: offering one would be offering a 409.
-    """
-
-    source: CatalogueSource
-    #: Whether a narrowed ISBN lookup may name it.
-    answers_lookup: bool
-    #: Whether a narrowed title search may name it.
-    answers_search: bool
 
 
 class BookStatusUpdate(BaseModel):

@@ -5,6 +5,7 @@
  * Catalogue, lend and track a collection of books, on the shelf and in files, shared by the people who use it.
  * OpenAPI spec version: 1.0.0
  */
+import type { ClassificationScheme } from "./classificationScheme.ts";
 import type { HeadingKind } from "./headingKind.ts";
 
 /**
@@ -13,12 +14,7 @@ import type { HeadingKind } from "./headingKind.ts";
  * Accepted from the client rather than re-fetched, because the lookup that
  * produced it is the expensive part and the member may sit on the confirm
  * screen for a while. Nothing here is trusted beyond its own bounds: the
- * scheme is a bounded code, and both strings are bounded and stripped.
- *
- * **Whether the scheme has a row is not asked here**, because a model has no
- * session. The routes taking this from a client refuse one with a 422
- * (`routers.books._refuse_unknown_schemes`), and `classifications.add_headings`
- * drops one from a record, before `fk_classifications_scheme` would refuse it.
+ * scheme is a closed enum, and both strings are bounded and stripped.
  */
 export interface ClassificationIn {
   kind?: HeadingKind | null;
@@ -28,9 +24,5 @@ export interface ClassificationIn {
    * @maxLength 120
    */
   number: string;
-  /**
-   * @minLength 1
-   * @maxLength 20
-   */
-  scheme: string;
+  scheme: ClassificationScheme;
 }

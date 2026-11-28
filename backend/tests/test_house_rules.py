@@ -1003,7 +1003,7 @@ class TestEveryRequestBodyRowIdIsBounded:
     Only int-shaped fields are the question. A `str` bound by `max_length` is a
     different rule, and a `float` cannot overflow the driver.
 
-    Measured on the tree as it stands: **171** models under `schemas/`, **58** of
+    Measured on the tree as it stands: **148** models under `schemas/`, **52** of
     them reachable from a request.
 
     **What those two numbers count, because a bare number is what rots.** The
@@ -3647,16 +3647,22 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
 #: still data loss nobody can see, which is why the degrade logs rather than
 #: passing silently.
 #:
-#: **Meant to, and neither of these two does**, which is stated here rather than
-#: left as a promise the list makes and the code does not keep.
+#: **Meant to, and none of these three does**, which is stated here rather than
+#: left as a promise the list makes and the code does not keep. Measured
+#: 2026-09-06: a restored `classifications.scheme` of `udc`, which
+#: `test_backup.py` restores and asserts a 200 on, makes `PublicBookOut` raise,
+#: so it 500s the unauthenticated public catalogue. Nothing here degrades that.
 #:
-#: **So this list is the whole of what is still owed.** `books.format`,
-#: `books.condition` and `books.lending` are behind `DegradingEnum`, and what
-#: keeps these two honest is that the rule below reads for the type rather than
-#: for a name. `classifications.scheme` left the list by becoming a foreign key
-#: into `classification_schemes`, so it is no longer enum typed.
+#: **So this list is the whole of what is still owed**, where until 2026-09-16 it
+#: was half of it: `books.format`, `books.condition` and `books.lending` were
+#: parked in a second list with no decision at all, and they are behind
+#: `DegradingEnum` now. What keeps these three honest is that the rule below
+#: reads for the type rather than for a name.
 #:
-#: - Both columns are `nullable=False`, and the three above are nullable.
+#: **What each of them needs before it can move is not the same thing**, and a
+#: single reason given for three entries is this file's own named tell:
+#:
+#: - All three columns are `nullable=False`, and the three above are nullable.
 #:   `DegradingEnum` takes a `default`, so the move is available, but it is a
 #:   column declaration plus a default rather than a one line change, and the
 #:   rule below refuses a non-nullable column with no default for exactly this
@@ -3665,11 +3671,20 @@ class TestOnlyOneHelperTurnsForeignKeysOff:
 #: - `user_books.status` and `tags.category` have an obvious default each,
 #:   `UNREAD` and `CUSTOM`, and `models.py` already declares the first of them
 #:   on the column.
+#: - `classifications.scheme` has none, and that is a fact about the domain
+#:   rather than an omission: a scheme is what gives a number its reading, so
+#:   relabelling one is worse than dropping it. Degrading that column means
+#:   leaving the row out of the answer, which is a different shape from a
+#:   default and is not what `DegradingEnum` does.
 GROWING_ENUM_COLUMNS: dict[str, str] = {
     "user_books.status": (
         "ReadStatus has already grown once: WANT_TO_READ was added later and "
         "kept distinct from UNREAD because a Goodreads export carries the "
         "distinction."
+    ),
+    "classifications.scheme": (
+        "ClassificationScheme grows whenever a catalogue source is added, which "
+        "is an open issue rather than a hypothetical."
     ),
     "tags.category": ("TagCategory is the seeded vocabulary's shape, and the bilingual tag work touches it."),
 }
@@ -4237,10 +4252,12 @@ class TestEveryEnumColumnIsConstrainedOrExemptWithAReason:
         This is the only list left. The second one, which held columns with no
         decision at all, is closed: its three are behind `models.DegradingEnum`
         and the rule reads the type rather than a name. An entry here is a
-        column that can have neither half yet.
+        column that can have neither half yet, and `ClassificationScheme` is why
+        that is not an empty category.
         """
         assert set(GROWING_ENUM_COLUMNS) == {
             "user_books.status",
+            "classifications.scheme",
             "tags.category",
         }
 
@@ -4527,7 +4544,7 @@ class TestOnlyTheCatalogueBuildsAnUnfoldedRecord:
 
 
 class TestAnAddressIsServedOnlyWhereItIsNamed:
-    """An address reaches the schemas that exist for it, and no other.
+    """A member's address reaches the three schemas that exist for it, and no other.
 
     The rule is issue #80's, settled by the owner: an admin may read and write
     any address, a member may read and write their own, and **it is used and
@@ -4541,12 +4558,6 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
     see a book, with a 200 and nothing in any log. That is the shape the
     appearance columns were kept off `UserOut` to avoid, and it was kept off by
     a comment.
-
-    **A patron's address is the same rule's admin half**, not a widening: a
-    patron is a borrower with no account, and only an admin may read or write
-    the record (`routers/patrons.py`, gated on the router). The three patron
-    schemas are named below by name, so a model that nests one, such as a loan
-    naming its patron, is still a carrier and still fails here.
 
     Two passes, in the two places the field could arrive.
 
@@ -4623,9 +4634,6 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
         "MemberEmailOut": "the four routes in routers/users.py",
         "EmailUpdate": "the body those two writes take",
         "UserCreate": "the body the two routes that create an account take, #103",
-        "PatronOut": "a patron's record, served only by the admin only routers/patrons.py",
-        "PatronCreate": "the body that router registers a patron from",
-        "PatronUpdate": "the body that router changes a patron with",
     }
 
     #: The modules allowed to read `.email`, and why each must.
@@ -4662,13 +4670,6 @@ class TestAnAddressIsServedOnlyWhereItIsNamed:
     #: `ast` pass can see and is stated here rather than implied.
     ADDRESS_READERS_BY_RECEIVER = {
         "routers/auth.py": ({"payload"}, "registration sets one on the account it creates, #103"),
-        # The column, in the admin's search. Off `Patron` only: a `user.email`
-        # added to the same module is still reported.
-        "patrons.py": ({"Patron"}, "the admin's patron search matches a patron's own address"),
-        # A patron's own overdue notice goes to the address on their record
-        # (#24). Off the one local, `patron`: a `user.email` here is reported,
-        # because a member is chased in the app and never by mail.
-        "notifications.py": ({"patron"}, "a patron's own overdue notice is sent to their address"),
     }
 
     #: The name an address goes by on the wire.
@@ -4929,7 +4930,7 @@ class TestEveryTargetResolvesToADoorAndAReader:
         """Not a restatement of the derivation: it names the roster's answer.
 
         A derivation compared against itself is vacuous, so this writes out what
-        the twenty one rows actually say. A row whose capability changes has to change
+        the twenty rows actually say. A row whose capability changes has to change
         this line too, which is the argument the old test made for writing
         `SEARCH_SOURCES` out rather than deriving it, kept in the one place where
         it still costs nothing.
@@ -4953,7 +4954,6 @@ class TestEveryTargetResolvesToADoorAndAReader:
             "sbn",
             "porbase",
             "oszk",
-            "snk",
         }
         assert {source.value for source in sources.SEARCH_SOURCES} == {
             "dnb",
@@ -5095,7 +5095,7 @@ class TestNoModuleHardCodesASourceOrder:
       neither is ever two or more sources and neither is reported.
       `test_dropping_an_exemption_surfaces_only_its_own_literal` is what said
       so: with the entry kept, dropping it surfaced nothing.
-    * `targets.SEEDED`, the twenty one catalogue rows. **A mapping consulted by key**,
+    * `targets.SEEDED`, the twenty catalogue rows. **A mapping consulted by key**,
       the narrower claim `SERVES_GROUPS` makes: `metadata` reaches it with
       `SEEDED[name]`, and the four derivations in `sources.py` build
       `frozenset`s, which have no order to read. The order a household gets is
@@ -5492,7 +5492,7 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
     #: that only checks what it finds passes happily on a file whose subject has
     #: been deleted, which has happened twice in this suite.
     #:
-    #: **Two spellings, because a door takes one or the other.** Five take a
+    #: **Two spellings, because a door takes one or the other.** Four take a
     #: `metadata.Access`, which carries the plan along with the key and the
     #: logins; the two that send no login take the plan alone. Which is which is
     #: `tests/test_metadata.py::TestNoDoorTakesTheKeyAndThePlanApart`, with the
@@ -5505,10 +5505,6 @@ class TestEveryOutboundEntryPointTakesTheProviderList:
         "title_search": "access",
         "editions": "plan",
         "candidates": "access",
-        # It reads the key and the login off the access and asks the one target
-        # its caller names, so the plan arrives and is not consulted: the
-        # admin's test of a switched off source. Its docstring has the reason.
-        "probe": "access",
     }
 
     def _public_coroutines(self) -> dict[str, set[str]]:
@@ -5876,9 +5872,9 @@ class TestOneReaderPerAmbiguousSubfield:
 
     **Identity is the path, not `path.stem`.** That is the same defect one level
     down and it came through the rewrite untouched from the first version.
-    `application_modules()` already holds **fourteen** colliding stems, `auth`,
-    `backup`, `covers`, `imports`, `kosync`, `oai`, `opds`, `patrons`, `public`,
-    `readwise`, `registry`, `settings`, `sru` and `stats`, each
+    `application_modules()` already holds **eleven** colliding stems, `auth`,
+    `backup`, `covers`, `imports`, `kosync`, `opds`, `public`, `readwise`,
+    `settings`, `sru` and `stats`, each
     a module at the root and one under `routers/` or `schemas/`. Neither
     `metadata` nor `marc` collides today, which is why nothing failed; a reader
     added to `routers/metadata.py` would have been indistinguishable from the
@@ -5987,7 +5983,7 @@ class TestOneReaderPerAmbiguousSubfield:
         assert set(found) == {("metadata.py", "_subject_vocabulary")}
 
     def test_two_files_of_one_stem_are_two_sites(self):
-        """`path.stem` was the identity and fourteen stems already collide.
+        """`path.stem` was the identity and eleven stems already collide.
 
         `metadata` is not one of them today, so nothing failed; a reader added
         to `routers/metadata.py` would have been indistinguishable from the
@@ -6000,10 +5996,9 @@ class TestOneReaderPerAmbiguousSubfield:
     def test_the_stems_that_already_collide_are_still_only_these(self):
         """A count in prose does not recount itself, so this recounts it.
 
-        The docstring names fourteen, and it named seven until `sru.py` arrived
-        beside `routers/sru.py`, eight until `opds.py`, nine until `kosync.py`,
-        ten until `readwise.py`, eleven until `oai.py`, twelve until
-        `patrons.py` and thirteen until `registry.py` did. If a fifteenth
+        The docstring names eleven, and it named seven until `sru.py` arrived
+        beside `routers/sru.py`, eight until `opds.py`, nine until `kosync.py`
+        and ten until `readwise.py` did. If a twelfth
         appears the number above is stale, and this says so at the rule rather
         than leaving the next reader to trust it.
         """
@@ -6018,12 +6013,9 @@ class TestOneReaderPerAmbiguousSubfield:
             "covers",
             "imports",
             "kosync",
-            "oai",
             "opds",
-            "patrons",
             "public",
             "readwise",
-            "registry",
             "settings",
             "sru",
             "stats",
@@ -7141,20 +7133,6 @@ class TestOneInstanceIssuesALoan:
             "when a reminder last went out, which is delivery state rather "
             "than the loan: it says nothing about who has the book or when it "
             "is due, and it is stamped only after a send that succeeded"
-        ),
-        "notifications.py: writes loans.patron_notified_at": (
-            "the same delivery state for the patron's own notice, its own "
-            "column so a failure on one audience never silences the other "
-            "(owner, 2026-11-22)"
-        ),
-        "routers/patrons.py: builds a row shaped like a loan": (
-            "not a write at all: `PatronLoanOut`, one loan on a patron's record, "
-            "which shares the loan's column names. Reported rather than exempted, "
-            "for the reason the `serialisation.py` entry gives"
-        ),
-        "patrons.py: builds a row shaped like a loan": (
-            "`patrons.erase`, the one erasure: it takes a patron off their loans "
-            "and stamps the marker, keeping the dates. It issues no loan"
         ),
         "schemas/loan.py: writes loans.loaned_to_name": (
             "not the table at all: the request model normalising a blank name "
@@ -8672,14 +8650,7 @@ class TestOneDoorParsesAResponseBody:
         the distinction the companion rule turns on. It imports `fetch` for
         `pinned_client` and the address policy, keeps its own read loop, and
         parses nothing: an image is bytes. So it belongs in this set and has
-        nothing to be exempted from in the rule above. **`targets.py` is here
-        for one constant**, `fetch.TIMEOUT_SECONDS`, half of the ceiling on a
-        row's own bound, and fetches and parses nothing. **`vocabulary_copy.py`
-        is here for `fetch.download`**, which writes a release to disk; the file
-        is parsed by `vocabulary_dumps.py`, never as a response body.
-        **`credentials.py` is here for `fetch.HOUSEHOLD_ADDRESSES`**, which its
-        `household_admits` applies to an address an admin typed; it fetches and
-        parses nothing.
+        nothing to be exempted from in the rule above.
         """
         fetchers = {
             path.name for path in application_modules() if _imports_fetch(ast.parse(path.read_text()))
@@ -8689,13 +8660,9 @@ class TestOneDoorParsesAResponseBody:
             "metadata.py",
             "authority.py",
             "google_books.py",
-            "harvester.py",
             "opds.py",
             "covers.py",
             "readwise.py",
-            "targets.py",
-            "vocabulary_copy.py",
-            "credentials.py",
         }
 
 
@@ -9627,7 +9594,7 @@ _PARSERS_THE_LINTER_SEES = frozenset({"fromstring", "parse", "iterparse", "XMLPa
 #: The modules allowed to turn outside XML into a tree, each refusing a document
 #: type declaration first and capped on the bytes it reads. Every one says why in
 #: its own docstring.
-_MODULES_THAT_PARSE_XML = ("authority.py", "harvester.py", "marc.py", "metadata.py", "opds.py")
+_MODULES_THAT_PARSE_XML = ("authority.py", "marc.py", "metadata.py", "opds.py")
 
 
 #: The module whose parse entry points this rule is about.
@@ -9941,10 +9908,7 @@ def _parse_sites(source: str) -> list[tuple[str, tuple[str, ...]]]:
 _BYTE_DOORS: Final[dict[str, str]] = {
     "marc.py::_parsed": "tests/test_marc.py::TestAnUploadIsReadOrRefusedByName",
     "metadata.py::_parsed": ("tests/test_metadata.py::TestACatalogueAnswerIsReadOrRefusedByName"),
-    "harvester.py::_parsed": "tests/test_harvester.py::TestAResponseIsReadOrRefusedByName",
-    # The NAF's and the BNP's one parse; the BNP's path has its own property,
-    # `tests/test_authority.py::TestABnpAnswerIsReadOrRefusedByName`.
-    "authority.py::_tree": "tests/test_authority.py::TestANafAnswerIsReadOrRefusedByName",
+    "authority.py::_naf_read": "tests/test_authority.py::TestANafAnswerIsReadOrRefusedByName",
     "opds.py::read_page": "tests/test_opds.py::TestAPageIsReadOrRefusedByName",
     "backup.py::read_manifest": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
     "backup.py::_manifest_bytes": "tests/test_backup.py::TestAnArchiveIsReadOrRefusedByName",
@@ -9953,11 +9917,6 @@ _BYTE_DOORS: Final[dict[str, str]] = {
         "after the commit, where one it cannot read is declined alone"
     ),
     "backup.py::build_archive": "writes an archive, reads none",
-    "backup.py::_read_lines": (
-        "second round: a `_LINES` entry of the archive `read_manifest` read, a "
-        "line bounded by `_LINE_MAX`; a line that is not JSON, not an object or "
-        "too long is a `RestoreError`, each a named case"
-    ),
     "fetch.py::Fetched.json": (
         "second round: generated at this seam with the JSON lookups behind "
         "`metadata.NOT_DECODERS`; `RecursionError` is converted and a lone "
@@ -9972,18 +9931,6 @@ _BYTE_DOORS: Final[dict[str, str]] = {
         "unparseable, too deep and a list are each the reference's 400, and a "
         "lone surrogate is refused or dropped by `kosync.read_push`, each a "
         "named case"
-    ),
-    "vocabularies.py::_raw_entries": (
-        "second round: a data file the operator supplies or a converter wrote, "
-        "read only once its SHA-256 matches the one recorded; refusals are named "
-        "cases. `load_declaration` reads YAML through `yaml.safe_load`, which "
-        "this census does not resolve"
-    ),
-    "vocabulary_dumps.py::_nodes_of_line": (
-        "second round: a publisher's release, a line bounded by `MAX_VALUE`; "
-        "`_json_document` decodes the other serialisation through `raw_decode`, "
-        "which this census does not resolve, under the same bound. A malformed "
-        "or cut release is `ConversionFailed`, each a named case"
     ),
     "settings_store.py::get_json": (
         "second round: a stored row, which a restore can carry, degraded to an "

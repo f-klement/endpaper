@@ -28,10 +28,7 @@ import CollectionPicker from "./components/CollectionPicker";
 import CopiesPanel from "./components/CopiesPanel";
 import CopyPanel from "./components/CopyPanel";
 import ClassificationPanel from "./components/ClassificationPanel";
-import HeadingField from "./components/HeadingField";
-import PendingHeadingsPanel from "./components/PendingHeadingsPanel";
 import CustomFieldsPanel from "./components/CustomFieldsPanel";
-import CoverImagesPanel from "./components/CoverImagesPanel";
 import DigitalReferencesPanel from "./components/DigitalReferencesPanel";
 import OnlineLinksPanel from "./components/OnlineLinksPanel";
 import EnrichPicker from "./components/EnrichPicker";
@@ -47,7 +44,6 @@ import {
   useBookAccess,
   useBookActions,
   useBookCopies,
-  useBookCoverImages,
   useBookCustomFields,
   useBookEnrichment,
   useBookFiles,
@@ -55,15 +51,11 @@ import {
   useBookKosync,
   useBookLoan,
   useBookNotes,
-  useBookPendingHeadings,
-  useBookHeadingField,
   useBookProgress,
   useBookQuotes,
   useBookSections,
   type UseBookAccessResult,
   type UseBookActionsResult,
-  type UseBookPendingHeadingsResult,
-  type UseBookHeadingFieldResult,
   type UseBookCustomFieldsResult,
   type UseBookEnrichmentResult,
   type UseBookKosyncResult,
@@ -127,10 +119,7 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
   const enrichment = useBookEnrichment(bookId);
   const copies = useBookCopies(bookId);
   const files = useBookFiles(bookId);
-  const coverImages = useBookCoverImages(bookId);
   const customFields = useBookCustomFields(bookId);
-  const pendingHeadings = useBookPendingHeadings(bookId, currentUser.is_admin);
-  const headingField = useBookHeadingField(bookId);
   const showGoodreadsLink = useGoodreadsLookup();
   // Above the early returns, because hooks are. Null until the book lands, and
   // the page shows a spinner until then, so no section is ever drawn against a
@@ -174,7 +163,6 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             loan.error,
             access.error,
             progress.error,
-            pendingHeadings.error,
           ]}
         />
 
@@ -205,8 +193,6 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
             customFields={customFields}
             sections={sections}
             canDeleteTags={currentUser.is_admin}
-            pendingHeadings={pendingHeadings}
-            headingField={headingField}
           />
 
           <CollapsibleSection
@@ -242,26 +228,11 @@ export default function BookDetail({ currentUser }: BookDetailProps) {
               error={files.error}
               onForget={files.forget}
             />
-
-            {/* Here for the files' reason: an image of the back or the jacket
-                is evidence of which object this row is. */}
-            <CoverImagesPanel
-              title={book.title}
-              images={coverImages.images}
-              isUploading={coverImages.isUploading}
-              busy={coverImages.busy}
-              listError={coverImages.listError}
-              error={coverImages.error}
-              onUpload={coverImages.upload}
-              onRemove={coverImages.remove}
-              onShelve={coverImages.shelve}
-            />
           </CollapsibleSection>
 
           <LendingSection
             book={book}
             currentUserId={currentUser.id}
-            canLendToPatron={currentUser.is_admin}
             users={users}
             access={access}
             loan={loan}
@@ -466,10 +437,6 @@ interface FilingSectionProps {
   sections: UseBookSectionsResult;
   /** Deleting a tag is admin only on the server; anybody else gets a 403. */
   canDeleteTags: boolean;
-  /** A harvest's suggestions, which only an admin is ever handed. */
-  pendingHeadings: UseBookPendingHeadingsResult;
-  /** Headings offered from a local vocabulary copy, in library mode. */
-  headingField: UseBookHeadingFieldResult;
 }
 
 /** Where the book sits in this library: its tags, shelf and collection. */
@@ -482,8 +449,6 @@ function FilingSection({
   customFields,
   sections,
   canDeleteTags,
-  pendingHeadings,
-  headingField,
 }: FilingSectionProps) {
   const { t } = useTranslation();
 
@@ -524,29 +489,6 @@ function FilingSection({
           and a caption is that flattening them loses which is which. */}
       <ClassificationPanel classifications={book.classifications ?? []} />
 
-      {/* Under the headings it adds to, so a cataloguer sees what the book
-          carries before choosing another. */}
-      <HeadingField
-        vocabularies={headingField.vocabularies}
-        scheme={headingField.scheme}
-        onChooseScheme={headingField.chooseScheme}
-        typed={headingField.typed}
-        onType={headingField.type}
-        suggestions={headingField.suggestions}
-        onPick={headingField.pick}
-        isPicking={headingField.isPicking}
-        error={headingField.error}
-      />
-
-      {/* Straight under the headings it would add to, so an admin reads
-          what the book carries before what a harvest suggests. */}
-      <PendingHeadingsPanel
-        headings={pendingHeadings.headings}
-        isBusy={pendingHeadings.isBusy}
-        onConfirm={pendingHeadings.confirm}
-        onDiscard={pendingHeadings.discard}
-      />
-
       {/* Beside the classification: both are a catalogue's statements
           about the book, kept apart from the household's own. */}
       <OnlineLinksPanel
@@ -584,8 +526,6 @@ function FilingSection({
 interface LendingSectionProps {
   book: BookOut;
   currentUserId: number;
-  /** An admin's alone: `LoanPanel` says why. */
-  canLendToPatron: boolean;
   users: UserOut[];
   access: UseBookAccessResult;
   loan: UseBookLoanResult;
@@ -597,7 +537,6 @@ interface LendingSectionProps {
 function LendingSection({
   book,
   currentUserId,
-  canLendToPatron,
   users,
   access,
   loan,
@@ -628,7 +567,6 @@ function LendingSection({
         <LoanPanel
           book={book}
           members={users.filter((member) => member.id !== currentUserId)}
-          canLendToPatron={canLendToPatron}
           isBusy={loan.isBusy}
           isSavingDetails={actions.isSavingDetails}
           onSaveLending={actions.updateDetails}

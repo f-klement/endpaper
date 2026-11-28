@@ -7,7 +7,6 @@ cares about, because the failure is silent in exactly one direction.
 """
 
 import contextlib
-import dataclasses
 import functools
 import itertools
 import json
@@ -16,10 +15,9 @@ from pathlib import Path
 
 import pytest
 
-import registry
 import sources
 import targets
-from enums import CatalogueSource, ClassificationScheme, CredentialKind, RegisteredCatalogue, Transport
+from enums import CatalogueSource
 from isbn import registration_group
 
 #: The survey `sources.MEASURED` and `sources.TIER_UNION` were read off.
@@ -188,9 +186,9 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
     re-running the probe, not running this suite.
 
     **The file is not one run any more, and its name says one date.** Every column
-    but eleven is the 2026-08-31 pass; `bne` is a 2026-09-05 pass over the same
+    but ten is the 2026-08-31 pass; `bne` is a 2026-09-05 pass over the same
     500 books, `bnu` a 2026-11-07 one, `bn_pl`, `libris`, `kb_dk`, `bibsys` and
-    `melinda` 2026-11-16 ones and `sbn`, `porbase`, `oszk` and `snk` 2026-11-17 ones,
+    `melinda` 2026-11-16 ones and `sbn`, `porbase` and `oszk` 2026-11-17 ones,
     each with its `seconds_` column. The coverage
     counts stay comparable, because those are a property of the books rather
     than of the day. `p90_seconds` is not comparable
@@ -313,9 +311,9 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             assert sources.TIER_UNION[size] == answered, size
 
     def test_the_tail_marginal_the_order_rests_on_recomputes(self):
-        """`TAIL_MARGINAL` reads 34, 30, 29, 26, 25, 17, 4, 90, 1, 43, 40, 9, 7
-        and 7, the sample's figures plus the three frames', which its docstring
-        gives one source at a time.
+        """`TAIL_MARGINAL` reads 34, 30, 29, 26, 25, 17, 90, 1, 43, 40, 9, 7 and
+        7, the sample's figures plus the three frames', which its docstring gives
+        one source at a time.
 
         The pooled counts order the tail differently, and that sentence of the
         docstring is pinned at the end here.
@@ -332,7 +330,6 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             CatalogueSource.SBN: 26,
             CatalogueSource.PORBASE: 25,
             CatalogueSource.OSZK: 0,
-            CatalogueSource.SNK: 4,
             CatalogueSource.OPEN_LIBRARY: 82,
             CatalogueSource.OENB: 1,
             CatalogueSource.NKP: 42,
@@ -348,7 +345,6 @@ class TestTheConstantsAreRederivableFromTheCommittedSample:
             CatalogueSource.SBN: 0,
             CatalogueSource.PORBASE: 0,
             CatalogueSource.OSZK: 17,
-            CatalogueSource.SNK: 0,
             CatalogueSource.OPEN_LIBRARY: 8,
             CatalogueSource.OENB: 0,
             CatalogueSource.NKP: 1,
@@ -1472,8 +1468,8 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         assert sum(row in free or row in found for row in rows) == 437
 
     def test_the_saving_the_constant_claims_recomputes(self):
-        """`SERVES_GROUPS` states 2.376s becoming 1.263s and 2,325 tail requests
-        becoming 781. A number written in prose stops being re-derived and starts
+        """`SERVES_GROUPS` states 2.366s becoming 1.268s and 2,151 tail requests
+        becoming 748. A number written in prose stops being re-derived and starts
         being copied."""
         rows = _sample()
         tier, tail = _free_plan_names()
@@ -1496,10 +1492,10 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         # refuses it, which is correct about the types and wrong about the test.
         plain_seconds, plain_requests = totals(False)
         served_seconds, served_requests = totals(True)
-        assert plain_seconds == pytest.approx(2.376, abs=0.001)
-        assert plain_requests == 2325
-        assert served_seconds == pytest.approx(1.263, abs=0.001)
-        assert served_requests == 781
+        assert plain_seconds == pytest.approx(2.366, abs=0.001)
+        assert plain_requests == 2151
+        assert served_seconds == pytest.approx(1.268, abs=0.001)
+        assert served_requests == 748
 
     def test_skipping_saves_what_demoting_cannot(self):
         """**Why the rule skips rather than demotes**, which is the design this
@@ -1507,11 +1503,11 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         because it cannot lose a book.
 
         Moving a source that cannot answer to the back of the tail models at
-        1.6635s, against 2.3761s asking everything in order and 1.2627s
+        1.6600s, against 2.3663s asking everything in order and 1.2676s
         skipping. Demotion recovers what a dead source costs ahead of the
-        answerer, which is large now that seven remitted rows head the tail.
+        answerer, which is large now that six remitted rows head the tail.
         What it cannot recover is the failed lookups: on a row nothing answers
-        every source is asked whatever the order, and the 0.401s between the
+        every source is asked whatever the order, and the 0.392s between the
         first and last figures is that.
         """
         rows = _sample()
@@ -1524,9 +1520,9 @@ class TestACatalogueIsOnlyAskedAboutTheISBNsItsRemitReaches:
         mean = sum(_walk(row, tier, demoted(row))[0] for row in rows) / len(rows)
         plain = sum(_walk(row, tier, tail)[0] for row in rows) / len(rows)
         skipped = sum(_walk(row, tier, _served_tail(tail, row))[0] for row in rows) / len(rows)
-        assert mean == pytest.approx(1.6635, abs=0.0001)
-        assert plain == pytest.approx(2.3761, abs=0.0001)
-        assert skipped == pytest.approx(1.2627, abs=0.0001)
+        assert mean == pytest.approx(1.6600, abs=0.0001)
+        assert plain == pytest.approx(2.3663, abs=0.0001)
+        assert skipped == pytest.approx(1.2676, abs=0.0001)
         assert sum(_walk(row, tier, demoted(row))[1] for row in rows) == 429
 
     def test_an_unrestricted_source_is_asked_about_every_isbn(self):
@@ -1929,93 +1925,3 @@ class TestEverySeededTargetAnswersSomething:
         assert sources.LOOKUP_SOURCES
         assert sources.SEARCH_SOURCES
         assert targets.SEEDED
-
-
-class TestARowSaysHowItsCatalogueIsAsked:
-    """What a compliance reader needs from each row, read off its target.
-
-    **The rows a policy is most likely written about are pinned by name**: the
-    Library of Congress is reached in clear text and Google Books is a keyed
-    commercial API. The rest are held to `targets.SEEDED` and
-    `sources.CLASSIFIES`, which is where every value comes from."""
-
-    @staticmethod
-    def _described() -> dict[CatalogueSource, sources.Described]:
-        plan = sources.parse(
-            {"sources": [{"source": s.value, "enabled": True} for s in sources.DEFAULT_ORDER]}
-        )
-        return {
-            row.source: row
-            for row in sources.describe(plan, ready=frozenset(CatalogueSource), credentials=frozenset())
-        }
-
-    def test_the_library_of_congress_is_shown_as_unencrypted_sru_asking_for_mods(self):
-        row = self._described()[CatalogueSource.LOC]
-        assert (row.protocol, row.record_schema, row.encrypted) == (Transport.SRU, "mods", False)
-
-    def test_google_books_is_shown_as_its_own_api_wanting_an_api_key(self):
-        row = self._described()[CatalogueSource.GOOGLE_BOOKS]
-        assert (row.protocol, row.encrypted, row.credential) == (
-            Transport.BESPOKE,
-            True,
-            CredentialKind.API_KEY,
-        )
-
-    def test_a_catalogue_wanting_a_login_says_login_rather_than_key(self):
-        row = self._described()[CatalogueSource.BNA]
-        assert row.credential is CredentialKind.LOGIN
-
-    def test_a_z3950_door_is_never_shown_as_encrypted(self):
-        z3950 = [row for row in self._described().values() if row.protocol is Transport.Z3950]
-        assert z3950
-        assert not any(row.encrypted for row in z3950)
-
-    def test_every_row_supplies_the_schemes_its_reader_declares(self):
-        for source, row in self._described().items():
-            assert set(row.classification_schemes) == sources.CLASSIFIES[targets.SEEDED[source].reader], (
-                source
-            )
-
-    def test_the_dnb_supplies_gnd(self):
-        assert ClassificationScheme.GND in self._described()[CatalogueSource.DNB].classification_schemes
-
-
-class TestAPickIsAskedOnlyAtTheTailOfALookup:
-    """`Plan.picked`: after the whole chain, and on no other path."""
-
-    PICKED = (registry.ENTRIES[RegisteredCatalogue.NLS].target,)
-
-    def _plan(self) -> sources.Plan:
-        return dataclasses.replace(sources.DEFAULT_PLAN, picked=self.PICKED)
-
-    def test_the_lookup_roster_is_the_chain_then_the_picks(self):
-        plan = self._plan()
-        assert plan.lookup_roster == (*sources.DEFAULT_PLAN.lookup_chain, RegisteredCatalogue.NLS)
-
-    def test_a_pick_is_in_no_seeded_roster(self):
-        plan = self._plan()
-        seeded = (
-            plan.asked,
-            plan.lookup_chain,
-            plan.lookup_together,
-            plan.lookup_in_turn(None),
-            plan.searched_harder,
-        )
-        assert seeded == (
-            sources.DEFAULT_PLAN.asked,
-            sources.DEFAULT_PLAN.lookup_chain,
-            sources.DEFAULT_PLAN.lookup_together,
-            sources.DEFAULT_PLAN.lookup_in_turn(None),
-            sources.DEFAULT_PLAN.searched_harder,
-        )
-
-    def test_a_pick_alone_is_still_a_roster(self):
-        everything_off = sources.in_force(sources.DEFAULT_PLAN, frozenset())
-        plan = dataclasses.replace(everything_off, picked=self.PICKED)
-        assert plan.lookup_chain == ()
-        assert plan.lookup_roster == (RegisteredCatalogue.NLS,)
-
-    def test_narrowing_a_plan_drops_its_picks(self):
-        # A narrowed lookup goes through `in_force` and asks only what it names.
-        narrowed = sources.in_force(self._plan(), frozenset({CatalogueSource.DNB}))
-        assert narrowed.picked == ()

@@ -10,9 +10,9 @@ import {
 } from "../../../api/generated/model";
 import {
   KIND_LABEL,
+  SCHEME_LABEL,
   headingKind,
   headingText,
-  schemeLabel,
 } from "../../../lib/classificationLabels";
 
 interface ClassificationPickerProps {
@@ -160,7 +160,7 @@ function HeadingChip({
       onClick={() => onToggle(headingKey(facet))}
     >
       <span className={selected ? "opacity-80" : "opacity-70"}>
-        {schemeLabel(facet.scheme, t)}
+        {t(SCHEME_LABEL[facet.scheme])}
       </span>
       {/* The caption where the record carried one, the identifier where it
           did not. A GND chip showing `facet.number` is a row of digits. */}

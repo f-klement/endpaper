@@ -2324,10 +2324,9 @@ says so rather than implying a round trip.
 `Z` under a plain comparison; collation for display order is a separate change.
 ### A route docstring is API documentation, not an internal comment
 
-FastAPI serves a handler's docstring as the operation description in `/openapi.json`, which
-any signed in member can read, and `orval` ships it as a doc comment in
-`frontend/src/api/generated/`. So a route docstring has an audience that cannot open the
-repository.
+FastAPI serves a handler's docstring as the operation description at `/docs`, `/redoc` and
+`/openapi.json`, and `orval` ships it as a doc comment in `frontend/src/api/generated/`. So
+a route docstring has an audience that cannot open the repository.
 
 Recorded because moving logic out of two handlers took their documentation with it.
 Measured on `openapi.json`: `POST /api/books/authors/merge` went from **1277 characters to
@@ -3084,9 +3083,9 @@ books the viewer may not see. That is the `list_tags` disclosure again by a
 different door.
 
 **The fourth pass reports every read of those tables and decides nothing.** Which
-statements are safe is a hand written allowlist, each entry a source fragment and
+statements are safe is a hand written allowlist of ten, each a source fragment and
 a reason, with a test asserting the fragment appears in the statement at the line
-it is matched to. Some entries are correct queries reported anyway, and a test
+it is matched to. Two of the ten are correct queries reported anyway, and a test
 keeps them reported so the cost is not quietly removed.
 
 **Deciding correctness was tried first and abandoned on evidence.** Five versions
@@ -5846,12 +5845,10 @@ writer here can produce**, and these pass it: the identifier arrives free from a
 this app already has a reason to read.
 
 Being able to resolve one is a later question, and it runs the other way. `acervo.bn.gov.br`
-answers 403 to every agent tried and has no open Z39.50 port, and the rest were measured on
-2026-11-18 once the Z39.50 client existed: Portugal's authority file answers by number over
-plain HTTPS and is resolved; Spain's, Italy's and Argentina's do not take a stored number over
-any protocol this app speaks, and Chile's accepts no connection. So an adapter is blocked on
-the libraries rather than on this list, and the identifier stored today is what makes one
-cheap on the day a library serves it.
+answers 403 to every agent tried and has no open Z39.50 port, and the rest wait on a Z39.50
+transport this app does not have. So an adapter is blocked on a transport rather than on
+this list, and the identifier stored today is what makes that adapter cheap on the day the
+transport lands.
 
 `SUDOC` is deliberately still absent though every cluster carries it: it is a French union
 catalogue rather than one of the six national files that were asked for.
@@ -6160,55 +6157,21 @@ would have been permanent. A Renovate custom manager now raises the version from
 new hash, so the merge request is expected to be red at `sha256sum -c` until a person
 supplies it, and that failure is the design rather than a defect.
 
-### YAZ checks a TLS target's certificate
+### YAZ encrypts a TLS connection and does not authenticate it
 
 
 Up to 5.37.3 YAZ performed no certificate verification: `verify_peers`,
 `set_x509_system_trust`, `session_set_verify_cert`, `set_x509_trust_file` and
 `GNUTLS_CERT` appeared nowhere in `src/` or `client/`, checked on 5.35.1 and 5.37.3, and
 `src/tcpip.c` allocated certificate credentials without ever loading a trust store.
-5.38.0 added it as an opt in: `gnutls_certificate_verify_peers3` against the system trust,
-behind the ZOOM option `check_cert`, which defaults to 0. Without it an `ssl:` target is
-protected against a passive listener and not against anyone who can answer for the address.
-
-**`_options()` in `backend/z3950_yaz.py` sets `check_cert` to 1 on every connection, and
-no target can turn it off**, because a setting a target can switch off is a default rather
-than a bound. It is on before any target uses TLS, so the first `ssl:` target added has
-to verify from its first lookup. None does yet, though four seeded rows reach Z39.50: a
-row's address is `z3950://host:port/database` in `_Z3950_ADDRESS`'s grammar in
-`backend/targets.py`, whose host admits no colon, so no row can spell `ssl:` and every
-live lookup is `tcp:`. The first `ssl:` target arrives with a change to that grammar.
-
-**An older YAZ would ignore the option without a word**, as ZOOM ignores any key it does
-not know, and connect unverified. `test_z3950_yaz.py` holds the Dockerfile's pinned
-version at 5.38.0 or later for that reason.
-
-Measured 2026-11-19 in a pod on the released image (YAZ 5.38.1, running as uid 1000),
-driving `CtypesBindings` with `_options()` as it stands:
-
-| Target | `check_cert` 1 | `check_cert` 0 |
-|---|---|---|
-| `ssl:` to a self signed certificate | `[10000] Connect failed` in 0.05 s | `[10007] Timeout` after the handshake |
-| `ssl:` to a public host by IP, so the name does not match | `[10000] Connect failed` | `[10007] Timeout` |
-| `ssl:` to a public host by name, valid certificate, not Z39.50 | `[10007] Timeout`: verified, then no Init answer | the same |
-| `tcp:` to a plain listener | `[10007] Timeout` | the same |
-| `lx2.loc.gov:210` | connected, and a search answered | the same |
-
-gnutls loaded 118 certificates from the system trust, `ca-certificates`. The base image
-carries it, and the runtime stage's `apk add` names it anyway, because a base without it
-would refuse every `ssl:` target in a way that looks like each being down. **YAZ does not log that count** and offers no hook to ask for it, so a check at
-startup would mean binding gnutls directly for one log line; the valid public certificate
-verifying is the same fact, shown end to end. With an empty store the check fails closed:
-every `ssl:` target is refused.
-
-**A refused certificate reaches a caller as an ordinary connect failure.** ZOOM reports
-`ZOOM_ERROR_CONNECT` with the address as its detail; the reason gnutls gave (`status=66`
-for an unknown signer, `16386` for a wrong name) goes only to YAZ's own log, which is off.
-So `classify` makes it `Unreachable`, the same as a closed port. To learn why a new `ssl:`
-target is down, set `YAZ_LOG=comstack` in the container's environment and restart it:
-YAZ reads that variable once when the library initialises, and writes `TLS certificate
-verification failed: status=... host=...` to standard error, which is the pod log. That
-level logs every connection, so it is for the diagnosis and comes off after.
+5.38.0 added it as an opt in, checked with the same grep: `gnutls_certificate_verify_peers3`
+against the system trust, behind the ZOOM option `check_cert`, which defaults to 0. This
+application does not set it (the options it does set are `_options()` in
+`backend/z3950_yaz.py`), so the position is unchanged by the upgrade: an `ssl:`
+target is protected against a passive listener and not against anyone who can answer for
+the address. Recorded rather than acted on: no target this application reaches uses TLS.
+Turning `check_cert` on is an issue in the tracker, not done here, because the first
+`ssl:` target added would then need its certificate to verify.
 
 ### A suite pod must not outlive the run that made it
 
@@ -7532,50 +7495,6 @@ household never touched moves, which the ticket forbids.
 A design seat proposed a stored cut position driving `_SECONDARY_SOURCES` and it
 was refused on that measurement. Recorded because it is the obvious next
 proposal and the reason it does not work is not obvious.
-
-### An institution's order is an ask order too, and trust stays measured
-
-Ticket 32's second story asked an institution to order its sources "so that the catalogue we
-trust most fills a field first". That is the trust order, and the stored list is the ask order;
-the entry above gives the three measured reasons one list cannot drive both. The owner chose
-on 2026-11-19 to narrow the story to ask order rather than add a second list or let the ask
-order overturn `_MATCH_PRECEDENCE` and `_preferred_source`.
-
-**Why not a second list.** Scanning asks with nobody watching, so whatever decides a contested
-field decides it for every book scanned. The measured precedence is the better default there,
-and an order an admin sets once for compliance reasons is not evidence about which catalogue
-spells a title better. Where a cataloguer does want a say, per search narrowing (ticket 133)
-gives it at the moment the choice is made, which is the shape Koha's human in the loop takes.
-
-**Why not make the ask order the trust order.** It would move the field a household never
-touched: an institution that switches off Open Library and K10plus on compliance grounds would
-also change which catalogue's title wins, without being told.
-
-The settings page already says the order changes who is asked and not who is believed, so the
-screen needed no new line.
-
-### Which schemes a catalogue supplies is declared per reader
-
-The provider list warns before switching off the last supplier in force of a classification
-scheme. The supplier map is `sources.CLASSIFIES`, keyed on the reader, and a source's schemes
-follow from `targets.Target.reader`. The ticket named the DNB as the only supplier of GND and
-the Library of Congress as the only one of LCC; read off the decoders, neither holds: every row
-whose reader is `MARC_GND` can supply GND, and Open Library supplies LCC. So on the roster of
-2026-11-19, with every row in force, the warning fires for one row alone: the Library of
-Congress, the only supplier of LCSH. Switching off the DNB, the case the ticket named, warns of
-nothing, because every other `MARC_GND` row counts as a GND supplier whether or not its records
-carry GND headings. The owner accepted that on 2026-11-19. A seeded row changes it without
-touching this table.
-
-**A supplier is a row in force**, switched on and able to answer, which is what
-`sources.in_force` asks of a lookup. A row without its key is no supplier, and switching it off
-asks nothing.
-
-**A capability, not a measurement of any catalogue's records.** A reader that can produce a
-scheme counts as a supplier whether or not that library fills the field, so the warning errs
-towards silence. Measuring each catalogue's actual yield would need live sampling per source
-and would go stale; the declaration is held to the decoders by
-`tests/test_decoders.py::TestEveryReaderDeclaresTheSchemesItProduces`.
 
 ### The tier a source is asked in is a position, not a property of the source
 
@@ -9975,9 +9894,10 @@ fifth MARC source, and the sentence was rewritten to name which two sources appl
 rather than to count anything. Its verdict went with it, and this guard is how that was
 noticed rather than left.
 
-The census raises 2 candidates in it. **0** are live claims the guard now checks against
-`sources.py`; **2** are not the roster, being one of this entry's own worked examples and a
-survey of national libraries in the Z39.50 transport entry.
+The census raises 3 candidates in it. **0** are live claims the guard now checks against
+`sources.py`; **3** are not the roster, being one of this entry's own worked examples, a
+sentence about what a shared pattern would have changed, and a survey of national libraries
+in the Z39.50 transport entry.
 All three figures are recomputed from the verdict table rather than reread.
 
 **Rejected: an enumeration of sites.** A list of regexes goes stale exactly like the numbers
@@ -11081,9 +11001,6 @@ The same reasoning gives it the catalogue's rate limit counter rather than one o
 size: there is one published catalogue, and a harvester and a browser reading the same
 records should not have two budgets between them.
 
-The SRU server also has a switch of its own, read after this gate: see *The SRU server has a
-switch of its own*.
-
 ## The column boundary for a MARC record is `marc.py`'s field mapping, and it is now pinned
 
 `Shelf.seen_by_the_public` filters rows and `schemas/public.py` is the column boundary for
@@ -11146,8 +11063,6 @@ obvious derivation fails: "the column has no length limit" gets `dc.description`
 `dc.subject` wrong, since its column is `String(100)` and its cost is a correlated `EXISTS`
 over a join. The two classes are declared per row with no default, so a thirteenth index
 cannot be added without somebody deciding what it costs.
-`dc.subject` adds a charge per tag per book on top of its class: see *`dc.subject` is
-charged by the public shelf's tags per book*.
 
 **The parse bounds stay.** They bound structure, which is memory and stack; the budget
 bounds work, which is CPU. Neither is the other, and the budget is applied on top, so it is
@@ -11554,14 +11469,10 @@ now.** A scheme has to be a value some writer can produce, which was the rule
 the old sentence was reaching for and which these pass: the identifier
 arrives free from a VIAF cluster this app already has a reason to read.
 Being able to *resolve* one is a separate and later question, and it is what
-makes the argument run the other way: Brazil answers 403 to every agent
-tried and has no open Z39.50 port. Argentina does have one:
-`200.123.191.9:9991/BNA10` serves its MARC21 authority file with the login
-the app already ships for the catalogue row, but no index there takes the
-stored number, only a name (measured 2026-11-18). So an adapter for either
-is blocked on something other than this list, and the identifier stored
-today is what makes that adapter cheap on the day the library serves the
-number.
+makes the argument run the other way: Brazil and Argentina answer 403 to
+every agent tried and have no open Z39.50 port, so an adapter for them is
+blocked on a transport rather than on this list, and the identifier stored
+today is what makes that adapter cheap on the day the transport lands.
 
 So the closed set is still closed for the same reason: a member has to be
 something a writer here produces. What changed is that six more things are.
@@ -12560,24 +12471,22 @@ held one bespoke source whose secret is a settings row.
 
 **The mapping is resolved for the SRU targets and no others**, because the SRU door is what
 passes a credential to `fetch`. A bespoke target's secret is an argument to its own adapter,
-so a login resolved for one would be dropped without a word. `metadata.resolve` refuses that
-residual at boot, where a row naming an unservable capability is turned away: which store a
-source's secret lives in is `targets.Target.credential_kind`, and a row whose credential is a
-login going out of a door that carries none is refused.
-`tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` asks the same of
-the roster.
+so a login resolved for one would be dropped without a word. That residual cannot be refused
+in `metadata.resolve`, which is where a row naming an unservable capability is turned away at
+boot: which store a source's secret lives in is `settings_store._SECRET_IS_A_SETTINGS_ROW`,
+and the capability that would make it refusable is not built yet. Until then
+`tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is the tripwire.
 
-**Which transport carries a login has one spelling, `metadata.carries_a_credential`, a
-column of `metadata._DOORS`.** `metadata.resolve` reads that column for the refusal above,
-and the tripwire and `TestWhichDoorCarriesALogin` ask the predicate; no production code calls
-it. A copy of the rule written into the tripwire instead would be the edit a red tripwire asks
-for, and would green while the door still dropped the login. The predicate is measured against
-the wire rather than compared with a
+**Which transport carries a login has one spelling, `metadata.carries_a_credential`, and the
+router and the tripwire both ask it.** Written at both sites instead, the day a transport
+starts carrying one turns the tripwire red and the cheap edit is to the test's own copy,
+which greens the suite while the router still skips the row and the request still goes out
+unauthenticated. The predicate is measured against the wire rather than compared with a
 second reading of the transport field: `TestWhichDoorCarriesALogin` drives every seeded row
 that answers a lookup through `_lookup_one` holding a login for that row's own origin, and
-asserts the answer matches whether an `Authorization` header left the process. The column is
-a declaration and each door's own `lookup` is the behaviour, so that test compares the two
-rather than the rule with itself.
+asserts the answer matches whether an `Authorization` header left the process. `_lookup_one`
+still spells the transport test at its own branch, deliberately, because calling the
+predicate there would make that test compare the rule with itself.
 
 **The call sites are guarded structurally rather than by one behavioural test each.** Measured
 by mutation: dropping the credential inside `metadata._sru_search` was caught only in
@@ -12776,25 +12685,6 @@ rather than implied: the key lives in the operator's environment, so the operato
 decrypt every credential stored on the instance. That is a property of holding the key, not
 a defect to be fixed by a switch, and a deployment whose tenants cannot accept it should not
 offer the feature.
-
-## A catalogue login is stored only for a source whose credential is a login
-
-Owner's decision, 2026-11-22. `PUT /api/settings/catalogue-sources/{source}/credential`
-answers 409 for a source whose `targets.Target.credential_kind` is not LOGIN, naming that it
-takes none, and the settings screen offers only the sources that take one.
-
-**It reverses the rule the route's docstring stated**: any roster source, because a library
-may hold an account at a catalogue that also answers anonymously. Nothing ever sent such a
-login. `settings_store.catalogue_logins` resolves one for `sources.NEEDS_A_LOGIN` and no other
-source, so a login stored for a free catalogue, or for Google Books, whose credential is this
-deployment's key, was sealed, shown on the screen as held, and read by nothing. Accepting it
-promised an effect the code did not have.
-
-**The delete is unchanged.** A row stored before the refusal, or carried in by an archive, is
-still removable, for the reason `catalogue_credentials` carries no foreign key.
-
-The 409 is undeclared in the schema, like every other 409: `refusals.DECLARED` holds 401, 403
-and 404 only.
 
 ## The importer gets a reader per service, rather than a pre-pass in front of one path
 
@@ -13481,196 +13371,24 @@ would make the public catalogue a weaker artefact than the thing it imitates.
 one named field joining it and not a relaxation of the rule. The security seat owns the check
 that it is the only surface that moved.
 
-## Harvesting an OAI-PMH repository (owner, 2026-11-20)
+## A harvested Book is owned by the harvest, not by the admin who ran it
 
-### A harvested Book has no owner, points at its harvest run, and is never private
+Owner's decision, 2026-09-07, against the recommendation that it be attributed to the
+running admin.
 
-This replaces the owner's decision of 2026-09-07, which gave harvested Books to a service
-account because the owner column could not be empty. It can, and has been since the baseline
-(`books.added_by_user_id` is nullable). A service account as a `users` row is adopted, with its
-Books, by any proxy or LDAP identity of the same name, so the run is recorded in `harvests`
-instead, one row per run, and `books.harvest_id` points at it.
-`ck_books_harvested_is_nobodys_and_public` (`harvest_id IS NULL OR (added_by_user_id IS NULL
-AND NOT is_private)`) holds it in the database. An ownerless private row would be seen by
-nobody, so `set_privacy` refuses with a 409. The reason harvested rows are public is
-unchanged: an institution cataloguing its holdings is publishing them, and a bulk import that
-lands three thousand private rows only defers the decision to whoever has to unprivate them.
+Attribution to a person is a claim, and a bulk import of three thousand records is not that
+person's shelf. **A service account says what actually happened**, and it keeps the harvest
+out of every place that reasons about what a member added.
 
-**The per member statistics count Books a member added.** A harvested Book has no adder, so it
-is in the total and in no member's row, the way an unfiled Book is in no collection's.
+**This needs a non human owner, which does not exist today**, and that is the cost the
+decision accepts rather than a reason to refuse it. Every row needs an owner and the column
+is not nullable, so the concept has to be built rather than worked around. **It is very
+likely the same concept the patron record needs**, which also introduces an actor who is not
+a member of the household, and building two would be storing one fact twice.
 
-### The repository may be a household address, over http or https
-
-Migrating off another system on the same network is the case the feature exists for. Every
-request goes through `fetch.py`'s pinned client under `HOUSEHOLD_ADDRESSES`; the settings write
-refuses an address literal that policy refuses, and the settings card says this is the one
-setting that makes the server connect where a person typed. This server's own loopback is
-admitted with the household range, as at the OPDS door: an admin may point a harvest at a
-service on the pod's loopback, which the OPDS client already allows.
-
-**The harvester's switch is refused on without a repository**, as the OAI provider's switch is
-without a contact address. The write answers 409, and the card holds the switch off with the
-reason under it. `settings_store.harvest_repository` reads library mode, the switch and a non
-blank address again at every harvest, and `harvester.configured_repository` applies
-`is_harvestable` to it, since a restore stores the rows without passing the route.
-
-### A harvest reads MARCXML where offered, and Dublin Core where not
-
-**MARCXML whenever the repository offers it, and Dublin Core only when it does not** (owner,
-2026-11-21). `oai_dc` is the protocol's mandatory format, so a repository with no MARC21 slim
-is still harvestable; it is known by the `oai_dc` namespace or by the prefix the protocol
-reserves. MARC is known by its namespace whatever the repository calls it, and a prefix wider
-than `harvests.metadata_prefix` is passed over, since the run could not record it. The choice
-is made once, from what the repository lists. A repository listing MARCXML and refusing it
-with `cannotDisseminateFormat` on the first `ListRecords` request of a run from the start is
-read in Dublin Core, as if it had not listed it: nothing has been read and the fallback costs
-one request. Refused after a page was read, or on a continuation's first request, it fails the
-run. The preview and the result name the
-format read, and a Dublin Core run says it carries less.
-
-A MARC record goes through `marc.read`, as a file's records are read. A Dublin Core record is
-read by the same upload profile in that serialisation (`harvester._dublin_core_record`): it
-refuses only a record with no title, and reaches the same apply and matching ladder. **Each
-OAI record is at most one Book**: a MARC record holding another, or a `<metadata>` holding two
-records side by side, in either format, is unreadable. A record a repository marks deleted is
-counted and deletes nothing.
-
-**What Dublin Core cannot say is not guessed.** It carries no heading, since `dc:subject`
-names no scheme and a guessed one would put a number in the wrong vocabulary, so a Dublin
-Core run raises no pending heading. An ISBN is read only from an identifier naming itself one
-or a bare ISBN-13, because the list holds whatever identifies the record and a local ten digit
-number passes the ISBN-10 checksum one time in eleven; an ISMN's `979-0` is not an ISBN. The
-year is the earliest in any `dc:date`, because DSpace lists the accession and availability
-dates beside the issue date, and a year nought or one is passed over as a date never set.
-Every creator is an author in record order, since Dublin Core has no role, and contributors
-are authors only where no creator is named, as MARC credits everybody only where nobody is the
-author. No series, since `dc:relation` is any relation, and no links, since an identifier URL
-is as often the repository's landing page. These value rules live in `bibliographic.py`, and
-the BnF's and the NKP's catalogue readers, which answer in Dublin Core, read by them too; the
-NKP's stamps the ISBN it was asked for.
-
-### A harvest's headings wait as suggestions
-
-**Naming a repository once confirms no record, so a harvest writes no Classification.** ADR
-0006 lets a chosen MARC file's headings cross as confirmed because choosing the file is the
-confirmation; pulling thousands of records is not. A harvest raises each record's headings as
-`pending_headings` rows, but only on a Book the record is: one the run created, or one an
-earlier run of the same repository created from the same identifier. A Book the ladder matched
-by ISBN or by author and title is another record's and gets gaps and links only.
-
-**An admin confirms or discards a Book's whole set**, as selecting a picker row confirms a whole
-record (ADR 0006, amended). Both keep the rows, marked `settled_at`: a re-harvest then raises
-only a heading the record newly carries, never a discarded one, nor a confirmed one a member
-later removed or the ceiling dropped.
-
-**A run raises only what the ceiling leaves room for**: eight less the headings the Book carries
-and those already waiting, a heading in both counted once, so every suggestion fits at the
-confirm. One left out is not remembered, and a later run raises it once there is room. A
-confirm meets the ceiling only when the Book gained headings between the raise and the confirm,
-from a member or a merge; it then drops the suggestions that no longer fit and settles them,
-and the Book it answers shows what landed.
-
-`scheme` carries no foreign key, so a suggestion never blocks deleting a scheme and the confirm
-drops one whose scheme has gone. A merge leaves the loser's to the cascade, since the keeper
-keeps its own identifier and the loser's record will never find it. The routes are admin only,
-and a Book the caller cannot see is 404 before any 403, pinned for a member. The result reports
-`headings_pending`, the count this run raised; the preview has no count.
-
-### How a harvested record is matched
-
-**A harvested Book keeps its record's OAI identifier**, and a later run of the same repository
-matches it first, so a Book corrected since is not created again. A merge whose survivor is not
-the harvested Book drops the identifier, and the absorbed record is then matched as a file's
-is. **A record crediting nobody and carrying no ISBN matches a Book crediting nobody by its
-title**, as a file's record does, so two such records of one repository are one Book.
-
-**Dublin Core makes title only matching common, and the rule stands.** DSpace and EPrints
-repositories hold reports, theses and grey literature that often name neither a creator nor an
-ISBN, so two different records of one title, such as two "Annual report 2019", become one Book
-on the first run. The rule stands because it is the one a file's records are matched by, and a
-harvest is a bulk import like a file: a harvest matching by a looser or stricter ladder would
-make the same record two Books depending on how it arrived.
-
-### A run is cut short rather than failed
-
-The run deadline, a request's timeout or a 503 after the first page ends a run truncated with
-the pages read, and `Retry-After` is not honoured. Where it stopped is kept, and the next run
-may carry on from there: *A truncated harvest carries on as a new run*. **The preview and the apply each fetch
-the repository**, and nothing is kept between them, so with truncation the two can read
-different spans. **One run at a time**, preview or apply, a second answered 409. A failed run
-leaves no `harvests` row, so the table records the runs that wrote.
-
-**The apply names the address its client held when it read the preview**, and a 409
-`repository_changed` refuses it when another is stored, whether that one was saved before the
-read or after it. The preview route does not echo the address it read, so a tab holding an
-address saved over in another tab still learns of it at the apply, before anything is written.
-One case passes: the address changed and changed back between the read and the apply, which
-needs two saves elsewhere.
-
-**The preview's two count panels repeat four count rows between the MARC file card and the
-harvest card.** Sharing them needs one shape over two preview types with different extra rows
-(would add, deleted), which costs more than the four rows it saves.
-
-### A truncated harvest carries on as a new run
-
-A run a cap, the deadline or a busy repository cuts short records where it stopped on its
-`harvests` row: the resumption token that asked for the page it stopped in or before (null for
-the first request) and how many of that page's records it read, since the record cap cuts
-inside a page and the rest of it would otherwise fall between the two runs. It records the
-format it read too, because the token is the repository's position in that format's list and
-set.
-
-**A continuation is a new row pointing at the old one (`continues_harvest_id`), not the old
-row extended.** Each row stays a true record of one run: who pressed the button, when, what it
-read and what it added; and `/?harvest=<id>` lists the Books that run added, as the result's
-link says. It is also the reversible choice: rows can later be merged into a chain by rewriting
-`books.harvest_id`, while one row holding several runs can never be split again. The pointer
-carries no foreign key, because `backup.restore` inserts a table's rows in an order nothing
-fixes, so a key into the same table could refuse a restore.
-
-**No CHECK holds `resume_skip` non negative or pairs it with the token.** Every write is
-`_applied`'s, which writes the pair together from `harvester.Resume`, whose skip is the stored
-skip plus the records taken, both non negative. Only a hand edited archive reaches the table
-otherwise, a restore is admin only, and a negative skip there reads the tail of one page.
-
-**Only the latest run of the stored repository is offered**, of any set, matched by its exact
-address, so a token is never sent to a repository that did not issue it. A continuation
-becomes the latest, so a run is never continued twice, and a run from the start made since
-replaces whatever an older run left. The offer is checked again under `one_run`: a second tab
-pressing while the first continuation runs is told `harvest_running`, and one pressing after
-it is told `not_resumable`.
-
-**A token the repository has forgotten (`badResumptionToken` on the continuation's first
-request) is a 502 telling the admin to read the repository again from the start.** Nothing is
-lost by that: a rerun matches what an earlier run harvested by its record identifiers and adds
-none of it twice. The stored point is left as it was, so the card keeps offering to carry on,
-and each press costs one Identify and one request for the same 502, until the next run from
-the start replaces the point. A preview writes nothing, so leaving it costs requests and no
-data.
-
-**`MAX_TOKEN_LENGTH` is the column's width**, so any token a run could stop on fits; a wider
-one is refused while it is read, before any run could store it. The one run rule applies
-unchanged: a continuation is a run.
-
-### The books list filters by origin and by harvest run
-
-`GET /api/books?origin=harvested` lists the Books a harvest created and `origin=added` every
-other, so a member can review what harvesting brought in. `?harvest=<run id>` lists one
-run's Books, so a member can review what that run brought in; it arrives by the link a
-run's result offers, and the library page shows it as a removable chip rather than a
-picker, since no route lists the runs. Both narrow the caller's shelf like any column
-filter, composing with each other, the rest, the paging and the count. `origin` takes two
-values rather than a boolean, so the parameter says what it asks and the panel offers it as
-one select.
-
-**Refused with 403 outside library mode**, as the MARC export and the catalogue narrowing
-are, rather than answered with the whole shelf. The library page draws the select only in
-library mode and holds both filters at null in a household, so a link or a saved search
-carrying one never turns the grid into an error.
-
-**A listing whose filters name an origin or a harvest run waits for the feature flags before
-it asks**, so a deep link does not paint the unfiltered shelf first; a listing naming neither
-does not wait.
+Harvested rows are not private: an institution cataloguing its holdings is publishing them,
+which is the whole point of the harvest, and a bulk import that lands three thousand private
+rows only defers the same decision to whoever has to unprivate them.
 
 ## The competitor register's reference counts get a stated command and no guard
 
@@ -16434,12 +16152,12 @@ collection: `mailer` imports `settings_store`, which would import `metadata`,
 which imports `catalogue`, which imports `schemas.book`, which imports the
 `schemas` package, which imports `schemas.user`, which reads
 `mailer.MAX_ADDRESS` before `mailer` has defined it. Measured 2026-09-17,
-`AttributeError: partially initialized module 'mailer'`. So `settings_store`
-does not import `metadata` at all: which sources a login is resolved for is
-`sources.NEEDS_A_LOGIN`, read off `targets.Target.credential_kind`, and
-`metadata.resolve` refuses at boot a login row whose door carries none, so
-nothing here asks `metadata.carries_a_credential` at run time, and nothing here
-annotates a `metadata` type.
+`AttributeError: partially initialized module 'mailer'`. So `metadata` is
+imported inside the two functions that need it at run time and under
+`TYPE_CHECKING` for the annotation, which PEP 649 never evaluates. **What goes
+red if that block is deleted is `mypy`, not the suite**: collection still exits
+0 and the targeted files pass, while `mypy` reports `Name "metadata" is not
+defined`. The rung is tested rather than self enforcing.
 
 **The Google Books switch is not read on the outbound path any more.**
 `ready_sources` puts Google Books in the plan only when its section is on and a
@@ -16540,14 +16258,19 @@ reachable. `tests/test_catalogue_access.py::TestALocallyRefusedRequestSpendsNoBu
 both routes. The first draft of that test used ten zeroes as its malformed ISBN, which is a
 **valid** ISBN-10, and passed for the wrong reason.
 
-## A credentialled catalogue is admitted and resolved over one subject, and a disagreement is logged
+## Two predicates decide whether a credentialled catalogue is asked, and they ask different questions
 
-`settings_store.ready_sources` admits a source whose credential is a login on
-`credentials.is_held`, and `settings_store.catalogue_logins` resolves its login on
-`credentials.for_request`, both over `sources.NEEDS_A_LOGIN`, which
-`targets.Target.credential_kind` derives. A source in the first and not the second would sit
-in the plan with no entry in the mapping, and every request to it would go out with no
-credential and nothing saying so.
+`settings_store.ready_sources` admits a credentialled source on `credentials.is_held`, over
+`sources.NEEDS_A_KEY` minus the one source whose secret is a settings row.
+`settings_store.catalogue_logins` resolves a login on `metadata.carries_a_credential`, over
+`sources.NEEDS_A_KEY`. Different subjects, different readers. A source in the first and not
+the second sits in the plan with no entry in the mapping, and every request to it goes out
+with no credential and nothing saying so.
+
+**They agree today on a set of size one, by coincidence**, and `catalogue_logins`' docstring
+carries the measurement. `carries_a_credential` answers False for every transport but SRU, so
+the first catalogue that needs a key, keeps its secret sealed rather than in a settings row,
+and speaks anything else opens the gap.
 
 **Logged rather than refused, and the refusal of the refusal is the decision.** A raise would
 turn a silent unauthenticated request into a 500, on a case that cannot happen today, for a
@@ -16556,9 +16279,7 @@ key rotated between them is a legitimate disagreement. The runtime half is
 `catalogue_access._warn_about_any_source_asked_with_no_login`, which makes the silent case
 audible, and it reads the resolved value rather than either predicate. The test half is
 `tests/test_settings_store.py::TestThePlanAndTheLoginsAgreeOnWhoNeedsOne`, which fails on the
-row that opens the gap rather than on the search that goes out bare. It asks
-`catalogue_logins` itself with `credentials.for_request` stubbed, so a filter written inside
-that loop is red there too.
+row that opens the gap rather than on the search that goes out bare.
 
 ## One matcher serves both catalogue door rules, with a receiver exemption
 
@@ -16786,10 +16507,10 @@ suite does not run on the second engine and nothing skips on one. SQLite is the 
 target and what the whole suite runs on. The published prose says so in those words.
 
 **`postgresql+pg8000://` is the spelling, and the bare scheme is the trap.** SQLAlchemy
-resolves `postgresql://` to its default driver, psycopg, which the image deliberately does
-not carry. `database.py` does not rewrite the URL; it refuses it at startup with a message
-naming the full scheme (see *A Postgres URL naming any driver but pg8000 is refused at
-startup, never rewritten*). Every published table and every comment spells the full scheme.
+resolves `postgresql://` to its default driver, psycopg. Nothing in `database.py` rewrites it, so the obvious
+URL still fails, with an error naming a package the image deliberately does not carry.
+Every published table and every comment now spells the full scheme; normalising it in code
+is a separate decision and is in the tracker.
 
 **The connection is not certificate checked and can be cleartext, and shipping the driver
 is what made that an operator's problem rather than a developer's.** It is authenticated,
@@ -19956,7 +19677,7 @@ reader keyed table carrying a credential slot is wrong now.
 `metadata.carries_a_credential`, which is a claim about the effect of a branch and is measured
 against whether an `Authorization` header left the process. A second spelling on the row would be
 checked only against the first, and the measurement is the whole reason that function exists
-rather than being written out where it is read.
+rather than being written out at its call sites.
 
 **The two tables are the enforcement, not a check.** `_FREE_LOOKUPS` values take an ISBN and
 `_KEYED_LOOKUPS` values take an ISBN and a key, so the free door has no parameter a secret could
@@ -22618,7 +22339,7 @@ Settled by the owner. `_checked_collection` already answered 400 for a collectio
 
 `subtitle`, `author`, `publisher`, `description` and `series_name` hold no empty or whitespace only string. `models.BLANK_IS_NULL` names them and `models.blank_as_none` is the rule, with four callers: `Book`'s `@validates` hook for every ORM write (the request bodies, evidence, and the MARC, OPDS and CSV creates, which build a `Book` from a record with no request body), the two request bodies' `mode="before"` validators, `backup._parse_row` for a restore, and `evidence.is_empty`. Revision d3f8a1c6b250 nulled the stored ones.
 
-* **Only all whitespace changes.** Text keeps its spaces, because trimming is a second rule nobody asked for. Whitespace is `str.isspace`'s 29 characters on both engines; a character that looks blank and is not whitespace (zero width space, Hangul filler, byte order mark, Mongolian vowel separator U+180E, which left the whitespace set in Unicode 6.3) is a value and is kept. A test runs every one of the 29 and the four lookalikes through the revision on SQLite in CI, and on PostgreSQL 18 in the nightly whole suite run, since the `test:postgres` selection on the release paths does not include that class.
+* **Only all whitespace changes.** Text keeps its spaces, because trimming is a second rule nobody asked for. Whitespace is `str.isspace`'s 29 characters on both engines; a character that looks blank and is not whitespace (zero width space, Hangul filler, byte order mark, Mongolian vowel separator U+180E, which left the whitespace set in Unicode 6.3) is a value and is kept. A test runs every one of the 29 and the four lookalikes through the revision on SQLite in CI, and on PostgreSQL 18 in the nightly whole suite run, since the `test:postgres` selection on the release paths does not include that file.
 * **Why the model is the home.** It is the one hook every ORM write passes, so a new writer is covered without knowing the rule. It does not fire on a Core insert or `Query.update`, so the restore calls the function itself, as it does `covers.storable` for `cover_url`; no `Query.update` or bulk write touches the five columns today.
 * **Why the request bodies keep their validators.** They run before `max_length`, so a blank wider than the column is null rather than a 422. They call the same function over the same tuple, so it is one rule at two sites, not two rules.
 
@@ -23629,9 +23350,8 @@ no code, because no client acts on it: the trash page never offers the verb on s
 **`DELETE /api/books/trash` skips what the rule refuses and counts only what it purged**, so
 `PurgeResult.purged` is the number destroyed, not the number listed.
 
-**A Book with no adder goes to an admin** (owner's answer of 2026-10-24). `added_by_user_id` is nullable, every write path in the application but a harvest sets it,
-and no route deletes an account, so a null is reachable only by a harvested Book, which has no
-adder by decision (*Harvesting an OAI-PMH repository*), or a row written outside the
+**A Book with no adder goes to an admin** (owner's answer of 2026-10-24). `added_by_user_id` is nullable, every write path in the application sets it and
+no route deletes an account, so a null is reachable only by a row written outside the
 application. Before the ruling nobody could ever destroy such a row. The owner's answer is
 about deleting such a Book on purpose, so it reaches the single purge and empty the trash,
 not the add door: an admin's scan or import card over such a holder answers 409 `in_trash`
@@ -25088,38 +24808,6 @@ so the privacy scope cannot differ. The columns are named in `routers/books._htm
 leaves it out; the page carries it because finding the book is the page's purpose, and the
 CSV already carries it to the same member.
 
-### The HTML export carries no covers
-
-Neither linked nor embedded. A cover by URL is one of two things. Where the fetch was
-stored, it is this server's `/covers/` route, behind sign in and out of reach of the person
-the file is handed to. Where it failed, it stays a third party's `https://` URL (*A stored
-cover must be https, or one of ours*), which would learn who opened the page. The page's
-own `default-src 'none'` policy refuses both. A cover embedded as a data URL is up to
-`covers.MAX_COVER_BYTES` (5 MiB) a book, a third more as base64, so a thousand books could
-reach gigabytes at the bound; a real cover is tens of kilobytes, so tens of megabytes is
-the usual file, against roughly a hundred kilobytes of rows. The policy would also need an
-`img-src data:` hole. `TestTheHtmlExport::test_the_page_names_nothing_a_browser_would_fetch`
-refuses `src` and the other fetching attributes it lists, so an `<img>` cover fails it; a
-cover in a CSS `url()` passes that test and is left to the policy. The reason sits in the
-docstring of `routers/books._html_chunks`.
-
-**The case against, kept.** A person browsing a shelf recognises a cover faster than a
-title. Embedding a thumbnail rather than the stored image would bound the size, but needs
-a resize step that does not exist; the page stays text until somebody asks for that.
-
-### The HTML export has no size cap of its own
-
-The precedent is *The MARCXML export is paged rather than capped*. The page is streamed
-from the same `_export_pages` walk, one page of `marc.EXPORT_PAGE_RECORDS` rows at a time,
-so the server's peak is one page whatever the shelf's size (measured flat at about 1 MiB
-from 10,000 to 40,000 books for the MARCXML arm), and the file grows linearly with six
-short escaped columns a book. A cap could only truncate or refuse. One that truncates is a
-short export nobody can notice, which `_export_pages` and *An oversized MARC file is
-refused, where an oversized CSV is truncated* both rule out. One that refuses would protect
-no resource, because the peak does not grow with the shelf. `ratelimit.EXPORT_LIMIT` allows
-five starts a minute a member, which, as `ratelimit.py` says, bounds neither concurrency nor
-members together; it is not offered as a size bound.
-
 ## Five exports a minute is held to the formats the menu offers
 
 `ratelimit.EXPORT_LIMIT` is five because a member comparing every format spends one start on
@@ -25525,7 +25213,7 @@ on condition that it is measured once on a quiet cluster.
 
 **Why the narrower legs run one at a time, not all at once.** With two nodes held by the
 suites, only the third is free; a second concurrent leg would find every node busy and wait for
-the first of them to free, which is one the suites hold.
+builder behind the backend.
 
 **What a refusal does.** No leg starts after it; a leg already running is waited for and its
 verdict reported. The refusals met in practice (a stale generated file) come before a node is
@@ -26043,8 +25731,7 @@ Public APIs Terms of Service (updated 23 October 2024, read 2026-11-16 at
 the public to access our Anonymous API and Public API (together the "Public APIs")", and say
 "you may not make use of the public APIs in connection with any revenue-generating product or
 service". The anonymous tier is inside that definition. `docs/configuration.md` says so to
-deployers. Whether ORCID is asked by default was the owner's question, answered on 2026-11-18:
-see *ORCID is asked by name only in library mode; a stored iD resolves in either*.
+deployers; whether ORCID is asked by default is the owner's question.
 
 **A lookup on demand, not a suggest source.** It is asked by `search` under
 `ratelimit.AUTHORITY_LIMIT`, once per name search that missed, never per keystroke: 25,000
@@ -26052,10 +25739,9 @@ reads a day per address would not carry a typeahead.
 
 **Ranked last, as the owner ruled on 2026-09-05**: asked only where lobid and the Library of
 Congress name authority file both answered and found nobody, so its request is paid on a miss
-alone, and only in library mode. A national file that did not answer raises "try again" before
-ORCID is asked, as it did before ORCID was a file: its researchers sharing the name are no
-answer to an outage. Its people arrive under `AuthorityScheme.ORCID` and are cross checked
-against Wikidata by `P496`. A stored iD resolves only where no GND or LCNAF number is stored.
+alone. A national file that did not answer raises "try again" before ORCID is asked, as it did
+before ORCID was a file: its researchers sharing the name are no answer to an outage. Its people arrive under `AuthorityScheme.ORCID` and are cross checked against Wikidata
+by `P496`. A stored iD resolves only where no GND or LCNAF number is stored.
 
 **ORCID and ISNI are never compared, and that is the dedupe rule.** ISNI reserved a block of its
 numbering space for ORCID to mint from (`0000-0001-5000-0007` to `0000-0003-5000-0001`, and
@@ -26710,1428 +26396,3 @@ committed sample.
 Refused alternatives, with figures: follow the rule as written (tier DNB, K10plus, SBN; tail
 NLG, BN_PL, KB_DK, PORBASE, OSZK, Open Library, OENB, NKP, BNE, LIBRIS, BIBSYS, Melinda), or
 K10plus with the SBN at two (the DNB to the tail with 14 marginal).
-
-## The Slovak National Library joins the roster over Z39.50 (2026-11-17)
-
-One row in `targets.SEEDED`, ISBN lookup only, migration `5c3e9a1d7b20`:
-
-| row | address | syntax, charset | records | ISBN-10 retry | remit |
-|---|---|---|---|---|---|
-| SNK | `z3950://z3950.snk.sk:1111/Default` | MARC21, UTF-8 | 5 | no | `978-80` |
-
-Chosen on its own country's frame: of fifty Slovak ISBNs drawn from Wikidata by publisher
-country (pool 120, seed 20261116) the fifteen keyless sources find 16 and the SNK 27, **NEW 16**
-(17 with remits applied), every one `978-80`; on the 29 `978-80` ISBNs of that frame the fifteen
-find 13 and the SNK 27. The lowest NEW built before it is Melinda's 9.
-
-Measured through `metadata._lookup_one` on the row as first built, with the ISBN-10 retry on, system libyaz 5.34.4, one lookup at
-a time, over 700 ISBNs: the committed 500, the Polish, Danish and Hungarian frames, and the Slovak
-fifty. Figures are in `metadata`'s block for the row; the 500's and the frames' answers are
-committed as the `snk` column, with `seconds_snk` on the 500.
-
-### Where the placement rules put it
-
-**Remit `978-80`.** The bar (`sources.SERVES_GROUPS`): no book of the 500 that it alone answers
-outside the remit. It answers 16 of the 500: 10 Czech, all `978-80`, and 6 outside (4 Austrian,
-2 German), each held by a source still asked about it. Bar met. `978-80` is shared with Czech
-publishers and is the NKP's group too; the NKP carries no remit (it fails the bar on its own
-two books), so a `978-80` ISBN is asked of both.
-
-**Not in the leading tier.** p90 0.066s, inside `FIRST_TIER_BUDGET_SECONDS`. It adds 4 books to
-the DNB and K10plus, all Czech; that is under `SLOT_MUST_EARN`, so its concentration is not read
-and it enters the pool a tier may hold, which moves `TIER_UNION` from size 4 on (228, then 232,
-235, 236, 237, 238, 238, 238 over ten sources, against 231 ... 234 over nine). As a third slot it
-earns 4, against LIBRIS's 6 and the bar of 10, so the pair is unchanged and `ALWAYS_ASKED` stays 2.
-Every tier guard holds with it in the pool (budget and concentration sweeps unchanged).
-
-**Tail: just ahead of Open Library, after the OSZK.** Inside `978-80` the leading pair misses 41
-books, all in the sample's Czech frame; the SNK answers 4 of them, Open Library 1, the NKP 40,
-the BNE, LIBRIS, Melinda and BIBSYS 0. By the rule, a remitted row goes ahead of the first
-unremitted row it beats on its own ISBNs: 4 against Open Library's 1, so ahead of Open Library.
-Among the remitted rows meeting there it goes by `TAIL_MARGINAL`, where it reads 4, the least,
-so last of them: NLG 34, BN_PL 30, KB_DK 29, SBN 26, PORBASE 25, OSZK 17, SNK 4, then Open
-Library. For any `978` ISBN in a named group that position is the whole walk: no other remitted
-row serves `978-80`, so a Czech or Slovak book asks the SNK first after the pair, then Open
-Library, then the NKP. The order among the remitted rows matters only to a `979` ISBN or one
-with no named group, which now asks seven remitted rows before Open Library, p90s summing to
-about 3.4s.
-
-**No Slovak frame committed, by the rule's own wording.** `TAIL_MARGINAL` counts a remitted row on
-the ISBNs inside its remit, from the sample where the sample holds them and from a committed
-frame only where it holds none. The sample's Czech frame is fifty `978-80` ISBNs, so the SNK is
-counted on those. With the Slovak fifty added it would read 20 against Open Library's 5 inside
-`978-80` and sit between PORBASE and the OSZK, which changes no walk for a named group; the
-same frame would also count over every unremitted row and break the Melinda and BIBSYS tie the
-other way (BIBSYS 9, Melinda 8), a reorder of two rows unrelated to Slovakia. Measured both
-ways; the frame stays in the seat's scratch, not the tree.
-
-**The remit model** (`SERVES_GROUPS`) re-run with the row: 2.376s per lookup without the table,
-1.263s with it, 2,325 tail requests becoming 781, for the same 429 books; per frame 0.166s
-(German) to 2.209s (Czech). Demotion instead of skipping models at 1.6635s.
-
-**Coverage of the 500 unchanged**: the SNK adds no book of the 500 to the other fifteen keyless
-sources, so the sixteen answer 429 and the eighteen a stock install asks 441.
-
-### Its door closes after about eight connections a minute
-
-The SNK's Metaproxy closes a new connection at open once about eight have arrived from one
-address within a minute: at one every 1.5s, eight were accepted and every one after refused for
-half a minute; at one every 7.5s, one in eight was refused; at one every 8.2s, none in about 500.
-22 of the 700 lookups were refused this way and each answered when asked again 20 to 30s later.
-The client reads it as a lost connection, `Unreachable`, so the lookup marks the SNK
-`UNAVAILABLE` and walks on, as for the OSZK's refusals; where nothing else holds the book the
-lookup reports the catalogue unavailable and that is cached for `_MISS_TTL_SECONDS`.
-The door counts by address, so every member's lookups, refreshes and enrichments count
-together, and it is met by `978-80` books and by `979` ones or any whose group cannot be named,
-which `_serves` puts to every remitted row, once the leading pair misses them.
-`METADATA_LIMIT` (60 a minute per member) does not prevent it. Recorded in the security rate row
-and the limiter's comment. Not built: a per host pace in the Z39.50 door, which would be a design
-change to the door rather than to this row.
-
-### No ISBN-10 retry: the index matches the ten digit form
-
-6 books were found by the thirteen digit search alone though every record fetched for them
-states only the ten digit form in `020`, so the SNK's index normalises the two, as the BN_PL's
-does, and the row does not retry, as the BN_PL's does not. Measured with the retry on, the second
-search ran on 652 lookups and found nothing. The latency in `metadata`'s block and the committed
-`seconds_snk` (p90 0.066s in `sources.MEASURED`) were taken with it on and stand as an upper
-bound: subtracting the retry's search from each logged lookup gives median 0.042s and p90 0.053s
-against 0.060s and 0.069s. The order is unchanged, the SNK's place resting on its counts and not
-its p90.
-
-### Leader/07 `b` records arrive among the hits
-
-5 of 93 rendered records were leader/07 `b`, articles about the book with no ISBN of their own;
-`refuses_component_parts` refuses them, and each of the 3 lookups that returned one found the
-book in another record.
-
-### Three survey candidates refused, each on its own frame (2026-11-17)
-
-The last four candidates of the national catalogue survey were each measured on fifty ISBNs of
-their own country, drawn from Wikidata by publisher country (P212 of an item whose publisher's
-P17 is that country, at most 3,000 rows, valid ISBN-13s deduplicated, sorted and shuffled with
-seed 20261116), against the fifteen lookup sources that need no credential, each asked as its row
-asks. The Slovak National Library joined; the other three are refused, and the figure is the one
-the bar reads: the books a candidate finds that none of the fifteen does (NEW). The lowest NEW
-built so far is Melinda's 9 of 50.
-
-| candidate | endpoint | NEW | why refused |
-|---|---|---|---|
-| Netherlands, KB GGC | SRU 1.2 `jsru.kb.nl/sru/sru`, `x-collection=GGC`, `dc.identifier` | **3 of 50**, remits applied or not | under the bar, and only one of the three is a printed book |
-| Lithuania, LIBIS | Z39.50 `z3950.libis.lt:210/KNYGOS`, UNIMARC | **2 of 6** | no measurement: Wikidata holds six ISBNs with a Lithuanian publisher |
-| Belgium, KBR | Z39.50 `catalog.kbr.be:9001`, MARC21 | not measured | the database name is not discoverable from outside |
-
-**The Netherlands, KB GGC.** The Dutch frame's pool hit the 3,000 row limit (2,948 valid), so
-it is whatever the endpoint returned first; 22 of its 50 are in a Dutch group (`978-90`,
-`978-94`). The fifteen find 46 of the 50. KB finds 18, every one Dutch, 6 of them only through
-the ISBN-10 retry, and NEW 3: `9789070066727` a printed book, `9789025866655` a sound recording
-(DAISY streaming audio) and `9789024443451` an ePub, read off KB's own records. On the Dutch
-subframe the fifteen find 18 and KB 18. **It would also need a reader nothing here has**: KB
-answers namespaced Dublin Core. `DUBLIN_CORE_BARE`, the one Dublin Core lookup reader, reads the
-NKP's un-namespaced shape and sees nothing in it, and the BnF's `DUBLIN_CORE` is wired for title
-search only; its record builder would find the elements but refuses an online record by
-`dc:format` or "electronic resource" in `dc:type`, and KB writes neither (the extent is in
-`dcterms:extent`, "online resource" in `dc:type`), so the ePub above would pass as a book. Median
-0.099s.
-
-**Lithuania, LIBIS.** Wikidata's whole pool for the rule is six ISBNs, and only two of them are in
-the Lithuanian group `978-609`; the other four are Portuguese groups. LIBIS finds the two
-Lithuanian ones and nobody else does, so NEW 2 of 6, which ranks nothing. A frame of Lithuanian
-books from another source is what would let it be measured. Median 0.95s over 6 queries,
-against 2.56s on an earlier day, so about a second per query is what holds.
-
-**Belgium, KBR.** The Z39.50 door at `catalog.kbr.be:9001` (Metaproxy/YAZ) accepts a connection
-and names no database: `IR-Explain-1` is diagnostic 235, "database does not exist", and so are
-146 guessed names (case variants of Default, KBR, catalogue, biblios, the OPAC's Syracuse and
-CATALOGUE, Alma's `32KBR_INST`, the Voyager, Aleph, Virtua and Koha defaults, `*`). The same port
-over HTTP is Metaproxy's 400 for every path, so it has no SRU front end. IRSpy, Tellico's server
-list and Koha's directory name no Belgian national target, and KBR's own page names the host, the
-port and MARC21-XML and no database. The route left is to ask `metadata@kbr.be`. Twenty of the
-Belgian frame's fifty are Dutch language group ISBNs, where KB GGC would overlap it.
-
-## A list of ISBNs joins the rapid queue and its paced run, and adds no route (2026-11-18)
-
-A pasted or uploaded list of ISBNs is a fifth way into the queue rapid mode, the file picker and
-a Calibre library fill (`IsbnListPanel` on the Scan page). Each valid ISBN becomes a `listed`
-row keyed as a barcode is, so a book listed and then scanned is one row, and the paced lookup
-(`runTheLookups`, one start per `FALLBACK_INTERVAL_MS`, half of `METADATA_LIMIT`) asks each one
-through the same `GET /api/books/lookup` a barcode takes. Nothing is written until Add all. The
-merge of several sources into one record is the lookup's own, so the server gains nothing: no
-route, no schema, no new limiter. A second queue or a server side job would be a second pace
-beside the one the page already shares with the scanner and the search box, which is what
-`runTheLookups` exists to refuse.
-
-**It starts the run without a second press**, unlike a picked folder, whose lookup is offered and
-never automatic. Pointing at a folder is not a request to send its names anywhere; handing over a
-list of identifiers is the request to look them up, the button that does it says so, and the only
-thing that leaves the browser is the ISBNs the member wrote. A run already going finishes first; a stop
-pressed meanwhile leaves the list's rows waiting for the Look up press instead, because a stop is
-a request to stop asking. Leaving the Scan page stops the run, so a list cannot go on spending
-lookups into a page nobody is on, nor run beside a second list pasted on coming back.
-
-**The list size bound is 500 rows waiting for the lookup, the list's and those already waiting
-together, and a list that does not fit is refused whole.** The queue's bound rather than each
-list's, because two lists of 500 are the thousand rows one list may not queue. Priced against
-the pace and the queue rather than the server: every row goes through the one paced run, so a list spends no
-more of the metadata limit a minute than a folder does, only more of the clock, about 17 minutes
-for 500. The queue draws every row with no windowing, and 500 is the folder size the paced lookup
-was priced for. Refused whole rather than cut at 500, because a cut leaves the member to find the
-line it fell on. An uploaded file over 1 MB is refused before it is read: 500 ISBNs one a line is
-under 9 KB. **Every row waiting for a lookup counts**, a picked folder's names not
-yet looked up among them, because that is what the next Look up press walks; so a folder of
-more than 500 refuses any list until it has been looked up, and the panel's copy says what is
-counted rather than promising room for 500.
-
-**The pace meets the Slovak National Library's door sooner on a list than on a folder.** The SNK
-closes a connection past about eight lookups a minute per address (`ratelimit.py`), and the paced
-run starts 30 a minute. A list of a Slovak shelf is uniformly `978-80`, so it holds that rate
-against the SNK where a folder of mixed names rarely does; past it the SNK reports itself
-unavailable and those rows go `not-reached`, which the lookup offers again. Accepted rather than
-slowed: a slower pace for every list to suit one catalogue would cost every other member the
-clock.
-
-**Progress on a long list is a figure beside the stop**, "Asked n of m", counted over the rows the
-run set out to ask, so a row picked meanwhile does not move it; each row also changes from
-"Waiting for the lookup" to "Asking the catalogues..." to its answer. Not a live region, for the
-reason the add's progress is not: it moves once per row.
-
-**An ISBN no source answers becomes what a scanned barcode no source answers becomes**: a
-`not-found` row with a titleless draft, which the batch does not take and which says
-"Not found: ISBN"; the member removes it or adds that book by hand. An unreachable catalogue makes
-it `not-reached`, offered to the lookup again. One rule for both entries, in
-`queue.ts`'s `ASKED_AS_A_BARCODE`.
-
-**An invalid ISBN is reported and never queued.** A token shaped like one, ten or thirteen
-characters once normalised, whose check digit fails or whose prefix is not Bookland's, is named
-back as written, so the typo can be found (the first fifty, and a count of the rest); any other token (a header, a title word, a year) is
-only counted, because listing each word of a title as a bad ISBN would bury the real typo.
-A leading `ISBN:` or `ISBN-13:` label, as copied bibliographic text writes it, is read past
-rather than costing the ISBN. `lib/isbnList.ts` holds the reading.
-
-## ORCID is asked by name only in library mode; a stored iD resolves in either (2026-11-18)
-
-**A name search asks ORCID only in library mode.** Measured on the catalogue sample's
-authors (385 distinct authors over ten frames, 2026-11-18): ORCID's top hit was the book's own
-author for 30 (8%, 0 to 17% by frame, every one an academic), and 192 (50%) got some hit, mostly
-namesakes. On a household shelf a hit is therefore usually a researcher sharing a novelist's
-name, offered as a candidate a member can confirm by mistake. A library with an academic
-collection is where the 8% sits, so library mode keeps the fallback. `authority.search` takes
-`ask_orcid`, off by default, and the route passes `settings_store.library_mode`. Off by default
-so a new caller that forgets it offers nobody's namesakes.
-
-**Resolving a stored ORCID iD stays on with library mode off.** The ruling is about the name
-search's namesakes, and a stored iD has none: it is a key that names one person, and it got
-there because a member confirmed it or a confirmed GND record carried it. Turning library mode
-off must not make an author with only an ORCID iD answer nothing on the next lookup, which is
-the defect an LCNAF number alone once caused. Its cost is one ORCID request per stored iD,
-already bounded by `MAX_CANDIDATES` and the authority limiter.
-
-**The GND record's `orcid.org` cross reference is still stored on a confirmation, in either
-mode.** It is read from lobid's `sameAs` and costs no request to ORCID, and the GND asserts it
-rather than a name matching it, so the namesake argument does not reach it.
-
-This answers the question *ORCID is the last file a name search asks, and never compared with
-ISNI* left to the owner, and narrows its ranking to library mode.
-
-## A Portuguese author number is checked against the BNP's authority file and looked up there, and the other five are not (2026-11-18)
-
-**Measured 2026-11-18** over the 300 ISBNs of the Italian, Spanish, Portuguese, Brazilian,
-Argentine and Uruguayan survey frames: 163 author names, 153 VIAF clusters, and each stored scheme
-put back to its own library by the number the cluster carries.
-
-| Scheme | Route | Found by number | Why not, where not |
-|---|---|---|---|
-| PTBNP, Portugal | HTTPS GET `urn.bnportugal.gov.pt/nca/unimarc-authorities/marcxchange?id=<n>` | **20 of 20**, each named as its cluster names the person; median 0.20 s, max 0.46 s | |
-| BNE, Spain | Alma SRU `alma.authority_id=<n>`; Z39.50 `z3950.bne.es:210` | 0 of 20 | The open SRU serves bibliographic records only; 40 of 42 stored numbers are Alma record ids, and neither `alma.authority_id` (19 asked) nor `alma.mms_id` (1 asked) takes one; the one legacy `XX` number asked, of 2, found linked book records. Z39.50 answers `[101] Access-control failure` without a login. |
-| ICCU, Italy | Z39.50 `opac.sbn.it:2100/nopac`, `1=1016` | 0 of 20 | SBN serves no authority database over Z39.50 (`[235] Database does not exist` on every name tried) and no SRU; `nopac` does not index the `$0` that carries the number. |
-| ARBABN, Argentina | Z39.50 `200.123.191.9:9991/BNA10`, published login | 0 of 12 | The authority file answers, MARC21, `001` the stored number; **no use attribute takes the number** (`1=12`, `1=1032` and 29 others `[123]`, `1=1016` finds nothing). A name search confirmed by `001` found 6 of 12, which is a name lookup and not a number lookup. |
-| BLBNB, Brazil | none | not measurable | `acervo.bn.gov.br` answers 403 behind Cloudflare; no Z39.50 port accepts a connection; no directory lists a target. |
-| BNCHL, Chile | none | not measurable | `www.bncatalogo.cl` accepts no connection on ports 80, 443, 210, 2100, 9909, 9991 or 9992; VIAF's numbers are 23 digits where Wikidata's `P1890` records 9. |
-
-**Choices in the build:**
-
-- **The URN service, not Z39.50.** The BNP's Z39.50 server ignores the database name: `aut`,
-  `autoridades` and `zzzznonsense` all answered the same 981 bibliographic hits. The URN service is
-  plain HTTPS with a valid certificate and needs no new client. The record's own `003` host,
-  `id.bnportugal.gov.pt`, redirects to `urn.bn.pt`, whose certificate does not match; the
-  `urn.bnportugal.gov.pt` host is asked directly.
-- **Asked at confirmation time, on the owner's ruling (2026-11-18).** A PTBNP number arrives as a
-  cross reference of a confirmed GND record, so a lookup resolves that person by the GND number
-  and would never reach the BNP. So `national_identifiers` puts the number the VIAF cluster (or,
-  where VIAF produced none, Wikidata) names back to the BNP, through the same request the lookup
-  makes and with no Wikidata call, and compares names:
-  - **the record names the person, or links the VIAF cluster that named the confirmed GND record
-    back**: the number is stored;
-  - **the record names somebody else and links no such cluster, the BNP answers its miss, or the
-    number is not one it would be asked by**: the number is not stored, and nothing else changes:
-    the other national numbers are stored as before and no name is written anywhere;
-  - **the BNP cannot answer** (no connection, a 5xx, a body it cannot read, a collection holding
-    no record, the deadline spent): the number is stored unchecked, as it was before the BNP was
-    asked. The supplier already tied it to the confirmed person (VIAF in both directions, Wikidata
-    by the GND number), and a confirmation must not fail or lose a number because one library is
-    down. An empty collection counts as no answer because the miss is a different, measured body;
-    read as a miss, a format drift would drop every Portuguese number confirmed while it lasted.
-- **What "names the person" means**: any name the GND record gives (heading or variant) is any
-  name the BNP record gives, as the same words in any order under `authors.author_key`. Measured
-  2026-11-18 over the 19 of the 20 sampled people whose VIAF cluster carried a GND number,
-  lobid's record against the BNP's: **18 of 19 match**, 16 on the two headings alone and 17
-  with variants but word order kept (`Taibo, Paco Ignacio II.` meets the BNP's `Taibo II, Paco
-  I.` only through word order). The one refused is a true person the BNP misspells,
-  `Fogazarro, Antonio`, in its heading and both variants.
-  **0 of 361** pairings of one person's GND record with another's BNP record match.
-  **What that does not measure**: the name check catches a number for somebody else entirely,
-  and no more. A namesake shares a form and passes, and a namesake is the error a VIAF mis-merge
-  most plausibly makes; a single word form (`Nietzsche` in a `400`, `Plutarco` as a heading) is
-  enough on its own. The 361 pairings are of differently named people, so they do not measure
-  that risk, and no wrong number was seen in the 19 (nor in the 20 asked).
-- **The rescue: the record's own VIAF link.** Where the names do not meet, the number is still
-  kept when the BNP record links the very cluster that named the confirmed GND record back: the
-  bidirectional check `national_identifiers` makes for the GND number, from the BNP's side.
-  Measured over the 20 sampled records: **4 of 20 carry a VIAF link**, every one the cluster the
-  number was read from: three in `856 $u` (`https://viaf.org/viaf/<n>/`: Nietzsche, Marías,
-  Sánchez Dragó) and Fogazzaro's in `810 $a` (`VIAF http://viaf.org/viaf/39408145/`). Eco's
-  record, outside the 20, writes `https://viaf.org/en/viaf/<n>`; all three shapes are read. So
-  Fogazzaro is kept on the VIAF route, and the trade over the 19 is now 0 of 19 correct numbers
-  lost and 0 of 19 wrong caught. On the Wikidata route no cluster spoke, so the link rescues
-  nothing there and the misspelling still drops.
-- **The cost**: one request on a confirmation whose cluster names a PTBNP number, 0.17 to 0.46 s
-  measured, so the confirmation's worst path is about 4.9 s against the 8.0 s deadline; a
-  confirmation is up to 9 requests over four hosts, 15 on the Wikidata fallback.
-- **A lookup still reaches the BNP through `resolve_stored`, last in `_STORED_ORDER`**, only for a
-  PTBNP number with no GND, LCNAF or ORCID number beside it: the same one file per lookup rule as
-  the LCNAF and ORCID resolvers.
-- **A miss is read from the body.** The service answers HTTP 200 with `<urn-response><error>Registo
-  inexistente</error></urn-response>` for a number it does not hold (measured on `99999999`); that
-  is None. Any other `urn-response`, a non 200, or a body that is not MarcXchange is
-  `AuthorityUnavailable`, so an outage is never shown as nobody.
-- **The record must be the one asked for**: `001` equal to the stored number, leader/06 `x` (an
-  established entry, 20 of 20 sampled), and a `200` personal name heading. Name and `400` variants go
-  through `metadata.unimarc_name_heading`, the rule the catalogue door's UNIMARC crosswalk already
-  applies to a `700`, now a named export so both read a name alike. Dates are `200 $f` split at the
-  hyphen and kept as written. `830`, a biographical note, is not read.
-- **Wikidata is asked by `P1005`** for the item and its description, as the LCNAF and ORCID
-  resolvers ask by `P244` and `P496`, **and nothing is compared**: a BNP candidate carries no
-  `same_as`, and the record's own `856` Wikidata link is not read, since 1 of 21 records fetched
-  carried one (Eco's; none of the 20 sampled). As with the NAF, a wrong `P1005` claim would show
-  another person's description beside the BNP's name; it writes nothing.
-- **An undifferentiated heading is not refused**: UNIMARC `120` is not read, where the NAF's
-  `008/32 b` is. None of the 20 sampled records carried a `120`.
-- **Bounds.** A PTBNP number is `[1-9][0-9]{0,9}` (sampled 4 to 7 digits) before it reaches a query.
-  `_BNP_LIMIT` is 65,536 bytes against a largest measured record of 2,901 over 20 (22x). The XML is
-  built through the module's one parse site, `_tree`, now shared by the NAF and the BNP, so the
-  doctype refusal and `xml_parse` bounds hold; **the allocation factor was not measured for this
-  record shape**: the NAF's `ALLOCATION_FACTOR` of 33 is measured on MARC21 slim, and MarcXchange is
-  the same element shape, so at the 64 KiB cap the bound is about 2.4 MB. The 20 real records
-  (870 to 2,901 bytes) sit inside `ALLOCATION_FLOOR`, so they cannot measure it; a local read
-  (CPython 3.15, not the suite pod) on records built to the cap peaked at 11.7 to 14.7 a byte.
-  The deadline is the
-  lookup's `DEADLINE_SECONDS`; one BNP request measured 0.17 to 0.46 s. The rate row in
-  `docs/security.md` carries the fifth host: a lookup at most 15 requests and about 20 KB per call,
-  and a confirmation 9 requests over four hosts, 15 on the fallback, 150 a minute at the ceiling.
-- **Terms**: the BNP's open data page offers the URN service for retrieval by identifier, mainly for
-  library systems, and states nothing beyond a contact.
-
-## picomatch ReDoS advisory accepted, not overridden (2026-11-19)
-
-GHSA-fc5q-39xc-vjpf (HIGH, CVE-2026-112366) covers picomatch `<= 4.0.7` with no patched
-version: an extglob with one repeated branch, such as `+(*)` or `+(*a)`, skips the
-`analyzeRepeatedExtglob` guard in `lib/parse.js` and compiles to a regex that backtracks
-exponentially on a short crafted string. 4.0.7 is picomatch's latest release, so there is
-nothing to override to, and bun's range resolution did not block anything. GitHub withdrew
-the advisory on 2026-11-18, and npm's bulk audit endpoint no longer returns it for 4.0.7.
-
-It is accepted in `.trivyignore` rather than pinned, because:
-
-| Question | Answer |
-|---|---|
-| Who pulls it | vite, vitest, tinyglobby and @rollup/pluginutils (fdir as an optional peer), at build and test time only |
-| Does the image carry it | No. The runtime stage copies only `frontend/dist`; the v0.22.0 image has no node_modules, no node or bun binary, and no picomatch code in its static bundle |
-| Who writes its patterns | The repository: `vite.config.ts` globs, vitest `include`, the PWA `globPatterns`. None is an extglob and none comes from a request |
-
-The entry expires on 2027-02-17, the 90 day ceiling the acceptance file test enforces. If the
-withdrawal holds, no scanner reports it by then and the entry can lapse.
-
-## The printed ISBN is read in the browser, lazy loaded (2026-11-19)
-
-The owner decided the recognition runs in the browser and is lazy loaded; what follows is
-what the build settled inside that.
-
-**The engine is Tesseract, through `tesseract.js-core` alone, not the `tesseract.js`
-wrapper.** The wrapper's defaults fetch its worker, its engine and its model from jsdelivr,
-start the worker from a `blob:` URL, and its two bundles carry `Function` fallbacks
-(regenerator runtime and webpack's global shim) that `scripts/check-build.ts` refuses. All
-three are refused by the content security policy, which is unchanged. What it would add over
-the hundred and thirty lines of `src/lib/textRecognition.worker.ts` is a job queue and an
-IndexedDB cache, neither needed: every asset is a hashed file the browser keeps under the
-backend's year long `immutable` rule. Going to the core directly also drops nine transitive
-packages (`node-fetch`, `idb-keyval`, `zlibjs`, `bmp-js` and the rest) to none. The core's
-emitted loader scans clean for string evaluation.
-
-**One build of the engine: SIMD, LSTM only.** A browser without WebAssembly SIMD lacks
-`DecompressionStream` too (Safari gained both in 16.4), and the model needs that, so the
-plain build would serve nobody the SIMD one does not. Such a browser is told the reader
-cannot start and to type the ISBN.
-
-**The model is the English `best_int` LSTM model** from `@tesseract.js-data/eng`, the one
-the wrapper itself defaults to for an LSTM only engine. No digits only model is published
-as a package; a character whitelist (`0123456789X-ISBN: `) does the narrowing instead, and
-the space in it is load bearing: without it the engine dropped every space and glued a
-barcode's price add-on onto its EAN.
-
-**Sizes, measured on the build of this branch** (raw; the backend sends no compression):
-
-| File | Raw | Gzipped |
-|---|---|---|
-| Worker chunk | 1.26 kB | |
-| Lazy main thread chunk | 1.09 kB | 0.60 kB |
-| Engine loader | 89.27 kB | |
-| Engine WebAssembly | 2,857.60 kB | 1,077.41 kB |
-| Model (gzip on disk) | 2,952.87 kB | |
-
-The first open fetches about 5.9 MB; nothing of it is precached (`globIgnores` in
-`vite.config.ts`), so a session that never opens the reader pays nothing, and the shipped
-image grows by the same 5.9 MB. The main chunk grows by 7.02 kB raw and 1.98 kB gzipped (1,494.20 to 1,501.22 kB, 403.42 to 405.40 kB gzipped, base against this branch), which is the reader's page code and its strings; the precache grows by 6.88 KiB, so no engine file is in it. `scripts/check-build.ts` passes over the emitted engine loader and worker.
-
-**First open, timed in headless Chromium against a local server** sending this app's policy,
-so with no network cost: the engine and model opened in 193 ms and 1,428 ms on two runs, and
-a read of one ISBN line took 66 ms to 581 ms. On a phone over the LAN the 5.9 MB download
-dominates; that was not measured.
-
-**The frame is cropped to the guide box before it is read**: a copyright page holds a dozen
-lines of numbers, and every line read costs time. The box is drawn with the same fractions
-over a picture shown at its own aspect ratio, so what is in the box on screen is what is
-read.
-
-**What the member sees.** A read whose check digit holds is offered as "Read ISBN …" with a
-Look it up button; nothing is looked up without that tap. A read shaped like an ISBN whose
-check digit fails says so, names what was read, and offers only another read. A read with
-nothing ISBN shaped says the box held no ISBN. Where one read finds more than one valid
-ISBN (a copyright page printing the ISBN-10 and ISBN-13 of different editions), each is
-offered.
-
-**Why groups are joined only at their boundaries.** A barcode's digits are printed in
-spaced groups (`9 783161 484100`), so a line's groups are joined to ten or thirteen
-characters, but never by cutting a group: the first ten digits of an EAN pass the ISBN-10
-check one time in eleven. A one digit group only starts a join, so a printer's key
-(`10 9 8 7 …`) is not read as a misread.
-
-**A camera frame is a member's bytes, and two rules hold the claim that none leaves.**
-The server cannot back it the way it backs the book file claim, because the cover route
-accepts any image, and the frame is reachable outside `src/lib/` (the reader owns the
-`<video>`). So the premise is the encoding: a frame carries nothing until something turns it
-into bytes, and `tests/houseRules.test.ts` holds that exactly one module under `src/`
-names a pixel encoder, `lib/textRecognition.ts`, which sits under the `lib/` network rule
-with its worker. The worker's three requests (the loader by `importScripts`, the engine's
-WebAssembly through `locateFile`, the model by `fetch`) are each exempted by expression,
-pinned to its `?url` import and to two occurrences of its name; `importScripts` is otherwise
-refused in `lib/`. `RTCPeerConnection` is on both lists, since WebRTC is not bound by
-`connect-src` and can carry a frame without encoding it by name. The encoder list is an
-enumeration and says so.
-
-**Closing the reader abandons a load in flight.** `openTextRecogniser` takes an
-`AbortSignal`; aborting it terminates the worker mid download, so closing and reopening
-never runs two loads.
-
-**Third party notices for the engine.** `tesseract.js-core` and the Tesseract model are
-Apache-2.0, whose clause 4(a) asks for the licence with every copy, and the engine's
-WebAssembly statically links Leptonica, libtiff, libpng, zlib, the IJG libjpeg, giflib, libwebp
-and OpenLibm, each under its own terms. `frontend/public/licences/tesseract.txt` reproduces
-every one of those licences from the commit `tesseract.js-core` 7.0.0 pins, so it is in the
-build at `/licences/` and in the image beside the engine files. `frontend/tests/licence.test.ts`
-holds one phrase per library, and that the build copies `public/` into the served dist.
-
-## Further images of a book (2026-11-19)
-
-A book holds further images beside its shelf cover, shown on its page only.
-
-### Slot count: the shelf cover plus seven
-
-`models.MAX_COVER_IMAGES_PER_BOOK = 7`, so eight images a book. The use is evidence of an
-edition: front, back, spine, a dust jacket and its variants, a title page, a colophon. Eight
-covers that with room, and stays a bounded number a household can sort through on a phone.
-uBiblio's sixteen buys nothing this use needs and doubles the disk bound below.
-
-### The shelf image: `books.cover_url`, unchanged, chosen by a swap
-
-The shelf cover stays the one column every listing, the OPDS feed, the export, the MARC
-doors and the public catalogue already read, so none of them changed. Further images live
-in a child table `cover_images` and are shown only on the book page.
-
-Choosing one for the shelf (`PUT /api/books/{id}/cover-images/{image_id}/shelf`) is a
-**swap**: the image's bytes are written as the book's cover through `cover_store.write` and
-settled like an upload, its row goes, and the cover it replaced is kept as a new further
-image. The count is unchanged and nothing a member kept is lost.
-
-Every writer of a book's cover files holds `hold_book_ceilings` before it writes one: both
-uploads, the swap, and a merge, which holds every book it touches, keeper and losers, in
-ascending id, because taking the keeper first deadlocked two merges whose keepers were
-swapped. The
-swap reads `cover_url` and the image only after the lock: two swaps on one book otherwise
-both demoted the same old cover and one chosen image survived nowhere, and on Postgres a shelf
-cover uploaded while the swap waited was read as the link it replaced and written over. The
-shelf cover upload holds it before writing the file, since a swap writes the same name. A
-merge holding only its keeper repointed a loser's images and then waited at the loser's
-DELETE, whose cascade took an image a writer holding the loser had added meanwhile. Each of
-the three is proved against a live Postgres in
-`tests/test_database_ceilings_on_a_real_server.py`, because SQLite serialises writers and
-cannot show any of them. The lock answers whether the book is still there: a book a merge
-deleted while a writer waited makes the upload, the further image upload and the swap answer
-404 and a merge answer 409, each before it writes anything. A
-rollback of a same format swap writes the old cover's bytes back over the shelf name
-(`cover_store.write_over`), because the further image they were copied to goes with the same
-rollback; an upload does not, since the member asked to replace.
-
-Rejected: letting `cover_url` point at a slot. Every reader of `cover_url` (merge adoption,
-the backfill, `covers.settle`, the public schema's local cover rule) reasons about
-`<book id>.<ext>`, and each would have learnt a second shape.
-
-### The storage bound per book: eight times the upload cap
-
-Every slot is written only through the shelf cover's bounds: `uploads.read_image_upload`
-(5 MB cap, 413; JPEG, PNG or WebP by magic number, 400) and `cover_store`'s sniff on every
-write. So one book holds at most 8 × `MAX_UPLOAD_BYTES` = 40 MB through the writers that add
-one. The ceiling is counted after the insert under `hold_book_ceilings`, as the file
-reference ceiling is, and a refused upload's file goes with its rollback.
-
-A merge may carry a survivor past seven (below); it adds no bytes to the disk, and the
-survivor takes no further upload until one goes.
-
-### A replaced cover gets a new URL: `?v=` on `cover_url`
-
-The cover route caches for a week (`private, max-age=604800`), and a same format replace
-writes the same `<id>.<ext>`, which a swap makes the common case. So the two routes that write
-a stored cover over its own name, the upload and the swap, record `covers.replaced_url`: the
-plain URL plus `?v=` and eight random hex digits. Random rather than the file's change time,
-because it needs no `stat`. Every other writer (a catalogue store, an adoption, a copy) puts
-a file under a name no browser fetched with a 200, so it stays unversioned.
-
-Two readers compared `cover_url` with a URL built from a name, and both would have failed
-silently on a version: `covers.settle` (no sweep of the other format on commit, no discard on
-a rollback) and the merge's adoption plan (the loser's file swept rather than adopted). Both
-compare through `covers.unversioned`, which strips the query.
-
-Rejected: a versioned file name, which breaks every reader of `<id>.<ext>`; `no-cache` with
-revalidation, since Starlette's `FileResponse` sets an ETag and answers no `If-None-Match`, so
-every listing would refetch every cover in full. Existing rows need no migration.
-
-### Catalogue cover and uploaded images
-
-A catalogue cover lives only in the shelf slot, as it always has: fetched through
-`covers.py`'s host allowlist and size cap and stored as `<book id>.<ext>`. A further image
-is always an upload; no catalogue writes a slot, so the fetch path gained no new writer.
-
-When an image is shelved over a catalogue cover that was **stored**, the catalogue's bytes
-become a further image like any other. When the shelf cover is only a remote link (the
-download failed and the URL was kept), there are no bytes to keep, and the link is let go:
-a metadata refresh asks the catalogue for it again.
-
-### Files are named by the row, not the book
-
-`image_<row id>.<ext>` in the covers directory. A merge then carries a row by repointing it
-and moves no file; `cover_store.book_ids` never counts one (its stem is not an integer);
-`cover_store.files` lists them, so a backup carries them and a restore writes them back by
-name. `sqlite_autoincrement` on the table, because a reused id on SQLite would hand a new
-row a URL a browser cached for another image (`private, max-age=604800`).
-
-### What each path does with the images
-
-| Path | What happens |
-|---|---|
-| Read | `GET /api/books/{id}/cover-images` behind `BookForRead`; the file at `/covers/{book id}/images/{image id}.{ext}` behind `BookForCover`. An invisible book, an image of another book, and a wrong extension are each 404. |
-| Trash | Rows and files stay: a trashed book is restored whole. |
-| Purge | Rows cascade; `_purge` queues each file's removal on the commit, as the cover's. |
-| Merge | `folding` moves every row to the survivor (`_moves_wholesale`), no ceiling: dropping one would delete a photograph nothing puts back. A loser's own shelf cover keeps the existing adoption rule; it is not turned into a further image. |
-| Add a copy | Not copied. A copy is another object, and its jacket is its own evidence. |
-| Backup and restore | The table is in the archive's manifest; the files ride with the covers. |
-| Export (CSV, JSON, MARC), OPDS, public catalogue | Nothing: they carry the shelf cover only. The public schema already drops a local cover, and further images have no public route. |
-
-## The image ships one generated notices file, served at /licences/third-party.txt (2026-11-19)
-
-**Decision.** A Dockerfile stage, `notices`, writes `static/licences/third-party.txt`
-beside the OCR engine's `licences/tesseract.txt`, and the Appearance page's licences
-section links both. It credits three populations: the JavaScript the browser is served,
-every distribution in the runtime virtualenv, and YAZ. A package with no licence text
-fails the image build and nothing is written.
-
-**Why the JavaScript is read from the module graph, not the lockfile.** The
-`dependencies` closure in `package.json` and `bun.lock` both overshoots (tree shaken
-packages) and misses: Vite's preload helper, Rolldown's runtime, Tailwind's preflight in
-the stylesheet, the Workbox runtime and its module loader in the service worker. None is
-a dependency and all of them ship. So a Vite plugin (`bundleRecorder`, in
-`frontend/scripts/notices.ts`) records every `node_modules` package with a module or an
-asset in the application's bundle and in each worker's, and `collect-notices.ts` then
-accounts for every file in `dist/`: emitted by the bundle, copied from `public/`, or one
-of the PWA plugin's templated files (`sw.js`, `workbox-*.js`, `registerSW.js`). A file
-nothing accounts for fails the build; a virtual module id with no owner fails it.
-
-**Why the Python side reads the installed venv, not `uv.lock`.** What is credited is
-what was installed. Every `*.dist-info` is read: `licenses/` (PEP 639) and any top level
-LICENSE, COPYING, COPYRIGHT, UNLICENSE or NOTICE.
-
-**What counts as licence text.** Both collectors take the same file names, and both drop a
-file that is empty or only whitespace before the check, so an empty `LICENSE` does not pass
-as one. `AUTHORS` is not read: it names people and grants nothing, so a package carrying
-only that would pass as licensed.
-
-**A gap reds the merge request that brings it.** Renovate automerges minors and patches,
-and `build:merge-request` fires on no lockfile, so a refusal only in the image build would
-first red `build` on `main`, after the merge. So both halves also run on every merge
-request, in jobs that already have their dependencies installed: `test:frontend` runs
-`collect-notices.ts` over the build `check:build` has just made, and `test:backend` syncs
-a runtime only virtualenv under `/tmp` and runs `notices.py check-venv` on it. Runtime only
-because the job's own venv carries the dev group, which the image does not ship; under
-`/tmp` because the suite's tree walks would read a venv inside the checkout. Not chosen:
-adding the lockfiles to `build:merge-request`'s `changes:`, which is a full image build per
-Renovate merge request. A pipeline test pins the steps, and that neither job's merge
-request rule carries `changes:` or `when:`.
-
-**Offline.** No new dependency and no network: the JS half is a bun script over
-`node_modules`, the rest is a standard library Python script (`docker/notices.py`) on
-the base image. YAZ's `LICENSE` is kept aside by `docker/build-yaz.sh` at
-`/opt/yaz-notice/LICENSE`, outside the runtime subset so it ships once.
-
-**Packages with no licence file of their own.** `SHIPPED_NOTICE` in `notices.ts` maps
-`tesseract.js-core` and `@tesseract.js-data/eng` to `licences/tesseract.txt`; the
-generated entry points there. A row whose package leaves the bundle fails, so the table
-cannot outlive what it describes.
-
-**The OCR engine's residue.** libwebp's PATENTS grant and OpenLibm's per file notices,
-which `tesseract.txt` points at without reproducing, are committed as
-`docker/ocr-engine-notices.txt` and appended whole to the generated file. Taken from
-libwebp at 20ef03ee and OpenLibm at ae2d9169 (the commits `tesseract.txt` names); the
-OpenLibm part is every distinct licence comment in the directories a wasm32 build
-compiles (src, wasm32, bsdsrc, include), one copy each with the files carrying it. It
-overshoots a little: a handful of other architectures' headers live in src. Two of those
-comments, the FDLIBM notice and Stephen L. Moshier's ISC notice, are word for word in
-OpenLibm's own licence, which `tesseract.txt` carries; their entries keep the file list and
-point there, so the generated file holds each text once.
-
-**Bounds.**
-- A file is accounted for, not every byte: a tool that starts injecting a helper of a
-  new package into a file the bundle already emits is not seen. `INJECTED` names the
-  one known (Tailwind's banner).
-- The base image's own software (CPython, musl, Alpine's libxml2, libxslt, gnutls) is
-  not credited; Alpine ships those under its own terms.
-- Vite's `LICENSE.md` is about 98 KB because it carries the notices of Vite's own bundled
-  Node dependencies; it is included whole rather than trimmed by a special case.
-- The link to `/licences/third-party.txt` is a 404 under `bun run dev`: the file exists
-  only in a built image.
-
-## `dc.subject` is charged by the public shelf's tags per book (2026-11-19)
-
-**Decision.** A `dc.subject` comparison charges `Cost.EXPENSIVE` (8) plus
-`SUBJECT_CHARGE_PER_TAG` (1) for each tag per book above one, rounded up. Tags
-per book is tag links over books on `Shelf.seen_by_the_public`, measured once per
-request and only when the query names the index. The two value enum stays.
-
-**Why this shape and not a separate bound.** Measured on builder, 3,000 public
-books, 2,000 character descriptions, 400 tag vocabulary, two runs of three:
-eight subject comparisons go from 45 to 56 ms at one tag per book to 624 to 644 ms
-at forty, while description and title stay flat. One subject comparison at forty
-tags is 78 to 80 ms, most of the 102 to 115 ms the whole budget buys. So a
-separate bound that does not know tags per book has to pick a density: set for
-forty it allows one subject comparison per query in every library, refusing
-`dc.subject any "two words"` that costs about 12 ms at one tag, and it is still
-wrong past forty. A bound that does know tags per book is this shape plus a
-second calibrated constant. The measurement this shape needs costs 6 to 16 ms per
-request that names the index, on the same corpus.
-
-**Why the mean and the public shelf.** The `EXISTS` evaluates once per tag link,
-so the cost is links over the shelf: the mean, not the maximum. The charge
-reaches a client in a refusal's details, so a count including private books
-would publish an aggregate of them.
-
-**What was measured and not taken.** Rewriting the `EXISTS` as an uncorrelated
-`IN` over `book_tags` joined to `tags` still scales with tags per book (in8 151 to
-155 ms at ten tags, 577 to 585 ms at forty), so the SQL shape is not the lever.
-Vocabulary size from 40 to 30,000 at ten tags per book moves neither form.
-SQLite VM steps were tried as a deterministic instrument and rejected: they
-count one opcode for a LIKE over 2,000 characters, so they rank description below
-title. LIKE evaluations are the instrument the test pins.
-
-**Consequence.** A public shelf averaging more than 57 tags per book refuses every
-`dc.subject` query. One comparison there extrapolates to 109 to 117 ms, the
-whole budget's worth, so that is the bound working rather than a side effect.
-
-**Pinned by** `tests/test_sru.py::TestTheSubjectChargeFollowsTagsPerBook`.
-
-## A catalogue's own bound is applied at the door seam, inside the fan out's wait (2026-11-19)
-
-Ticket "bound each source separately" (GitLab 132), decision D8 of the source as data epic.
-
-`Target.timeout_seconds` ends one question to one catalogue: a lookup with its ISBN-10 retry, or one title search. It is applied in `metadata._within_its_own_bound`, which `_lookup_one` and `_search_one` call around the door, so one rule covers the SRU, Z39.50 and bespoke doors alike.
-
-**On a search, the shared deadline stays the ceiling by construction rather than by a comparison.** The bound runs inside `_within_deadline`'s wait, so a bound longer than the time left is never reached and the fan out's cancellation arrives first. Nothing reads `SEARCH_DEADLINE_SECONDS` to clamp a row, which is why `targets.py` does not import `metadata`. **A lookup holds no shared deadline**, so there the row's bound is the only one over the question beyond one request's own.
-
-**The two protocol doors are handed the same absolute moment.** `fetch.get_once(deadline=)` and `z3950.association(deadline=)` already took one; handing it on means the Z39.50 client's own socket timeout is derived from the row's bound rather than from `z3950.TIMEOUT_SECONDS`, so an abandoned association frees its thread at the bound instead of up to ten seconds later. The bespoke door's adapters own their clients and are bounded by the seam alone.
-
-**A row is refused a bound outside `0 < seconds <= targets.TIMEOUT_CEILING_SECONDS`**, the lower of `fetch.TIMEOUT_SECONDS` and `z3950.TIMEOUT_SECONDS`. Past the Z39.50 figure `z3950.association` raises `ValueError`, which would reach a member as a 500 rather than as one source being `UNAVAILABLE`; past the SRU figure the row would wait longer than it did before it had a bound. The comparison is written so NaN fails it, and `ck_catalogue_targets_timeout` holds the same rule in the table, so a restore cannot write a row the dataclass would refuse when one is read back.
-
-**A seed is a margin over a measurement, not the measurement.** The slowest ask the row answered, doubled and rounded up to whole seconds, at least 3 and at most 10. The slowest rather than the 95th percentile: over about 20 asks the percentile discards the one or two slowest, and at the BNE that left an observed ask at 80% of the bound. **The measurement is narrow, and a seed is read against it.** One run through `metadata._lookup_one` and `_search_one` from one cluster node (builder), on 2026-11-19 from 13:33Z to 13:37Z, one ask at a time per host at least 2 s apart: 22 ISBN lookups and 20 title searches per row answering each. It covers one time of day only, so a catalogue slower in its own evening is not measured, and most Z39.50 lookups were misses, so a hit's record transfer is barely sampled there. Generous because a leading source cut by its bound leaves a merged record without it in the cache for a day, where a miss is cached for minutes. **A Z39.50 row gets one second more**: YAZ takes whole seconds and `z3950_yaz._options` truncates what is left, which keeps an abandoned thread inside the bound but opens a 3 second row with a 2 second wait. A row with no trustworthy measurement keeps NULL, one request's own 10 seconds as before.
-
-**The seed migration updates each row by source, whatever it held.** No row can carry a household's choice yet, and the seeder writes `targets.SEEDED` over every seeded row on every boot; a condition on the old value would only let a restored archive and the constant disagree until that boot.
-
-**Rejected: wrapping only, with no deadline handed down.** It holds the bound, but leaves a Z39.50 thread running to the client's ten second socket timeout after every miss.
-
-## A Postgres URL naming any driver but pg8000 is refused at startup, never rewritten (2026-11-19)
-
-**`database._refuse_a_driver_this_image_lacks` refuses a URL whose backend is
-`postgresql` or `postgres` and whose driver is not `pg8000`, before `create_engine`
-imports anything.** The message names `postgresql+pg8000://` and never the URL, which
-carries the password. Owner, 2026-11-19 (GitLab 333, Q3): refuse rather than rewrite.
-
-**Wider than the bare scheme, deliberately.** SQLAlchemy 2.1 resolves a bare
-`postgresql://` to psycopg, which dies in `create_engine` with a `ModuleNotFoundError`.
-`postgres://` fails with SQLAlchemy's `NoSuchModuleError` and `postgresql+psycopg2://`
-with a `ModuleNotFoundError`, the same failure under other names, and nothing but pg8000
-is installed. The engine is pg8000
-shaped besides: `ssl_context`, the cleartext check and the SQLSTATE mapping read pg8000
-alone. A derived image that installs another driver on purpose is refused too, which is
-the cost of not rewriting: the message tells that operator what this image supports.
-
-**Placed in `_connect_args`, whose result is `create_engine`'s argument**, so it runs
-first by evaluation order. A child interpreter arm in `tests/test_database.py` holds the
-order: placed after `create_engine`, startup dies on the import error again.
-
-## The schema is behind sign in, its two viewers are gone, and `google_books_ready` stays public (2026-11-19)
-
-**`/openapi.json` requires `get_current_user`.** FastAPI's own is off (`openapi_url=None`)
-and `main._schema` serves it, `include_in_schema=False`. Owner, 2026-11-19 (GitLab 398, Q4).
-
-**`/docs` and `/redoc` are removed rather than gated** (`docs_url=None`, `redoc_url=None`,
-and no route of ours). They never rendered: the page's CSP (`script-src 'self'`) refuses
-the CDN script and the inline bootstrap both viewers depend on, so each was a blank page
-for everybody. Loosening the CSP for them was not worth it, since it guards every page of
-the app and the schema itself is what a caller reads. Both paths stay in
-`errors.API_PREFIXES`, so a browser opening one gets a JSON 404 rather than the app shell.
-`/docs/oauth2-redirect` went with them: FastAPI adds it only when `docs_url` is set.
-
-- **Every auth mode works through the one dependency**: a bearer token under local and
-  ldap (ldap issues the same token at sign in), the proxy's header under proxy.
-- **A browser navigation carries no bearer token**, and the only cookie is the cover
-  cookie at `Path=/covers`, so under local and ldap a member opening `/openapi.json` in a
-  tab gets 401. Widening the cover cookie was not taken: it is narrowed to one GET route
-  on purpose. A caller sends the token as `Authorization: Bearer <token>`.
-- **Regeneration is untouched**: `scripts/dump_openapi.py` calls `app.openapi()` in
-  process and Orval reads the committed `frontend/openapi.json`. Nothing fetches the
-  route. The public catalogue and the SRU server do not read it.
-
-**`google_books_ready` on `GET /api/settings/features` stays public, deliberately.** The
-backfill refusal, `catalogue_access.GOOGLE_BOOKS_IS_NOT_ASKED`, tells any member whether
-Google Books is asked; that is safe only because the flag tells anybody.
-Narrowing the flag fails
-`tests/test_catalogue_access.py::TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`,
-and that test goes with the refusal: whoever narrows the flag rewrites both in the same
-change. The constant's comment says so.
-
-## The SRU server has a switch of its own (2026-11-19)
-
-**Decision.** `/sru` needs library mode, the catalogue published, and `sru_server_enabled`,
-which defaults off. The switch is read after `routers.public.public_reader` by
-`routers.sru.sru_switch`, through `settings_store.sru_is_served`, which also reads the publish
-state. Off, the route answers the gate's own 404, same status and same body.
-
-**Why a switch.** Owner, 2026-09-05, on issues #176 and #178: publishing a catalogue to people
-and serving a machine protocol are two decisions, and an archive may want the first without
-the second. This revises "The SRU server borrows the public catalogue's gate rather than
-growing one": it still borrows the gate and adds one row after it.
-
-**Why a 404 and not an SRU diagnostic.** SRU's diagnostics are how a server that is answering
-refuses one request. A switched off server is not answering, and every SRU client reads a 404
-as "no SRU service at this address". A diagnostic (1/2, "system temporarily unavailable", was
-the candidate) would tell a stranger that a catalogue is here and its protocol is withheld,
-which is what the 404 rule exists not to say. It would also need a new member of
-`sru.Diagnostic`.
-
-**Why the conjunction is repeated in `sru_is_served`.** The router runs `public_reader` first
-for the rate limit, so the publish check runs twice per request. Two settings reads buy an
-answer that stays right for any caller that asks it alone, and a switch that cannot publish a
-catalogue whatever the dependency list says.
-
-**Why default off, and why an upgrade keeps SRU where it was served.** The owner's rule on
-#178: every export protocol defaults off, so a fresh install serves no SRU until an admin says
-so. The owner's decision of 2026-11-19: a deployment whose catalogue is published when it
-upgrades keeps answering on `/sru`. Revision `f73ebc9f0436` writes the switch on where no row for
-it exists and both library mode and the publish row read true as `settings_store` reads them,
-so an upgrade neither narrows nor widens what any deployment serves. Library mode is part of
-the condition because without it the public gate refused `/sru` before the switch existed.
-
-**One row per protocol, never a shared one.** #178's testing section: a shared gate is where
-two switches become one.
-
-## A public record says on the shelf or on loan, at its own path, for the title (2026-11-19)
-
-Owner's decision on issue #29, 2026-11-19: a stranger may see whether a copy is on the shelf or
-on loan, with no due date, behind its own switch, off by default. A due date says when a member
-will have the book at home, which is more than availability needs. The ticket's own text already
-ruled out the borrower, a member, a patron and a count.
-
-**Its own route, `GET /api/public/books/{id}/availability`, not a field on `PublicBookOut`.** A
-field would be `null` on every record and every listing row while the switch is off, which
-changes every public answer for a feature that is off by default. As a route, the record and
-the listing are byte for byte what they were with the switch on or off, and the switch decides
-only whether this path answers. The cost is a second request per record view, against the same
-rate limit; a person reading records stays far under 120 a minute.
-
-**The switch off is the gate's own 404**, as with SRU: a stranger cannot tell it from an
-unpublished catalogue. It runs after `public_reader`, so probing it spends the catalogue's rate
-limit. No migration: nothing showed availability before, so off is right for a fresh deployment
-and an upgraded one alike.
-
-**A stranger can tell when the answer changes, and that was accepted.** The payload says only
-on the shelf or on loan, but nothing coarsens it and no cache holds it, so somebody polling one
-record (the rate limit allows twice a second) learns when it went out and when it came back. They
-never learn when it is due back or who has it. The owner accepted availability on that basis: the
-due date was the line drawn, not the moment of change.
-
-**It answers for the title, not the row.** A copy is a row of its own, so the record reads on
-the shelf while it or any public copy in its `copy_group` has no open loan, and on loan only when
-every one is out. **Private copies count for nothing in either direction**: only the ids
-`Shelf.seen_by_the_public` returns are asked, through `Loans.open_on`. A private copy on the
-shelf making a title read as available, or its loan making one read as out, would tell a
-stranger the private copy exists. `tests/test_nothing_private_leaves.py::TestAPrivateLoanChangesNoPublicAnswer`
-lends a private copy of the public Book and asserts no public answer changes, once with the
-public copy out and once with it in, because each state hides one direction of a miscounted
-private loan; beside it, a control that lending the public copy does change one.
-
-**Search results do not carry it.** Story 2 asks to see that a copy is out; the item record is
-where a reader decides to come. Adding it to the listing would need a field on the listing row,
-which is the byte for byte cost above, or a request per row.
-
-## The OAI-PMH provider (2026-11-20)
-
-The provider at `/oai` answers harvesters while the catalogue is published, its own switch is
-on, and a contact address is stored (`settings_store.oai_is_served`).
-
-### The OAI-PMH provider keeps persistent tombstones of an id and a datestamp, with no backfill
-
-Owner's decision for the provider: `deletedRecord` is `persistent`, the tombstone holds the
-identifier and the datestamp only, and any record a harvester could have seen that it can no
-longer see answers as a deleted header. The table is `oai_tombstones` (book id, datestamp); the
-id carries no foreign key, because the Book it names may be gone. **No tombstone is backfilled
-by the migration**: nothing was served over OAI-PMH before it, so no harvester holds a record it
-could need told about. A tombstone is written only for a Book that was public immediately before
-the write, read off `Shelf.seen_by_the_public`, so a Book that was always private never gets one.
-**Public there means not private and not trashed, whatever the publish state**, which the next
-entry bounds.
-
-### No tombstone before the provider first served a request
-
-Owner's decision (Q7, 2026-11-19). `routers/oai.py` records the first moment it answers a
-request as the `oai_first_served` setting, once. Before it, no departure is tombstoned: no
-harvester could have seen the record, and a tombstone would publish its id and the day it left,
-which is how a Book made private before the catalogue was ever harvested reached a deleted
-header. After it, every departure is tombstoned whether or not the switch is on at that moment,
-since a harvester may still hold the record. A restore counts the provider as served when either
-the database or the archive says so, and keeps the earlier moment. Rejected: tombstoning only
-while the switch is on, which would lose a departure during a short switch off that a harvester
-still needs told about.
-
-### Datestamps are served to the day, and the day a Book was added is an accepted disclosure
-
-Owner's decision (Q6, 2026-11-19). `Identify` advertises `YYYY-MM-DD`, every header carries the
-day, and a `from` or `until` given to the second is `badArgument`, as the specification makes
-a granularity finer than the repository's. Datestamps are still stored to the second, so a
-write's order is kept. **What remains disclosed, accepted**: a record never edited carries the
-day its Book was added, which `PublicBookSort` withholds from the JSON catalogue, and every
-record carries the day it last changed or left. The day narrows the second, which would have
-dated an acquisition to the moment. The migration stamps every existing Book with the one moment
-of the upgrade, never its `added_at`, so the disclosure starts with changes made after it.
-
-### The datestamp is kept by session events registered from models.py, not by each write path
-
-One mechanism a new write path cannot forget: `harvest.py` registers `before_flush`,
-`after_flush_postexec` and `do_orm_execute` on `Session`, and `models.py` imports it at its foot.
-The watched set is derived from `PublicBookOut`, so a new public field is watched without an
-edit. Rejected: bumping in each router (forgettable), a database trigger (two dialects, and the
-visibility rule would be restated in SQL). **Blind spots, accepted**: text SQL and a bare
-`Connection`. `tests/test_harvest.py::TestNothingWritesPastBothDoors` refuses a literal text
-write to the harvested tables, driver SQL, and a `connection()` or zero argument `connect()`
-call outside `harvest.py`, the migration runner and the database creation script; a
-`Connection` reached under another name (`engine.begin()`, `session.bind`) and text built from a
-variable pass it. Migrations are outside it: a migration changing published values leaves
-datestamps unmoved, which under reports a change and never publishes a row. A bulk INSERT into a
-child table whose Books its parameters do not name is refused outright, and a bulk child UPDATE
-that sets the column naming a Book stamps the Book it moves to as well as the one it left. Cost:
-two primary key SELECTs per flush that deletes a Book or changes a column the public shelf reads,
-none for any other edit or for one that only creates; a bulk UPDATE or DELETE of `books` asks twice
-per statement whatever it sets.
-
-### A restore re-stamps every record and raises the Book id counter
-
-`backup.restore` runs under `harvest.wholesale`: both events suspended, then every Book stamped
-now, public ids before minus after tombstoned (where the provider has served), after's
-tombstones cleared, and the Book id counter raised past every tombstone. A restore can change
-any record to anything, so a harvester re-collects the whole catalogue once; the alternative,
-comparing restored rows to the old ones, is a second copy of the record definition. **The
-counter**: an archive carries Books with their ids and not the counter, so on a fresh database
-the next Book would take the id of a record purged before the backup, and a harvester's
-identifier would come to name another work. Raised on SQLite through `sqlite_sequence` and on
-Postgres with `setval`, never lowered. Rejected: refusing such an archive, which would refuse
-every ordinary backup taken after a purge.
-
-**Every other table's counter on Postgres** is raised to its highest restored row by
-`backup._raise_the_id_counters`: Postgres moves a sequence only when it issues the id, so
-without it the first insert into any restored table on a fresh database would take a restored
-row's id. SQLite needs nothing, since it issues above the highest row.
-
-### OAI-PMH is GET only
-
-The specification also allows POST. No harvester this serves needs it, and a second method is a
-second way in to keep equal to the first.
-
-### Identify serves a repository contact address an admin stores
-
-Owner's decision (Q8, 2026-11-19). `Identify` must name an address, and a member's would put on
-an unauthenticated surface what the JSON catalogue withholds, so it is a setting of its own,
-`oai_admin_email`, given on the public catalogue screen beside the switch. The switch cannot be
-stored on while the address is empty: `PUT /api/settings` answers 409 for a write that would
-leave it so, whichever field it changes, and the screen disables the switch and says why.
-`settings_store.oai_is_served` also requires it, so a restored or hand edited row with the
-switch on and no address serves nothing. The reserved `.invalid` placeholder is gone.
-
-### Identifiers are oai:<request host>:<book id>
-
-The host is the one the request named, read by `routers.sru.server_for` against its bounded
-pattern, falling back to `localhost`. An id is never issued twice: `AUTOINCREMENT` and the
-Postgres sequence never step back at head, and a restore raises the counter past every tombstone
-(above), so an identifier never comes to name a different Book. Cost: a deployment reached under
-two names gives the same record two identifiers; a harvester is configured with one base URL, so
-it sees one.
-
-### The resumption token carries only what a fresh request could ask, and no bound finer than a day
-
-base64url of format, window start and end as day numbers (`date.toordinal`), and the last id
-served; at most 64 characters, parsed strictly. The page size (50) and the row filter are the
-server's. Paging is by id rather than offset, so a record changing mid harvest is neither served
-twice nor makes another skip; one whose datestamp moves out of the window is caught by the next
-incremental harvest. A token from before an upgrade that changed its shape is
-`badResumptionToken`, which tells the harvester to start again.
-
-**Day granularity holds at the comparison, not only at the door.** `oai._within` compares each
-bound as the start of its day, whatever built the `Harvest`, so neither the arguments nor a
-forged token can bisect a day to recover a stored datestamp to the second, which for a
-never edited Book is its `added_at`.
-
-**Rejected: an HMAC over the token**, keyed with the JWT secret the app already holds. It would
-stop a forged token, and that is all it would do: a token reaches no more than a fresh request
-once its bounds are days, so signing adds nothing to privacy, while it ties every in flight
-harvest to the session key (a rotation, or a restore onto another machine, ends them) and
-lengthens the token. The truncation holds without a secret, and covers any later path that builds
-a `Harvest`, which a signature on one path does not.
-
-### Known limit: datestamp against responseDate
-
-Datestamps are served to the day and taken in the flush, before commit. A record committed on
-the day a harvester's `until` names, after that harvest ran, is caught by the next one, since a
-harvester at day granularity overlaps `from` with the day of its last `responseDate`. A
-harvester that sets `from` to the day after its last harvest misses it. Not fixed.
-
-## One search or lookup narrowed to some catalogues (2026-11-20)
-
-In library mode a member may name, for one request, the catalogues an ISBN lookup or a title
-search asks, as `only` on either route. The route `GET /api/books/lookup/catalogues` offers
-the names, since a member cannot read the settings.
-
-### A narrowing is refused rather than intersected, with a 409
-
-`catalogue_access._narrowed_access` checks the names against the path's own roster in force,
-`lookup_chain` for a lookup and `searched_harder` for a search, and refuses the request when
-any name falls outside it: switched off, without its key, or unable to answer that path, such
-as the BnF on an ISBN. It intersects nothing. A request that quietly asked fewer catalogues
-than it named would answer from a set the member did not choose and say nothing. The refusal
-comes before the allowance is charged, and an unknown name is FastAPI's own 422.
-
-**409, not 422.** `tests/test_errors.py` refuses a string detail under 422, because the
-committed schema types that status with a list detail, and 409 is the status every refusal
-about what this Library asks already answers with. Library mode off answers 403, as the
-MARCXML export does.
-
-### The ticks are a draft spent by the one request they narrow
-
-A submit or a lookup carries the ticks and clears them, so a tick never sends a request
-and the next search or ISBN asks every catalogue. Rejected: ticks held until cancel, which made
-"this search only" false and fired a fan out on every tick.
-
-**The line under an answer names what was asked, not what was ticked.** A narrowed search
-still leaves a slow catalogue to a harder search and may be refused that slot, so the search
-names the ticks the answer's `asked` holds. A lookup has no `asked` on the wire and asks every
-ticked catalogue on a miss, so it names its ticks, except above a draft entered by hand.
-
-### A refused narrowing asks for the roster again
-
-A narrowed request refused with 409 means the page's roster is out of date: the plan in force
-moved since the page read it. The page asks for the roster again, drops a tick it no longer
-offers, says the list changed, and offers no retry, which would send the same names and be
-refused again. Rejected: refetching the roster on focus, which the app turns off for every
-query and which would miss a second admin's write made while this tab stays focused.
-
-## Classification schemes are rows a library can add to (2026-11-20)
-
-A scheme was a closed enum of four. It is now a row of `classification_schemes`, which a
-library's admin can add to, rename and delete while no book uses it.
-
-### The four built in schemes are locked
-
-`ddc`, `lcc`, `gnd` and `lcsh` cannot be renamed, refiled or deleted. Readers produce them
-(`sources.CLASSIFIES`), `BookSort` orders by two of them and the MARC export writes fields
-for them, so a delete or a new rule would break code rather than data. This extends the
-owner's rule of 2026-11-19 (refuse a delete while something references the row) to a
-reference from code.
-
-### A scheme's filing rule is fixed when it is defined
-
-Every stored `classifications.sort_key` was computed under the rule. Changing it would need
-every heading under the scheme refiled in the same transaction, so the edit route renames
-only, and a different rule means deleting the unused scheme and defining it again.
-
-### The sort key is derived at flush, under the row's rule
-
-The `@validates` hook read a closed enum at assignment. A rule is now a row, so mapper
-`before_insert` and `before_update` events derive the key, reading the rules once per session
-through a cache in `Session.info` (`models.filing_rules`) that every scheme write drops. A
-side effect: an unflushed instance has no key yet.
-
-### The delete refusal counts only books the caller may see, and says so
-
-The refusal counts through `Shelf.seen_by` plus `Shelf.trashed_by`, like every count of
-books, and words the number as that count: "N books you can see still use this scheme"
-(owner, 2026-11-20). A heading on another member's private book still blocks the delete and
-is not counted. Where only such books block it, the refusal gives no number: refusing at all
-already says some book quotes the scheme, and a count would say how many of another member's
-private books do. The 409 carries `code` `scheme_in_use` and the `count` beside the English
-sentence, so the client words it in English and German.
-
-### What the enum gave, each answered in code
-
-- **Graceful degradation.** Response schemas type `scheme` as a string. A restore adds a row
-  for each code its headings quote, degrades an unknown filing value to `generic`, and a
-  missing or overlong name to the code or the column's width; the migration adds a row for
-  each code already stored. `add_headings` drops and logs a heading from a record under a
-  code with no row, rather than failing the book at the foreign key.
-- **An unknown scheme on a member's write is still a 422.** `POST /api/books`,
-  `POST /api/books/scan` and `POST /api/books/{book_id}/enrich/apply` refuse a heading whose
-  code has no row, naming the field, as they did while the scheme was an enum. A member named
-  the scheme, so a typo or a wrong case (`DDC`) is told rather than dropped. A record is a
-  third party's, so MARC upload and lookup keep dropping.
-- **The check constraint** becomes `fk_classifications_scheme`, `ON DELETE RESTRICT`.
-- **The closed client union** is gone for headings. The client keeps it for the four built in
-  labels, and `CatalogueSourceOut.classification_schemes`, what a reader yields, stays the
-  enum.
-
-### A filter naming a scheme with no row matches no book
-
-`GET /api/books?classification=bogus:004` answered the whole library while the scheme was an
-enum, because the filter dropped a value it could not parse. Now any scheme reaches the
-query, an empty one or one longer than any code included, and matches no book. Dropping it
-would widen the listing silently, for a link that asked for less. The filter does not ask
-the table whether the scheme exists, which would cost every listing a statement. A value
-with no colon or no number is still dropped, as before.
-
-### A chip shows a library's own scheme by its code
-
-The book page, the filter and the table draw a library's own scheme as its code in capitals
-rather than its name, so no page that draws a heading has to fetch the scheme list. The
-settings card shows the name.
-
-### The API field is `scheme`, not `code`
-
-`ClassificationSchemeOut.scheme` matches the field a heading carries, and a field named `code`
-reads as a one time code to `TestAOneTimeCodeIsServedOnlyWhereItIsNamed`.
-
-### Defining a scheme is admin only
-
-Unlike a custom field, a scheme's rule orders the library's shelves and cannot be changed
-afterwards. Listing is open to any member, and carries no count.
-
-## A local copy of the GND and LCSH subject vocabularies (2026-11-20)
-
-The owner's answers of 2026-11-20 fix the shape. The copy is a table in the existing
-database, so it rides the existing backup and restore and the suggest field is an indexed
-query on both engines. Its download runs in the background with progress and is
-refreshed by hand from settings; where it is offered is the entry on the vocabulary
-download below. GND subjects and LCSH both
-land as first class vocabularies: "Given that this is going to be a FOSS project, both of
-these have to be first class citizens." This wave ships the loader and the two converters;
-the table and the download come with the next migration.
-
-### An LCSH entry's id is its id.loc.gov URI
-
-ADR 0009 decided an entry id takes the form imported records store as their first `$0`, and
-said LCSH's form was unmeasured. Measured 2026-11-20: the two LC MODS fixtures hold 35
-`<subject authority="lcsh">`, none with a valueURI or href, and the MODS subject reader in
-`metadata.py` stores no identifier anyway. 100 live LC MARCXML records carry 117 LCSH subject
-fields and no `$0` on any. So the ADR's rule has nothing to copy for LCSH.
-
-The owner chose the id.loc.gov URI, `http://id.loc.gov/authorities/subjects/sh...` (https
-mapped to http), in `vocabularies._URI_TO_STORED`. It is the publisher's spelling, stable
-across LC revisions, and what a catalogue writes in `$0` when it writes one. Rejected: the
-authorised string, which equals the stored LCSH classification number but changes across
-revisions, and the bare `sh` number.
-
-### A subject field's second indicator is read as a thesaurus only on a Library of Congress record
-
-MARC 21 defines the second indicator of `600`, `650`, `651` and `655` as the thesaurus: 0
-LCSH, 1 LC children's, 2 MeSH, 3 NAL, 5 Canadian, 6 RVM, 4 unspecified, 7 named in `$2`. LC
-writes LCSH as `#0` with no `$2` (117 of 117 above), so `marc_fields.Subfields.subject_vocabulary`
-falls back to the indicator where `$2` is absent, mapped to the MARC source codes `lcsh`,
-`lcshac`, `mesh`, `nal`, `cash` and `rvm`, **but only on a record whose `040 $a` is `DLC`**
-(`marc_fields._INDICATOR_TRUSTING_AGENCIES`).
-
-Other catalogues miscode it. Of 21 ÖNB `650` fields with indicator 0 and no `$2` in 150 live
-records (2026-11-20), at least 10 were MeSH from Austrian medical libraries, which an upload
-would have stored as LCSH and the SRU server republished as `$2 lcsh`. The owner's ruling:
-"Only for LC". On every other record a field with no `$2` declares no vocabulary, and `$2`
-wins where both are present. `689` is excluded: its second indicator numbers the heading
-inside an RSWK chain. `lcshac` is kept for indicator 1 although the source list now prefers
-`cyac`, because LC's MODS writes it and the MODS reader reads it.
-
-**The fallback for German speaking catalogues comes with the vocabulary table.** No German
-record in the live samples carries `040 $a DLC`, so the rule above labels nothing there.
-Judged by hand over 589 subject fields, trusting the indicator everywhere was 94.0% precise;
-the chosen rule was 99.8% (432 of 433) at 76.1% coverage. It reads a `$0` prefix where there
-is one, and otherwise the indicator's vocabulary only when the heading is an exact preferred
-label in that vocabulary's local copy. It needs the GND and LCSH copies, so it shipped beside
-the vocabulary table, with a MeSH match added when a MeSH copy exists: the entry on option AC
-below.
-
-### The GND converter reads JSON-LD, not MARC21 XML
-
-The DNB's open data page serves the Sachbegriff file as JSON-LD, RDF/XML and Turtle only,
-measured 2026-11-20, and the stable MARC file names answer 404. So the declaration says
-`origin-format: [gzip, json]`.
-
-### A data file is streamed and checked twice over one handle
-
-`vocabularies.read_entries` yields entries: it checks the SHA-256 before the first and the
-count after the last, over one open handle, so the next slot's loader writes beside the copy
-in use and discards what it took when the iterator raises. YAML is still parsed whole; JSON
-Lines and CSV are read a line at a time.
-
-### Points the ADR leaves open, decided in code
-
-- `origin` and `origin-format` are refused one without the other, and `origin-format` is
-  checked whatever the licence.
-- An unknown licence drops `origin` with the `data-file`.
-- The licences permitting a copy are `CC0-1.0` and `public-domain` only.
-- A conversion writes at most `vocabulary_dumps.MAX_DATA_FILE` bytes, 4 GiB, which nobody
-  has measured against a whole release.
-- The shipped declaration has no `suggest`: no source row has a suggest capability yet, so
-  the loader takes the capable source names from its caller.
-
-## The subject vocabulary download (2026-11-20)
-
-### It is offered in library settings, and by a notice to an admin
-
-The owner's answer of 2026-11-20 had the download offered at first initialization, and the
-app has no first run flow. So library settings carry a Subject vocabularies section, admin
-only, and an admin sees a notice on the library page pointing at it until a copy is loaded
-or the notice is dismissed (owner, 2026-11-20). The dismissal is a settings row, so it holds
-for the installation rather than one browser. A first run flow was rejected as a piece of
-work of its own for one item.
-
-### A restore holds off a download, and nothing else
-
-A restore and a load take the same lock, `vocabulary_copy._ONE_LOAD`: a restore while a load
-runs is refused, a load asked for during a restore waits, and a second restore is refused as
-a restore, not as a download. The lock is a `threading.Lock`, so it holds within the one
-uvicorn worker the image starts. Other writers are not held off: on SQLite an async write
-during a restore's minute can fail after the 5 s busy timeout, and on Postgres a row
-committed meanwhile can outlive the restore. Synchronous routes already ran beside a restore
-before it left the event loop.
-
-### The download's first URL is not checked for https
-
-`fetch.download` refuses a redirect to http (`_https_hop`) and does not check the URL it
-starts from. Both origins in `backend/vocabularies.yaml` are https, and that file is shipped
-configuration rather than a response, so an http origin needs an edit to the image. Accepted
-rather than adding a refusal to a module most door guards read.
-
-### Converting and loading share the interpreter with requests
-
-A load converts and inserts on a thread of the application's process, and a restore now runs
-on one too, so both share the GIL with every request. Measured 2026-11-20 in a pod limited
-to 500m over a million `vocabulary_labels` rows: with the restore on a thread, the event
-loop's longest stall was 0.10 s over 600 ticks, which is the ticker's own resolution. Accepted
-at that figure. A load's own stall was not measured; its work has the same shape.
-
-## Option AC: a subject field with no `$2`, outside a Library of Congress record (2026-11-20)
-
-**A `$0` prefix names the vocabulary first.** That rule needs no local copy and covers both
-paths, the catalogue lookup and an uploaded file (owner, 2026-11-20). On the catalogue path it
-changes only `Subject.vocabulary`, which nothing persists; on an upload with no copy loaded a
-`$0` at id.loc.gov now stores an LCSH row.
-
-**Otherwise indicator 0 is LCSH only where `$a`, its closing full stop removed, is an exact
-preferred label of the local LCSH copy and no subdivision opens lower case.** Judged by hand
-over 589 live fields from five German speaking catalogues: 99.8% precise (432 of 433) at
-76.1% coverage, against 94.0% for trusting the indicator; the review's reproduction on the
-built code read 429 of 430 (99.8%) and 75.5%. Indicator 4 stays unknown. MeSH waits for a MeSH
-copy (`marc_fields._SUBDIVISION_FORMS`).
-
-**The heading is stored in the form it was matched in**, without the closing full stop, which
-is the form the copy's labels and the MODS heading take; storing the stop would equal neither
-and keep two rows for one heading. Migration `c2015421927e` put the LCSH rows stored earlier
-into that form, merged the twins this made on one book, and moved the OAI datestamp of every
-book it changed.
-
-**Restoring an archive taken before that revision brings the stop forms back, and that is
-accepted.** The consequence is a duplicate row on the next MARC read, not a refusal or a leak,
-and a second frozen copy of the merge inside `backup.restore` would cost more than it saves.
-
-## Patron records (2026-11-20)
-
-### A card number is stored upper cased
-
-`a12` and `A12` are one card. `schemas/patron.py` upper cases the number on create and edit,
-before the unique index sees it, and the hint under the field says letters are saved as
-capitals. No migration, because the table is new. A restore inserts what the archive holds
-without upper casing it; no released build has written a patron, so no archive holds a lower
-case card. `CHECK (card_number = upper(card_number))` is the cheap hold if that changes.
-
-### The search carries its term in a POST body
-
-A patron's name in a GET's query string reaches uvicorn's access log and every proxy's. A
-filter on the access log covered the first only; `POST /api/patrons/search` covers both.
-Orval generates a POST as a mutation, which a typed search box reads badly, so
-`orval.config.ts` overrides `search_patrons` to a query.
-`test_no_patron_route_takes_a_query_parameter` holds every patron route to no query
-parameter.
-
-### An erasure zeroes the row on SQLite
-
-`database.py` sets `PRAGMA secure_delete=ON`. The image's SQLite is built with it on and uv's
-Python's is not, so setting it pins the erasure off a compile flag at no cost to the image.
-What it leaves is in `data-model.md`: the WAL keeps the old page until later writes overwrite
-it, and Postgres keeps a dead tuple until vacuum. Closing the WAL as well, by
-`journal_size_limit` or a truncating checkpoint after each erasure, is the owner's call if
-wanted.
-
-### Accepted as built
-
-- Two admins registering the same card number at once: the second is a 500 rather than a 409,
-  because telling the unique index from a CHECK failure needs the constraint name read.
-  Admin only, one process.
-- The patron text columns carry no byte bound CHECK: `String(n)` is unenforced by SQLite only
-  on the restore path, which is admin only.
-
-## Lending to a patron (2026-11-20)
-
-### Only an admin names a patron on a loan
-
-`POST /api/loans` with `loaned_to_patron_id` answers a member 403 before the lookup, so a
-missing id and an existing one answer alike, as on the patron routes. The loan form draws the
-patron radio for an admin alone, whatever the library mode, the same rule as the Patrons page.
-
-### An admin reads who has the book; everyone else reads that a patron has it
-
-Owner's decision, 2026-11-20. Every loan carries `to_patron`, a flag and never the id. An
-admin's loan also carries `patron`, the name and card number and no contact detail, on the
-badge, the loans and overdue pages and a lend or return, filled per viewer by
-`patrons.named_on_loans`, which reads nothing for anybody else. The desk asks "who has this
-overdue book", and only the loan answers it. The admin's patron record lists the patron's open
-loans, through the admin's own `Loans.seen_by`.
-
-**The overdue digest a channel receives names no patron.** It has no viewer and goes to third
-parties, so a patron's loan is in it with its title and due date and an empty borrower, as an
-erased borrower's is. The owner's answer named "the overdue digest an admin receives"; the in
-app overdue page an admin reads is the surface that answers it, and it names the patron.
-
-### An expired registration still lends
-
-`models.Patron` says `expires_on` is what a scheduled erasure would key on, and nothing makes
-it a bar to lending. Refusing the person at the desk over a date is a circulation policy, which
-the ticket puts out of scope. The picker shows "Registration expired on X" in words, and the
-desk decides. `CHECK` or a 409 is the hold if a library asks for one. **A scheduled erasure
-must skip a patron with an open loan, or count a loan as renewing the registration**:
-otherwise a loan just made to a lapsed patron is anonymised while still open, and the book is
-left out with nobody.
-
-### Registering at the loan is two requests, not one
-
-The register write hands back the stored patron, which becomes the pick, and the loan names it
-by id. A loan that fails after the registration keeps the pick, so a retry registers nobody. A
-combined endpoint would make the pair atomic, at the cost of a second create path for the same
-record and its 409.
-
-### The patron form and search are one copy, in the middle tier
-
-`PatronForm` is in `pages/components/`, the search and register hooks in `pages/hooks.ts`, and
-the draft helpers in `pages/types.ts`, since two pages now hold them.
-
-## The curated catalogue registry and the source test (2026-11-22)
-
-Catalogue settings list a registry of national and union catalogues this release ships, which
-an admin can pick, and every catalogue, seeded or registered, gains a Test action.
-
-### The catalogue registry is vendored, and a pick is a name
-
-The registry is a committed snapshot, `registry.py`, refreshed by a commit and never at
-runtime: a list fetched live would let a third party's page decide which addresses this server
-asks. An entry ships only once it was probed answering, with its date, its ISBN and its
-disposition. `TAKEN_ON` must equal the newest probe, and any other date, earlier or later, is
-refused at import, because the snapshot counts as aged 183 days after `TAKEN_ON` and a date
-later than every probe would hide an old one. The snapshot is checked again at each release.
-
-**A pick is a `RegisteredCatalogue` name in `SettingKey.PICKED_CATALOGUES`, never a
-`catalogue_targets` row**, so no table holds a picked address and the roster table stays a
-copy of the seeded targets.
-
-**A picked entry is asked at the tail of an ISBN lookup, lookup only** (owner, 2026-11-22):
-after the seeded chain missed, in `RegisteredCatalogue` order, never in the leading tier,
-a title search or a narrowed lookup, and with no login. That is the place a new catalogue gets:
-nothing measured where an entry would earn more, so it costs a request only on a book the chain
-could not find. Its own rate limits are unmeasured; `METADATA_LIMIT`, per member, is what bounds
-the requests it takes. The plan carries a pick as the snapshot's own `targets.Target`, filled at
-the one place an `Access` is built, because `metadata` reaches no database. A library whose only
-catalogue is a pick has something to ask: a lookup misses as not found rather than "nothing
-switched on", and enrichment is not refused up front. `RecordOrigin` holds every
-`RegisteredCatalogue` and the frontend names each, so a registry refresh that adds an entry is
-refused at import and by the frontend's catalogue name test until both exist; the type check does
-not refuse it, since the name's key is built from a template.
-
-The National Library of Wales was a candidate; on 2026-11-22 no Alma host gave a record of it
-to probe with, so it is not listed.
-
-### The test action is the scan's door
-
-`metadata.probe` is `_lookup_one`, the call a lookup makes, so the deadline, the byte cap, the
-redirect rule and the identity check a test meets are the scan's own. It takes the one resolved
-`Access`, so it cannot be handed a key the resolver never checked, but it does not consult that
-access's plan: an admin tests a catalogue to decide whether to switch it on. It returns a
-`Disposition` and never the record, since echoing the body would make the button an oracle for
-whatever an address serves.
-
-**Refused and unreachable are told apart at every door**, the bespoke Open Library and Google
-Books replies included, each arm under a test: a rejected key and a dead host need different
-fixes. The action is admin only and limited to 10 a minute for the deployment, which is per
-process; the image runs one.
-
-## A heading's vocabulary filters what the field offers and refuses nothing on save (2026-11-22)
-
-A book's heading field offers headings from the local GND and LCSH copies, and **the vocabulary
-filters what it offers and refuses nothing on save** (owner, 2026-11-22). A heading posted that
-no copy holds is written as any member's heading is, until ticket 136's batch matcher can mark a
-heading no copy holds. The field is behind `headings_from_vocabulary`, on by default and read
-together with library mode, so a household is not offered a cataloguer's field.
-
-**A picked heading is written as an import writes it** (`vocabularies.classification_row`): a
-GND heading as its bare number and label, an LCSH heading as its heading string with no URI. A
-pick and an import of the same heading are therefore one row rather than two.
-
-What a heading may be used as, `008/14` to `16`, is the vocabulary's rather than the entry's,
-since both copies are subject files. LCSH's subdivision records (`008/09`), valid only under a
-heading, are left out of a copy at conversion by their usage note, so neither the field nor the
-MARC import's confirmation of an untrusted `650 _0` sees them. A copy loaded before that keeps
-them until its next refresh.
-
-## A patron's own overdue notice names a private book the patron holds, and keeps its own reminder stamp (2026-11-22)
-
-**The notice names a private book the patron holds** (owner, 2026-11-22): privacy protects a
-book from other members, not from its borrower. The notice goes only to the patron the loan
-belongs to and never names another patron's or member's loan. The household digest and the
-other channels still withhold private books and count them as `skipped_private`, which reads 0
-when no channel is on.
-
-**The digest and the patron notice each keep a stamp per loan**, `notified_at` and
-`patron_notified_at`, and each selection reads its own, so a failure on one audience never
-silences the other. One shared stamp would let a digest that delivered hold back a patron whose
-mail failed for the whole interval, and a patron mail that delivered drop the loan out of the
-household digest.
-
-**The patron loop goes on only past a failure about one address** (a refused recipient, or a non
-ASCII address on a server without `SMTPUTF8`) and stops on any other, which would repeat for
-every patron: a server that is down costs one deadline, and a rejected login one attempt, rather
-than one per patron each hour. A server that refuses to relay refuses every recipient the same
-way, so it costs one refused conversation per patron per run and reads as `unreachable`; that is
-accepted, since it waits on no deadline and tries no login. A patron with no usable address is
-reported as `no_address`, a configuration fault shown at once.
-
-The notice greets the patron by name, lists each loan with its due date and asks for the books
-back. It is English, since the server has no message catalogue, and names no library, since no
-setting holds one.
-
-Both notices turn on once, when library mode is first switched on, and each only where nobody
-has already set it. A later switch on, a switch off, and an upgrade that finds the mode already
-on change neither.
-
-## Which file supplied an author identifier, and which checked it (2026-11-22)
-
-An author identifier records `asserted_by`, the file that supplied it, and `checked_by`, a second
-file that tied the same value to the same person, both `enums.AuthoritySupplier`.
-
-**Rows stored before the columns existed read `unrecorded`, never a supplier guessed from
-`provenance`** (owner, 2026-11-22), because an LCNAF member row can be a NAF confirmation or a
-lobid cross reference. `provenance` keeps its meaning beside them: it says who tied the number to
-the author, where the supplier says which file carried it.
-
-**A stored row changes only by gaining `checked_by`, never its `identifier`** (owner,
-2026-11-22). `Authorship.record_check` is that rule's one door, and an agreeing cross reference
-sets it by the same rule. Rows stored while a host is switched off are kept and shown with their
-supplier; an admin recheck that may set `checked_by` is not built yet.
-
-**Lobid holding a member's GND number is not a check** (owner, 2026-11-22): the member picked the
-number from a lobid search, and a wrong but existing number is held too. The row is stamped
-`checked_by = lobid` only where lobid's record is the number's own and its preferred or a variant
-name folds to the row's key by `authors.author_key` with words in any order, the fold the BNP
-check already uses; otherwise `checked_by` stays empty, so the recheck finds it. A plain key
-comparison would refuse `Stevenson, Robert Louis` against `Robert Louis Stevenson` on nearly every
-confirmation. A namesake passes, and so does a person whose name is the same words in another
-order: `Luther Martin` against `Luther, Martin`. Where the record does not name the author, its
-cross references are stored with their check cleared too, since Wikidata and the BNP corroborated
-somebody else.
-
-**Switching the authority spine off degrades author identity to name only, and the spine is a
-pick of ISNI, GND, LCNAF or none** (owner, 2026-11-22), the existing `suggest_merges(spines=None)`
-path. Not built yet.
-
-**Switching VIAF off removes the national numbers it supplied rather than promoting the Wikidata
-fallback** (owner, 2026-11-22), which changed 2 of 6 national values in the fixture. Only lobid,
-LoC and ORCID rerank, and the LoC authority switch leaves the LoC catalogue target alone. Not
-built yet.
-
-## The accession number (2026-11-22)
-
-A copy carries an accession number, the code its label prints and a scan resolves: the first
-slice of ticket 31, which tickets 25 and 26 also wait on.
-
-### Endpaper mints it, from the row
-
-Endpaper mints the number rather than taking one a member types (owner, 2026-11-22), which
-reverses the rule that Endpaper assigns none. It is nine ASCII digits: lead `2`, the zero padded
-row id, a Damm check digit (`backend/accession.py`, mirrored by `frontend/src/lib/accession.ts`,
-both held to `conformance/cases/accession.json`). Nine is no length a book or retail barcode
-carries, so a scan is told from an ISBN by its length. The lead digit reserves the minted range,
-so typed numbers can follow outside it. Damm misses no single digit error and no adjacent
-transposition, where Luhn misses 289 of 14441 transpositions. A scan is classified after
-stripping one pinned set, ASCII space and the C0 controls, on both sides.
-
-### A label prints Code 128 or Code 39, as its stock says
-
-Labels print either symbology by label stock, and the scanner reads both (owner, 2026-11-22).
-The case file names both; neither the label printer nor the label reader exists yet, and each
-must read its declared constant.
-
-### Member only
-
-The number is withheld from the public catalogue (owner, 2026-11-22): it is off
-`PublicBookOut`, so off OAI-PMH, SRU and the public pages. It is derivable from the public id,
-which is acceptable because it grants nothing. A malformed code is a 400, and a code on a copy
-the caller cannot see is the same 404 as one nobody holds.
-
-### None until assigned
-
-Existing books get no number at upgrade; a bulk action assigns them (owner, 2026-11-22). The
-action numbers owned rows and counts the rest unchanged. A new copy starts with none; a merge
-fills a keeper's empty number from a loser and never overwrites one; the trash keeps it.
-
-### A number is unique for life, across a restore
-
-No number is ever issued twice, a restore onto a fresh database included (owner, 2026-11-22).
-Ids are never reused on one database, so the row id needs no counter of its own. A backup
-archive carries the books counter's highest issued id under `highest_issued`, and a restore
-raises the counter to it, so a purged copy's number, which leaves no row in the archive, is not
-minted again. An archive taken before that key existed still restores: its counter goes past the
-highest restored row and the highest serial a restored code carries, so a copy purged before it
-was taken may have its number issued again. Ticket 145, which splits a copy out of its instance,
-must keep the `books` id sequence as the item id, or move minting to a counter of its own.

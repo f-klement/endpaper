@@ -18,7 +18,6 @@ export const en = {
   "nav.loans": "Loans",
   "nav.stats": "Stats",
   "nav.settings": "Settings",
-  "nav.patrons": "Patrons",
   "nav.menu": "Menu",
   // The trigger names the signed-in member, so the top bar says who you are
   // without opening anything.
@@ -93,13 +92,6 @@ export const en = {
   "library.channelBroken":
     "Overdue reminders are not getting through on {channels}.",
   "library.channelBrokenAction": "Check the settings",
-  "library.vocabularyOffer":
-    "No subject vocabulary is copied here yet, so every subject lookup asks its source. A copy can be downloaded in the settings, under Subject vocabularies.",
-  "library.vocabularyOfferAction": "Open the settings",
-  "library.vocabularyOfferDismiss": "Dismiss",
-  "library.vocabularyLoading":
-    "A subject vocabulary is being copied here. Its progress is shown in the settings, under Subject vocabularies.",
-  "library.vocabularyLoadingAction": "Show the progress",
 
   // ── Library ─────────────────────────────────────────────────────────────
   "library.title": "Library",
@@ -120,11 +112,6 @@ export const en = {
   "library.viewTable": "Table",
   "library.viewList": "List",
   "library.loaned": "Loaned",
-  "library.originLabel": "Where the books came from",
-  "library.originAll": "Harvested or added",
-  "library.originHarvested": "Harvested",
-  "library.originAdded": "Added here",
-  "library.harvestRun": "Harvest run",
 
   "sort.title_asc": "Title A to Z",
   "sort.title_desc": "Title Z to A",
@@ -147,25 +134,6 @@ export const en = {
   "classification.scheme.lcsh": "Subject heading",
   "classification.kind.content": "Content type",
   "classification.kind.carrier": "Carrier type",
-  "pendingHeadings.section": "Suggested by a harvest",
-  "pendingHeadings.explain":
-    "A harvested record suggests these. None is on the book until it is confirmed.",
-  // A whole phrase for one, as `public.resultCountOne`: no plural engine here.
-  "pendingHeadings.confirm": "Confirm all {count}",
-  "pendingHeadings.confirmOne": "Confirm",
-  "pendingHeadings.discard": "Discard",
-  "pendingHeadings.discardConfirm":
-    "Discard these suggestions? A later harvest of the same record will not suggest them again.",
-  "pendingHeadings.discardConfirmOne":
-    "Discard this suggestion? A later harvest of the same record will not suggest it again.",
-  "headingField.section": "Add a heading",
-  "headingField.label": "Find a heading",
-  "headingField.placeholder": "Type the start of a heading",
-  "headingField.vocabulary": "Vocabulary",
-  "headingField.settingTitle": "Heading field",
-  "headingField.setting": "Offer headings from the local vocabularies",
-  "headingField.settingHint":
-    "On a book, a heading field offers headings from a loaded copy of a vocabulary as you type. It reads only the copy on this server.",
   "onlineLinks.section": "Online links",
   "onlineLinks.relation.resource": "The resource itself",
   "onlineLinks.relation.version": "A version of it",
@@ -333,24 +301,6 @@ export const en = {
     "Nothing is recorded and the camera stays closed until you start it.",
   "scan.notABook":
     "Read {code}, which is not a book barcode. Look for the one above the ISBN.",
-  "scan.printed.open": "Barcode will not scan? Read the printed number",
-  "scan.printed.close": "Scan the barcode instead",
-  "scan.printed.aim":
-    "Fill the box with the ISBN line, or the digits under the barcode",
-  "scan.printed.loading": "Loading the text reader...",
-  "scan.printed.read": "Read the number",
-  "scan.printed.reading": "Reading...",
-  "scan.printed.confirm":
-    "Check this against the number printed on the book before looking it up.",
-  "scan.printed.found": "Read ISBN {isbn}",
-  "scan.printed.lookUp": "Look it up",
-  "scan.printed.misread":
-    "Read {code}, but its check digit does not match, so a digit was misread. Hold the book still, closer to the light, and read again.",
-  "scan.printed.nothing":
-    "No ISBN in the box. Line the number up inside it and read again.",
-  "scan.printed.again": "Read again",
-  "scan.printed.unavailable":
-    "The text reader could not start in this browser. Type the ISBN below instead.",
   "scan.tryAgain": "Try again",
   "scan.cameraUnavailable": "Camera unavailable",
   "scan.orEnterManually": "Or enter ISBN manually:",
@@ -421,20 +371,6 @@ export const en = {
   // sends somebody off to type a book in by hand.
   "search.slow.nothingAsked":
     "Nothing was searched. Every catalogue this library has switched on is a slow one.",
-  // Library mode only: which catalogues produced a candidate, by the names the
-  // settings list shows. A merged row names every catalogue that answered.
-  "search.source.from": "Source: {names}",
-  // Library mode only: a cataloguer narrows one lookup or one search to some of
-  // the catalogues this library asks. Never stored, so the hint says so.
-  "search.narrow.title": "Ask only some catalogues",
-  "search.narrow.chosen": "Asking only {names}",
-  "search.narrow.lookupHint":
-    "For the next ISBN scanned or typed. Nothing ticked asks every catalogue.",
-  "search.narrow.searchHint":
-    "For the next search only. Nothing ticked asks every catalogue.",
-  "search.narrow.asked": "Asked only {names}.",
-  "search.narrow.refused":
-    "The catalogues this library asks have changed, so nothing was asked. The choices offered are now up to date.",
 
   // ── Loans ───────────────────────────────────────────────────────────────
   "loans.title": "Loans",
@@ -510,55 +446,6 @@ export const en = {
   "customFields.valuePlaceholder": "Leave empty to clear",
   // The link opens away from this app, so it says so before it is pressed.
   "customFields.opensElsewhere": "Opens in a new tab",
-
-  // ── Classification schemes ──────────────────────────────────────────────
-  // The four built in schemes and a library's own. A rule is how a scheme's
-  // numbers sort on a shelf, chosen once because every stored key used it.
-  "schemes.title": "Classification schemes",
-  "schemes.explain":
-    "The schemes a book's classification may come from. Add your own to catalogue under a scheme Endpaper does not know; how its numbers sort is chosen once.",
-  "schemes.codeLabel": "Code",
-  "schemes.nameLabel": "Name",
-  "schemes.ruleLabel": "Sorts like",
-  "schemes.ruleGeneric": "Plain text",
-  "schemes.ruleDewey": "Dewey",
-  "schemes.ruleLcc": "Library of Congress",
-  "schemes.addButton": "Add scheme",
-  "schemes.renameLabel": "New name for {name}",
-  "schemes.deleteConfirm": "Delete {name}? This cannot be undone.",
-  // The count is of the books the reader can see, and says so: another
-  // member's private book blocks the delete too and is not counted. A whole
-  // phrase for one, as `public.resultCountOne`: no plural engine here.
-  "schemes.inUse":
-    "{count} books you can see still use this scheme, so it cannot be deleted.",
-  "schemes.inUseOne":
-    "1 book you can see still uses this scheme, so it cannot be deleted.",
-  "schemes.inUseUnseen":
-    "Books you cannot see still use this scheme, so it cannot be deleted.",
-
-  // ── Subject vocabularies ────────────────────────────────────────────────
-  // GND subjects and LCSH, each kept as a local copy where its licence allows.
-  // A lookup never waits on a copy: until one loads it asks the source live.
-  "vocabularies.title": "Subject vocabularies",
-  "vocabularies.explain":
-    "A local copy of a vocabulary answers subject lookups without asking its source each time. Until a copy is downloaded, and while it downloads, lookups ask the source live.",
-  "vocabularies.download": "Download",
-  "vocabularies.refresh": "Refresh",
-  "vocabularies.licence": "Licence: {licence}",
-  "vocabularies.licenceNone": "No licence declared",
-  "vocabularies.notCopyable":
-    "Its licence does not permit a local copy, so lookups always ask the source live.",
-  "vocabularies.notLoaded": "Not downloaded yet. Lookups ask the source live.",
-  "vocabularies.fetched": "Fetched {date}, {count} entries.",
-  "vocabularies.released": "Released by the source {date}.",
-  "vocabularies.releasedUnknown": "The source gave no release date.",
-  "vocabularies.phaseQueued": "Waiting to start",
-  "vocabularies.phaseFetching": "Downloading",
-  "vocabularies.phaseConverting": "Converting",
-  "vocabularies.phaseLoading": "Loading",
-  "vocabularies.phaseFailed": "The last download failed.",
-  "vocabularies.phasePercent": "{phase}: {percent}%",
-  "vocabularies.failedBecause": "The last download failed: {error}",
 
   // ── Quotes ──────────────────────────────────────────────────────────────
   "quotes.title": "Quotes",
@@ -774,30 +661,6 @@ export const en = {
   "settings.public.confirmIndexing":
     "Search engines are told to stay away until you allow them separately.",
   "settings.public.confirmAction": "Publish",
-  "settings.protocols.title": "Protocols for other libraries",
-  "settings.protocols.sruLabel": "Serve this catalogue over SRU",
-  "settings.protocols.sruHint":
-    "Another library's software can search the published catalogue at /sru and read its records as MARCXML. It sees exactly what a visitor sees.",
-  "settings.protocols.sruNeedsPublishing":
-    "Publish the catalogue first. SRU serves only a published catalogue.",
-  "settings.protocols.oaiLabel":
-    "Let aggregators harvest this catalogue over OAI-PMH",
-  "settings.protocols.oaiHint":
-    "A union catalogue or aggregator can collect the published records at /oai. It sees the same records a visitor sees, plus the day each one last changed and which have left the catalogue.",
-  "settings.protocols.oaiNeedsPublishing":
-    "Publish the catalogue first. OAI-PMH serves only a published catalogue.",
-  "settings.protocols.oaiNeedsAddress":
-    "Enter a repository contact address below first. OAI-PMH shows it to every aggregator.",
-  "settings.protocols.oaiAddressLabel": "Repository contact address",
-  "settings.protocols.oaiAddressHint":
-    "Every aggregator is shown this address. Use a role address rather than a person's.",
-  "settings.protocols.oaiAddressSave": "Save address",
-  "settings.availability.label":
-    "Show whether a book is on the shelf or on loan",
-  "settings.availability.hint":
-    "Each published record says on the shelf or on loan. A visitor never sees who has a book or when it is due back.",
-  "settings.availability.confirmShown":
-    "Shown as well: whether each book is on the shelf or on loan, never who has it or when it is due back.",
   "settings.lending.title": "Lending",
   "settings.lending.summary":
     "Reminders for books that are late, and where they are sent.",
@@ -957,11 +820,6 @@ export const en = {
     "The palettes below are used under the MIT licence, with their values taken from each project's own repository. None of these projects endorses this one.",
   "appearance.licencesMorris":
     "The Morris pattern names identify the historical designs the drawings are after. This project is not affiliated with, or endorsed by, Morris & Co.",
-  "appearance.licencesSoftware":
-    "Endpaper is built on other people's open source software, and ships their licences:",
-  "appearance.licencesThirdParty": "Third party notices",
-  "appearance.licencesEngine":
-    "The printed ISBN reader's text recognition engine",
   "settings.language": "Language",
   "settings.languageHint": "Applies to you on this device.",
   "settings.defaultLanguage": "Default language for new visitors",
@@ -1192,25 +1050,6 @@ export const en = {
     "failed in a way the app did not expect. The server log names the cause.",
   "settings.overdueRowNothingSent": "nothing was sent.",
 
-  // ── The patron's own overdue notice (#24) ───────────────────────────────
-  //
-  // One mail per patron about the loans that patron holds. It goes to the
-  // borrower, so it names a private book they hold (owner, 2026-11-22).
-  "settings.overdueSenderPatronMail": "Patron email",
-  "settings.overdueNotSentNoAddress":
-    "Nothing was sent: a patron with an overdue loan has no usable email address. Add one to their record, or switch the patron email off.",
-  "settings.overdueRowNoAddress":
-    "a patron with an overdue loan has no usable email address.",
-  "settings.patronMail": "Email to each patron",
-  "settings.patronMailEnable":
-    "Email each patron about their own overdue loans",
-  "settings.patronMailHint":
-    "One message to each patron, at the address on their record, listing only the loans that patron holds. It uses the mail server above, and a loan is chased at most once per reminder interval. The first run mails every patron with a loan overdue, however long ago it fell due. Switching library mode on turns this and the household email on, once, unless you have set either yourself; switching it off changes neither.",
-  "settings.public.modeTurnsOnNotices":
-    "The first time it is switched on, it also turns on the overdue emails to each patron and to the household, unless you have set them yourself. Both are under Lending.",
-  "settings.patronMailPrivacyNote":
-    "This one goes to the patron holding the book, so it names a private book they borrowed, and never anybody else's loan. A patron with no email address is reported here rather than skipped.",
-
   // ── In app reminders, and whether a channel is working ──────────────────
   //
   // The one channel that needs nothing obtained first, and the standing record
@@ -1398,66 +1237,6 @@ export const en = {
   "collections.couldNotLoad": "Could not load the collections.",
   "collections.saving": "Filing...",
 
-  // ── Patrons ─────────────────────────────────────────────────────────────
-  // A library's word for the people who borrow from it. Never "customer" or
-  // "user": a reader in a library would notice.
-  "patrons.title": "Patrons",
-  "patrons.explain":
-    "The people who borrow from this library without an account in it. Only an admin sees this page.",
-  "patrons.search": "Search patrons",
-  "patrons.searchPlaceholder": "Name, email or card number",
-  "patrons.searchHint":
-    "Search by name, email or card number to find a patron.",
-  "patrons.noMatch": "No patron matches that search.",
-  "patrons.capped":
-    "Showing the first {count}. A narrower search finds the rest.",
-  "patrons.couldNotLoad": "Could not search the patrons.",
-  "patrons.couldNotSave": "Could not save the patron.",
-  "patrons.couldNotDelete": "Could not delete the patron.",
-  "patrons.new": "New patron",
-  "patrons.newTitle": "Register a patron",
-  "patrons.editTitle": "Edit {name}",
-  "patrons.register": "Register",
-  "patrons.registering": "Registering...",
-  "patrons.name": "Name",
-  "patrons.cardNumber": "Card number",
-  "patrons.cardNumberHint":
-    "Letters and digits, joined by at most a full stop, a slash or a hyphen. Letters are saved as capitals.",
-  "patrons.contact": "Contact",
-  "patrons.email": "Email",
-  "patrons.phone": "Phone",
-  "patrons.address": "Address",
-  "patrons.street": "Street",
-  "patrons.houseNumber": "House number",
-  "patrons.postcode": "Postcode",
-  "patrons.city": "City",
-  "patrons.expiresOn": "Registered until",
-  "patrons.card": "Card {number}",
-  "patrons.expiredOn": "Registration expired on {date}",
-  "patrons.validUntil": "Registered until {date}",
-  "patrons.noExpiry": "No expiry date",
-  // Says it cannot be undone, what survives (the loan dates) and what a desk
-  // loses that it may not expect: who holds a book still out with them.
-  "patrons.deleteConfirm":
-    "Delete {name}? Their record is erased, and that cannot be undone. Their loans keep the dates each book went out and came back, and no longer name them. A book still out with them stays recorded as out, with no borrower.",
-
-  // ── Lending to a patron ─────────────────────────────────────────────────
-  // The loan form's two doors to the register, and what a loan says of a
-  // patron. An admin reads the patron's name and card on every loan, filled
-  // per viewer by the server; every other reader is told "a registered patron"
-  // and no more. The admin's patron record lists the books the patron has out.
-  "loans.borrowerPatron": "A registered patron",
-  "loans.patronExisting": "Existing patron",
-  "loans.patronNew": "New patron",
-  "loans.patronFindTitle": "Find a patron",
-  "loans.patronChange": "Choose another",
-  "loans.badgePatron": "Loaned to a registered patron",
-  "loans.loanedToPatronBy": "Loaned to a registered patron by {by}",
-  "loans.badgeNamedPatron": "Loaned to {name}, card {card}",
-  "loans.loanedToNamedPatronBy": "Loaned to {name}, card {card}, by {by}",
-  "patrons.openLoans": "Books out",
-  "patrons.outSince": "Out since {date}",
-
   // ── Authors ─────────────────────────────────────────────────────────────
   "authors.title": "Authors",
   "authors.label": "Author",
@@ -1567,7 +1346,6 @@ export const en = {
   "rapid.lookingUp": "Looking up...",
   "rapid.reading": "{name} is being read...",
   "rapid.notFound": "Not found: {isbn}",
-  "rapid.listed": "Waiting for the lookup: {isbn}",
   "rapid.notReached": "Catalogues not reached: {isbn}",
   "rapid.duplicate": "Already scanned",
   "rapid.alreadyInLibrary": "Already in the library",
@@ -1624,27 +1402,6 @@ export const en = {
   "rapid.nothingScanned": "Nothing scanned yet",
 
   // ── Adding books from their files ───────────────────────────────────────
-  // ── A pasted or uploaded list of ISBNs ──────────────────────────────────
-  "isbnList.title": "Add from a list of ISBNs",
-  "isbnList.explain":
-    "Paste ISBNs or pick a text file of them, separated by lines, spaces or commas; a list may bring the queue's entries that wait for a lookup up to {limit}, picked files not yet looked up included. Each one is looked up in the catalogues at the same pace as picked files, and the books wait in the queue for you to review before anything is added.",
-  "isbnList.pasteLabel": "ISBNs",
-  "isbnList.submit": "Look these up",
-  "isbnList.fileLabel": "Or pick a text or CSV file",
-  "isbnList.queued": "ISBNs queued for the lookup: {count}",
-  "isbnList.invalid":
-    "Not ISBNs, because the check digit does not match, so not looked up: {count}",
-  "isbnList.repeated": "Written more than once, queued once: {count}",
-  "isbnList.ignored":
-    "Words and numbers that are not shaped like an ISBN, passed over: {count}",
-  "isbnList.tooMany":
-    "This list holds {count} ISBNs, and one list may hold {limit}. Split it and hand it over in parts.",
-  "isbnList.invalidMore": "And {count} more, not shown.",
-  "isbnList.noRoom":
-    "This list holds {count} ISBNs, and {room} more can join the queue now: what waits there for a lookup, picked files included, may reach {limit}. Hand over fewer, or the rest once the queue has been looked up.",
-  "isbnList.fileTooLarge": "This file is too large to be a list of ISBNs.",
-  "isbnList.fileUnreadable": "This file could not be read.",
-
   "file.title": "Add from a file",
   // **The last sentence says what the press does and not only what it refuses.**
   // "Never uploaded" was the whole of it, and it stayed true when a folder pick
@@ -1700,7 +1457,7 @@ export const en = {
   // to the same public catalogues a title search and a scanned barcode reach.
   // The tags are file content rather than a name, which is why they are named.
   "fallback.pace":
-    "The file names, any ISBN a file states, the title and author an audiobook's tags name (or its folder name, where it has none), the ISBN of any scanned barcode that reached no catalogue, and any ISBN from a list are sent to the catalogues Endpaper searches; the files are not. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
+    "The file names, any ISBN a file states, the title and author an audiobook's tags name (or its folder name, where it has none), and the ISBN of any scanned barcode that reached no catalogue are sent to the catalogues Endpaper searches; the files are not. Paced, so that one folder cannot spend a whole library's budget at once. Roughly {minutes} min.",
   // **Written to stand alone, because that is how it usually renders.** The bulk
   // keep clears the queue, so nothing is waiting and the paragraph above is off
   // the screen: every fact this press discloses is in this string on its own,
@@ -1711,7 +1468,6 @@ export const en = {
   "fallback.paceAgain":
     "The same file names, audiobook tags and audiobook folder names go to the same catalogues a second time, and the files themselves still do not. Paced the same way. Roughly {minutes} min.",
   "fallback.stop": "Stop looking up",
-  "fallback.progress": "Asked {done} of {total}",
   "fallback.searching": "Asking the catalogues...",
   "fallback.fromTheName": "From the file name",
   "fallback.notInCatalogues":
@@ -1854,10 +1610,6 @@ export const en = {
   "copy.save": "Save copy details",
   "copy.purchaseSourcePlaceholder": "The Oxfam on the high street",
 
-  // ── Accession numbers ───────────────────────────────────────────────────
-  "accession.label": "Accession number",
-  "accession.assign": "Give accession numbers",
-
   // ── More than one copy of the same book ─────────────────────────────────
   "copies.title": "Copies",
   "copies.count": "{count} copies of this book",
@@ -1874,23 +1626,6 @@ export const en = {
   "copies.addFailed": "That copy could not be added.",
   "copies.loadFailed": "The other copies of this book could not be loaded.",
   "copies.badge": "{count} copies",
-
-  // ── Further images of this copy ─────────────────────────────────────────
-  // The images panel on the book page, beside the files.
-  "coverImages.title": "More images",
-  "coverImages.hint":
-    "The back, the spine, a dust jacket: images of this copy kept beside the cover the shelf shows.",
-  "coverImages.alt": "Image {number} of {title}",
-  "coverImages.add": "Add an image",
-  "coverImages.adding": "Adding...",
-  "coverImages.shelve": "Show on the shelf",
-  "coverImages.shelveFor": "Show image {number} on the shelf",
-  "coverImages.remove": "Remove",
-  "coverImages.removeFor": "Remove image {number}",
-  "coverImages.removeConfirm":
-    "Remove this image? Nothing brings an uploaded image back.",
-  "coverImages.loadFailed": "This copy's images could not be loaded.",
-  "coverImages.failed": "The images could not be changed.",
 
   // ── Where this copy's files are, and a file held in another format ──────
   // The Files panel on the book page and the copy offer on the scan queue.
@@ -2372,8 +2107,6 @@ export const en = {
   "public.fact.pages": "Pages",
   "public.fact.format": "Format",
   "public.fact.series": "Series",
-  "public.availability.on_shelf": "On the shelf",
-  "public.availability.on_loan": "On loan",
   "origin.label": "Record source",
   "origin.unknown": "Unknown",
   "origin.manual": "Typed by hand",
@@ -2397,23 +2130,6 @@ export const en = {
   "providers.moveUp": "Move {name} up",
   "providers.moveDown": "Move {name} down",
   "providers.moved": "{name} moved to position {position} of {total}.",
-  "providers.test": "Test",
-  "providers.testLabel": "Test {name}",
-  "providers.testing": "Testing",
-  "providers.testFailed": "The test could not be run.",
-  "providers.disposition.answered": "Answered: it holds ISBN {isbn}.",
-  "providers.disposition.answered_nothing":
-    "Replied, with no record for ISBN {isbn}.",
-  "providers.disposition.refused":
-    "Refused: it replied with an error when asked about ISBN {isbn}.",
-  "providers.disposition.unreachable":
-    "Unreachable: no reply in time when asked about ISBN {isbn}.",
-  "registry.title": "More catalogues",
-  "registry.hint":
-    "National and union catalogues this release ships, each checked answering on the date shown. A picked one is asked last: when a book is looked up by its ISBN and no other catalogue answered.",
-  "registry.aged":
-    "This list was checked on {date} and is due for a recheck, so an entry may no longer answer.",
-  "registry.evidence": "{country}, {host}. Checked on {date}: {answer}",
   "providers.name.open_library": "Open Library",
   "providers.name.google_books": "Google Books",
   "providers.name.dnb": "German National Library",
@@ -2432,10 +2148,6 @@ export const en = {
   "providers.name.sbn": "Italian National Library Service",
   "providers.name.porbase": "PORBASE",
   "providers.name.oszk": "National Széchényi Library",
-  "providers.name.snk": "Slovak National Library",
-  "providers.name.nls": "National Library of Scotland",
-  "providers.name.nli": "National Library of Israel",
-  "providers.name.csic": "CSIC Library Network",
   "providers.name.bnf": "National Library of France",
   "providers.name.loc": "Library of Congress",
   "providers.status.needsKey":
@@ -2474,27 +2186,6 @@ export const en = {
   // not given a paragraph about something it does not have.
   "providers.slowLegend":
     "A catalogue marked slow cannot answer a title search inside the deadline the quick search allows, so it is left out of that one and asked only when somebody asks for it. It answers a scan exactly as the others do.",
-  // How each catalogue is asked, for a policy about which catalogues may
-  // receive readers' queries. Protocol and schema names are technical terms and
-  // stay as they are in both catalogues.
-  "providers.how.sru": "SRU {version}",
-  "providers.how.z3950": "Z39.50",
-  "providers.how.bespoke": "Its own JSON API",
-  "providers.how.schema": "Record schema: {schema}",
-  "providers.how.noSchema": "No record schema named",
-  "providers.how.encrypted": "Encrypted",
-  "providers.how.unencrypted": "Not encrypted",
-  "providers.how.apiKey": "Needs an API key",
-  "providers.how.login": "Needs a login",
-  "providers.how.supplies": "Supplies {schemes}",
-  "providers.scheme.ddc": "Dewey",
-  "providers.scheme.lcc": "Library of Congress Classification",
-  "providers.scheme.gnd": "GND",
-  "providers.scheme.lcsh": "Library of Congress Subject Headings",
-  "providers.confirm.lastSupplier":
-    "Of the catalogues that can answer, only {name} supplies {schemes}. Books looked up from now on will not get them. Switch it off?",
-  "providers.confirm.allOff":
-    "After this, no catalogue that can answer is left switched on, so looking up a book will find nothing and every book is catalogued by hand. Switch it off?",
   // ── Highlights: marked on a reading device, imported from KOReader ──────
   "highlights.title": "Highlights",
   "highlights.private": "Only visible to me",
@@ -2524,60 +2215,6 @@ export const en = {
     "It records no fingerprint of its book, so it cannot be matched.",
   "highlights.outcomeEmpty": "It holds no highlights.",
   "highlights.outcomeFailed": "The import of this file failed.",
-  "harvest.title": "Harvest another catalogue",
-  "harvest.explain":
-    "Reads the records of another library system over OAI-PMH into this catalogue. A harvested book belongs to nobody and is always public, and its subject headings arrive unconfirmed, as suggestions.",
-  "harvest.switchLabel": "Harvest from the repository below",
-  "harvest.switchHint":
-    "Turning it off stops the next harvest. Books already harvested stay.",
-  "harvest.needsAddress": "Enter the repository address below first.",
-  "harvest.addressLabel": "Repository address",
-  "harvest.addressHint":
-    "This is the one setting that makes the server connect to an address somebody typed. It may be on your own network, over http or https, with no username, password, query or fragment.",
-  "harvest.addressSave": "Save address",
-  "origin.oai_harvest": "OAI-PMH harvest",
-  "harvestRun.title": "Harvest now",
-  "harvestRun.explain":
-    "Reads the repository above and shows what a harvest would add and fill in. Nothing is written until you confirm.",
-  "harvestRun.setLabel": "Set (optional)",
-  "harvestRun.setHint":
-    "Harvest only this set, spelled as the repository names it. Leave it empty for the whole repository.",
-  "harvestRun.read": "Read the repository",
-  "harvestRun.reading": "Reading the repository...",
-  "harvestRun.repository": "Repository: {name}",
-  "harvestRun.previewTitle":
-    "{seen} records read, {readable} this app can store.",
-  "harvestRun.wouldAdd": "{count} are new here and will be added.",
-  "harvestRun.deleted":
-    "{count} records are marked deleted by the repository. No book is removed for them.",
-  "harvestRun.headingsPreview":
-    "The records listed below carry {count} headings and shelf notations. A harvest writes none of them. It suggests them on the books it creates from these records, and on books an earlier harvest created from the same records, for an admin to confirm or discard there. A book found by ISBN, or by author and title, gets no suggestions.",
-  "harvestRun.addedBooks": "Show the books this harvest added",
-  "harvestRun.readDublinCore":
-    "Read as Dublin Core, because the repository offers no MARCXML this app can ask for. Dublin Core carries less: no headings or shelf notations, no series, and no roles for the people it names, so the books it adds are thinner.",
-  "harvestRun.truncatedPreview":
-    "The run stopped before the end of the repository, at a limit or because the repository was busy, so these counts cover only part of it. Once this is harvested, the next run can carry on from where it stopped.",
-  "harvestRun.confirm": "Harvest {count} records",
-  "harvestRun.importing": "Harvesting...",
-  "harvestRun.resultHeadings":
-    "Headings and shelf notations suggested, waiting on their books for an admin to confirm or discard: {count}.",
-  "harvestRun.truncatedResult":
-    "The harvest stopped before the end of the repository, at a limit or because the repository was busy. What was read is kept, and the next run can carry on from where this one stopped.",
-  "harvestRun.off":
-    "The harvester is off, or no repository address is stored. Turn it on and save the address above.",
-  "harvestRun.running":
-    "A harvest is already running. Wait until it finishes, then try again.",
-  "harvestRun.lostRace":
-    "Another change to the same books met this harvest, and nothing was harvested. Harvest again.",
-  "harvestRun.resumable":
-    "The harvest of {date} stopped before the end of the repository, after reading {count} records in that run. The next run can carry on from where it stopped.",
-  "harvestRun.resumableSet":
-    "It read the set {set}, and carrying on reads that set too.",
-  "harvestRun.carryOn": "Carry on from where it stopped",
-  "harvestRun.notResumable":
-    "That run can no longer be carried on: the repository has been harvested since, or the run was not cut short. Nothing was harvested.",
-  "harvestRun.repositoryChanged":
-    "The stored repository is not the one this page read, and nothing was harvested. Read the repository again.",
 } as const;
 
 /** Every message key. Adding one here requires a German translation. */

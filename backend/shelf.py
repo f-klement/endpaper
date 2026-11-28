@@ -69,14 +69,11 @@ from typing import TYPE_CHECKING, Any, Self
 
 from sqlalchemy import func, literal, nullslast, or_, select
 from sqlalchemy.orm import InstrumentedAttribute, Query, Session, joinedload, selectinload
-from sqlalchemy.sql import visitors
-from sqlalchemy.sql.elements import ColumnClause, ColumnElement, UnaryExpression
+from sqlalchemy.sql.elements import ColumnElement, UnaryExpression
 
-import classification_schemes
 import filing
 from enums import (
     BookFormat,
-    BookOrigin,
     BookSort,
     ClassificationScheme,
     LendingWillingness,
@@ -115,9 +112,9 @@ class Loading(Enum):
 
     **The stronger sentence is false**, and it was the one written here until it
     was measured: "everything fetched with `SERIALISED` is serialised by
-    `books_to_out`" is falsified by **40 of the 60 routes** reaching
-    `book_for_read` or `book_in_trash`. **27** serialise a sub-resource and never
-    the book, **12** answer 204 and serialise nothing at all, and `add_copy`
+    `books_to_out`" is falsified by **33 of the 50 routes** reaching
+    `book_for_read` or `book_in_trash`. **22** serialise a sub-resource and never
+    the book, **10** answer 204 and serialise nothing at all, and `add_copy`
     serialises the copy rather than the book it read.
 
     **Those numbers are recomputed from the routers** by
@@ -240,10 +237,8 @@ def _division_key(number: Any) -> Any:
 def _shelf_order(scheme: ClassificationScheme) -> tuple[UnaryExpression[Any], ...]:
     """This Book's place on a shelf filed under one scheme.
 
-    **The key is the scheme's own, and that is the whole point.** The
-    scheme's row names its rule in `filing.py` and this asks it rather than
-    deciding. Only a built in scheme reaches here, whose row is locked to
-    `classification_schemes.BUILT_IN`, so that table is what is read; before it
+    **The key is the scheme's own, and that is the whole point.** `filing.py`
+    holds one rule per scheme and this asks it rather than deciding; before it
     existed there was one order, Dewey's, offered on a column that also draws
     Library of Congress numbers. `BF75` files before `BF575` on a shelf and
     after it in a string comparison, so the old order was wrong exactly where a
@@ -300,7 +295,7 @@ def _shelf_order(scheme: ClassificationScheme) -> tuple[UnaryExpression[Any], ..
     while `_MULTI_COLUMN_ORDERS` is built: the failure is a broken import in
     the developer's own gate, not a 500 for a member.
     """
-    rule = filing.FILING_RULES[classification_schemes.BUILT_IN[scheme].filing]
+    rule = filing.rule_for(scheme)
     if not rule.orders_a_shelf:
         raise ValueError(
             f"{scheme.value!r} files under the {rule.name} rule, which orders no "
@@ -319,14 +314,13 @@ def _shelf_order(scheme: ClassificationScheme) -> tuple[UnaryExpression[Any], ..
 
 #: Which `BookSort` value asks for which scheme's shelf order.
 #:
-#: **Two tables meeting, and the test is what holds them together.**
-#: `classification_schemes` says which built in schemes file a shelf and this
-#: says how a client asks for one, and neither can derive the other: `BookSort`
-#: is the API's vocabulary and a scheme is the catalogue's.
-#: `tests/test_shelf.py::TestEverySortHasAnOrdering` pins that this covers
-#: `classification_schemes.SHELF_SCHEMES` exactly, so a built in scheme whose
-#: rule starts ordering a shelf is a failing test rather than an order nobody
-#: can ask for.
+#: **Two tables meeting, and the test is what holds them together.** `filing`
+#: says which schemes file a shelf and this says how a client asks for one, and
+#: neither can derive the other: `BookSort` is the API's vocabulary and a
+#: scheme is the catalogue's. `tests/test_shelf.py::TestEverySortHasAnOrdering`
+#: pins that this covers `filing.SHELF_SCHEMES` exactly, so a scheme whose rule
+#: starts ordering a shelf is a failing test rather than an order nobody can ask
+#: for.
 _SHELF_SORTS: dict[BookSort, ClassificationScheme] = {
     BookSort.DDC: ClassificationScheme.DDC,
     BookSort.LCC: ClassificationScheme.LCC,
@@ -384,18 +378,13 @@ class BookFilters:
     unfiled: bool = False
     unrated: bool = False
     discuss: bool = False
-    #: Harvested Books, or every other. See `BookOrigin`.
-    origin: BookOrigin | None = None
-    #: One harvest run's Books, `books.harvest_id`. Composes with `origin`,
-    #: which it makes redundant beside `harvested` and empty beside `added`.
-    harvest_id: int | None = None
     #: Exact headings, each a scheme and that scheme's own identifier.
     #:
     #: A pair rather than a string, because the number alone means nothing:
     #: `004` is computing in Dewey and is not a Library of Congress call number
     #: at all. Parsed at the edge (`dependencies.headings`), so what reaches
-    #: here is already a scheme code's shape and a bounded string.
-    headings: Sequence[tuple[str, str]] = ()
+    #: here is already a closed-enum scheme and a bounded string.
+    headings: Sequence[tuple[ClassificationScheme, str]] = ()
     #: Dewey divisions, as the three digit strings `ddc.division` produces.
     ddc_divisions: Sequence[str] = ()
 
@@ -499,14 +488,14 @@ class Outbound:
 class HeadingCount:
     """One distinct heading on a shelf, and how many Books carry it."""
 
-    #: The code as stored. Any row of `classification_schemes` may be one.
-    scheme: str
+    scheme: ClassificationScheme
     number: str
     label: str | None
     #: What this heading asserts, null where no record ever said.
     #:
     #: **`str | None` rather than the enum, because that is what the column
-    #: hands back**, as `scheme` beside it is. Coercing here would be the one place that raises on a value
+    #: hands back** and this row is not coerced the way `scheme` beside it is.
+    #: Coercing here would be the one place that raises on a value
     #: `ck_classifications_kind` did not exist to refuse when the row was
     #: written; `HeadingFacetOut` types the field and is where the coercion
     #: belongs.
@@ -526,19 +515,6 @@ class DivisionCount:
 
     division: str
     book_count: int
-
-
-def _public_criteria() -> tuple[ColumnElement[bool], ...]:
-    """`Shelf.seen_by_the_public`'s predicate, one home for its builder and
-    for `Shelf.public_columns`.
-
-    Written out rather than composed from `visible_to`, because composing it
-    is exactly what cannot be done: this is that predicate with its second
-    disjunct removed, not that predicate with an argument. `.is_(False)`,
-    never `not Book.is_private`, which evaluates the Column's Python
-    truthiness and matches every row.
-    """
-    return (Book.deleted_at.is_(None), Book.is_private.is_(False))
 
 
 class Shelf:
@@ -645,27 +621,13 @@ class Shelf:
         `settings_store.public_catalogue_is_published`, and the router is what
         asks. This answers only which rows a public reader may be shown.
         """
-        criteria = _public_criteria()
+        # Written out rather than composed from `visible_to`, because
+        # composing it is exactly what cannot be done: this is that predicate
+        # with its second disjunct removed, not that predicate with an
+        # argument. `.is_(False)`, never `not Book.is_private`, which
+        # evaluates the Column's Python truthiness and matches every row.
+        criteria = (Book.deleted_at.is_(None), Book.is_private.is_(False))
         return cls(db, db.query(Book).filter(*criteria), None, criteria)
-
-    @staticmethod
-    def public_columns() -> tuple[ColumnClause[Any], ...]:
-        """The columns deciding whether a Book is in `seen_by_the_public`.
-
-        Read off the criteria that build it rather than listed, so a writer
-        asking whether a change could move a Book in or out of the public view
-        (`harvest.py`) never holds a second spelling of the rule. A tuple
-        rather than a set: a column's `==` builds an expression. Static, as
-        it builds no Shelf: the classmethods are the constructors, and
-        `tests/test_shelf.py` classifies every one of them by its viewer. A
-        criterion written as text names no column and goes unwatched.
-        """
-        return tuple(
-            element
-            for criterion in _public_criteria()
-            for element in visitors.iterate(criterion)
-            if isinstance(element, ColumnClause)
-        )
 
     @property
     def _viewer(self) -> int:
@@ -725,7 +687,6 @@ class Shelf:
             (Book.lending, filters.lending),
             (Book.series_name, filters.series),
             (Book.location, filters.location),
-            (Book.harvest_id, filters.harvest_id),
         )
         shelf = self
         for column, value in exact:
@@ -733,10 +694,6 @@ class Shelf:
                 shelf = shelf.where(column == value)
         if filters.unfiled:
             shelf = shelf.where(Book.collection_id.is_(None))
-        if filters.origin is BookOrigin.HARVESTED:
-            shelf = shelf.where(Book.harvest_id.is_not(None))
-        elif filters.origin is BookOrigin.ADDED:
-            shelf = shelf.where(Book.harvest_id.is_(None))
 
         # One id is one bound parameter, and SQLite has a ceiling on those:
         # `SQLITE_LIMIT_VARIABLE_NUMBER`, measured per environment rather than
@@ -899,23 +856,6 @@ class Shelf:
             .correlate(Book)
         )
         return self.where(offered.exists())
-
-    def classified_under(self, scheme: str) -> Shelf:
-        """This shelf, narrowed to the Books carrying a heading in `scheme`.
-
-        What `classification_schemes.remove` counts when it refuses a delete.
-        """
-        return self.where(Book.classifications.any(Classification.scheme == scheme))
-
-    def labelled(self, accession: str) -> Shelf:
-        """This shelf, narrowed to the copy whose label carries `accession`.
-
-        A narrowing rather than a lookup of its own, so a code on somebody's
-        private Book, or on a trashed one, is not found from `seen_by`: a scan
-        answers exactly what an id in the path answers. The code is not
-        checked here; a caller refuses a malformed one before asking.
-        """
-        return self.where(Book.accession == accession)
 
     def count(self) -> int:
         """How many Books are on this shelf.
@@ -1150,7 +1090,7 @@ class Shelf:
         )
         return [
             HeadingCount(
-                scheme=scheme,
+                scheme=ClassificationScheme(scheme),
                 number=number,
                 label=label,
                 kind=kind,

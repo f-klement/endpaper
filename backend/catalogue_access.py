@@ -19,13 +19,6 @@ nothing, each for the reason at its own site, and a caller with fallback paths a
 `refuse_if_nothing_is_asked` instead. What is uniform is the limiter: it is charged by the
 constructor, so no method can be reached without it.
 
-**A cataloguer may narrow one request, and only narrow it.** The two narrowed constructors
-take a set of catalogues and keep the standing plan's order, so the leading tier and the
-fallback are the leading enabled sources of what remains, through the same `Plan` every
-other request reads. The narrowing is checked against the plan in force, which is the
-institution's policy, and a name outside it is refused rather than dropped: a dropped name
-would turn "ask only these" into "ask these, or whatever is left".
-
 **Two types, and the second one is why this is not one class with two constructors.**
 `Enquiry` holds a resolved `metadata.Access`, logins included. `GoogleVolumes` holds a
 plan and a key and no logins at all, because its single door sends none. A single class
@@ -59,8 +52,6 @@ credential properties above is that it is only that one.
 
 import dataclasses
 import logging
-from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Final, Self
 
 from fastapi import HTTPException, status
@@ -69,12 +60,10 @@ from sqlalchemy.orm import Session
 import catalogue
 import credentials
 import metadata
-import registry
 import settings_store
 import sources
-import targets
-from enums import CatalogueSource, RegisteredCatalogue
-from ratelimit import identifier_backfill_limiter, metadata_limiter, source_test_limiter
+from enums import CatalogueSource
+from ratelimit import identifier_backfill_limiter, metadata_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -125,12 +114,6 @@ NOTHING_IS_SWITCHED_ON: Final[str] = (
 #: accession number and nothing else in the world resolves one, so naming any other
 #: catalogue would be useless. Two things have to hold, the section being on and a key
 #: being in force, and the sentence names both because either one missing produces this.
-#:
-#: **Safe to tell any member only because `GET /api/settings/features` tells anybody**,
-#: as `google_books_ready`, which is public deliberately. Narrowing that flag makes this
-#: refusal the disclosure, so the two move together: narrowing the flag fails
-#: `tests/test_catalogue_access.py::TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead`,
-#: and that test goes with this refusal.
 GOOGLE_BOOKS_IS_NOT_ASKED: Final[str] = (
     "This Library does not ask Google Books, so a Google volume id cannot be "
     "resolved. An administrator can switch Google Books on in Settings and add an "
@@ -138,38 +121,12 @@ GOOGLE_BOOKS_IS_NOT_ASKED: Final[str] = (
 )
 
 
-#: Narrowing a request is a library mode feature.
-#:
-#: **403 rather than a silent full search**, the status the MARCXML export answers a
-#: household with: a client sending a narrowing outside library mode is out of step with
-#: the server, and asking every catalogue instead would answer a question it did not ask.
-NARROWING_NEEDS_LIBRARY_MODE: Final[str] = "Asking only some catalogues is a library mode feature."
-
-#: A narrowed lookup named a catalogue this Library does not ask for an ISBN.
-#:
-#: **A refusal, never an intersection that drops the name.** The standing list is
-#: the institution's policy, and a narrowing can only take sources away from it. Naming a
-#: switched off source, or one that cannot answer an ISBN, is a request the policy does
-#: not permit, and dropping it quietly would also answer a narrowing to that source alone
-#: with every other source asked.
-NARROWED_PAST_THE_ISBN_ROSTER: Final[str] = (
-    "Only catalogues this Library asks for an ISBN can be chosen. At least one named here "
-    "is switched off or cannot look up an ISBN."
-)
-
-#: The same refusal for a narrowed title search, with its own roster and its own words.
-NARROWED_PAST_THE_TITLE_SEARCH_ROSTER: Final[str] = (
-    "Only catalogues this Library asks in a title search can be chosen. At least one named "
-    "here is switched off or cannot answer a title search."
-)
-
-
 def _refused(detail: str) -> HTTPException:
     """One of the constants above as the refusal it earns.
 
     Takes a constant rather than building a sentence, which is what keeps the rule in
-    this module's docstring checkable: every `HTTPException` built here takes one of
-    those names as its detail.
+    this module's docstring checkable: there is one `HTTPException` construction here
+    and its argument is always a name.
     """
     return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
 
@@ -178,7 +135,7 @@ def nothing_answers_an_isbn() -> HTTPException:
     """The refusal `metadata.Outcome.NO_SOURCES` earns, for a caller holding a `Lookup`.
 
     **The lookup path is the one that does not test up front, deliberately.**
-    `sources.Plan.lookup_roster`'s emptiness *is* what `NO_SOURCES` means, and that
+    `sources.Plan.lookup_chain`'s emptiness *is* what `NO_SOURCES` means, and that
     docstring is where the fact lives. A door here re-testing it would be the same fact
     in two places, free to disagree, so what this module owns on that path is the
     sentence and not the predicate.
@@ -196,14 +153,9 @@ def _resolved_access(db: Session) -> metadata.Access:
     subject; what this adds is that the three are one value and are read together.
 
     **The logins are resolved whatever the plan says, and travel no further than a
-    source the plan admits**, with one exception: `probe`, the admin's test of one
-    named source, sends that source's own login to its own origin whether or not the
-    plan asks it, and its docstring argues why. Otherwise `metadata._lookup_one` hands
-    a credential to a bespoke adapter and `_search_one` to a metered one, and neither is
-    constructed for a source the plan left out.
-
-    **The picks join the plan here and nowhere else**, after `sources.in_force`, so a
-    narrowed lookup, which goes through `in_force` again, asks none: `registry.with_picks`.
+    source the plan admits.** `metadata._lookup_one` hands a credential to a bespoke
+    adapter and `_search_one` to a metered one, and neither is constructed for a source
+    the plan left out.
 
     **The key is resolved once here and handed to all three**, because each opens
     something sealed: the logins, a credentialled source's readiness, and the Google
@@ -213,7 +165,7 @@ def _resolved_access(db: Session) -> metadata.Access:
     """
     state = credentials.key_state()
     access = metadata.Access(
-        plan=registry.with_picks(db, settings_store.catalogue_sources(db, state)),
+        plan=settings_store.catalogue_sources(db, state),
         api_key=settings_store.google_books_api_key(db, state),
         logins=settings_store.catalogue_logins(db, state),
     )
@@ -221,92 +173,17 @@ def _resolved_access(db: Session) -> metadata.Access:
     return access
 
 
-def _narrowed_access(
-    db: Session,
-    only: frozenset[CatalogueSource],
-    roster: Callable[[sources.Plan], tuple[CatalogueSource, ...]],
-    refusal: str,
-) -> metadata.Access:
-    """The access this request may use, narrowed to `only`, or the refusal it earns.
-
-    **Refuses before anything is charged**, so a narrowing the policy does not permit
-    spends none of a Member's allowance: the same order `lookup_isbn` keeps for a
-    malformed ISBN.
-
-    **`sources.in_force` does the narrowing**, because it is already the one function
-    that switches sources off in a plan while keeping its order. What it leaves is a plan
-    like any other, so `lookup_together`, `lookup_in_turn` and the search rosters take
-    the leading enabled sources of what remains with no second mechanism.
-
-    **`roster` is the path's own**, `lookup_chain` or `searched_harder`. Checking
-    against `asked` alone admitted a source that cannot answer this path, and the
-    narrowed plan then refused with the 409 telling an administrator to switch a
-    catalogue back on, for a library that had switched nothing off.
-    """
-    if not settings_store.library_mode(db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=NARROWING_NEEDS_LIBRARY_MODE)
-    access = _resolved_access(db)
-    if not only or not only <= frozenset(roster(access.plan)):
-        raise _refused(refusal)
-    return metadata.Access(
-        plan=sources.in_force(access.plan, only), api_key=access.api_key, logins=access.logins
-    )
-
-
-#: The one key `source_test_limiter` is charged under. See `ratelimit.SOURCE_TEST_LIMIT`.
-_THIS_DEPLOYMENT: Final = "deployment"
-
-#: What a seeded source is asked when the admin names no ISBN.
-#:
-#: **One the DNB holds, measured 2026-08-23** (`metadata.py` records the
-#: measurement). A seeded catalogue that does not hold it answers nothing,
-#: which still says what the test is for, that the host replies and its reply
-#: reads; an admin who wants `answered` names an ISBN that catalogue holds.
-DEFAULT_TEST_ISBN: Final = "9783446249974"
-
-
-async def probe(
-    db: Session, source: CatalogueSource | RegisteredCatalogue, isbn: str | None
-) -> registry.Evidence:
-    """Test one source, seeded or from the registry, as a scan would ask it.
-
-    **Charged before anything is resolved**, so a refused test costs no keychain
-    round trip and sends nothing. The call underneath is `metadata.probe`, which
-    is `_lookup_one`, the scan's own: no second path and no second set of bounds.
-
-    **Whether this library asks the source does not matter here**, which is the
-    one way this differs from a lookup. An admin tests a catalogue to decide
-    whether to switch it on, so a switched off source is tested too, with its own
-    stored login where it has one: a login is sealed to its source's origin, so
-    sending it to that origin is the use it was stored for. A registry entry has
-    no login, because the registry ships none and the logins are keyed by the
-    seeded roster; the access is resolved for it all the same, so there is one
-    way an access reaches the door.
-
-    `isbn` is normalised already, or None for the source's default: a registry
-    entry's own evidence ISBN, so a test re-runs the shipped probe, and
-    `DEFAULT_TEST_ISBN` for a seeded source.
-    """
-    source_test_limiter.check(_THIS_DEPLOYMENT)
-    if isinstance(source, RegisteredCatalogue):
-        entry = registry.ENTRIES[source]
-        target, asked = entry.target, isbn or entry.evidence.isbn
-    else:
-        target, asked = targets.SEEDED[source], isbn or DEFAULT_TEST_ISBN
-    disposition = await metadata.probe(target, asked, access=_resolved_access(db))
-    return registry.Evidence(datetime.now(UTC).date(), asked, disposition)
-
-
 def _warn_about_any_source_asked_with_no_login(access: metadata.Access) -> None:
     """Say so when the plan admits a credentialled source no login was resolved for.
 
-    **Here because this is the one place both halves are in hand.** Both range over
-    `sources.NEEDS_A_LOGIN`, in `settings_store`, but read the keychain twice:
-    `ready_sources` admits one on `credentials.is_held` and `catalogue_logins`
-    resolves one on `credentials.for_request`. A key rotated between the two puts a
-    source in the plan with no entry in the mapping, and every request to it goes
-    out with no credential and nothing saying so. `settings_store.catalogue_logins`
-    says why this is a warning rather than a refusal.
+    **Here because this is the one place both halves are in hand.** Two predicates
+    decide whether such a source is asked, in `settings_store`, and they ask different
+    questions of different subjects: `ready_sources` admits one on
+    `credentials.is_held`, and `catalogue_logins` resolves one on
+    `metadata.carries_a_credential`. A source in the first and not the second is in
+    the plan with no entry in the mapping, and every request to it goes out with no
+    credential and nothing saying so. `settings_store.catalogue_logins` carries the
+    measurement and why this is a warning rather than a refusal.
 
     **Read off the resolved value, not off either predicate**, so it reports what this
     request will actually do rather than re-deriving whether it should. The source is
@@ -372,32 +249,6 @@ class Enquiry:
         metadata_limiter.check(member)
         return cls(_access=_resolved_access(db))
 
-    @classmethod
-    def for_a_narrowed_lookup(cls, db: Session, *, member: str, only: frozenset[CatalogueSource]) -> Self:
-        """`for_a_member_request` for one ISBN lookup that asks only `only`.
-
-        A cataloguer's judgement about one book, never a setting: nothing here is
-        stored, so the next request asks the standing plan again.
-        """
-        access = _narrowed_access(db, only, lambda plan: plan.lookup_chain, NARROWED_PAST_THE_ISBN_ROSTER)
-        metadata_limiter.check(member)
-        return cls(_access=access)
-
-    @classmethod
-    def for_a_narrowed_title_search(
-        cls, db: Session, *, member: str, only: frozenset[CatalogueSource]
-    ) -> Self:
-        """`for_a_member_request` for one title search that asks only `only`.
-
-        Checked against `searched_harder`, every search catalogue this Library asks,
-        so a slow one may be named; whether it is asked is still `harder`'s decision.
-        """
-        access = _narrowed_access(
-            db, only, lambda plan: plan.searched_harder, NARROWED_PAST_THE_TITLE_SEARCH_ROSTER
-        )
-        metadata_limiter.check(member)
-        return cls(_access=access)
-
     def __str__(self) -> str:
         return f"<enquiry of {len(self._access.plan.asked)} catalogue(s)>"
 
@@ -409,15 +260,13 @@ class Enquiry:
         switched off got a lookup's refusal and then a search's, from one request.
         Asking nothing is one answer rather than two.
 
-        **The predicate is `plan.asked` and `plan.picked` rather than either roster**,
-        and it is the honest one for a caller with fallbacks: it asks whether anything is
-        enabled, not whether the first path can answer. `test_sources.py` pins that every
-        seeded target answers a lookup or a search, which is what makes this equivalent
-        to both rosters being empty rather than merely equal to it today. A pick counts
-        because a lookup asks it: without it, a library asking only a pick would be told
-        here that nothing is switched on, and told by `lookup` that the book was missed.
+        **The predicate is `plan.asked` rather than either roster**, and it is the
+        honest one for a caller with fallbacks: it asks whether anything is enabled, not
+        whether the first path can answer. `test_sources.py` pins that every seeded
+        target answers a lookup or a search, which is what makes this equivalent to
+        both rosters being empty rather than merely equal to it today.
         """
-        if not self._access.plan.asked and not self._access.plan.picked:
+        if not self._access.plan.asked:
             raise _refused(NOTHING_IS_SWITCHED_ON)
 
     async def lookup(self, isbn: str) -> metadata.Lookup:

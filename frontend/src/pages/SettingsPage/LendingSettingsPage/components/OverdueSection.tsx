@@ -34,7 +34,6 @@ const REASON_LABELS: Record<OverdueNotifyReason, MessageKey> = {
   [OverdueNotifyReason.misconfigured]: "settings.overdueNotSentMisconfigured",
   [OverdueNotifyReason.in_app_only]: "settings.overdueNotSentInAppOnly",
   [OverdueNotifyReason.unexpected]: "settings.overdueNotSentUnexpected",
-  [OverdueNotifyReason.no_address]: "settings.overdueNotSentNoAddress",
 };
 
 interface OverdueSectionProps {

@@ -16,20 +16,15 @@ household build the receiver: most have none and no intention of writing one, so
 the feature was off for them in practice. SMTP is universal and Telegram is one
 fixed host, so neither costs a service.
 
-**The patron notice is the one pushing audience that carries a private book**,
-because being reminded of a book you hold is not a disclosure (owner, 2026-11-22).
-It goes to one patron's own address, about that patron's loans and nobody
-else's, from its own selection: `due_for_patrons`. A member's `User.email` is
-still read by nothing here; a member is chased in the app.
+**A per borrower mail is the one audience that could carry a private book**,
+since being reminded of a book you borrowed is not a disclosure. It is not built.
+`User.email` exists, and nothing here reads it: `send_mail` takes its recipients
+from `mailer.checked_config`, so the column's arrival is invisible to this module
+**by construction rather than by discipline**.
 
-`notified_at` is stamped when **at least one pushing channel** delivered, because
+`notified_at` is stamped when **at least one pushing sender** delivered, because
 the column records that a reminder went out and one did. Stamping only when every
-channel delivered turns one broken channel into silence on all of them.
-
-**The patron notice keeps its own stamp, `patron_notified_at`** (owner's decision
-on #24), for the same reason one level up: with one stamp for both audiences, a
-digest that delivered would silence a patron whose mail failed for the whole
-interval, and the other way round. Each selection reads its own column.
+sender delivered turns one broken channel into silence on all of them.
 """
 
 import asyncio
@@ -40,7 +35,6 @@ import logging
 import re
 import smtplib
 import traceback
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, assert_never
 from urllib.parse import urlparse
@@ -48,7 +42,7 @@ from urllib.parse import urlparse
 import httpx
 import idna
 from sqlalchemy import or_
-from sqlalchemy.orm import InstrumentedAttribute, Query, Session, joinedload
+from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.elements import ColumnElement
 
 import errors
@@ -91,10 +85,7 @@ SIGNATURE_HEADER = "X-Endpaper-Signature"
 #: stated rather than hidden: `asyncio.to_thread` cannot be cancelled, so a
 #: server that stops answering costs one worker thread until its own socket
 #: timeout expires. What it buys is the thing that matters, which is that the
-#: hourly ticker and `POST /api/loans/overdue/notify` are held by it once per
-#: mail sender at most: the patron notice stops at its first failure other than
-#: a refused recipient (`_mail_patrons`), so a server that is down costs one
-#: deadline rather than one per patron.
+#: hourly ticker and `POST /api/loans/overdue/notify` are never held by it.
 MAIL_DEADLINE_SECONDS = 30.0
 
 #: Telegram's one host, as a constant and **deliberately not a setting**.
@@ -286,21 +277,6 @@ def overdue_clauses(now: datetime) -> list[ColumnElement[bool]]:
     ]
 
 
-def _not_chased_since(
-    stamp: InstrumentedAttribute[datetime | None], now: datetime, days: int
-) -> ColumnElement[bool]:
-    """Never chased, or chased longer ago than the reminder interval, by one audience's stamp.
-
-    The cadence of every pushing sender: one notice per loan per interval at
-    most **per audience**. `stamp` is `Loan.notified_at` for the digest and
-    `Loan.patron_notified_at` for the patron notice, so a failure on one
-    audience never holds the other back (owner, 2026-11-22). Written once
-    for both selections below, so they cannot come to disagree about how often.
-    """
-    cutoff = now - timedelta(days=days)
-    return (stamp.is_(None)) | (stamp < cutoff)
-
-
 def due_for_reminder(db: Session, now: datetime, days: int) -> list[Loan]:
     """Open loans past their date that nothing has chased recently.
 
@@ -315,47 +291,14 @@ def due_for_reminder(db: Session, now: datetime, days: int) -> list[Loan]:
     interval. That is the whole state this feature keeps, which is why it is
     added here through `as_query` rather than owned by the door.
     """
+    cutoff = now - timedelta(days=days)
     return (
         lending.Loans.for_a_channel(db)
         .overdue(now)
         .as_query()
         .options(joinedload(Loan.book), joinedload(Loan.loaned_to))
-        .filter(_not_chased_since(Loan.notified_at, now, days))
+        .filter((Loan.notified_at.is_(None)) | (Loan.notified_at < cutoff))
         .order_by(Loan.due_at, Loan.id)
-        .all()
-    )
-
-
-def due_for_patrons(db: Session, now: datetime, days: int) -> list[Loan]:
-    """Overdue loans to a patron that the patron notice has not chased recently, **private Books included**.
-
-    **The patron notice's own selection, and the one place a pushing sender
-    reads a private Book.** Its audience is the patron the loan went to, and a
-    Book in that patron's hands is not disclosed to them by a reminder
-    (owner, 2026-11-22). So this is not `Loans.for_a_channel`: that shelf drops every
-    private Book, which here would be the borrower never being chased for the
-    one book the library most wants back.
-
-    **Safe only because of how it is consumed.** `_mail_patrons` groups these
-    by `loaned_to_patron_id` and sends each patron their group alone, to the
-    address on their record. Handing this list to a channel sender would post
-    private titles to the household; `_push` keeps the two selections apart.
-
-    A bare join rather than a Shelf, for the reason `JOIN_CALLERS` gives this
-    module: there is no member viewer, and the partition is on the borrower.
-    `overdue_clauses` carries `Book.deleted_at`, so a trashed Book is not
-    chased. Ordered by patron, so one patron's loans are adjacent.
-    """
-    return (
-        db.query(Loan)
-        .join(Book, Loan.book_id == Book.id)
-        .options(joinedload(Loan.book), joinedload(Loan.loaned_to_patron))
-        .filter(
-            *overdue_clauses(now),
-            Loan.loaned_to_patron_id.isnot(None),
-            _not_chased_since(Loan.patron_notified_at, now, days),
-        )
-        .order_by(Loan.loaned_to_patron_id, Loan.due_at, Loan.id)
         .all()
     )
 
@@ -364,8 +307,10 @@ def count_private_overdue(db: Session, now: datetime) -> int:
     """How many overdue loans the privacy exclusion held back.
 
     **The number for a sender whose audience is a channel**, so it says how much
-    the household is not being told rather than naming anything. The patron
-    notice withholds none of these from the patron holding one, and reports 0.
+    the household is not being told rather than naming anything.
+
+    **A per borrower mail would be the audience that could carry those books**,
+    and it does not exist. `User.email` exists and nothing here reads it.
 
     **No reminder interval here**, unlike the digest: this counts what is overdue
     rather than what is due to be chased again.
@@ -475,10 +420,9 @@ def build_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
                 "loan_id": loan.id,
                 "book_id": loan.book_id,
                 "title": loan.book.title if loan.book else "",
-                # A member's username, the free-text name of somebody with no
-                # account, or null for a patron or an erased borrower: a
-                # patron's record never leaves for a channel, which is a third
-                # party. See `ck_loans_one_borrower`.
+                # A member's username, or the free-text name of somebody with
+                # no account. Exactly one of the two is set; see
+                # `ck_loans_one_borrower`.
                 "borrower": (loan.loaned_to.username if loan.loaned_to else loan.loaned_to_name),
                 "due_at": loan.due_at.isoformat() if loan.due_at else None,
                 # `lending.days_overdue`, not the subtraction that was inline
@@ -532,8 +476,7 @@ def render_text(digest: dict[str, Any], *, limit: int | None = None) -> str:
     count = digest["count"]
     header = f"{count} overdue {'book' if count == 1 else 'books'}."
     lines = [
-        f"{entry['title'] or 'Untitled'}: {entry['borrower'] or 'no name sent'}, "
-        f"{_days(entry['days_overdue'])} overdue"
+        f"{entry['title'] or 'Untitled'}: {entry['borrower']}, {entry['days_overdue']} days overdue"
         for entry in digest["loans"]
     ]
 
@@ -666,12 +609,8 @@ async def send_telegram(db: Session, text: str) -> None:
     await _post(telegram_url(token), body, {"Content-Type": "application/json"})
 
 
-async def send_mail(db: Session, subject: str, text: str, *, to: str | None = None) -> None:
-    """Send the digest to the household mailbox, or to `to` alone, or raise.
-
-    `to` is one patron's own address, for the patron notice. Through
-    `checked_config`'s `recipients`, so it meets the same refusals the household
-    address does and the household address is never added beside it.
+async def send_mail(db: Session, subject: str, text: str) -> None:
+    """Send the digest to the household mailbox, or raise.
 
     **On a worker thread.** `smtplib` is blocking and every FastAPI handler that
     reaches here is `async def`, so calling it inline would stop the event loop
@@ -682,7 +621,7 @@ async def send_mail(db: Session, subject: str, text: str, *, to: str | None = No
     The deadline bounds this coroutine, not the thread. See
     `MAIL_DEADLINE_SECONDS`.
     """
-    config = mailer.checked_config(db, recipients=None if to is None else (to,))
+    config = mailer.checked_config(db)
     async with asyncio.timeout(MAIL_DEADLINE_SECONDS):
         await asyncio.to_thread(mailer.send, config, subject, text)
 
@@ -694,7 +633,6 @@ _ENABLED_KEY: Final[dict[OverdueSender, SettingKey]] = {
     OverdueSender.WEBHOOK: SettingKey.OVERDUE_WEBHOOK_ENABLED,
     OverdueSender.EMAIL: SettingKey.OVERDUE_MAIL_ENABLED,
     OverdueSender.TELEGRAM: SettingKey.OVERDUE_TELEGRAM_ENABLED,
-    OverdueSender.PATRON_MAIL: SettingKey.OVERDUE_PATRON_MAIL_ENABLED,
 }
 
 
@@ -743,18 +681,11 @@ _CONFIGURED_BY: Final[dict[OverdueSender, frozenset[SettingKey]]] = {
             SettingKey.TELEGRAM_CHAT_ID,
         }
     ),
-    # The same mail server as the digest, so a fix to it clears both records:
-    # which is why `senders_for` answers every sender a row configures.
-    OverdueSender.PATRON_MAIL: frozenset({SettingKey.OVERDUE_PATRON_MAIL_ENABLED, *settings_store.MAIL_KEYS}),
 }
 
 
-def senders_for(key: SettingKey) -> tuple[OverdueSender, ...]:
-    """Every sender this settings row configures, in sender order; empty for none.
-
-    **Plural since the patron notice**, which shares the mail server with the
-    digest: a fix to `mail_server` has to clear both channels' records, and a
-    singular answer cleared whichever came first in the table.
+def sender_for(key: SettingKey) -> OverdueSender | None:
+    """Which sender this settings row configures, if it configures one.
 
     **The door the settings router writes through**, so that "this write
     invalidates that channel's health record" is a fact about the sender rather
@@ -762,7 +693,10 @@ def senders_for(key: SettingKey) -> tuple[OverdueSender, ...]:
     payload field, and it covered the four switches only, which is the defect
     above.
     """
-    return tuple(sender for sender, keys in _CONFIGURED_BY.items() if key in keys)
+    for sender, keys in _CONFIGURED_BY.items():
+        if key in keys:
+            return sender
+    return None
 
 
 def pushes_outward(sender: OverdueSender) -> bool:
@@ -787,7 +721,7 @@ def pushes_outward(sender: OverdueSender) -> bool:
     `_destination` already use.
     """
     match sender:
-        case OverdueSender.WEBHOOK | OverdueSender.EMAIL | OverdueSender.TELEGRAM | OverdueSender.PATRON_MAIL:
+        case OverdueSender.WEBHOOK | OverdueSender.EMAIL | OverdueSender.TELEGRAM:
             return True
         case OverdueSender.IN_APP:
             return False
@@ -896,9 +830,7 @@ def _destination(sender: OverdueSender, db: Session) -> str:
         return _host(settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_URL))
     if sender is OverdueSender.TELEGRAM:
         return _host(TELEGRAM_API)
-    if sender is OverdueSender.EMAIL or sender is OverdueSender.PATRON_MAIL:
-        # The server, never the patron's address: a log line is not a register
-        # of who borrowed what.
+    if sender is OverdueSender.EMAIL:
         return settings_store.in_force(db, SettingKey.MAIL_SERVER).strip() or "unknown"
     if sender is OverdueSender.IN_APP:
         # Reached by nothing today: `_run_sender` is the only caller and
@@ -912,13 +844,8 @@ def _destination(sender: OverdueSender, db: Session) -> str:
     assert_never(sender)
 
 
-async def _deliver(
-    sender: OverdueSender, db: Session, digest: dict[str, Any], subject: str, to: str | None
-) -> None:
-    """Hand one sender the digest. Raises a refusal or a transport error.
-
-    `to` is the patron's address for the patron notice and None for the rest.
-    """
+async def _deliver(sender: OverdueSender, db: Session, digest: dict[str, Any], subject: str) -> None:
+    """Hand one sender the digest. Raises a refusal or a transport error."""
     if sender is OverdueSender.WEBHOOK:
         url = checked_url(settings_store.in_force(db, SettingKey.OVERDUE_WEBHOOK_URL))
         body = json.dumps(digest).encode("utf-8")
@@ -928,8 +855,6 @@ async def _deliver(
         await send_mail(db, subject, render_text(digest))
     elif sender is OverdueSender.TELEGRAM:
         await send_telegram(db, render_text(digest, limit=TELEGRAM_MAX_UNITS))
-    elif sender is OverdueSender.PATRON_MAIL:
-        await _send_to_patron(db, subject, digest, to)
     elif sender is OverdueSender.IN_APP:
         # There is nothing to hand off. The notice is the app: a member reads
         # it from `GET /api/loans/overdue/mine`, scoped to them, which is what
@@ -950,55 +875,6 @@ async def _deliver(
         assert_never(sender)
 
 
-async def _send_to_patron(db: Session, subject: str, digest: dict[str, Any], to: str | None) -> None:
-    """The patron notice's send, refusing to fall back to the household mailbox.
-
-    **A raise rather than `send_mail(db, ..., to=None)`**, which would mail one
-    patron's loans, private Books included, to `overdue_mail_to`. Reaching it
-    means `_mail_patrons` stopped passing the address it checked.
-    """
-    if to is None:
-        raise AssertionError("The patron notice has no address. See notifications._mail_patrons.")
-    await send_mail(db, subject, _patron_text(digest), to=to)
-
-
-def _patron_text(digest: dict[str, Any]) -> str:
-    """The patron notice as plain text: addressed to the patron, saying what to do.
-
-    **Not `render_text`**, which is written for the household: one line per
-    loan naming the borrower, "no name sent" for every patron. The patron is
-    the borrower of every loan here, so the mail greets them by name instead,
-    gives each loan its due date, and asks for the books back. The loans are
-    still `build_digest`'s, so what is overdue is decided in one place.
-
-    English, for the reason `render_text` gives. The library is not named
-    because the app has no setting that holds its name; the sender address
-    the mail server is configured with is what tells a patron who wrote.
-    """
-    lines = [
-        f"{entry['title'] or 'Untitled'}: due {entry['due_at'][:10]}, {_days(entry['days_overdue'])} overdue"
-        for entry in digest["loans"]
-    ]
-    # A patron often holds one loan, often one day late, and reads the mail.
-    books, them = ("this book", "it") if len(lines) == 1 else ("these books", "them")
-    return "\n".join(
-        [
-            f"Hello {digest['patron']},",
-            "",
-            f"The library's records show {books} you borrowed as overdue:",
-            "",
-            *lines,
-            "",
-            f"Please bring {them} back, or ask the library for more time.",
-        ]
-    )
-
-
-def _days(count: int) -> str:
-    """`count` days, in the singular for one."""
-    return "1 day" if count == 1 else f"{count} days"
-
-
 async def _run_sender(
     sender: OverdueSender,
     db: Session,
@@ -1007,19 +883,15 @@ async def _run_sender(
     *,
     loans: int,
     skipped_private: int,
-    to: str | None = None,
-) -> tuple[dict[str, Any], Exception | None]:
-    """One sender's attempt, as the entry that will be reported for it, and what it raised.
+) -> dict[str, Any]:
+    """One sender's attempt, as the entry that will be reported for it.
 
-    **The exception is returned beside the entry** because one caller decides on
-    its class: `_mail_patrons` goes on past a failure about one patron's
-    address and stops on anything else, and the entry's `UNREACHABLE` is the
-    same for both. It is never reported or stored, only read.
-
-    **`skipped_private` is carried per sender, not once for the run.** The three
-    channels withhold the same rows and report the same number; the patron
-    notice goes to a person, withholds none and reports 0. A single figure at
-    the top would be a lie on one of them.
+    **`skipped_private` is carried per sender, not once for the run.** All three
+    withhold the same rows today, because all three go to a channel rather than
+    to a person, so all three report the same number. The count is attached here
+    anyway: the moment one sender's audience differs, "3 private books withheld"
+    has to mean what it says on the channel it appears on, and a single figure
+    at the top would be a lie on the other two.
 
     **Every `Exception` is caught.** One sender that fails must not stop the
     ones after it, must not 500 the endpoint, and must not skip the stamp for
@@ -1035,7 +907,7 @@ async def _run_sender(
     # Before the send, never inside a handler: see `_destination`.
     destination = _destination(sender, db)
     try:
-        await _deliver(sender, db, digest, subject, to)
+        await _deliver(sender, db, digest, subject)
     except _REFUSALS as refusal:
         # `NO_URL` for the webhook keeps the reason the client already renders
         # for an empty destination. The other two have no URL to be missing.
@@ -1056,7 +928,7 @@ async def _run_sender(
             skipped_private=skipped_private,
             reason=reason,
             detail=str(refusal),
-        ), refusal
+        )
     except _TRANSPORT as error:
         # The type, never the error's own message. `httpx.HTTPStatusError`
         # renders the request URL, and for Telegram the URL is the bot token.
@@ -1073,7 +945,7 @@ async def _run_sender(
             skipped_private=skipped_private,
             reason=OverdueNotifyReason.UNREACHABLE,
             detail="The destination could not be reached.",
-        ), error
+        )
     except Exception as error:  # noqa: BLE001  one channel's defect is not the run's
         # Neither a refusal nor a transport failure: a case the code does not
         # anticipate, so a defect to report rather than an outage to wait out.
@@ -1098,7 +970,7 @@ async def _run_sender(
             skipped_private=skipped_private,
             reason=OverdueNotifyReason.UNEXPECTED,
             detail="The send failed in a way the app did not expect. The server log names the cause.",
-        ), error
+        )
 
     logger.info(
         "The %s reminder to %s covered %d loans",
@@ -1106,7 +978,7 @@ async def _run_sender(
         destination,
         loans,
     )
-    return _sender_entry(sender, loans=loans, skipped_private=skipped_private), None
+    return _sender_entry(sender, loans=loans, skipped_private=skipped_private)
 
 
 def _shape(error: BaseException) -> str:
@@ -1155,9 +1027,7 @@ MIN_FAILURES_TO_INTERRUPT: Final = 2
 #: until somebody changes a setting. Waiting a day to say so would tell the
 #: household nothing it could not have been told at once. `UNREACHABLE` is the
 #: opposite case and is the one the window is for.
-_CONFIGURATION_REASONS: Final = frozenset(
-    {OverdueNotifyReason.NO_URL, OverdueNotifyReason.MISCONFIGURED, OverdueNotifyReason.NO_ADDRESS}
-)
+_CONFIGURATION_REASONS: Final = frozenset({OverdueNotifyReason.NO_URL, OverdueNotifyReason.MISCONFIGURED})
 
 
 def _in_app_entry(db: Session, now: datetime) -> dict[str, Any]:
@@ -1430,11 +1300,9 @@ async def run_digest(db: Session) -> dict[str, Any]:
     three that do push for the length of the interval. `pushes_outward` carries
     the measurement.
 
-    **One selection for the three channels, not one each.** They carry the
+    **One selection for every pushing sender, not one each.** They carry the
     same content by construction, and re-running `due_for_reminder` between
     senders would let a loan returned mid run reach one channel and not another.
-    The patron notice has its own, `due_for_patrons`, taken in the same pass
-    before anything is sent: see `_Due`.
 
     **The result is recorded before it is returned**, which is #82. It used to
     be returned to `ticker()` and thrown away, so a channel that failed every
@@ -1450,12 +1318,10 @@ async def run_digest(db: Session) -> dict[str, Any]:
 
 
 async def _run_digest(db: Session, now: datetime) -> dict[str, Any]:
-    """The pass itself. `run_digest` is what records it; see there for why.
+    """The pass itself. `run_digest` is what records it; see there for why."""
+    days = reminder_days(db)
 
-    Kept to the decisions; each reading is a helper beside it: `_enabled`, the
-    in app only answer `_in_app_only`, and the two selections `_due`.
-    """
-    enabled = _enabled(db)
+    enabled = [sender for sender in OverdueSender if settings_store.get_bool(db, _ENABLED_KEY[sender])]
     if not enabled:
         return _outcome(OverdueNotifyReason.DISABLED, "Overdue reminders are switched off.")
 
@@ -1463,283 +1329,78 @@ async def _run_digest(db: Session, now: datetime) -> dict[str, Any]:
     # entry is built rather than attempted: it hands the digest to nothing.
     in_app = [_in_app_entry(db, now)] if OverdueSender.IN_APP in enabled else []
     pushing = [sender for sender in enabled if pushes_outward(sender)]
-    if not pushing:
-        return _in_app_only(db, now, in_app)
 
-    channels: list[OverdueSender] = [sender for sender in pushing if sender is not OverdueSender.PATRON_MAIL]
-    due = _due(db, now, channels, patrons=OverdueSender.PATRON_MAIL in pushing)
-    if not due.loans and not due.held:
+    loans = due_for_reminder(db, now, days)
+    skipped = count_private_overdue(db, now)
+
+    if not pushing:
+        # In app is on and nothing else is. Nothing was sent and nothing was
+        # meant to be, which is a different answer from "reminders are off" and
+        # reads differently on the screen.
+        return _outcome(
+            OverdueNotifyReason.IN_APP_ONLY,
+            "Nothing was sent: the in app notice is the only channel switched on.",
+            loans=len(loans),
+            skipped_private=skipped,
+            senders=in_app,
+        )
+
+    if not loans:
         return _outcome(
             OverdueNotifyReason.NOTHING_DUE,
             "Nothing is overdue.",
-            skipped_private=due.skipped,
+            skipped_private=skipped,
             senders=in_app,
         )
-    return await _push(db, now, due, channels, in_app)
 
-
-def _enabled(db: Session) -> list[OverdueSender]:
-    """The senders switched on, in sender order."""
-    return [sender for sender in OverdueSender if settings_store.get_bool(db, _ENABLED_KEY[sender])]
-
-
-def _in_app_only(db: Session, now: datetime, in_app: list[dict[str, Any]]) -> dict[str, Any]:
-    """In app is on and nothing else is.
-
-    Nothing was sent and nothing was meant to be, which is a different answer
-    from "reminders are off" and reads differently on the screen.
-    """
-    return _outcome(
-        OverdueNotifyReason.IN_APP_ONLY,
-        "Nothing was sent: the in app notice is the only channel switched on.",
-        loans=len(due_for_reminder(db, now, reminder_days(db))),
-        skipped_private=count_private_overdue(db, now),
-        senders=in_app,
-    )
-
-
-def _due(db: Session, now: datetime, channels: list[OverdueSender], *, patrons: bool) -> _Due:
-    """Both selections, taken in the same pass before anything is sent.
-
-    **The channels' loans and their withheld count only when a channel is on.**
-    With the patron notice alone, a loan to a member is nobody's to send, and a
-    private Book was mailed to its borrower rather than left out, so reporting
-    it as `skipped_private` would say the run withheld what it did not.
-    """
-    days = reminder_days(db)
-    return _Due(
-        loans=due_for_reminder(db, now, days) if channels else [],
-        held=due_for_patrons(db, now, days) if patrons else [],
-        skipped=count_private_overdue(db, now) if channels else 0,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _Due:
-    """What one pass found to send: the channels' digest and the patrons' own loans.
-
-    **Two selections, never merged**, and that is the privacy rule rather than
-    a convenience. `loans` is `due_for_reminder`, which no private Book reaches;
-    `held` is `due_for_patrons`, which private Books do reach and which goes to
-    each patron alone. A single list would put the second into the first.
-    `skipped` is `count_private_overdue`, the channels' withheld count.
-    """
-
-    loans: list[Loan]
-    held: list[Loan]
-    skipped: int
-
-
-def _subject(count: int) -> str:
-    """A count and no title: a subject is stored in clear by every hop."""
-    return f"{count} overdue {'book' if count == 1 else 'books'}"
+    return await _push(db, now, loans, skipped, pushing, in_app)
 
 
 async def _push(
     db: Session,
     now: datetime,
-    due: _Due,
-    channels: list[OverdueSender],
+    loans: list[Loan],
+    skipped: int,
+    pushing: list[OverdueSender],
     in_app: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Send the digest on every channel and each patron their own loans; stamp what went out.
-
-    **Each audience stamps its own column** (owner, 2026-11-22): the
-    digest's loans on `notified_at` when any channel delivered, a patron's
-    loans on `patron_notified_at` when that patron's mail did. A loan in both
-    selections is chased once per interval by each, and a failure on one
-    audience leaves the other's stamp, and so its cadence, alone.
-    """
-    pushed: list[dict[str, Any]] = []
-    digested: list[Loan] = []
-    mailed: list[Loan] = []
-    if due.loans:
-        entries = await _send_digest(db, now, due, channels)
-        pushed += entries
-        digested = due.loans if any(entry["sent"] for entry in entries) else []
-    if due.held:
-        entry, mailed = await _mail_patrons(db, now, due.held)
-        pushed.append(entry)
+    """Send one digest of `loans` on every pushing sender, and stamp them if any delivered."""
+    digest = build_digest(loans, now)
+    subject = f"{len(loans)} overdue {'book' if len(loans) == 1 else 'books'}"
+    pushed = [
+        await _run_sender(sender, db, digest, subject, loans=len(loans), skipped_private=skipped)
+        for sender in pushing
+    ]
     outcomes = in_app + pushed
-    covered = len({loan.id for loan in due.loans + due.held})
 
     # Asked of `pushed`, never of `outcomes`. The in app entry always reports
     # `sent`, so reading the whole list here would make every run look like a
     # delivery and stamp loans nothing chased.
-    if not digested and not mailed:
+    if not any(entry["sent"] for entry in pushed):
         # The first failure in sender order, so a single sender library reads
-        # exactly as it did before there were three. Nothing chased means no
-        # pushed entry delivered, so there is one.
-        first = next(entry for entry in pushed if not entry["sent"])
+        # exactly as it did before there were three.
+        first = pushed[0]
         return _outcome(
             first["reason"],
             first["detail"],
-            loans=covered,
-            skipped_private=due.skipped,
+            loans=len(loans),
+            skipped_private=skipped,
             senders=outcomes,
         )
 
-    _stamp(db, now, digested, mailed)
+    for loan in loans:
+        loan.notified_at = now
+    db.commit()
 
     # The one exit with no reason: `reason` is null exactly when `sent` is true.
     return {
         "sent": True,
-        "loans": covered,
-        "skipped_private": due.skipped,
+        "loans": len(loans),
+        "skipped_private": skipped,
         "reason": None,
         "detail": None,
         "senders": outcomes,
     }
-
-
-def _stamp(db: Session, now: datetime, digested: list[Loan], mailed: list[Loan]) -> None:
-    """Stamp each audience's own column on the loans it delivered, and commit.
-
-    Two columns, never one: `due_for_reminder` reads `notified_at` and
-    `due_for_patrons` reads `patron_notified_at`. Writing a patron's delivery
-    into `notified_at` would drop that loan out of the household digest for the
-    interval although the household was never told.
-    """
-    for loan in digested:
-        loan.notified_at = now
-    for loan in mailed:
-        loan.patron_notified_at = now
-    db.commit()
-
-
-async def _send_digest(
-    db: Session, now: datetime, due: _Due, channels: list[OverdueSender]
-) -> list[dict[str, Any]]:
-    """One digest of the channels' loans on every channel, one entry each."""
-    digest = build_digest(due.loans, now)
-    subject = _subject(len(due.loans))
-    return [
-        (await _run_sender(sender, db, digest, subject, loans=len(due.loans), skipped_private=due.skipped))[0]
-        for sender in channels
-    ]
-
-
-def _by_patron(held: list[Loan]) -> list[list[Loan]]:
-    """`held` cut into one list per patron, in the order `due_for_patrons` gave."""
-    groups: dict[int | None, list[Loan]] = {}
-    for loan in held:
-        groups.setdefault(loan.loaned_to_patron_id, []).append(loan)
-    return list(groups.values())
-
-
-def _patron_digest(loans: list[Loan], now: datetime) -> dict[str, Any]:
-    """`build_digest` of one patron's loans, with the name the mail greets.
-
-    The name goes into this digest only: it is handed to the patron notice
-    alone, never to a channel, and `build_digest` keeps a patron's record out
-    of everything a channel receives.
-    """
-    patron = loans[0].loaned_to_patron
-    return {**build_digest(loans, now), "patron": patron.name if patron else "reader"}
-
-
-def _about_this_patron(error: Exception | None, address: str) -> bool:
-    """Did this send fail for a reason that belongs to this patron's address alone?
-
-    `SMTPRecipientsRefused` always does. **`SMTPNotSupportedError` does when
-    the address is not ASCII**: `smtplib` raises it for such an address on a
-    server that does not offer `SMTPUTF8`, and stopping there would hold every
-    later patron back behind one address, every run. The same error for an
-    ASCII address is a missing STARTTLS, which is the server's and must stop.
-    """
-    if isinstance(error, smtplib.SMTPRecipientsRefused):
-        return True
-    return isinstance(error, smtplib.SMTPNotSupportedError) and not address.isascii()
-
-
-def _address(loans: list[Loan]) -> str | None:
-    """The patron's own address, when it is one this app will put in an envelope.
-
-    Checked here as well as when a patron is written, because a restore or a
-    hand edit can put anything in the column, and a malformed address is a
-    notice nobody can send: reported as `NO_ADDRESS`, never mailed to a guess.
-    """
-    patron = loans[0].loaned_to_patron
-    address = (patron.email or "").strip() if patron else ""
-    return address if mailer.looks_like_address(address) else None
-
-
-async def _mail_patrons(db: Session, now: datetime, held: list[Loan]) -> tuple[dict[str, Any], list[Loan]]:
-    """Mail each patron their own overdue loans: the sender's entry, and the loans delivered.
-
-    **One mail per patron, carrying that patron's loans and nobody else's**, to
-    that patron's address alone. `build_digest` still decides which loans it
-    names; `_patron_text` words it for the patron.
-
-    **A patron with no usable address is counted, not skipped silently**: the
-    entry reports `NO_ADDRESS`, which the health record treats as a
-    configuration fault and shows at once. Their loans stay unstamped, so the
-    next run reports them again.
-
-    **Only a failure about this patron's address lets the loop go on; every
-    other failure stops it.** `_about_this_patron` says which those are, and
-    stopping on one would hold every later patron back behind them on every
-    run. A server that refuses to relay refuses every recipient the same way,
-    so it costs one refused conversation per patron per run and reads
-    `UNREACHABLE`; nothing about it waits on a deadline or a login. Anything
-    else is the server or its configuration, the same for every patron: a
-    server that is down would cost one `MAIL_DEADLINE_SECONDS` and one
-    stranded thread per patron and hold "Send now" for minutes, and a wrong
-    password would make one failed login per patron an hour, which is how a
-    provider locks an account.
-    """
-    delivered: list[Loan] = []
-    failures: list[dict[str, Any]] = []
-    unaddressed = 0
-    for loans in _by_patron(held):
-        address = _address(loans)
-        if address is None:
-            unaddressed += len(loans)
-            continue
-        entry, error = await _run_sender(
-            OverdueSender.PATRON_MAIL,
-            db,
-            _patron_digest(loans, now),
-            _subject(len(loans)),
-            loans=len(loans),
-            skipped_private=0,
-            to=address,
-        )
-        if entry["sent"]:
-            delivered += loans
-            continue
-        failures.append(entry)
-        if not _about_this_patron(error, address):
-            break
-    return _patron_entry(len(held), unaddressed, failures), delivered
-
-
-def _patron_entry(loans: int, unaddressed: int, failures: list[dict[str, Any]]) -> dict[str, Any]:
-    """The patron notice's one line in a run's report, from its per patron attempts.
-
-    The first failure when a send failed, since that is what somebody has to
-    fix; `NO_ADDRESS` when every send worked and some patron had no address;
-    sent otherwise. `skipped_private` is 0: this audience withholds nothing.
-    """
-    if failures:
-        first = failures[0]
-        return _sender_entry(
-            OverdueSender.PATRON_MAIL,
-            loans=loans,
-            skipped_private=0,
-            reason=first["reason"],
-            detail=first["detail"],
-        )
-    if unaddressed:
-        logger.warning("The patron_mail reminder left %d loans unsent: no usable address", unaddressed)
-        return _sender_entry(
-            OverdueSender.PATRON_MAIL,
-            loans=loans,
-            skipped_private=0,
-            reason=OverdueNotifyReason.NO_ADDRESS,
-            detail=f"{unaddressed} overdue loans went to a patron with no usable email address.",
-        )
-    return _sender_entry(OverdueSender.PATRON_MAIL, loans=loans, skipped_private=0)
 
 
 async def ticker() -> None:

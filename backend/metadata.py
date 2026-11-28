@@ -62,26 +62,19 @@ from authors import join_authors
 from bibliographic import (
     LANGUAGES,
     credit_line,
-    earliest_year,
     flip_catalogue_name,
     is_a_disc,
     is_physical_book,
     is_placeholder_title,
-    isbn_among_identifiers,
     pages_from_extent,
     split_title_statement,
     strip_isbd_punctuation,
-    two_letter_language,
 )
 from catalogue import Heading, Record, Subject, uncontrolled
-from deadline import in_, left
 from enums import (
     Capability,
     CatalogueSource,
     ClassificationScheme,
-    CredentialKind,
-    Disposition,
-    RegisteredCatalogue,
 )
 from isbn import parse as parse_isbn
 from isbn import registration_group
@@ -198,17 +191,6 @@ class Lookup:
     #: Every source that was tried, in order, with its own outcome. Kept so a
     #: failure can be explained rather than only reported.
     attempts: list[tuple[str, Outcome]] = field(default_factory=list)
-    #: Whether the target replied and the reply was a no: a diagnostic, an HTTP
-    #: error status, a Z39.50 refusal, or bytes no reader could take.
-    #:
-    #: **Read by `probe` alone, and only on an answer that is not `FOUND` or
-    #: `NOT_FOUND`.** `UNAVAILABLE` folds a host that said no into a host that
-    #: never replied, which is right for a scan, where either way nobody knows
-    #: yet, and wrong for an admin choosing a catalogue: a refusal is a wrong
-    #: database name or a missing login, and silence is a host that is down.
-    #: `z3950.py` keeps the two apart for that reason, and this carries the split
-    #: out of the door rather than a second door re-deriving it.
-    refused: bool = False
 
     @property
     def found(self) -> bool:
@@ -446,9 +428,9 @@ def _open_library_year(raw: object) -> int | None:
 def _year_in(text: str) -> int | None:
     """The first run of four digits in free text, as a year.
 
-    Open Library's `publish_date` and a MODS `dateIssued` are read this way,
-    joined into one string first where the record repeats it. A Dublin Core
-    `date` is read by `bibliographic.earliest_year`.
+    Every reader in this module whose source writes its date as prose rather
+    than a code reads it this way: Open Library's `publish_date`, a Dublin Core `date` and a MODS
+    `dateIssued`, each joined into one string first where the record repeats it.
     """
     match = re.search(r"\d{4}", text)
     return int(match.group()) if match else None
@@ -603,8 +585,7 @@ async def _open_library(isbn: str) -> Lookup:
             response = await fetch.get(client, f"{_OPEN_LIBRARY}/isbn/{isbn}.json")
             missed = _open_library_miss(response.status_code)
             if missed is not None:
-                # A status is a reply, so anything but a miss is a refusal.
-                return Lookup(missed, source="open_library", refused=True)
+                return Lookup(missed, source="open_library")
             data = _open_library_object(response)
             if not data:
                 # A 200 carrying no object at all is a fault at the other end
@@ -612,7 +593,7 @@ async def _open_library(isbn: str) -> Lookup:
                 # `NOT_FOUND`: the difference is whether the reader is told to
                 # type the book in by hand or to try again.
                 logger.info("Open Library answered %s with no record object", isbn)
-                return Lookup(Outcome.UNAVAILABLE, source="open_library", refused=True)
+                return Lookup(Outcome.UNAVAILABLE, source="open_library")
 
             # The work first, because it is the fallback for the author: an
             # edition record names one on a minority of records and the work
@@ -622,12 +603,9 @@ async def _open_library(isbn: str) -> Lookup:
                 client,
                 _open_library_author_key(data.get("authors")) or _open_library_work_author_key(work),
             )
-    except (httpx.HTTPError, ValueError) as failure:
+    except httpx.HTTPError, ValueError:
         logger.warning("Open Library lookup failed for %s", isbn, exc_info=True)
-        # A body that does not parse, or one `fetch` refused, is a reply; any
-        # other transport error is silence. `_FETCH_REPLIES` says which.
-        refused = isinstance(failure, (ValueError, *_FETCH_REPLIES))
-        return Lookup(Outcome.UNAVAILABLE, source="open_library", refused=refused)
+        return Lookup(Outcome.UNAVAILABLE, source="open_library")
 
     publishers = data.get("publishers", [])
 
@@ -693,13 +671,10 @@ async def _google_books(isbn: str, api_key: str) -> Lookup:
         # message is the only thing carrying which one it was.
         outcome = Outcome.RATE_LIMITED if "rate limiting" in str(error) else Outcome.UNAVAILABLE
         logger.info("Google Books declined %s: %s", isbn, error)
-        # Every `GoogleBooksError` is raised on a status or a body Google sent,
-        # a rejected key among them, so it is a refusal and never silence.
-        return Lookup(outcome, source="google_books", refused=True)
-    except (httpx.HTTPError, ValueError) as failure:
+        return Lookup(outcome, source="google_books")
+    except httpx.HTTPError, ValueError:
         logger.warning("Google Books lookup failed for %s", isbn, exc_info=True)
-        refused = isinstance(failure, (ValueError, *_FETCH_REPLIES))
-        return Lookup(Outcome.UNAVAILABLE, source="google_books", refused=refused)
+        return Lookup(Outcome.UNAVAILABLE, source="google_books")
 
     if fields is None:
         return Lookup(Outcome.NOT_FOUND, source="google_books")
@@ -1521,6 +1496,11 @@ def _dc_says_online(extent: str | None, online: re.Pattern[str]) -> bool:
     return extent is not None and online.search(extent) is not None
 
 
+def _dc_language(values: list[str]) -> str | None:
+    """The first Dublin Core `language` value through the shared table, or None."""
+    return LANGUAGES.get((values or [""])[0].lower())
+
+
 def _nkp_claims_isbn(record: ElementTree.Element, isbn: str) -> bool:
     """Whether this record names the ISBN that was asked for.
 
@@ -1615,8 +1595,8 @@ def _nkp_record(record: ElementTree.Element, isbn: str, *, source: str) -> Recor
         subtitle=subtitle,
         author=flip_catalogue_name(contributors[0]) if contributors else None,
         publisher=strip_isbd_punctuation(publisher) if publisher else None,
-        year=earliest_year(_dc_text(record, "date")),
-        language=two_letter_language(_dc_text(record, "language")),
+        year=_year_in(" ".join(_dc_text(record, "date"))),
+        language=_dc_language(_dc_text(record, "language")),
         page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn),
         # The un-namespaced dialect, and it has no more room for a stamp than
@@ -2301,50 +2281,6 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 #     `d`, a subunit, on 7; `refuses_component_parts` refuses `a` and `b`, so
 #     the 7 are read. The largest rendered answer was 9,993 bytes.
 
-# **The SNK, the Slovak National Library, over its Z39.50 server**: PQF on use
-# attribute 7, MARC21, read by `_dnb_record`. Measured on 2026-11-17, later
-# than the three above and by the same method, through `_lookup_one` on its own
-# row, one lookup at a time, over 700 ISBNs: the 500, the Polish, Danish and
-# Hungarian frames, and fifty Slovak ISBNs drawn from Wikidata by publisher
-# country, Slovakia, seed 20261116, from a pool of 120. The Slovak fifty are
-# not committed: the sample's Czech frame already holds `978-80`, and a frame
-# is committed only for a remit the sample holds nothing of
-# (`sources.TAIL_MARGINAL`).
-#
-#   * **16 of the 500**: 10 of the fifty Czech ISBNs, where the NKP answers 49,
-#     and 6 Austrian and German editions, each held by a source still asked
-#     about it, so it carries the `978-80` remit. It adds no book of the 500
-#     to the fifteen other sources that need no credential.
-#   * **On the fifty Slovak ISBNs it answers 27**, where those fifteen answer
-#     16 between them; **16 are books none of them holds**, all in `978-80`.
-#     Twenty of the fifty are in one `978-1` block that nothing asked holds.
-#   * **The index matches the ISBN-10 form too**, the BN_PL's way, so the row
-#     does not retry: 6 books were found by the thirteen digit search alone
-#     though every record fetched for them states only the ten digit form in
-#     `020`. Measured with the row retrying, the second search ran on 652
-#     lookups and found nothing.
-#   * Lookup latency over the 700, measured with that retry on: median
-#     0.060s, p90 0.069s, max 0.511s. The retry cost about 0.02s a miss, so
-#     these and the committed `seconds_snk` stand as an upper bound.
-#   * **It closes a connection at the door once about eight have arrived from
-#     one address within a minute.** One new connection every 1.5s was
-#     accepted eight times and then refused for half a minute; every 7.5s, one
-#     in eight was refused; every 8.2s, none. 22 of the 700 lookups were
-#     refused that way at open and answered when asked again 20 to 30s later.
-#     The refusal is a lost connection, `Unreachable`, so here it is
-#     `UNAVAILABLE` for this source and the walk goes on, as the OSZK's is:
-#     a household looking up, refreshing or enriching books the leading pair
-#     misses, `978-80` ones or `979` ones or any whose group cannot be named,
-#     faster than one each seven seconds or so between all its members will
-#     see some lookups report the SNK unavailable rather than the book
-#     missing, cached for `_MISS_TTL_SECONDS`. `METADATA_LIMIT` is per member
-#     and far above it.
-#   * UTF-8, `a` in leader/09 on 93 of 93 rendered records. Leader/07 is `m`
-#     on 88 and `b` on 5, articles about the book carrying no ISBN that
-#     `refuses_component_parts` refuses; every lookup that returned one found
-#     the book in another record. The largest rendered answer was 43,312
-#     bytes, five records, about 2% of `z3950.MAX_RESPONSE_BYTES`.
-
 # ── The chain ─────────────────────────────────────────────────────────────────
 #
 # Ranked by measurement, not reputation. Ten ISBNs across five languages, each
@@ -2395,20 +2331,19 @@ def _nkp_title(raw: str) -> tuple[str, str | None] | None:
 # **What this chain covers without a Google Books key, which is what a default
 # install runs.** Three sources need a credential (`sources.NEEDS_A_KEY`), two
 # of them ship the login their library publishes and Google Books does not, so
-# the chain most deployments actually run is the eighteen sources a stock install
+# the chain most deployments actually run is the seventeen sources a stock install
 # asks. Measured over 500 domestic ISBNs across ten frames, it answers 441 and
 # misses 59, and outside German language publishing it misses 55 of 400.
 #
-# The twelve books between that and the sixteen sources that need nothing, which
+# The twelve books between that and the fifteen sources that need nothing, which
 # answer 429 and miss 71, are the two credentialled rows above: the Argentine
-# one uniquely adds 4 and the Uruguayan one 8. Of the sixteen, the Polish,
+# one uniquely adds 4 and the Uruguayan one 8. Of the fifteen, the Polish,
 # Swedish and Nordic rows add three books to the 395 the first seven answered,
 # an Italian edition only LIBRIS holds, a Brazilian book only the Royal Danish
 # Library and BIBSYS hold and a Greek one only Melinda holds; the sample has no
 # Polish or Nordic frame, and each row's block says what it adds there. The
-# Z39.50 rows add 31 more, the SBN 15 Italian books and PORBASE 16 Portuguese
-# ones; the OSZK and the SNK add none, the sample having no Hungarian or Slovak
-# frame.
+# three Z39.50 rows add 31 more, the SBN 15 Italian books and PORBASE 16
+# Portuguese ones.
 #
 # The same 500 books
 # under the roster of three releases
@@ -2786,7 +2721,7 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
     if not is_physical_book(extent, title) or _dc_says_online(extent, _BNF_ONLINE):
         return None
 
-    isbn = isbn_among_identifiers(texts("identifier"))
+    isbn = _bnf_isbn(texts("identifier"))
     # "M. J. Minard, Lettres modernes (Paris)" is publisher then place.
     publisher = next(iter(texts("publisher")), None)
 
@@ -2797,8 +2732,8 @@ def _bnf_record(record: ElementTree.Element, *, source: str) -> Record | None:
         subtitle=subtitle,
         author=_bnf_authors(texts("creator")),
         publisher=_without_trailing_place(publisher) if publisher else None,
-        year=earliest_year(texts("date")),
-        language=two_letter_language(texts("language")),
+        year=_year_in(" ".join(texts("date"))),
+        language=_dc_language(texts("language")),
         page_count=pages_from_extent(extent),
         cover_url=covers.open_library_url(isbn) if isbn else None,
         # Dublin Core names no vocabulary and carries no identifier, in either
@@ -2832,6 +2767,23 @@ def _bnf_says_printed(record: ElementTree.Element) -> bool:
     # And not printed, which is a separate question from not being printed:
     # the DCMI `text` on an ebook satisfies the first test. See the constant.
     return _dc_says_printed(kinds) and _BNF_NOT_PRINTED not in kinds
+
+
+def _bnf_isbn(identifiers: list[str]) -> str | None:
+    """The first ISBN among a BnF record's `dc:identifier` values.
+
+    They hold an ARK URL and sometimes "ISBN 0333532945", so the prefix is
+    dropped and anything that does not parse is passed over.
+    """
+    return next(
+        (
+            parsed
+            for value in identifiers
+            for parsed in [parse_isbn(value.replace("ISBN", "").strip())]
+            if parsed is not None
+        ),
+        None,
+    )
 
 
 def _without_trailing_place(publisher: str) -> str:
@@ -3528,18 +3480,6 @@ def _unimarc_renamed(codes: Mapping[str, str], subfields: _Subfields) -> _Subfie
     return [(codes[code], text) for code, text in subfields if code in codes]
 
 
-def _unimarc_isbn_qualifier(subfields: _Subfields) -> str | None:
-    """The first non empty `$b`, or None where there is none.
-
-    Wrapped in parentheses unless it already opens with one; one that does
-    is returned as it stands, closed or not.
-    """
-    qualifier = next((text for code, text in subfields if code == "b" and text), None)
-    if qualifier is not None and not qualifier.startswith("("):
-        return f"({qualifier})"
-    return qualifier
-
-
 def _unimarc_isbn(subfields: _Subfields) -> _Subfields:
     """`010` as `020`: hyphens out, and `$b` written inline after the number.
 
@@ -3547,7 +3487,9 @@ def _unimarc_isbn(subfields: _Subfields) -> _Subfields:
     qualifier `marc_fields.Subfields.isbn_is_qualified` already reads, so a
     number qualified `broch.` loses to a sibling stating none.
     """
-    qualifier = _unimarc_isbn_qualifier(subfields)
+    qualifier = next((text for code, text in subfields if code == "b" and text), None)
+    if qualifier is not None and not qualifier.startswith("("):
+        qualifier = f"({qualifier})"
     converted: _Subfields = []
     for code, text in subfields:
         if code == "a":
@@ -3611,19 +3553,15 @@ def _unimarc_name(subfields: _Subfields) -> _Subfields:
     PORBASE and `Redi $b , Riccardo` at the SBN, so each part is trimmed of it
     first.
     """
-    heading = unimarc_name_heading(subfields)
+    heading = _unimarc_name_heading(subfields)
     if heading is None:
         return []
     return [("a", heading), *_unimarc_name_qualifiers(subfields)]
 
 
-def unimarc_name_heading(subfields: list[tuple[str, str]]) -> str | None:
+def _unimarc_name_heading(subfields: _Subfields) -> str | None:
     """The first `$a` with every `$b` after it, or None where that `$a` is
-    missing or blank, so the name converts to nothing.
-
-    **A seam because a UNIMARC authority record spells a person the same way**:
-    `authority._bnp_person` reads the BNP's `200` through it, so a name reads
-    alike whether a book or the authority file carried it."""
+    missing or blank, so the name converts to nothing."""
     entry = [text.strip(" ,") for code, text in subfields if code == "a"][:1]
     if not entry or not entry[0]:
         return None
@@ -3698,13 +3636,6 @@ def _append_field(record: ElementTree.Element, tag: str, subfields: _Subfields) 
         ElementTree.SubElement(field, f"{_MARC21}subfield", {"code": code}).text = text
 
 
-def _append_form_of_item(converted: ElementTree.Element, datafield: ElementTree.Element) -> None:
-    """`106 $a` as `008`, the form of item at position 23."""
-    form = next((text[:1] for code, text in _unimarc_subfields(datafield) if code == "a"), "")
-    control = ElementTree.SubElement(converted, f"{_MARC21}controlfield", {"tag": "008"})
-    control.text = f"{form:>24}".ljust(40)
-
-
 def _marc21_from_unimarc(record: ElementTree.Element) -> ElementTree.Element | None:
     """One UNIMARC record as the MARC21 record the crosswalk makes of it.
 
@@ -3721,7 +3652,9 @@ def _marc21_from_unimarc(record: ElementTree.Element) -> ElementTree.Element | N
     for datafield in record.findall(f"{_MARC21}datafield"):
         tag = datafield.get("tag") or ""
         if tag == "106":
-            _append_form_of_item(converted, datafield)
+            form = next((text[:1] for code, text in _unimarc_subfields(datafield) if code == "a"), "")
+            control = ElementTree.SubElement(converted, f"{_MARC21}controlfield", {"tag": "008"})
+            control.text = f"{form:>24}".ljust(40)
         elif tag in _UNIMARC_FIELDS:
             marc21_tag, conversion = _UNIMARC_FIELDS[tag]
             _append_field(converted, marc21_tag, conversion(_unimarc_subfields(datafield)))
@@ -3859,10 +3792,10 @@ def _mods_search(root: ElementTree.Element, decoding: decoders.Decoding) -> list
 #: Which decoder reads a lookup response, by `decoders.Reader`.
 #:
 #: **Keyed on the reader and not on the source**, which is the whole change:
-#: every row whose reader is `MARC_GND` shares its entry, and another would add
-#: none. A reader absent from this table is a target that answers a lookup with
-#: nothing able to parse the answer, and `resolve` is what turns that into a
-#: failure at load rather than a `KeyError` on the path that adds a book.
+#: four sources share `MARC_GND` and a fifth would add no entry here. A reader
+#: absent from this table is a target that answers a lookup with nothing able to
+#: parse the answer, and `resolve` is what turns that into a failure at load
+#: rather than a `KeyError` on the path that adds a book.
 #:
 #: **The value type is the seam, and it is enforced by the type rather than by a
 #: comment.** A decoder takes a parsed record and a `decoders.Decoding`; a
@@ -4000,33 +3933,15 @@ async def _first_answer(forms: tuple[str, ...], ask: Callable[[str], Awaitable[L
     return answer
 
 
-async def _sru_lookup(
-    target: targets.Target, isbn: str, credential: fetch.Credential | None, *, deadline: float | None
-) -> Lookup:
-    """One ISBN lookup against an SRU target, one request per form `_first_answer` asks for.
-
-    `deadline` is the row's own, from `_within_its_own_bound`, and every form
-    shares it: the bound is on the question, not on each request.
-    """
+async def _sru_lookup(target: targets.Target, isbn: str, credential: fetch.Credential | None) -> Lookup:
+    """One ISBN lookup against an SRU target, one request per form `_first_answer` asks for."""
     return await _first_answer(
-        target.isbn_forms(isbn), lambda asked: _sru_ask(target, isbn, asked, credential, deadline)
+        target.isbn_forms(isbn), lambda asked: _sru_ask(target, isbn, asked, credential)
     )
 
 
-#: The `fetch` refusals that are a reply from the target rather than its
-#: absence, which `Lookup.refused` records, at the SRU door and the bespoke
-#: one. A deadline and a refused address are not here: the first is silence,
-#: and the second never reached the host.
-_FETCH_REPLIES: Final = (
-    fetch.ResponseTooLarge,
-    fetch.RedirectedOffHost,
-    fetch.TooManyRedirects,
-    fetch.UnrequestedEncoding,
-)
-
-
 async def _sru_ask(
-    target: targets.Target, isbn: str, asked: str, credential: fetch.Credential | None, deadline: float | None
+    target: targets.Target, isbn: str, asked: str, credential: fetch.Credential | None
 ) -> Lookup:
     """One SRU request for `asked`, a form of `isbn`, read against `isbn` itself.
 
@@ -4044,21 +3959,15 @@ async def _sru_ask(
     name = target.source.value
     try:
         params = target.sru_params(target.isbn_query(asked), target.lookup_records)
-        response = await fetch.get_once(
-            target.base_url, params=params, deadline=deadline, credential=credential
-        )
+        response = await fetch.get_once(target.base_url, params=params, credential=credential)
         if response.status_code == 429:
-            return Lookup(Outcome.RATE_LIMITED, source=name, refused=True)
+            return Lookup(Outcome.RATE_LIMITED, source=name)
         if response.status_code != 200:
-            return Lookup(Outcome.UNAVAILABLE, source=name, refused=True)
+            return Lookup(Outcome.UNAVAILABLE, source=name)
         root = _parsed(response.text)
-    except (ElementTree.ParseError, *_FETCH_REPLIES):
-        # It replied, with something this door will not read: not XML, too
-        # large, compressed unasked, or a redirect. A reply, so a refusal.
-        logger.warning("%s lookup failed for %s", name, isbn, exc_info=True)
-        return Lookup(Outcome.UNAVAILABLE, source=name, refused=True)
     except (
         httpx.HTTPError,
+        ElementTree.ParseError,
         targets.BadQuery,
         z3950.BadQuery,
     ):
@@ -4075,16 +3984,11 @@ async def _sru_ask(
     # the only part of a diagnostic that is ever written down, and what `_worst`
     # then does with this one source's answer.
     logger.warning("%s refused a lookup: %r", name, refusal)
-    return Lookup(Outcome.UNAVAILABLE, source=name, refused=True)
+    return Lookup(Outcome.UNAVAILABLE, source=name)
 
 
 async def _sru_search(
-    target: targets.Target,
-    query: str,
-    limit: int,
-    credential: fetch.Credential | None,
-    *,
-    deadline: float | None,
+    target: targets.Target, query: str, limit: int, credential: fetch.Credential | None
 ) -> list[Record]:
     """One title search against an SRU target.
 
@@ -4101,9 +4005,7 @@ async def _sru_search(
         return []
     try:
         params = target.sru_params(target.title_query(terms), target.search_records(limit))
-        response = await fetch.get_once(
-            target.base_url, params=params, deadline=deadline, credential=credential
-        )
+        response = await fetch.get_once(target.base_url, params=params, credential=credential)
         if response.status_code != 200:
             return []
         root = _parsed(response.text)
@@ -4117,17 +4019,6 @@ async def _sru_search(
 #: the seam raises, a record that is not XML or not UTF-8, and a query a row
 #: could not build. Each is "this source is unavailable", never a 500.
 _Z3950_FAILURES: Final = (z3950.Z3950Error, ElementTree.ParseError, UnicodeDecodeError, targets.BadQuery)
-
-#: The failures above that are a reply from the target rather than its absence,
-#: which `Lookup.refused` records. `Unreachable`, `DeadlineExceeded` and
-#: `Closed` are silence; `BadQuery` is ours and never left the process.
-_Z3950_REPLIES: Final = (
-    z3950.Refused,
-    z3950.Unrenderable,
-    z3950.ResponseTooLarge,
-    ElementTree.ParseError,
-    UnicodeDecodeError,
-)
 
 #: How many times one search is put again after a temporary refusal
 #: (a `z3950.Refused` marked `temporary`), on the same association and inside its deadline.
@@ -4186,14 +4077,13 @@ def _z3950_root(target: targets.Target, answer: z3950.Answer) -> ElementTree.Ele
     return collection
 
 
-async def _z3950_lookup(target: targets.Target, isbn: str, *, deadline: float | None) -> Lookup:
+async def _z3950_lookup(target: targets.Target, isbn: str) -> Lookup:
     """One ISBN lookup through the Z39.50 seam, every form on one association.
 
     **Every bound arrives from the seam by construction**: the bytes across the
     records (`z3950.MAX_RESPONSE_BYTES`), their count (`targets.Target`
     refuses a row past `z3950.MAX_RECORDS`) and one deadline over the whole
-    association (`z3950.TIMEOUT_SECONDS`, or the row's own `deadline` where it
-    has one, under the fan out's own). The two
+    association (`z3950.TIMEOUT_SECONDS`, under the fan out's own). The two
     `fetch` bounds with no counterpart, a redirect off the host and a content
     encoding, name things the protocol does not have.
 
@@ -4206,17 +4096,13 @@ async def _z3950_lookup(target: targets.Target, isbn: str, *, deadline: float | 
     `z3950.association` names. A failure on any form is the whole lookup's.
     """
     try:
-        async with z3950.association(target.z3950_target, deadline=deadline) as open_:
+        async with z3950.association(target.z3950_target) as open_:
             return await _first_answer(
                 target.isbn_forms(isbn), lambda asked: _z3950_ask(open_, target, isbn, asked)
             )
-    except _Z3950_FAILURES as failure:
+    except _Z3950_FAILURES:
         logger.warning("%s lookup failed for %s", target.source.value, isbn, exc_info=True)
-        return Lookup(
-            Outcome.UNAVAILABLE,
-            source=target.source.value,
-            refused=isinstance(failure, _Z3950_REPLIES),
-        )
+        return Lookup(Outcome.UNAVAILABLE, source=target.source.value)
 
 
 async def _z3950_ask(open_: z3950.Association, target: targets.Target, isbn: str, asked: str) -> Lookup:
@@ -4249,9 +4135,7 @@ async def _z3950_asked_through_temporary_refusals(
     return await z3950.search(open_, pqf, records=records)
 
 
-async def _z3950_search(
-    target: targets.Target, query: str, limit: int, *, deadline: float | None
-) -> list[Record]:
+async def _z3950_search(target: targets.Target, query: str, limit: int) -> list[Record]:
     """One title search through the Z39.50 seam, bounded as `_z3950_lookup` is.
 
     The query is `targets.Target.title_query`'s PQF phrase, and the record
@@ -4262,9 +4146,7 @@ async def _z3950_search(
     if not terms or records < 1:
         return []
     try:
-        answer = await z3950.search_once(
-            target.z3950_target, target.title_query(terms), records=records, deadline=deadline
-        )
+        answer = await z3950.search_once(target.z3950_target, target.title_query(terms), records=records)
         root = _z3950_root(target, answer)
     except _Z3950_FAILURES:
         logger.warning("%s search failed for %r", target.source.value, query, exc_info=True)
@@ -4300,11 +4182,11 @@ def resolve(target: targets.Target) -> None:
     to know what code exists.
     """
     door = _DOORS[target.transport]
-    if target.credential_kind is CredentialKind.LOGIN and not door.carries_a_credential:
+    if target.needs_key and target.secret is targets.Secret.NONE and not door.carries_a_credential:
         # **The refusal the bespoke path did not have, and it is about the row
         # rather than about either capability**, which is why it is hoisted above
-        # both arms instead of written into one. A row whose credential is a
-        # login, going out of a door that carries none, has nothing
+        # both arms instead of written into one. A row needing a credential, naming
+        # no secret, and going out of a door that carries no login has nothing
         # that can supply one: a sealed login goes out of the SRU door and no
         # other, which `carries_a_credential` states and
         # `tests/test_metadata.py::TestWhichDoorCarriesALogin` measures at the
@@ -4357,14 +4239,13 @@ def carries_a_credential(target: targets.Target) -> bool:
     dropped without a word.
 
     **Public, and asked rather than restated, which is the whole reason it is a
-    function.** No production code calls it: `resolve` reads the same `_DOORS`
-    column to refuse at boot a row whose credential is a login and whose door
-    carries none, which is what lets `settings_store.catalogue_logins` resolve a
-    login for every source in `sources.NEEDS_A_LOGIN` without filtering on this.
-    Its askers are `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt`,
-    over the roster, and `TestWhichDoorCarriesALogin` below, at the wire. A copy
-    of the rule written into a test instead would be the thing a red test asks
-    to be edited, and would green while the door still dropped the login.
+    function.** `routers/books.py` resolves a login only for the targets this
+    admits, and `tests/test_credentials.py` asks the same question of the roster.
+    Written out at both sites instead, the day a transport starts carrying one
+    would turn the test red and the edit it demands is to the test's own copy,
+    which greens the suite while the router still skips the row and the request
+    still goes out unauthenticated. That is #209 recurring with its own tripwire
+    green.
 
     **Measured against the wire rather than stated**, by
     `tests/test_metadata.py::TestWhichDoorCarriesALogin`, which asks every seeded
@@ -4406,11 +4287,11 @@ async def _lookup_one(
 
     **A bespoke target is handed `api_key` and never a sealed login**, because
     that is where its secret lives: Google Books' key is an argument to its own
-    adapter. A row whose credential is a login on a bespoke transport never
-    reaches here: `resolve` refuses it at boot. `carries_a_credential` above is
-    that rule as a question a test may ask, and
-    `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt`
-    asks it of the roster.
+    adapter. A row that needed a sealed login on a bespoke transport would be
+    resolved by the router and dropped here. `carries_a_credential` above is that
+    rule as a question anything may ask, and
+    `tests/test_credentials.py::TestASealedLoginNeedsATransportThatCarriesIt` is
+    the tripwire that asks it of the roster.
 
     **Only the source the key belongs to, which is a narrower question than the
     one this used to ask.** `api_key` is Google Books' key, this deployment's
@@ -4453,103 +4334,11 @@ async def _lookup_one(
     read once rather than a branch at each call site, and the secret's `match`
     is `_bespoke_lookup`'s, the one door it concerns.
     """
-    door = _DOORS[target.transport]
-    return await _within_its_own_bound(
-        target,
-        lambda ends: door.lookup(target, isbn, api_key, credential, ends),
-        Lookup(Outcome.UNAVAILABLE, source=target.source.value),
-    )
-
-
-async def probe(target: targets.Target, isbn: str, *, access: Access) -> Disposition:
-    """Ask one target about one ISBN exactly as a scan would, and say only how it answered.
-
-    **The same call a lookup makes, `_lookup_one`, and no second path.** So the
-    door, the row's own deadline, the byte cap, the redirect rule and the
-    identity check a reader applies are the ones a scan gets, and a bound added
-    to the door later reaches this without anybody remembering it. The owner's
-    rule for the test action, 2026-09-05: a second path is a second set of bounds
-    to forget.
-
-    **A disposition and never the record**, which is the other half of that rule.
-    What came back stays in this function: echoing it would make an admin's test
-    button an oracle for reading whatever the address serves. `isbn` must be
-    normalised already; the caller refuses one that is not.
-
-    **The key and the login arrive in one `Access`**, as at every other door
-    that sends one, so this cannot be handed a key the resolver never checked.
-    **Its plan is not consulted**, and that is the one way this differs from a
-    lookup: the caller names the target, because an admin tests a catalogue to
-    decide whether to switch it on. `catalogue_access.probe`, admin only and
-    rate limited, is the only caller in the application, which `tests/test_catalogue_access.py`
-    holds. A registry entry is never handed a login: `access.logins` is keyed by
-    the seeded roster alone.
-    """
-    login = access.logins.get(target.source) if isinstance(target.source, CatalogueSource) else None
-    return _disposition(await _lookup_one(target, isbn, access.api_key, credential=login))
-
-
-def _disposition(answer: Lookup) -> Disposition:
-    """What one target's answer says about the target, in `z3950.py`'s vocabulary.
-
-    A record that failed its identity check is `NOT_FOUND` by then, so it reads
-    as answered nothing: the target replied and gave nothing this build believes.
-    """
-    match answer.outcome:
-        case Outcome.FOUND:
-            return Disposition.ANSWERED
-        case Outcome.NOT_FOUND:
-            return Disposition.ANSWERED_NOTHING
-        case Outcome.RATE_LIMITED:
-            return Disposition.REFUSED
-        # `NO_SOURCES` is a chain's answer and one target never gives it; it is
-        # here so a new `Outcome` member is a mypy error at this match.
-        case Outcome.UNAVAILABLE | Outcome.NO_SOURCES:
-            return Disposition.REFUSED if answer.refused else Disposition.UNREACHABLE
-    assert_never(answer.outcome)
-
-
-async def _within_its_own_bound[T](
-    target: targets.Target, ask: Callable[[float | None], Awaitable[T]], missed: T
-) -> T:
-    """One question to one target, ended at `target.timeout_seconds` with `missed` as its answer.
-
-    **Applied here, at the seam every door sits behind, so one rule covers all
-    three.** The bespoke door's adapters hold their own clients and are reached
-    by nothing else; the SRU and Z39.50 doors are handed the same absolute
-    moment as `ask`'s argument, so `fetch`'s clock and the association's agree
-    with this one, and the Z39.50 client's own socket timeout is derived from
-    it rather than from `z3950.TIMEOUT_SECONDS`, which frees the association's
-    thread at the row's bound instead of up to ten seconds later.
-
-    **The fan out's deadline is the ceiling without being read here.** This
-    runs inside the caller's wait, so a bound longer than what is left of it is
-    never reached and the caller's cancellation arrives first, untouched:
-    `asyncio.timeout` converts only its own.
-
-    **`expired()` is what tells the row's bound from any other `TimeoutError`**,
-    which would otherwise be reported as this source missing its bound. A miss
-    costs this source's answer only, which is `missed`: `UNAVAILABLE` for a
-    lookup and no rows for a search, both of which every caller already handles.
-    """
-    ends = None if target.timeout_seconds is None else in_(target.timeout_seconds)
-    bound = asyncio.timeout(left(ends))
-    try:
-        async with bound:
-            return await ask(ends)
-    except TimeoutError:
-        if not bound.expired():
-            raise
-    logger.info("%s missed its own bound of %ss", target.source.value, target.timeout_seconds)
-    return missed
+    return await _DOORS[target.transport].lookup(target, isbn, api_key, credential)
 
 
 async def _bespoke_lookup(
-    target: targets.Target,
-    isbn: str,
-    api_key: str,
-    _credential: fetch.Credential | None,
-    _deadline: float | None,
+    target: targets.Target, isbn: str, api_key: str, _credential: fetch.Credential | None
 ) -> Lookup:
     """The bespoke door's lookup, handed the key only where the row names it. See `_lookup_one`."""
     match target.secret:
@@ -4581,19 +4370,11 @@ async def _search_one(
     would have been handed Google's key by arriving, exactly as at the lookup
     door.
     """
-    door = _DOORS[target.transport]
-    return await _within_its_own_bound(
-        target, lambda ends: door.search(target, query, limit, api_key, credential, ends), []
-    )
+    return await _DOORS[target.transport].search(target, query, limit, api_key, credential)
 
 
 async def _bespoke_search(
-    target: targets.Target,
-    query: str,
-    limit: int,
-    api_key: str,
-    _credential: fetch.Credential | None,
-    _deadline: float | None,
+    target: targets.Target, query: str, limit: int, api_key: str, _credential: fetch.Credential | None
 ) -> list[Record]:
     """The bespoke door's search, handed the key on the lookup door's terms. See `_search_one`."""
     match target.secret:
@@ -4613,13 +4394,8 @@ class _Door:
     arguments it has no use for: the SRU door the key, the Z39.50 door both.
     """
 
-    #: The last argument is the row's own deadline, an absolute moment or None,
-    #: which `_within_its_own_bound` already enforces around the call; a door
-    #: with a clock of its own hands it on so the two agree.
-    lookup: Callable[[targets.Target, str, str, fetch.Credential | None, float | None], Awaitable[Lookup]]
-    search: Callable[
-        [targets.Target, str, int, str, fetch.Credential | None, float | None], Awaitable[list[Record]]
-    ]
+    lookup: Callable[[targets.Target, str, str, fetch.Credential | None], Awaitable[Lookup]]
+    search: Callable[[targets.Target, str, int, str, fetch.Credential | None], Awaitable[list[Record]]]
     #: Whether a sealed login handed to this door leaves the process. See
     #: `carries_a_credential`, which reads it.
     carries_a_credential: bool
@@ -4645,11 +4421,9 @@ class _Door:
 _DOORS: Final[Mapping[targets.Transport, _Door]] = MappingProxyType(
     {
         targets.Transport.SRU: _Door(
-            lookup=lambda target, isbn, _key, credential, ends: _sru_lookup(
-                target, isbn, credential, deadline=ends
-            ),
-            search=lambda target, query, limit, _key, credential, ends: _sru_search(
-                target, query, limit, credential, deadline=ends
+            lookup=lambda target, isbn, _key, credential: _sru_lookup(target, isbn, credential),
+            search=lambda target, query, limit, _key, credential: _sru_search(
+                target, query, limit, credential
             ),
             carries_a_credential=True,
             lookup_readers=lambda _target: _LOOKUP_READERS.keys(),
@@ -4658,10 +4432,8 @@ _DOORS: Final[Mapping[targets.Transport, _Door]] = MappingProxyType(
         # Which of the XML readers a Z39.50 row may name for its record syntax is
         # narrower still, and `targets.Target` refuses the rest.
         targets.Transport.Z3950: _Door(
-            lookup=lambda target, isbn, _key, _credential, ends: _z3950_lookup(target, isbn, deadline=ends),
-            search=lambda target, query, limit, _key, _credential, ends: _z3950_search(
-                target, query, limit, deadline=ends
-            ),
+            lookup=lambda target, isbn, _key, _credential: _z3950_lookup(target, isbn),
+            search=lambda target, query, limit, _key, _credential: _z3950_search(target, query, limit),
             carries_a_credential=False,
             lookup_readers=lambda _target: _LOOKUP_READERS.keys(),
             search_readers=lambda _target: _SEARCH_READERS.keys(),
@@ -4791,7 +4563,6 @@ _SECONDARY_SOURCES: Final = frozenset(
         "sbn",
         "porbase",
         "oszk",
-        "snk",
     }
 )
 _SECONDARY_PENALTY: Final = 1
@@ -5166,12 +4937,12 @@ async def _take_a_harder_slot(harder: bool, plan: sources.Plan) -> bool:
 #: `_METERED_SEARCHES` below holds it.
 #:
 #: **Keyed on the reader and not on the source**, which is what makes the
-#: sharing possible: every row whose reader is `MARC_GND` shares one entry, and
-#: another would add none anywhere. What that costs is the guard:
-#: `set(this) | set(that) == sources.SEARCH_SOURCES` cannot be restated against a
-#: reader keyed table, and `resolve` is the replacement. It asks the question
-#: the old one was really asking, one row at a time: this row says it answers a
-#: search, is there anything here that can read the answer.
+#: sharing possible: three sources name `MARC_GND` and a fourth would add no
+#: entry anywhere. What that costs is the guard: `set(this) | set(that) ==
+#: sources.SEARCH_SOURCES` cannot be restated against a reader keyed table, and
+#: `resolve` is the replacement. It asks the question the old one was really
+#: asking, one row at a time: this row says it answers a search, is there
+#: anything here that can read the answer.
 #:
 #: **Module level and introspectable on purpose.** The guard that keeps this in
 #: step with the roster used to read the fan out with `ast`, as a list literal
@@ -5408,7 +5179,6 @@ _MATCH_PRECEDENCE: Final = (
     "sbn",
     "porbase",
     "oszk",
-    "snk",
 )
 
 
@@ -5846,49 +5616,39 @@ _MISS_TTL_SECONDS: Final = 5 * 60
 #: Bounded so a long scanning session cannot grow it without limit.
 _MAX_ENTRIES: Final = 2_000
 
-#: An ISBN and the chain that answered it.
-#:
-#: **The chain is in the key because a narrowed lookup asks a different one.** Keyed on
-#: the ISBN alone, a cataloguer asking only the DNB would be handed the record the full
-#: chain cached, built from catalogues they had just excluded, and a DNB only record would
-#: be served to every later full lookup with the other catalogues' fields missing.
-#: Neither contacts anything it should not, so a transport assertion passes both; the
-#: answer is still from the wrong catalogues. The picks are in it for the same reason:
-#: `sources.Plan.lookup_roster`.
-type _CacheKey = tuple[str, tuple[CatalogueSource | RegisteredCatalogue, ...]]
-
-_cache: dict[_CacheKey, tuple[float, Lookup]] = {}
+_cache: dict[str, tuple[float, Lookup]] = {}
 _cache_lock = asyncio.Lock()
 
 
-def _cached(key: _CacheKey) -> Lookup | None:
-    entry = _cache.get(key)
+def _cached(isbn: str) -> Lookup | None:
+    entry = _cache.get(isbn)
     if entry is None:
         return None
     expires_at, result = entry
     if expires_at < time.monotonic():
-        del _cache[key]
+        del _cache[isbn]
         return None
     return result
 
 
-def _remember(key: _CacheKey, result: Lookup) -> None:
+def _remember(isbn: str, result: Lookup) -> None:
     ttl = _HIT_TTL_SECONDS if result.found else _MISS_TTL_SECONDS
     if len(_cache) >= _MAX_ENTRIES:
         # Oldest first. Insertion order is good enough for a bound this size
         # and costs nothing to maintain.
-        for oldest in list(_cache)[: _MAX_ENTRIES // 4]:
-            del _cache[oldest]
-    _cache[key] = (time.monotonic() + ttl, result)
+        for key in list(_cache)[: _MAX_ENTRIES // 4]:
+            del _cache[key]
+    _cache[isbn] = (time.monotonic() + ttl, result)
 
 
 def clear_cache() -> None:
     """Drop every entry.
 
-    **Called whenever a setting changes which catalogues are asked.** The chain
-    in the key already keeps an entry made under the old list from being served
-    under the new one; clearing is what frees it, rather than leaving it to age
-    out of its 24 hours.
+    **Called whenever a setting changes which catalogues are asked**, because
+    this cache is keyed on the ISBN alone: a record a source supplied before it
+    was switched off would otherwise keep being served for the rest of its 24
+    hours, and "off means not asked" would be true on the wire and false on the
+    screen.
 
     That is three writes, not one, and the docstring used to name the wrong one:
     it said "for an admin who has just set a key", which was inverted by the
@@ -5943,9 +5703,8 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
     if isbn is None:
         return Lookup(Outcome.NOT_FOUND, source="")
 
-    key = (isbn, access.plan.lookup_roster)
     async with _cache_lock:
-        hit = _cached(key)
+        hit = _cached(isbn)
     if hit is not None:
         logger.debug("Cached lookup for %s from %s", isbn, hit.source)
         return hit
@@ -5979,10 +5738,10 @@ async def lookup(raw_isbn: str, *, access: Access) -> Lookup:
     # what `test_a_metered_source_with_a_remit_is_still_not_no_sources` pins.
     # The chain is the thing actually being asked about; `attempts` getting the
     # right answer is a coincidence of two rules that live elsewhere.
-    outcome = Outcome.NO_SOURCES if not access.plan.lookup_roster else _worst(attempts)
+    outcome = Outcome.NO_SOURCES if not access.plan.lookup_chain else _worst(attempts)
     missed = Lookup(outcome, source="", attempts=attempts)
     async with _cache_lock:
-        _remember(key, missed)
+        _remember(isbn, missed)
     logger.info(
         "No record for %s: %s",
         isbn,
@@ -6028,7 +5787,7 @@ async def _lookup_together(isbn: str, access: Access, attempts: list[tuple[str, 
     # the search path builds and the one the cache and the log carry.
     found = Lookup(Outcome.FOUND, record=merged, source=merged.source, attempts=attempts)
     async with _cache_lock:
-        _remember((isbn, access.plan.lookup_roster), found)
+        _remember(isbn, found)
     logger.info("Resolved %s from %s", isbn, merged.source)
     return found
 
@@ -6044,12 +5803,14 @@ async def _lookup_in_turn(isbn: str, access: Access, attempts: list[tuple[str, O
     one: it is a round trip that cannot answer, and the tail stops at the first
     hit so it is paid in front of whatever would have. `sources.SERVES_GROUPS`
     carries the measurement and the bound that keeps it from losing a book.
-
-    **Then the picks**, `sources.Plan.picked`, which is the tail's end.
     """
-    for target, login in _in_turn(isbn, access):
-        name = target.source.value
-        result = await _lookup_one(target, isbn, access.api_key, credential=login)
+    for name in access.plan.lookup_in_turn(registration_group(isbn)):
+        result = await _lookup_one(
+            targets.SEEDED[name],
+            isbn,
+            access.api_key,
+            credential=access.logins.get(name),
+        )
         attempts.append((name, result.outcome))
         if result.found and result.record is not None:
             # Open Library's own record carries a cover URL and Google's
@@ -6059,21 +5820,7 @@ async def _lookup_in_turn(isbn: str, access: Access, attempts: list[tuple[str, O
             record = result.record.with_cover(await covers.resolve(isbn, result.record.cover_url))
             found = Lookup(Outcome.FOUND, record=record, source=name, attempts=attempts)
             async with _cache_lock:
-                _remember((isbn, access.plan.lookup_roster), found)
+                _remember(isbn, found)
             logger.info("Resolved %s from %s", isbn, name)
             return found
     return None
-
-
-def _in_turn(isbn: str, access: Access) -> tuple[tuple[targets.Target, fetch.Credential | None], ...]:
-    """What `_lookup_in_turn` asks, in order, each with the login it carries.
-
-    **A pick carries no login**, whatever `access.logins` holds: the logins are
-    keyed by the seeded roster, and a registry entry needing one is refused at
-    import, so there is nothing a pick could be owed.
-    """
-    seeded = tuple(
-        (targets.SEEDED[name], access.logins.get(name))
-        for name in access.plan.lookup_in_turn(registration_group(isbn))
-    )
-    return seeded + tuple((target, None) for target in access.plan.picked)

@@ -26,7 +26,6 @@ from typing import cast
 
 from sqlalchemy.orm import Session
 
-from authority import SuppliedIdentifier
 from authors import (
     AUTHOR_NAME_MAX,
     DEFAULT_MATCHER,
@@ -40,7 +39,7 @@ from authors import (
     suggest_merges,
 )
 from catalogue import AuthorityAssertion
-from enums import AuthorityProvenance, AuthorityScheme, AuthoritySupplier
+from enums import AuthorityProvenance, AuthorityScheme
 from models import (
     AUTHOR_KEY_MAX,
     AUTHORITY_IDENTIFIER_MAX,
@@ -469,8 +468,6 @@ class Authorship:
                     scheme=AuthorityScheme(row.scheme),
                     identifier=row.identifier,
                     provenance=AuthorityProvenance(row.provenance),
-                    asserted_by=AuthoritySupplier(row.asserted_by),
-                    checked_by=_supplier_or_none(row.checked_by),
                 )
                 for row in rows
             ],
@@ -833,11 +830,6 @@ class Authorship:
                 # assertion never names a person. See
                 # `ck_author_identifiers_asserter`.
                 created_by_user_id=None,
-                # The catalogue and nothing else, by
-                # `ck_author_identifiers_supplier`. Nothing checks it: the
-                # DNB's own record is the only file asked.
-                asserted_by=AuthoritySupplier.CATALOGUE,
-                checked_by=None,
             )
             self._db.add(row)
             return row
@@ -895,36 +887,15 @@ class Authorship:
             identifier=identifier,
             provenance=AuthorityProvenance.MEMBER,
             created_by_user_id=by_user_id,
-            # The request named the value, whatever search showed it first.
-            # A file whose record by it names this author is recorded
-            # afterwards by `record_check`, because asking one here would
-            # put an outbound request in front of the 409.
-            asserted_by=AuthoritySupplier.MEMBER,
-            checked_by=None,
         )
         self._db.add(row)
         self._db.commit()
         return row
 
-    def record_check(self, row: AuthorIdentifier, checked_by: AuthoritySupplier) -> None:
-        """Record that a second file named this row's value.
-
-        **The only change a stored row ever takes**, and it never touches
-        `identifier`, so the retype `AuthorIdentifier` refuses stays refused. A
-        row already checked keeps its first checker, and a file is never
-        recorded as checking a value it supplied itself: either would rewrite
-        what the row says happened.
-
-        The caller has already compared the value: this records the outcome,
-        it does not ask anybody.
-        """
-        if _note_check(row, checked_by):
-            self._db.commit()
-
     def record_cross_references(
         self,
         author: str,
-        references: Mapping[AuthorityScheme, SuppliedIdentifier],
+        references: Mapping[AuthorityScheme, str],
         *,
         by_user_id: int,
     ) -> RecordedAssertions:
@@ -961,9 +932,7 @@ class Authorship:
         holds, which is what `record_catalogue_assertions` means and is not what
         happened here. It would also violate `ck_author_identifiers_asserter`,
         which forbids a named asserter on a `CATALOGUE` row, so the honest
-        answer and the enforceable one are the same one. **Which file supplied
-        the number is a separate column**, `asserted_by`, read off each
-        `SuppliedIdentifier` with the file that checked it.
+        answer and the enforceable one are the same one.
 
         **Bounded by the enum**, which is why there is no slice here. The key
         type is `AuthorityScheme`, so a mapping cannot hold more entries than
@@ -982,11 +951,11 @@ class Authorship:
 
         stored: list[AuthorIdentifier] = []
         refused: list[RefusedAssertion] = []
-        for scheme, supplied in references.items():
-            if not _storable_identifier(supplied.identifier):
+        for scheme, identifier in references.items():
+            if not _storable_identifier(identifier):
                 logger.info("Dropped an unstorable cross reference: %r", scheme)
                 continue
-            outcome = self._cross_reference_row(key, entry.name, scheme, supplied, by_user_id=by_user_id)
+            outcome = self._cross_reference_row(key, entry.name, scheme, identifier, by_user_id=by_user_id)
             if isinstance(outcome, RefusedAssertion):
                 refused.append(outcome)
             else:
@@ -996,14 +965,13 @@ class Authorship:
         return RecordedAssertions(stored=stored, refused=refused)
 
     def _cross_reference_row(
-        self, key: str, name: str, scheme: AuthorityScheme, supplied: SuppliedIdentifier, *, by_user_id: int
+        self, key: str, name: str, scheme: AuthorityScheme, identifier: str, *, by_user_id: int
     ) -> AuthorIdentifier | RefusedAssertion:
         """The row this cross reference is stored as, the row that already
         agrees, or the refusal: `_catalogue_row`'s answer, filed as `MEMBER`.
 
         A new row is added uncommitted; `record_cross_references` commits.
         """
-        identifier = supplied.identifier
         existing = self._identifier_row(key, scheme)
         if existing is None:
             row = AuthorIdentifier(
@@ -1012,8 +980,6 @@ class Authorship:
                 identifier=identifier,
                 provenance=AuthorityProvenance.MEMBER,
                 created_by_user_id=by_user_id,
-                asserted_by=supplied.asserted_by,
-                checked_by=supplied.checked_by,
             )
             self._db.add(row)
             return row
@@ -1025,11 +991,6 @@ class Authorship:
                 kept=existing.identifier,
                 kept_provenance=AuthorityProvenance(existing.provenance),
             )
-        # An agreeing row gains the check this assertion carries, by the
-        # rule `record_check` keeps; without it a row stored unchecked stays
-        # so however many files later name the same value.
-        if supplied.checked_by is not None:
-            _note_check(existing, supplied.checked_by)
         return existing
 
     def forget_identifier(self, identifier_id: int) -> None:
@@ -1326,11 +1287,6 @@ def _evidenced_keys(entry: AuthorEntry) -> set[str]:
     return set(entry.alias_keys) | {author_key(spelling) for spelling in entry.spellings}
 
 
-def _supplier_or_none(value: str | None) -> AuthoritySupplier | None:
-    """A stored `checked_by` as the enum, or None where no file checked it."""
-    return None if value is None else AuthoritySupplier(value)
-
-
 def _disagreements(rows: list[AuthorIdentifier]) -> set[AuthorityScheme]:
     """The schemes on which the spellings folded into one person do not agree.
 
@@ -1407,18 +1363,6 @@ def _storable_key(name: str) -> str | None:
     if not key or len(key) > AUTHOR_KEY_MAX:
         return None
     return key
-
-
-def _note_check(row: AuthorIdentifier, checked_by: AuthoritySupplier) -> bool:
-    """`record_check`'s rule, uncommitted: whether the row took the checker.
-
-    The first checker stands and a file never checks what it supplied, so
-    neither path rewrites what the row says happened.
-    """
-    if row.checked_by is not None or row.asserted_by == checked_by:
-        return False
-    row.checked_by = checked_by
-    return True
 
 
 def _storable_identifier(identifier: str) -> bool:

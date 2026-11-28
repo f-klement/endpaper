@@ -26,7 +26,6 @@ import type { UserOut } from "./userOut.ts";
  * **Split from the rest so that the rest cannot be forgotten.** See `BookOut`.
  */
 export interface BookColumns {
-  accession?: string | null;
   added_at: string;
   added_by?: UserOut | null;
   author: string | null;

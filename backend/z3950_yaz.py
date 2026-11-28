@@ -480,17 +480,6 @@ class YazClient:
 
         **The timeout floor is one second**, because ZOOM's option is whole seconds. A
         shorter budget is carried by `Association._call`'s `asyncio.wait_for` alone.
-
-        **`check_cert` is 1 on every connection, and nothing can turn it off.** Without it
-        YAZ encrypts an `ssl:` connection and authenticates nobody: whoever answers for the
-        address is believed. A per target switch would make it a default rather than a
-        bound, so there is none. With it, YAZ loads the system trust store (Alpine's
-        `ca-certificates` in the image) and a certificate that does not verify ends the
-        connect as `[10000] Connect failed`, which `classify` makes `Unreachable`. A `tcp:`
-        target never reaches the check. The option exists from YAZ 5.38.0, and an older
-        library ignores it as it ignores any key it does not know: it would connect
-        unverified and say nothing, so `test_z3950_yaz.py` holds the Dockerfile's pinned
-        version at 5.38.0 or later.
         """
         return [
             ("databaseName", target.database),
@@ -503,5 +492,4 @@ class YazClient:
             # here: a target's operator can tell one caller from another. `fetch._AGENT`
             # carries the same name for the same reason, with no version and no address.
             ("implementationName", "endpaper"),
-            ("check_cert", "1"),
         ]

@@ -26,15 +26,9 @@ import {
   OwnershipStatus,
   ReadStatus,
   RecordOrigin,
-  RegisteredCatalogue,
   TagCategory,
 } from "../api/generated/model";
-import type {
-  Locale,
-  PatronCreate,
-  PatronOut,
-  TagOut,
-} from "../api/generated/model";
+import type { Locale, TagOut } from "../api/generated/model";
 import { tagName, type MessageKey } from "../i18n";
 import { catalogueName } from "../lib/catalogueName";
 import { sortByName } from "../lib/nameOrder";
@@ -220,19 +214,18 @@ export const OWNERSHIP_LABELS: Record<OwnershipStatus, MessageKey> = {
  * public page alike.
  *
  * **A catalogue is named by `catalogueName`, never by a second key**: every
- * `CatalogueSource` and every `RegisteredCatalogue` is a `RecordOrigin` under
- * the same value, and the settings list already names each, so a copy here
- * would be the one that drifts. The
+ * `CatalogueSource` is a `RecordOrigin` under the same value, and the settings
+ * list already names each, so a copy here would be the one that drifts. The
  * origins that are not a catalogue have keys of their own. `Record<...>` for
  * `FORMAT_LABELS`' reason: an origin added to the backend is a compile error.
  */
 export const ORIGIN_LABELS: Record<RecordOrigin, MessageKey> = {
   ...(Object.fromEntries(
-    [
-      ...Object.values(CatalogueSource),
-      ...Object.values(RegisteredCatalogue),
-    ].map((source) => [source, catalogueName(source)]),
-  ) as Record<CatalogueSource | RegisteredCatalogue, MessageKey>),
+    Object.values(CatalogueSource).map((source) => [
+      source,
+      catalogueName(source),
+    ]),
+  ) as Record<CatalogueSource, MessageKey>),
   [RecordOrigin.manual]: "origin.manual",
   [RecordOrigin.file]: "origin.file",
   [RecordOrigin.csv_import]: "origin.csv_import",
@@ -240,7 +233,6 @@ export const ORIGIN_LABELS: Record<RecordOrigin, MessageKey> = {
   [RecordOrigin.opds_import]: "origin.opds_import",
   [RecordOrigin.calibre_import]: "origin.calibre_import",
   [RecordOrigin.store_import]: "origin.store_import",
-  [RecordOrigin.oai_harvest]: "origin.oai_harvest",
 };
 
 /**
@@ -468,122 +460,3 @@ export const MODE_ORDER = everyOneOf<ThemePreference>()([
   "dark",
   "system",
 ]);
-
-// The patron record, as two pages hold it: the register and the loan form.
-
-/**
- * A patron as the form holds it: every field a string, an empty one meaning
- * nothing recorded.
- *
- * A form input cannot hold `null`, so the draft does not either, and
- * `patronBody` is the one place an empty box becomes one.
- */
-export interface PatronDraft {
-  name: string;
-  card_number: string;
-  email: string;
-  phone: string;
-  street: string;
-  house_number: string;
-  postcode: string;
-  city: string;
-  /** `YYYY-MM-DD`, what `<input type="date">` reads and writes. */
-  expires_on: string;
-}
-
-/** The form for a patron nobody has registered yet. */
-export const BLANK_DRAFT: PatronDraft = {
-  name: "",
-  card_number: "",
-  email: "",
-  phone: "",
-  street: "",
-  house_number: "",
-  postcode: "",
-  city: "",
-  expires_on: "",
-};
-
-/** The form opened on a patron already registered. */
-export function draftOf(patron: PatronOut): PatronDraft {
-  return {
-    name: patron.name,
-    card_number: patron.card_number,
-    email: patron.email ?? "",
-    phone: patron.phone ?? "",
-    street: patron.street ?? "",
-    house_number: patron.house_number ?? "",
-    postcode: patron.postcode ?? "",
-    city: patron.city ?? "",
-    expires_on: patron.expires_on ?? "",
-  };
-}
-
-/**
- * Whether the draft can be sent: a name and a card number with more than
- * spaces in them.
- *
- * The server refuses a whitespace only value with a 422. Refusing it here
- * first keeps that refusal for the writer this form is not.
- */
-export function isSendable(draft: PatronDraft): boolean {
-  return draft.name.trim() !== "" && draft.card_number.trim() !== "";
-}
-
-/** A box's value trimmed, or `null` for a box holding nothing but spaces. */
-function optional(value: string): string | null {
-  return value.trim() === "" ? null : value.trim();
-}
-
-/**
- * The body for both the create and the edit.
- *
- * **Every optional field is sent, an empty one as `null`**, because the edit
- * is a PATCH where `null` clears a field and an absent key leaves it: a field
- * left out when emptied would keep the old phone number on a record whose
- * form shows none. Every value is trimmed, so a box holding only spaces
- * clears its field rather than meeting the server's 422.
- */
-export function patronBody(draft: PatronDraft): PatronCreate {
-  return {
-    name: draft.name.trim(),
-    card_number: draft.card_number.trim(),
-    email: optional(draft.email),
-    phone: optional(draft.phone),
-    street: optional(draft.street),
-    house_number: optional(draft.house_number),
-    postcode: optional(draft.postcode),
-    city: optional(draft.city),
-    expires_on: optional(draft.expires_on),
-  };
-}
-
-/** A month or a day as the two digits an ISO date writes. */
-function pad(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-/**
- * Today's date where the reader is, as `YYYY-MM-DD`.
- *
- * Built from the local calendar fields, never from `toISOString`, which is
- * UTC: east of Greenwich that names yesterday for the first hours of a day,
- * and a registration expiring today would read as current or lapsed by the
- * hour the page was opened.
- */
-export function calendarToday(now: Date): string {
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
-/**
- * Whether a registration has lapsed: its expiry date is before today.
- *
- * The expiry date is the last day the registration holds, as Koha reads its
- * `dateexpiry`, so a card expiring today still lends today and the page
- * says "Registered until" that date.
- * Compared as strings, which for two `YYYY-MM-DD` dates is the calendar
- * order. A patron with no expiry date never lapses.
- */
-export function hasExpired(patron: PatronOut, today: string): boolean {
-  return patron.expires_on != null && patron.expires_on < today;
-}

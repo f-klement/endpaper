@@ -292,7 +292,6 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import contains_eager
 
-import classification_schemes
 import ddc
 import filing
 import models
@@ -307,7 +306,6 @@ from models import (
     Book,
     Classification,
     Collection,
-    Harvest,
     Tag,
     User,
     UserBook,
@@ -404,7 +402,7 @@ INDIRECT_READERS = {"backup.py"}
 #: red and no record. An inclusion list is one of the four tells this repository
 #: names; `_parameterised_reads` states the rule and this states the classification.
 #:
-#: Six, and they are six different things, which is why a person says which:
+#: Five, and they are five different things, which is why a person says which:
 #:
 #: * `backup.py` reads every row of every table through `select(*columns)`,
 #:   on purpose: it is the archive, `INDIRECT_READERS` says why it is
@@ -424,12 +422,6 @@ INDIRECT_READERS = {"backup.py"}
 #:   `aliased(ReadingProgress, ...)` bound two lines above. The table is fixed
 #:   at import; only the spelling is indirect, and `reading_progress` carries a
 #:   member of its own so it is outside `BOOK_OWNED_TABLES` anyway.
-#: * `harvest.py` reads the Book ids a bulk statement on a harvested table
-#:   touches, through the column of that table naming a Book, to move their
-#:   OAI-PMH datestamps, private Books included, since a datestamp is never
-#:   served for a Book the Shelf does not show. It returns no row to any caller,
-#:   and which ids get a tombstone, the one thing it publishes, it asks
-#:   `Shelf.seen_by_the_public` before and after the write.
 #: * `targets.py` calls `z3950.query(...)`, which is a Z39.50 client and not a
 #:   `Session`. `_builds_a_query` matches `query` on any receiver on purpose,
 #:   and its docstring says why, so a naming coincidence lands here rather than
@@ -442,9 +434,7 @@ INDIRECT_READERS = {"backup.py"}
 #:
 #: `test_a_parameterised_reader_is_genuinely_invisible_to_this_pass` is what
 #: stops an entry outliving the gap it describes.
-PARAMETERISED_READERS = frozenset(
-    {"backup.py", "folding.py", "harvest.py", "serialisation.py", "shelf.py", "targets.py"}
-)
+PARAMETERISED_READERS = frozenset({"backup.py", "folding.py", "serialisation.py", "shelf.py", "targets.py"})
 
 #: The entity the first three passes guard.
 _BOOK = frozenset({"Book"})
@@ -475,7 +465,6 @@ BOOK_CHILDREN = frozenset(
         "book_identifiers",
         "book_tags",
         "classifications",
-        "cover_images",
         "custom_field_values",
         "digital_references",
         "highlights",
@@ -483,7 +472,6 @@ BOOK_CHILDREN = frozenset(
         "loans",
         "notes",
         "online_links",
-        "pending_headings",
         "quotes",
         "reading_progress",
         "readwise_books",
@@ -532,20 +520,15 @@ BOOK_CHILDREN = frozenset(
 #: file came from is not stored, and `models.BookIdentifier` says why. So there
 #: is nothing on a row to scope it by and its privacy is the Book's entirely.
 #: `online_links` is the sixth, for the same reason: what a catalogue said is
-#: online, carrying no member (`models.OnlineLink`). `cover_images` is the
-#: seventh: an image of the object, carrying no member (`models.CoverImage`).
-#: `pending_headings` is the eighth: a harvested record's headings waiting on
-#: an admin, carrying no member (`models.PendingHeading`).
+#: online, carrying no member (`models.OnlineLink`).
 BOOK_OWNED_TABLES = frozenset(
     {
         "book_identifiers",
         "book_tags",
         "classifications",
-        "cover_images",
         "custom_field_values",
         "digital_references",
         "online_links",
-        "pending_headings",
     }
 )
 
@@ -599,168 +582,131 @@ BOOK_OWNED, UNNAMEABLE_BOOK_OWNED = _book_owned_entities()
 ARCHIVE_TABLES_DECLARATION: Final = (
     "_TABLES: tuple[tuple[str, Any, Table], ...] = tuple( (name, model, Base.metadata.tables[name]) for "
     'name, model in ( ("users", User), ("tags", Tag), # The library\'s own field definitions. No foreign '
-    "key of its own, so it # could sit anywhere before the values that reference it; here beside # "
-    "`tags`, which is the other library wide vocabulary. Deliberately # absent from `_REQUIRED_TABLES`: "
-    "an archive taken before custom fields # existed restores with none, which is the state it was "
-    'written in. ("custom_fields", CustomField), # Before books, which carry a foreign key into it. '
-    "Absent from # `_REQUIRED_TABLES` on purpose: an archive taken before collections # existed restores "
-    'with none, which is exactly the state it was # written in. ("collections", Collection), # Before '
-    "books, which carry a foreign key into it, and after users, # whom a run names. Absent from "
-    "`_REQUIRED_TABLES`: an archive taken # before harvests existed restores with none. "
-    '("harvests", Harvest), ("books", Book), # Before the headings, which carry a foreign key into it. '
-    "Absent from # `_REQUIRED_TABLES`, "
-    "and an archive taken before it existed still # restores its headings: "
-    "`classification_schemes.restorable` supplies # the rows they quote. "
-    '("classification_schemes", ClassificationSchemeRow), # Straight after the books they hang off, '
-    "and deliberately absent from # `_REQUIRED_TABLES`: "
-    "an archive taken before classifications existed # restores with none, which is the state it was "
-    'written in. ("classifications", Classification), # After both parents, `books` above and '
-    "`custom_fields` further up. The # values are the half of the feature a member typed by hand, so an "
-    "# archive that carried the definitions and not these would restore a # library with every field "
-    "defined and every one of them empty, which # is the shape of failure `author_aliases` had. Absent "
-    'from # `_REQUIRED_TABLES` for the same reason as the definitions. ("custom_field_values", '
-    'CustomFieldValue), ("user_books", UserBook), # After user_books, which is the other per-member '
-    "table, and before # loans purely to keep the reading rows together. Both parents # (users, books) "
-    "are already inserted by this point, which is the # only ordering this tuple actually constrains. "
-    '("reading_progress", ReadingProgress), # Where each member\'s devices last were, after both parents. '
-    "Absent from # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. "
-    '("kosync_documents", KosyncDocument), # Which Book each of a member\'s Readwise books is, after both '
-    "parents. # Absent from `_REQUIRED_TABLES`, like every table added after # `FORMAT_VERSION` 1. "
-    '("readwise_books", ReadwiseBook), # Before the loans, which carry a foreign key into it. The '
-    "archive is # the one place a patron's record leaves the database, and it is admin # only like the "
-    "patron routes. Absent from `_REQUIRED_TABLES`: an # archive taken before patrons existed restores "
-    'with none. ("patrons", Patron), ("loans", Loan), # After the loans it replaces for a digital '
-    "copy. Both parents are # inserted by here. Absent from `_REQUIRED_TABLES` for the reason # `quotes` "
-    'is: an older archive restores with no requests. ("access_requests", AccessRequest), ("notes", '
-    "Note), # After notes, which it is shaped after and has no relationship with. # Deliberately absent "
-    "from `_REQUIRED_TABLES`: an archive taken before # quotes existed restores with none, which is the "
-    'state it was written # in. ("quotes", Quote), # After the quotes it sits beside; both parents are '
+    "key of its own, so it # could sit anywhere before the values that reference it; here beside # `tags`, "
+    "which is the other library wide vocabulary. Deliberately # absent from `_REQUIRED_TABLES`: an archive "
+    "taken before custom fields # existed restores with none, which is the state it was written in. "
+    '("custom_fields", CustomField), # Before books, which carry a foreign key into it. Absent from # '
+    "`_REQUIRED_TABLES` on purpose: an archive taken before collections # existed restores with none, which "
+    'is exactly the state it was # written in. ("collections", Collection), ("books", Book), # Straight '
+    "after the books they hang off, and deliberately absent from # `_REQUIRED_TABLES`: an archive taken "
+    "before classifications existed # restores with none, which is the state it was written in. "
+    '("classifications", Classification), # After both parents, `books` above and `custom_fields` further '
+    "up. The # values are the half of the feature a member typed by hand, so an # archive that carried the "
+    "definitions and not these would restore a # library with every field defined and every one of them "
+    "empty, which # is the shape of failure `author_aliases` had. Absent from # `_REQUIRED_TABLES` for the "
+    'same reason as the definitions. ("custom_field_values", CustomFieldValue), ("user_books", UserBook), # '
+    "After user_books, which is the other per-member table, and before # loans purely to keep the reading "
+    "rows together. Both parents # (users, books) are already inserted by this point, which is the # only "
+    'ordering this tuple actually constrains. ("reading_progress", ReadingProgress), # Where each member\'s '
+    "devices last were, after both parents. Absent from # `_REQUIRED_TABLES`, like every table added after "
+    '`FORMAT_VERSION` 1. ("kosync_documents", KosyncDocument), # Which Book each of a member\'s Readwise '
+    "books is, after both parents. # Absent from `_REQUIRED_TABLES`, like every table added after # "
+    '`FORMAT_VERSION` 1. ("readwise_books", ReadwiseBook), ("loans", Loan), # After the loans it replaces '
+    "for a digital copy. Both parents are # inserted by here. Absent from `_REQUIRED_TABLES` for the reason "
+    '# `quotes` is: an older archive restores with no requests. ("access_requests", AccessRequest), '
+    '("notes", Note), # After notes, which it is shaped after and has no relationship with. # Deliberately '
+    "absent from `_REQUIRED_TABLES`: an archive taken before # quotes existed restores with none, which is "
+    'the state it was written # in. ("quotes", Quote), # After the quotes it sits beside; both parents are '
     "inserted by here. # Absent from `_REQUIRED_TABLES` for the reason `quotes` is: an archive # taken "
-    'before highlights existed restores with none. ("highlights", Highlight), # After the highlights '
-    "whose deletions it remembers; its only foreign # key is `users`. An archive that left it out would "
-    "restore a library # whose next import brings back every highlight a member deleted. # Absent from "
-    '`_REQUIRED_TABLES` for the reason `quotes` is. ("deleted_highlights", DeletedHighlight), # After '
-    "the quotes, which it sits beside for the same reason: its only # foreign key is `books`, which is "
-    "long since inserted by here. # # **Uncapped on restore, like every other table here.** # "
-    "`MAX_DIGITAL_REFERENCES_PER_BOOK` binds the two writers that add to a # library; this one "
-    "reinstates a whole database rather than adding to # one, and refusing rows would produce a restore "
-    "that silently differs # from the archive. The same bargain `classifications` records. # # Absent "
-    "from `_REQUIRED_TABLES` for the reason `quotes` is: an archive # taken before this table existed "
-    'restores with no references, which is # the state it was written in. ("digital_references", '
-    "DigitalReference), # Beside the file references, which it hangs off the same parent as and # sits "
-    "in the same position relative to: `books` is long since inserted # by here. A different claim about "
-    "the same Book: a reference says where # a file is and this says what a store calls the edition. # # "
-    "**Here on the day the table was created**, because the identical # omission for `author_aliases` "
-    "was silent for months and cost a restore # that produced perfectly intact books with every merge "
-    "undone. # `test_holds_every_table` reads the manifest against the metadata, so a # table left out "
-    "of this tuple now fails rather than waiting to be # noticed after a restore. # # **Uncapped on "
-    "restore, like every other table here.** # `MAX_IDENTIFIERS_PER_BOOK` binds the two writers that add "
-    "to a # library; this one reinstates a whole database rather than adding to # one, and refusing rows "
-    "would produce a restore that silently differs # from the archive. # # Absent from "
-    "`_REQUIRED_TABLES` for the reason `digital_references` is: # an archive taken before this table "
-    'existed restores with none, which # is the state it was written in. ("book_identifiers", '
-    "BookIdentifier), # Beside the identifiers, the other catalogue fact hanging off a Book. # Absent "
-    "from `_REQUIRED_TABLES` for their reason: an archive taken # before this table existed restores "
-    'with none. ("online_links", OnlineLink), # The rows naming a book\'s further images. The files ride '
-    "in the # archive's covers beside the shelf covers (`cover_store.files` lists # both), so a restore "
-    "writes each back under the name its row gives. # Absent from `_REQUIRED_TABLES` for the links' "
-    'reason: an archive taken # before this table existed restores with none. ("cover_images", '
-    "CoverImage), # A harvest's suggestions, settled ones included, since those are what # stops the "
-    "next run raising them again. After both parents, `books` # and `harvests`. Absent from "
-    "`_REQUIRED_TABLES` for the links' reason. "
-    '("pending_headings", PendingHeading), # The author merge decisions. Its only foreign key is '
-    "`users`, which is # first in "
-    "this tuple, so it could sit anywhere after that; it is here # beside the other tables that hold "
-    "what members decided rather than # what the catalogue says. # # **It was missing until "
-    "2026-08-26**, and the symptom was silent: a # restore produced a library where every merged author "
-    "had split back # into its spellings, with the books themselves perfectly intact, # because the "
-    "merges were never written to `books` in the first place. # Nothing errored, and "
-    '`docs/data-model.md` called this "the one stored # table in the feature" the whole time. '
-    "`test_holds_every_table` now # asserts that the archive's **manifest** carries every table in the # "
-    "metadata, so the next one cannot be forgotten the same way. The # manifest rather than this tuple, "
-    "because `book_tags` is in the # manifest and deliberately not here: it has no model of its own and "
-    "is # read straight from the table. # # Absent from `_REQUIRED_TABLES` for the reason `quotes` and # "
-    "`classifications` are: an archive written before this restores with # no aliases, which is the "
-    'state it was written in. ("author_aliases", AuthorAlias), # Beside the aliases, which it is keyed '
-    "the same way as and shares its # only foreign key with. A different claim about the same spelling: "
-    "an # alias says who two names mean and this says which record in an # external file one of them is. "
-    "# # **Here on the day the table was created**, because the identical # omission for "
-    "`author_aliases` was silent for months: a restore # produced a library whose books were perfectly "
-    "intact and whose author # decisions had all vanished. `test_holds_every_table` reads the # manifest "
-    "against the metadata, so a table left out of this tuple now # fails rather than waiting to be "
-    "noticed after a restore. # # Absent from `_REQUIRED_TABLES` for the reason `author_aliases` is: an "
-    "# archive written before this restores with none, which is the state it # was written in. "
-    '("author_identifiers", AuthorIdentifier), # The catalogue roster as rows. No foreign key of its '
-    "own, so its # position here is free; beside `settings` because it is the same kind # of thing, a "
-    "library wide configuration rather than anybody's data. # # **Here on the day the table was "
-    "created**, for the reason the comment # above gives, and with one difference worth stating: nothing "
-    "reads # these rows at runtime, so losing them costs no lookup. What it costs # is #130, which is "
-    "the ticket that puts them on a screen, and # `main.seed_catalogue_targets` refills them on the next "
-    "start anyway. # The reason to be in this tuple regardless is that an archive is # supposed to hold "
-    "the library, and a row a household has edited is # theirs the moment #130 ships. # # Absent from "
-    "`_REQUIRED_TABLES` for the reason `author_identifiers` is: # an archive written before this "
-    'restores with none, which is the state # it was written in. ("catalogue_targets", CatalogueTarget), '
-    "# The sealed catalogue logins, straight after the rows they hang off. # No foreign key between "
-    "them, so the position is free; here because # reading one without the other is meaningless. # # "
-    "**This is the table that makes the archive safe to hand around, and # the one that makes a restore "
-    "onto a new machine incomplete.** The # column holds ciphertext and the key is never in the "
-    "database, so # `endpaper.json` carries a credential nobody can use without a key the # archive does "
-    "not contain. That is the whole design and it is strictly # better than the plaintext this feature "
-    "started as. # # **The same property is the trap on a machine nobody administers.** A # restore onto "
-    "a new laptop, or onto the same one after a reinstall, # brings these rows back unreadable unless "
-    "the person still has the # recovery phrase: the key lives in that machine's keychain or in a file # "
-    'under `DATA_DIR`, and neither travels in the zip. "Keep your key safe" # is not a plan for somebody '
-    "who double clicked an installer, which is # why the phrase exists at all and why the settings "
-    "screen says this # beside the field rather than only here. `RestoreResult` counts these # rows for "
-    "the reason it counts `author_aliases`: silently restoring # none leaves a library whose sources "
-    "look configured and answer with an # authentication error. # # Absent from `_REQUIRED_TABLES`, like "
+    'before highlights existed restores with none. ("highlights", Highlight), # After the highlights whose '
+    "deletions it remembers; its only foreign # key is `users`. An archive that left it out would restore a "
+    "library # whose next import brings back every highlight a member deleted. # Absent from "
+    '`_REQUIRED_TABLES` for the reason `quotes` is. ("deleted_highlights", DeletedHighlight), # After the '
+    "quotes, which it sits beside for the same reason: its only # foreign key is `books`, which is long "
+    "since inserted by here. # # **Uncapped on restore, like every other table here.** # "
+    "`MAX_DIGITAL_REFERENCES_PER_BOOK` binds the two writers that add to a # library; this one reinstates a "
+    "whole database rather than adding to # one, and refusing rows would produce a restore that silently "
+    "differs # from the archive. The same bargain `classifications` records. # # Absent from "
+    "`_REQUIRED_TABLES` for the reason `quotes` is: an archive # taken before this table existed restores "
+    'with no references, which is # the state it was written in. ("digital_references", DigitalReference), '
+    "# Beside the file references, which it hangs off the same parent as and # sits in the same position "
+    "relative to: `books` is long since inserted # by here. A different claim about the same Book: a "
+    "reference says where # a file is and this says what a store calls the edition. # # **Here on the day "
+    "the table was created**, because the identical # omission for `author_aliases` was silent for months "
+    "and cost a restore # that produced perfectly intact books with every merge undone. # "
+    "`test_holds_every_table` reads the manifest against the metadata, so a # table left out of this tuple "
+    "now fails rather than waiting to be # noticed after a restore. # # **Uncapped on restore, like every "
+    "other table here.** # `MAX_IDENTIFIERS_PER_BOOK` binds the two writers that add to a # library; this "
+    "one reinstates a whole database rather than adding to # one, and refusing rows would produce a restore "
+    "that silently differs # from the archive. # # Absent from `_REQUIRED_TABLES` for the reason "
+    "`digital_references` is: # an archive taken before this table existed restores with none, which # is "
+    'the state it was written in. ("book_identifiers", BookIdentifier), # Beside the identifiers, the other '
+    "catalogue fact hanging off a Book. # Absent from `_REQUIRED_TABLES` for their reason: an archive taken "
+    '# before this table existed restores with none. ("online_links", OnlineLink), # The author merge '
+    "decisions. Its only foreign key is `users`, which is # first in this tuple, so it could sit anywhere "
+    "after that; it is here # beside the other tables that hold what members decided rather than # what the "
+    "catalogue says. # # **It was missing until 2026-08-26**, and the symptom was silent: a # restore "
+    "produced a library where every merged author had split back # into its spellings, with the books "
+    "themselves perfectly intact, # because the merges were never written to `books` in the first place. # "
+    'Nothing errored, and `docs/data-model.md` called this "the one stored # table in the feature" the '
+    "whole time. `test_holds_every_table` now # asserts that the archive's **manifest** carries every table "
+    "in the # metadata, so the next one cannot be forgotten the same way. The # manifest rather than this "
+    "tuple, because `book_tags` is in the # manifest and deliberately not here: it has no model of its own "
+    "and is # read straight from the table. # # Absent from `_REQUIRED_TABLES` for the reason `quotes` and "
+    "# `classifications` are: an archive written before this restores with # no aliases, which is the state "
+    'it was written in. ("author_aliases", AuthorAlias), # Beside the aliases, which it is keyed the same '
+    "way as and shares its # only foreign key with. A different claim about the same spelling: an # alias "
+    "says who two names mean and this says which record in an # external file one of them is. # # **Here on "
+    "the day the table was created**, because the identical # omission for `author_aliases` was silent for "
+    "months: a restore # produced a library whose books were perfectly intact and whose author # decisions "
+    "had all vanished. `test_holds_every_table` reads the # manifest against the metadata, so a table left "
+    "out of this tuple now # fails rather than waiting to be noticed after a restore. # # Absent from "
+    "`_REQUIRED_TABLES` for the reason `author_aliases` is: an # archive written before this restores with "
+    'none, which is the state it # was written in. ("author_identifiers", AuthorIdentifier), # The '
+    "catalogue roster as rows. No foreign key of its own, so its # position here is free; beside `settings` "
+    "because it is the same kind # of thing, a library wide configuration rather than anybody's data. # # "
+    "**Here on the day the table was created**, for the reason the comment # above gives, and with one "
+    "difference worth stating: nothing reads # these rows at runtime, so losing them costs no lookup. What "
+    "it costs # is #130, which is the ticket that puts them on a screen, and # "
+    "`main.seed_catalogue_targets` refills them on the next start anyway. # The reason to be in this tuple "
+    "regardless is that an archive is # supposed to hold the library, and a row a household has edited is # "
+    "theirs the moment #130 ships. # # Absent from `_REQUIRED_TABLES` for the reason `author_identifiers` "
+    "is: # an archive written before this restores with none, which is the state # it was written in. "
+    '("catalogue_targets", CatalogueTarget), # The sealed catalogue logins, straight after the rows they '
+    "hang off. # No foreign key between them, so the position is free; here because # reading one without "
+    "the other is meaningless. # # **This is the table that makes the archive safe to hand around, and # "
+    "the one that makes a restore onto a new machine incomplete.** The # column holds ciphertext and the "
+    "key is never in the database, so # `endpaper.json` carries a credential nobody can use without a key "
+    "the # archive does not contain. That is the whole design and it is strictly # better than the "
+    "plaintext this feature started as. # # **The same property is the trap on a machine nobody "
+    "administers.** A # restore onto a new laptop, or onto the same one after a reinstall, # brings these "
+    "rows back unreadable unless the person still has the # recovery phrase: the key lives in that "
+    "machine's keychain or in a file # under `DATA_DIR`, and neither travels in the zip. \"Keep your key "
+    'safe" # is not a plan for somebody who double clicked an installer, which is # why the phrase exists '
+    "at all and why the settings screen says this # beside the field rather than only here. `RestoreResult` "
+    "counts these # rows for the reason it counts `author_aliases`: silently restoring # none leaves a "
+    "library whose sources look configured and answer with an # authentication error. # # Absent from "
+    "`_REQUIRED_TABLES`, like every table added after # `FORMAT_VERSION` 1: an archive written before this "
+    'restores with none, # which is the state it was written in. ("catalogue_credentials", '
+    "CatalogueCredential), # The household's own OPDS servers, after the credential table their # "
+    "`credential_key` points into. No foreign key in either direction, so # the position is free; here "
+    "because the two are read together. # # **The address is the library's and the login is not in this "
+    "row**, so # this table restores usefully where `catalogue_credentials` restores # unreadable: somebody "
+    "who moves to a new machine gets their servers # back and types the passwords again, which is the same "
+    "bargain the # comment above describes and a better one than losing the addresses # too. # # **An "
+    "orphaned envelope is the failure this ordering does not # prevent**, and it does not need to: an "
+    "archive holding a credential # whose server row is gone leaves a row `credentials.unreadable_sources` "
+    "# reports and `DELETE /api/settings/catalogue-sources/{source}/credential` # removes, which is exactly "
+    "why that route deliberately does not check # the roster. # # Absent from `_REQUIRED_TABLES`, like "
     "every table added after # `FORMAT_VERSION` 1: an archive written before this restores with none, # "
-    'which is the state it was written in. ("catalogue_credentials", CatalogueCredential), # The '
-    "household's own OPDS servers, after the credential table their # `credential_key` points into. No "
-    "foreign key in either direction, so # the position is free; here because the two are read together. "
-    "# # **The address is the library's and the login is not in this row**, so # this table restores "
-    "usefully where `catalogue_credentials` restores # unreadable: somebody who moves to a new machine "
-    "gets their servers # back and types the passwords again, which is the same bargain the # comment "
-    "above describes and a better one than losing the addresses # too. # # **An orphaned envelope is the "
-    "failure this ordering does not # prevent**, and it does not need to: an archive holding a "
-    "credential # whose server row is gone leaves a row `credentials.unreadable_sources` # reports and "
-    "`DELETE /api/settings/catalogue-sources/{source}/credential` # removes, which is exactly why that "
-    "route deliberately does not check # the roster. # # Absent from `_REQUIRED_TABLES`, like every "
-    "table added after # `FORMAT_VERSION` 1: an archive written before this restores with none, # which "
-    'is the state it was written in. ("opds_servers", OpdsServer), # The password reset requests, whose '
-    "only foreign key is `users`, first # in this tuple. Here rather than beside the other per member "
-    "tables # because it is not about the catalogue at all: it is the record of who # approved a "
-    "member's way back into their account, which is the half of # that flow the member reads. # # "
-    "**Carried rather than dropped**, and the pending rows come with it. An # archive already holds "
-    "every password hash in the library, so a hash of # a code that stops working within the hour "
-    "discloses nothing new, and a # restore that silently emptied this table would take away the record "
-    'a # member is entitled to read back. # # **This module is the exception to "only a member starts a '
-    'reset", and # it is named at every site that states the rule.** `restore` writes # these rows '
-    "through `table.insert()` from the archive, so an archive # can carry an approved request. That "
-    "widens nothing: a restore replaces # every password hash in the library in the same transaction, so "
-    "# whoever can hand one to this route already holds every account. # # Absent from "
-    '`_REQUIRED_TABLES`, like every table added after # `FORMAT_VERSION` 1. ("password_reset_requests", '
-    "PasswordResetRequest), # Members' own logins elsewhere, sealed. Its only foreign key is # `users`. "
-    "**Carried for `catalogue_credentials`' reason and with its # cost**: the archive holds ciphertext "
-    "and never the key, so a restore # onto a machine without that key brings each token back "
-    "unreadable, # and its member enters it again on their account page. Absent from # "
-    '`_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. ("member_logins", '
-    "MemberLogin), # The records a harvester was told have gone. No foreign key, by design: # a "
-    "tombstone outlives its Book. Carried so a restore keeps telling a # harvester what it told it "
-    "before, and `harvest.wholesale` adds one for # every record the restore itself takes away. Absent "
-    'from # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. ("oai_tombstones", '
-    "OaiTombstone), "
-    "# The local copy of each subject vocabulary, which could be fetched # again and is carried "
-    "anyway (owner, 2026-11-20): a restore onto a # machine with no route to the DNB or id.loc.gov "
-    "still answers every # lookup, and the copy is the release the library catalogued against # "
-    "rather than whatever the source publishes on the day of the restore. # # **What it costs is "
-    "size**: both vocabularies loaded are of the order # of a million label rows, so "
-    "`vocabulary_labels` is in `_LINES` and is # never held whole. Rows of a load in progress ride "
-    "too, and the next # load of that vocabulary removes them. No foreign key either way, so # the "
-    "position is free. Absent from `_REQUIRED_TABLES`, like every table # added after "
-    '`FORMAT_VERSION` 1. ("vocabulary_copies", '
-    'VocabularyCopy), ("vocabulary_labels", VocabularyLabel), '
-    '("settings", Setting), ) )'
+    'which is the state it was written in. ("opds_servers", OpdsServer), # The password reset requests, '
+    "whose only foreign key is `users`, first # in this tuple. Here rather than beside the other per member "
+    "tables # because it is not about the catalogue at all: it is the record of who # approved a member's "
+    "way back into their account, which is the half of # that flow the member reads. # # **Carried rather "
+    "than dropped**, and the pending rows come with it. An # archive already holds every password hash in "
+    "the library, so a hash of # a code that stops working within the hour discloses nothing new, and a # "
+    "restore that silently emptied this table would take away the record a # member is entitled to read "
+    'back. # # **This module is the exception to "only a member starts a reset", and # it is named at every '
+    "site that states the rule.** `restore` writes # these rows through `table.insert()` from the archive, "
+    "so an archive # can carry an approved request. That widens nothing: a restore replaces # every "
+    "password hash in the library in the same transaction, so # whoever can hand one to this route already "
+    "holds every account. # # Absent from `_REQUIRED_TABLES`, like every table added after # "
+    '`FORMAT_VERSION` 1. ("password_reset_requests", PasswordResetRequest), # Members\' own logins '
+    "elsewhere, sealed. Its only foreign key is # `users`. **Carried for `catalogue_credentials`' reason "
+    "and with its # cost**: the archive holds ciphertext and never the key, so a restore # onto a machine "
+    "without that key brings each token back unreadable, # and its member enters it again on their account "
+    "page. Absent from # `_REQUIRED_TABLES`, like every table added after `FORMAT_VERSION` 1. "
+    '("member_logins", MemberLogin), ("settings", Setting), ) )'
 )
 
 # ── The allowlist, and how to add to it ──────────────────────────────────────
@@ -932,12 +878,6 @@ BOOK_OWNED_READERS = {
             "db.execute(delete(book_tags))",
             "a write: a restore empties the association table before it inserts the archive's rows. It "
             "publishes nothing, and `restore` is admin only.",
-        ),
-        (
-            'rows = classification_schemes.restorable(rows, tables.get("classifications") or [])',
-            "a lookup in the uploaded archive, not the database: the restore hands the archive's headings "
-            "to `restorable`, which reads only the scheme code each quotes, to add a row for a code no "
-            "scheme row carries. Nothing is returned to a caller, and `restore` is admin only.",
         ),
         (
             'associations = tables.get("book_tags") or []',
@@ -1124,93 +1064,60 @@ BOOK_OWNED_READERS = {
     "folding.py": [
         (
             "TRANSFERS: Final[tuple[_Transfer, ...]] = ( _Transfer(_table(book_tags.name), _union_tags), # "
-            "Two "
-            "rows for one Book often carry the same DDC number, and # "
-            "`uq_classifications_book_scheme_number` "
-            "would refuse the second on the # flush. Left out, the cascade on the loser's deletion takes "
-            "them "
-            "and a # merge silently drops the provenance of the row that lost. _Transfer( "
-            "_table(Classification.__tablename__), _deduplicated( Classification, held=lambda book: "
-            "book.classifications, key=lambda row: (str(row.scheme), row.number), "
-            "ceiling=MAX_CLASSIFICATIONS_PER_BOOK, absorb=_absorb_heading, ), ), # Notes carry their own "
-            "history. A merge repoints every one of them whatever # its author or its visibility: a rule "
-            "that "
-            "skipped a private note here # would not hide it, it would delete it. "
-            "_Transfer(_table(Note.__tablename__), _moves_wholesale(Note)), # Quotes move with the notes, "
-            "or the "
-            "cascade destroys passages somebody # typed out by hand. Page numbers travel unchanged and may "
-            "now "
-            "describe a # different printing, which is the standing cost of merging two rows that # were two "
-            "editions: the alternative is refusing the merge. _Transfer(_table(Quote.__tablename__), "
+            "Two rows for one Book often carry the same DDC number, and # "
+            "`uq_classifications_book_scheme_number` would refuse the second on the # flush. Left out, the "
+            "cascade on the loser's deletion takes them and a # merge silently drops the provenance of the "
+            "row that lost. _Transfer( _table(Classification.__tablename__), _deduplicated( Classification, "
+            "held=lambda book: book.classifications, key=lambda row: "
+            "(ClassificationScheme(row.scheme).value, row.number), ceiling=MAX_CLASSIFICATIONS_PER_BOOK, "
+            "absorb=_absorb_heading, ), ), # Notes carry their own history. A merge repoints every one of "
+            "them whatever # its author or its visibility: a rule that skipped a private note here # would "
+            "not hide it, it would delete it. _Transfer(_table(Note.__tablename__), "
+            "_moves_wholesale(Note)), # Quotes move with the notes, or the cascade destroys passages "
+            "somebody # typed out by hand. Page numbers travel unchanged and may now describe a # different "
+            "printing, which is the standing cost of merging two rows that # were two editions: the "
+            "alternative is refusing the merge. _Transfer(_table(Quote.__tablename__), "
             "_moves_wholesale(Quote)), # Highlights move whatever their author or sharing, as notes do: a "
-            "rule # "
-            "that skipped a private one would delete it. Nothing to resolve, because # "
+            "rule # that skipped a private one would delete it. Nothing to resolve, because # "
             "`uq_highlights_member_source_key` does not name the Book. Unlike notes, # each moved one is "
-            "private "
-            "again: see `_carry_highlights`. _Transfer(_table(Highlight.__tablename__), _carry_highlights), "
-            "# "
-            "`uq_digital_references_location` would refuse the flush where the keeper # and a loser were "
-            "catalogued from the same file, which is the **likely** # case rather than an edge: two rows "
-            "for one "
-            "Book are commonly two imports # of one library. A repeat is dropped after it gives the survivor "
-            "what one # more look at that location may write: see `file_references.absorb`. _Transfer( "
-            "_table(DigitalReference.__tablename__), _deduplicated( DigitalReference, held=lambda book: "
-            "book.digital_references, key=lambda row: (row.root_label, row.relative_path), "
-            "ceiling=MAX_DIGITAL_REFERENCES_PER_BOOK, absorb=file_references.absorb, ), ), # **Only an exact "
-            "repeat is a duplicate here**, which is the difference from # the headings above and the whole "
-            "reason `uq_book_identifiers_book_scheme_value` # carries the value. Two Kindle entries a Member "
-            "declared the same Book carry # two ASINs and both survive: that is the merge saying which "
-            "editions "
-            "were # folded together, where keying on the scheme alone would have made it an # "
-            "`IntegrityError` "
-            "instead of a fact. # # **A loser's `calibre_uuid` row is dropped like any other at the "
-            "ceiling**, "
-            "so # a keeper already carrying eight identifiers loses the uuid a re-import is # recognised "
-            "by, and "
-            "that record would be added once more. Not given a # preference, because keeping it means "
-            "deleting "
-            "one of the keeper's stored # rows instead, which is a loss of a fact too; the drop is logged. "
-            "_Transfer( _table(BookIdentifier.__tablename__), _deduplicated( BookIdentifier, held=lambda "
-            "book: "
+            "private again: see `_carry_highlights`. _Transfer(_table(Highlight.__tablename__), "
+            "_carry_highlights), # `uq_digital_references_location` would refuse the flush where the keeper "
+            "# and a loser were catalogued from the same file, which is the **likely** # case rather than "
+            "an edge: two rows for one Book are commonly two imports # of one library. A repeat is dropped "
+            "after it gives the survivor what one # more look at that location may write: see "
+            "`file_references.absorb`. _Transfer( _table(DigitalReference.__tablename__), _deduplicated( "
+            "DigitalReference, held=lambda book: book.digital_references, key=lambda row: (row.root_label, "
+            "row.relative_path), ceiling=MAX_DIGITAL_REFERENCES_PER_BOOK, absorb=file_references.absorb, ), "
+            "), # **Only an exact repeat is a duplicate here**, which is the difference from # the headings "
+            "above and the whole reason `uq_book_identifiers_book_scheme_value` # carries the value. Two "
+            "Kindle entries a Member declared the same Book carry # two ASINs and both survive: that is the "
+            "merge saying which editions were # folded together, where keying on the scheme alone would "
+            "have made it an # `IntegrityError` instead of a fact. # # **A loser's `calibre_uuid` row is "
+            "dropped like any other at the ceiling**, so # a keeper already carrying eight identifiers "
+            "loses the uuid a re-import is # recognised by, and that record would be added once more. Not "
+            "given a # preference, because keeping it means deleting one of the keeper's stored # rows "
+            "instead, which is a loss of a fact too; the drop is logged. _Transfer( "
+            "_table(BookIdentifier.__tablename__), _deduplicated( BookIdentifier, held=lambda book: "
             "book.identifiers, key=lambda row: (BookIdentifierScheme(row.scheme).value, row.value), "
             "ceiling=MAX_IDENTIFIERS_PER_BOOK, ), ), # Two rows for one Book imported from one MARC file "
-            "carry "
-            "the same links, # and `uq_online_links_book_url` would refuse the flush. A repeat URL is # "
-            "dropped; "
-            "its text and relation are the same record's. _Transfer( _table(OnlineLink.__tablename__), "
-            "_deduplicated( OnlineLink, held=lambda book: book.online_links, key=lambda row: row.url, "
-            "ceiling=MAX_ONLINE_LINKS_PER_BOOK, ), ), # Further images move whole, and no file moves with "
-            "them: "
-            "each is named by # its own row (`cover_store.IMAGE_SLOT_PREFIX`), so repointing the row is # "
-            "the "
-            "whole carry. **No ceiling, deliberately**: the images are already on # disk, so a merge adds no "
-            "bytes, and dropping one would delete a picture a # member took that nothing puts back. A "
-            "survivor "
-            "past # `MAX_COVER_IMAGES_PER_BOOK` takes no upload until one goes. "
-            "_Transfer(_table(CoverImage.__tablename__), _moves_wholesale(CoverImage)), "
+            "carry the same links, # and `uq_online_links_book_url` would refuse the flush. A repeat URL is "
+            "# dropped; its text and relation are the same record's. _Transfer( "
+            "_table(OnlineLink.__tablename__), _deduplicated( OnlineLink, held=lambda book: "
+            "book.online_links, key=lambda row: row.url, ceiling=MAX_ONLINE_LINKS_PER_BOOK, ), ), "
             "_Transfer(_table(Loan.__tablename__), _carry_loans), # Requests carry no uniqueness, so every "
-            "row "
-            "travels. Two open requests # from one member can result, which the holder answers like any "
-            "other. "
-            "_Transfer(_table(AccessRequest.__tablename__), _moves_wholesale(AccessRequest)), # Progress "
-            "carries "
-            "no uniqueness, so unlike the reading records below there # is nothing to resolve: two Members' "
-            "readings of what turned out to be one # Book are two histories of one Book. "
-            "_Transfer(_table(ReadingProgress.__tablename__), _moves_wholesale(ReadingProgress)), "
+            "row travels. Two open requests # from one member can result, which the holder answers like any "
+            "other. _Transfer(_table(AccessRequest.__tablename__), _moves_wholesale(AccessRequest)), # "
+            "Progress carries no uniqueness, so unlike the reading records below there # is nothing to "
+            "resolve: two Members' readings of what turned out to be one # Book are two histories of one "
+            "Book. _Transfer(_table(ReadingProgress.__tablename__), _moves_wholesale(ReadingProgress)), "
             "_Transfer(_table(reading.RECORDS_TABLE), _carry_reading_records), # A device's document names "
-            "the "
-            "file, not the Book, so the link follows the # Book that survives and nothing collides: the key "
-            "is "
-            "the member and the # document, which a merge does not touch. "
+            "the file, not the Book, so the link follows the # Book that survives and nothing collides: the "
+            "key is the member and the # document, which a merge does not touch. "
             "_Transfer(_table(KosyncDocument.__tablename__), _moves_wholesale(KosyncDocument)), # Which "
-            "Book a "
-            "member's Readwise book is follows the Book that survives, # for the KOReader document's "
-            "reason: the "
-            "key is the member and Readwise's # own book id, which a merge does not touch. "
+            "Book a member's Readwise book is follows the Book that survives, # for the KOReader document's "
+            "reason: the key is the member and Readwise's # own book id, which a merge does not touch. "
             "_Transfer(_table(ReadwiseBook.__tablename__), _moves_wholesale(ReadwiseBook)), "
-            "_Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values), # A harvest's "
-            "suggestions stay with the Book its record is: see # `_left_to_the_cascade`. "
-            "_Transfer(_table(PendingHeading.__tablename__), _left_to_the_cascade), )",
+            "_Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values), )",
             "a declaration, run once at import: the merge policy per child table. It reads no row. Every "
             "read a policy makes is bounded to the Books being folded, which "
             "`tests/test_folding.py::TestEveryReadIsBoundedToTheBooksBeingFolded` checks by shape.",
@@ -1230,15 +1137,6 @@ BOOK_OWNED_READERS = {
             "the mapping that tells the ORM `Book.tags` runs through the association table. A declaration "
             "and not a query; a load through it starts from a `Book` somebody already resolved, which is "
             "the relationship attribute blind spot the module docstring names.",
-        ),
-        (
-            'event.listen(Classification, "before_insert", _file_the_numbers)',
-            "registers the hook that files a heading as it is flushed, run once at import. It reads no "
-            "Book: the hook reads the one row being written and the scheme table's codes and rules.",
-        ),
-        (
-            'event.listen(Classification, "before_update", _file_the_numbers)',
-            "the same hook for an update of a heading's scheme or number, registered once at import.",
         ),
     ],
     "recognition.py": [
@@ -1366,18 +1264,6 @@ BOOK_OWNED_READERS = {
             "filtered `books` and the join is on `book_tags.book_id == books.id`.",
         ),
     ],
-    "sru.py": [
-        (
-            "links, books = ( Shelf.seen_by_the_public(db) .select(func.count(book_tags.c.tag_id), "
-            "func.count(distinct(Book.id))) .outerjoin(book_tags, book_tags.c.book_id == Book.id) .one() )",
-            "Tags per book on the public shelf, which the SRU subject charge publishes in a refusal. "
-            "**Correct, and reported anyway**"
-            ": written through `Shelf.seen_by_the_public().select()`, the FROM is the filtered `books` "
-            "and the join is on `book_tags.book_id == books.id`, so a private or trashed Book adds no "
-            "link. Run against a public Book with one tag and a private one with fifty: "
-            "`tests/test_sru.py::TestTheSubjectChargeFollowsTagsPerBook` answers one.",
-        ),
-    ],
 }
 
 
@@ -1387,27 +1273,6 @@ BOOK_OWNED_READERS = {
 #: came from. Keyed on the qualified name of the enclosing scope and the call,
 #: in line order; `_whole_book_calls` says why the qualified name is needed.
 WHOLE_BOOK_READERS: Final = {
-    "harvest.py": [
-        (
-            ": cast(Table, Book.__table__)",
-            "the `books` table object, for the harvest's own UPDATE of the datestamp column. Schema, not "
-            "rows: no statement is issued.",
-        ),
-        (
-            "watched: inspect(Book)",
-            "the mapper, for the names of the columns and relationships `PublicBookOut` reads. No "
-            "statement is issued.",
-        ),
-        (
-            "_stamp: identity_key(Book, book_id)",
-            "an identity map lookup for a Book this session already holds, to move its datestamp on the "
-            "object. It issues no SQL and hands the Book to nobody.",
-        ),
-        (
-            "_settle: identity_key(Book, book_id)",
-            "the same lookup, to expire the datestamp of a Book back on the public shelf. No SQL.",
-        ),
-    ],
     "importing.py": [
         (
             "Import._apply_one: self._db.get_one(Book, book_id)",
@@ -1425,11 +1290,6 @@ WHOLE_BOOK_READERS: Final = {
         ),
     ],
     "notifications.py": [
-        (
-            "due_for_patrons: db.query(Loan).join(Book, Loan.book_id == Book.id)",
-            "the same join, for the patron notice's own selection; `JOIN_CALLERS` again. Private Books "
-            "reach it by design (owner, 2026-11-22): each patron is mailed their own loans.",
-        ),
         (
             "count_private_overdue: db.query(Loan).join(Book, Loan.book_id == Book.id)",
             "a join, not a by key read: `JOIN_CALLERS` carries the reason this module reaches `books`.",
@@ -1450,27 +1310,12 @@ WHOLE_BOOK_READERS: Final = {
 #: is the shape these rules exist for. Keyed on the whole statement, in line
 #: order, as `BOOK_OWNED_READERS` is; `_raw_sql_naming` says which strings count.
 BOOKS_SQL_READERS: Final = {
-    "harvest.py": [
-        (
-            "_SQLITE_COUNTER_ROW: Final = ( \"INSERT INTO sqlite_sequence (name, seq) SELECT 'books', 0 \" "
-            "\"WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'books')\" )",
-            "the row SQLite keeps the Book id counter in, added after a restore where missing. It reads "
-            "no Book.",
-        ),
-        (
-            '_RAISE_THE_COUNTER: Final = { "sqlite": "UPDATE sqlite_sequence SET seq = MAX(seq, :highest) '
-            "WHERE name = 'books'\", \"postgresql\": ( \"SELECT setval(pg_get_serial_sequence('books', "
-            '\'id\'), GREATEST(:highest, " "(SELECT COALESCE(MAX(id), 0) FROM books), " '
-            "\"COALESCE(pg_sequence_last_value(pg_get_serial_sequence('books', 'id')::regclass), 0)))\" ), }",
-            "raises the Book id counter past every tombstone after a restore; on Postgres it reads the "
-            "highest Book id, a number and no row's data.",
-        ),
-    ],
     "database.py": [
         (
-            'statement = "SELECT id FROM books WHERE id = :book"',
-            "one Book the caller already resolved, read by id to answer whether it is still there, with a "
-            "row lock on Postgres. It returns the id it was handed and nothing else.",
+            'db.execute( text("SELECT id FROM books WHERE id = :book FOR NO KEY UPDATE"), '
+            '{"book": book_id}, )',
+            "a row lock on one Book the caller already resolved, taken by id on Postgres. It returns the id "
+            "it was handed and nothing else.",
         ),
     ],
     "models.py": [
@@ -1533,19 +1378,10 @@ RELATIONSHIP_READERS: Final = {
         (
             "return ( lending.Loans.for_a_channel(db) .overdue(now) .as_query() "
             ".options(joinedload(Loan.book), joinedload(Loan.loaned_to)) "
-            ".filter(_not_chased_since(Loan.notified_at, now, days)) "
+            ".filter((Loan.notified_at.is_(None)) | (Loan.notified_at < cutoff)) "
             ".order_by(Loan.due_at, Loan.id) .all() )",
             "a loader option on a query `Loans.for_a_channel` already scoped to the public shelf. It "
             "says how to load the Book of each overdue loan and chooses no row itself.",
-        ),
-        (
-            "return ( db.query(Loan) .join(Book, Loan.book_id == Book.id) "
-            ".options(joinedload(Loan.book), joinedload(Loan.loaned_to_patron)) "
-            ".filter( *overdue_clauses(now), Loan.loaned_to_patron_id.isnot(None), "
-            "_not_chased_since(Loan.patron_notified_at, now, days), ) "
-            ".order_by(Loan.loaned_to_patron_id, Loan.due_at, Loan.id) .all() )",
-            "a loader option on the patron notice's own selection, whose rows the join above chose. It "
-            "says how to load the Book of each loan a patron holds and chooses no row itself.",
         ),
     ],
     "schemas/book.py": [
@@ -3876,11 +3712,9 @@ class TestTheShelfIsTheOnlyWayIn:
         assert set(BOOK_OWNED) == {
             "BookIdentifier",
             "Classification",
-            "CoverImage",
             "CustomFieldValue",
             "DigitalReference",
             "OnlineLink",
-            "PendingHeading",
             "book_tags",
         }, (
             "The guarded entities no longer match BOOK_OWNED_TABLES. If a table "
@@ -4376,58 +4210,6 @@ class TestWhoSeesWhat:
         db.commit()
 
         assert Shelf.trashed_by(db, other.id).count() == 1
-
-
-def _harvested(db, **fields) -> Book:
-    """A Book a harvest run created: no adder, public, pointing at the run."""
-    run = Harvest(base_url="http://catalogue.home.example/oai", metadata_prefix="marcxml")
-    db.add(run)
-    db.flush()
-    return Book(harvest_id=run.id, added_by_user_id=None, is_private=False, **fields)
-
-
-class TestAHarvestedBookIsEverybodys:
-    """A harvested Book has no adder and is never private, so every shelf holds
-    it. Hidden from anybody, it would be a record nobody can reach, the admin
-    who ran the harvest included."""
-
-    def test_a_harvested_book_is_on_every_members_shelf(self, db, user, other):
-        db.add(_harvested(db, title="Harvested"))
-        db.commit()
-
-        assert (Shelf.seen_by(db, user.id).count(), Shelf.seen_by(db, other.id).count()) == (1, 1)
-
-    def test_a_harvested_book_is_on_the_public_shelf(self, db, user):
-        db.add(_harvested(db, title="Harvested"))
-        db.commit()
-
-        assert Shelf.seen_by_the_public(db).count() == 1
-
-    def test_a_trashed_harvested_book_is_in_every_members_trash(self, db, user, other):
-        harvested = _harvested(db, title="Gone")
-        harvested.deleted_at = datetime.now(UTC).replace(tzinfo=None)
-        db.add(harvested)
-        db.commit()
-
-        assert (Shelf.trashed_by(db, user.id).count(), Shelf.trashed_by(db, other.id).count()) == (1, 1)
-
-    def test_a_private_book_beside_a_harvest_stays_its_owners_alone(self, db, user, other):
-        """The reverse direction: a harvest in the library widens nothing that
-        is not harvested."""
-        db.add(_harvested(db, title="Harvested"))
-        db.add(Book(title="Private", added_by_user_id=user.id, is_private=True))
-        db.commit()
-
-        assert [book.title for book in Shelf.seen_by(db, other.id).all()] == ["Harvested"]
-        assert [book.title for book in Shelf.seen_by_the_public(db).all()] == ["Harvested"]
-
-    def test_a_harvested_book_cannot_be_stored_private(self, db, user):
-        harvested = _harvested(db, title="Harvested")
-        harvested.is_private = True
-        db.add(harvested)
-
-        with pytest.raises(IntegrityError, match="ck_books_harvested_is_nobodys_and_public"):
-            db.commit()
 
 
 class TestNarrowing:
@@ -5555,13 +5337,13 @@ class TestEverySortHasAnOrdering:
 
         Two vocabularies that cannot derive each other: `BookSort` is the API's
         and a scheme is the catalogue's. Without this assertion
-        `classification_schemes.SHELF_SCHEMES` and `orders_a_shelf` were read by nothing in
+        `filing.SHELF_SCHEMES` and `orders_a_shelf` were read by nothing in
         production, three documents said they were the mechanism, and both
         critic seats found that independently on 2026-09-03. A scheme whose
         rule starts ordering a shelf is now a failing test rather than an order
         no client can ask for.
         """
-        assert set(_SHELF_SORTS.values()) == set(classification_schemes.SHELF_SCHEMES)
+        assert set(_SHELF_SORTS.values()) == set(filing.SHELF_SCHEMES)
 
     def test_a_scheme_that_files_no_shelf_cannot_be_given_a_sort(self):
         """The other half, and the one that is enforced rather than compared.
@@ -5695,9 +5477,9 @@ class TestTheStoredKeyIsTheRulesKey:
 
     @pytest.mark.parametrize("scheme", list(ClassificationScheme))
     def test_across_every_scheme_and_the_whole_corpus(self, db, user, scheme):
-        """Parametrised over the enum, so a fifth built in scheme is covered the
-        day it is added rather than the day somebody remembers this file."""
-        rule = filing.FILING_RULES[classification_schemes.BUILT_IN[scheme].filing]
+        """Parametrised over the enum, so a fifth scheme is covered the day it
+        is added rather than the day somebody remembers this file."""
+        rule = filing.rule_for(scheme)
         # Postgres text cannot hold a NUL, so the values carrying one are a
         # question for SQLite alone; `ClassificationIn` refuses them at the door.
         storable = [value for value in CORPUS if "\x00" not in value or db.bind.dialect.name == "sqlite"]
@@ -5745,19 +5527,19 @@ class TestTheStoredKeyIsTheRulesKey:
         assert row.sort_key == "005.133"
 
     def test_the_two_columns_may_be_given_in_either_order(self, db, user):
-        """The trap `Tag._drop_the_key_on_a_rename` records: a hook reading a
-        sibling attribute depends on which constructor kwarg was assigned
-        first. The key is derived at the flush, with both columns set."""
+        """The trap `Tag._drop_the_key_on_a_rename` records: SQLAlchemy assigns
+        constructor kwargs in the order given, so a hook reading a sibling
+        attribute depends on which was assigned first. Whichever of the two is
+        set second recomputes the key with the first already there.
+        """
         book = Book(title="Either way", added_by_user_id=user.id)
         db.add(book)
         db.flush()
         scheme_first = Classification(book_id=book.id, scheme=ClassificationScheme.LCC, number="BF75")
-        number_first = Classification(number="BF75 .A1", scheme=ClassificationScheme.LCC, book_id=book.id)
-        db.add_all([scheme_first, number_first])
-        db.flush()
+        number_first = Classification(number="BF75", scheme=ClassificationScheme.LCC, book_id=book.id)
 
+        assert scheme_first.sort_key == number_first.sort_key
         assert scheme_first.sort_key == filing.LIBRARY_OF_CONGRESS.sort_key("BF75")
-        assert number_first.sort_key == filing.LIBRARY_OF_CONGRESS.sort_key("BF75 .A1")
 
     def test_a_writer_that_skips_the_hook_is_refused_rather_than_filed_last(self, db, user):
         """The enforcement, and the reason the column is NOT NULL with no default.
@@ -6151,7 +5933,7 @@ class TestTheRoutesThisDocstringCounts:
         assert self._bucket("copy") == ["add_copy"]
 
     def test_the_aliases_are_derived_from_the_fetch_not_from_a_list(self):
-        """The five aliases, and that `BookForCover` is excluded for a reason.
+        """The four aliases, and that `BookForCover` is excluded for a reason.
 
         `book_for_cover` reads the same book by the same rule and fetches with
         no `load=`, so it is the discriminator this derivation turns on. If it
@@ -6166,7 +5948,6 @@ class TestTheRoutesThisDocstringCounts:
             "BookInTrash": "book_in_trash",
             "BookForWrite": "book_for_read",
             "BookForOwner": "book_for_read",
-            "BookForAdmin": "book_for_read",
         }
 
     def test_a_new_alias_would_be_counted_without_editing_this_file(self):
@@ -6628,9 +6409,6 @@ class TestTheSerialisersThatMayBuildAnOutboundPayload:
             "the two published catalogue routes, which is also where the publish switch is read"
         ),
         "sru.py: asks a shelf for one": ("the SRU searchRetrieve response, gated by the same switch"),
-        "oai.py: asks a shelf for one": (
-            "the OAI-PMH GetRecord and ListRecords responses, gated by the same switch and its own"
-        ),
     }
 
     @staticmethod
@@ -6741,31 +6519,3 @@ class TestTheModulesTheseRulesWalk:
         """Anti vacuity, and it names one module per shape the rules read: the
         seam itself, a router and a module reached only through a join."""
         assert {"shelf.py", "routers/books.py", "notifications.py"} <= set(application_sources())
-
-
-class TestALabelIsFoundOnlyWhereItsCopyIsSeen:
-    """`Shelf.labelled` narrows a shelf rather than looking a code up, so a scan
-    answers what an id in the path answers. The route's half is in
-    `tests/routers/test_books_accession.py`."""
-
-    def test_a_label_finds_its_own_copy_and_no_other(self, db, user):
-        db.add(Book(title="Labelled", added_by_user_id=user.id, accession="200047116"))
-        db.add(Book(title="Other", added_by_user_id=user.id, accession="200000018"))
-        db.commit()
-
-        found = Shelf.seen_by(db, user.id).labelled("200047116").all()
-
-        assert [book.title for book in found] == ["Labelled"]
-
-    def test_a_label_on_somebody_elses_private_copy_is_not_found(self, db, user, other):
-        db.add(Book(title="Private", added_by_user_id=user.id, is_private=True, accession="200047116"))
-        db.commit()
-
-        assert Shelf.seen_by(db, user.id).labelled("200047116").count() == 1
-        assert Shelf.seen_by(db, other.id).labelled("200047116").count() == 0
-
-    def test_a_label_on_a_trashed_copy_is_not_found(self, db, user):
-        db.add(_trashed(title="Gone", added_by_user_id=user.id, is_private=False, accession="200047116"))
-        db.commit()
-
-        assert Shelf.seen_by(db, user.id).labelled("200047116").count() == 0

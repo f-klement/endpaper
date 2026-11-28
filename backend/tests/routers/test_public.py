@@ -10,8 +10,6 @@ matters most is the refusal: **publish on with library mode off must serve
 nothing**, asserted at the backend rather than through a disabled control.
 """
 
-from datetime import UTC, datetime, timedelta
-
 import pytest
 from fastapi.routing import APIRoute
 
@@ -19,7 +17,7 @@ import settings_store
 from dependencies import MAX_IDS_IN_A_FILTER
 from enums import SettingKey
 from main import app, iter_api_routes
-from models import Book, Loan, copy_group_token
+from models import Book
 from routers.public import PUBLIC_PAGE_PREFIX, PUBLIC_PREFIX, public_reader
 from tests.helpers import items, total
 
@@ -45,6 +43,8 @@ def shelf(db, admin, member):
     """
     public = Book(title="Public Book", author="A Writer", added_by_user_id=admin["user"]["id"])
     private = Book(title="Private Book", added_by_user_id=member["user"]["id"], is_private=True)
+    from datetime import UTC, datetime
+
     trashed = Book(
         title="Trashed Book",
         added_by_user_id=admin["user"]["id"],
@@ -333,127 +333,6 @@ class TestCrawlersAreNotInvitedUntilSomebodySaysSo:
         conjunction is the same shape as the publish one."""
         _publish(db, published=False, indexed=True)
         assert "Allow:" not in client.get("/robots.txt").text
-
-
-def _lend(db, admin, book_id: int) -> None:
-    """An open loan with every field a stranger must not learn filled in."""
-    moment = datetime.now(UTC).replace(tzinfo=None)
-    db.add(
-        Loan(
-            book_id=book_id,
-            loaned_to_name="Kim",
-            loaned_by_user_id=admin["user"]["id"],
-            loaned_at=moment - timedelta(days=3),
-            due_at=moment + timedelta(days=11),
-        )
-    )
-    db.commit()
-
-
-def _copy(db, admin, book_id: int, **columns) -> int:
-    """A second copy of `book_id`, sharing its `copy_group`."""
-    original = db.get(Book, book_id)
-    original.copy_group = original.copy_group or copy_group_token()
-    copy = Book(
-        title=original.title,
-        added_by_user_id=admin["user"]["id"],
-        copy_group=original.copy_group,
-        **columns,
-    )
-    db.add(copy)
-    db.commit()
-    return copy.id
-
-
-#: The two kinds of copy `Shelf.seen_by_the_public` drops, as `Book` columns.
-HIDDEN_COPIES: dict[str, dict[str, bool | datetime]] = {
-    "private": {"is_private": True},
-    "trashed": {"deleted_at": datetime(2030, 1, 2)},
-}
-
-
-def _availability(client, book_id: int):
-    return client.get(f"{PUBLIC_PREFIX}/books/{book_id}/availability")
-
-
-class TestAvailabilityIsShownOnlyWhenSwitchedOn:
-    """Story 2 of issue #29, as the owner narrowed it: on the shelf or on loan,
-    behind its own switch, and nothing about who or when."""
-
-    @staticmethod
-    def _show(db):
-        _publish(db)
-        settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
-
-    def test_a_published_catalogue_does_not_show_it_by_default(self, client, db, shelf):
-        """The default read through the gate, then the same request with the
-        switch set, so the 404 is the switch's and not a missing route's."""
-        _publish(db)
-        assert _availability(client, shelf["public"]).status_code == 404
-        settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
-        assert _availability(client, shelf["public"]).status_code == 200
-
-    def test_the_switch_alone_shows_nothing(self, client, db, shelf):
-        settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
-        _publish(db, published=False)
-        assert _availability(client, shelf["public"]).status_code == 404
-
-    def test_a_book_with_no_open_loan_is_on_the_shelf(self, client, db, shelf):
-        self._show(db)
-        assert _availability(client, shelf["public"]).json() == {"status": "on_shelf"}
-
-    def test_an_open_loan_reads_as_on_loan_and_nothing_more(self, client, db, admin, shelf):
-        """Equality on the whole body: no due date, borrower or start leaves."""
-        self._show(db)
-        _lend(db, admin, shelf["public"])
-        assert _availability(client, shelf["public"]).json() == {"status": "on_loan"}
-
-    def test_a_returned_loan_puts_it_back_on_the_shelf(self, client, db, admin, shelf):
-        self._show(db)
-        _lend(db, admin, shelf["public"])
-        loan = db.query(Loan).filter(Loan.book_id == shelf["public"]).one()
-        loan.returned_at = datetime.now(UTC).replace(tzinfo=None)
-        db.commit()
-        assert _availability(client, shelf["public"]).json() == {"status": "on_shelf"}
-
-    def test_one_copy_in_puts_the_title_on_the_shelf(self, client, db, admin, shelf):
-        self._show(db)
-        other = _copy(db, admin, shelf["public"])
-        _lend(db, admin, shelf["public"])
-        assert _availability(client, shelf["public"]).json() == {"status": "on_shelf"}
-        _lend(db, admin, other)
-        assert _availability(client, shelf["public"]).json() == {"status": "on_loan"}
-
-    @pytest.mark.parametrize("hidden", HIDDEN_COPIES, ids=list(HIDDEN_COPIES))
-    def test_a_hidden_copy_on_the_shelf_does_not_make_the_title_available(
-        self, client, db, admin, shelf, hidden
-    ):
-        """Counting it would tell a stranger the hidden copy exists."""
-        self._show(db)
-        _copy(db, admin, shelf["public"], **HIDDEN_COPIES[hidden])
-        _lend(db, admin, shelf["public"])
-        assert _availability(client, shelf["public"]).json() == {"status": "on_loan"}
-
-    @pytest.mark.parametrize("hidden", HIDDEN_COPIES, ids=list(HIDDEN_COPIES))
-    def test_a_hidden_copy_on_loan_does_not_put_the_title_out(self, client, db, admin, shelf, hidden):
-        """The other direction, which only shows with the public copy in."""
-        self._show(db)
-        _lend(db, admin, _copy(db, admin, shelf["public"], **HIDDEN_COPIES[hidden]))
-        assert _availability(client, shelf["public"]).json() == {"status": "on_shelf"}
-
-    @pytest.mark.parametrize("which", ["private", "trashed"])
-    def test_a_book_the_public_cannot_see_is_404(self, client, db, shelf, which):
-        self._show(db)
-        assert _availability(client, shelf[which]).status_code == 404
-
-    def test_the_record_and_the_listing_are_the_same_with_it_on(self, client, db, admin, shelf):
-        """Availability is its own path, so turning it on changes no other answer."""
-        _publish(db)
-        _lend(db, admin, shelf["public"])
-        paths = [f"{PUBLIC_PREFIX}/books/{shelf['public']}", f"{PUBLIC_PREFIX}/books"]
-        before = [client.get(path).text for path in paths]
-        settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
-        assert [client.get(path).text for path in paths] == before
 
 
 class TestThePublicReaderIsRateLimited:

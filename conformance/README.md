@@ -14,7 +14,6 @@ conformance/
 |---|---|---|---|---|
 | ISBN | `cases/isbn.json` | `schema/isbn.schema.json` | `backend/tests/conformance/test_isbn.py`, `frontend/tests/conformance/isbn.test.ts` | [`isbn.md`](isbn.md) |
 | subject | `cases/subject.json` | `schema/subject.schema.json` | `backend/tests/conformance/test_subject.py`, `frontend/tests/conformance/subject.test.ts` | [`subject.md`](subject.md) |
-| accession number | `cases/accession.json` | `schema/accession.schema.json` | `backend/tests/conformance/test_accession.py`, `frontend/tests/conformance/accession.test.ts` | [`accession.md`](accession.md) |
 
 A disagreement between two implementations of one domain is a failing test on
 the side that is wrong.

@@ -82,18 +82,6 @@ export default defineConfig({
               useInfiniteQueryParam: "page",
             },
           },
-          // A search sent as a POST, so the term (a patron's name, email or
-          // card number) travels in the body, where no proxy or server
-          // request log records it. It reads and writes nothing, so it is a
-          // query: cached by its body, refetched on mount, invalidated by the
-          // patron writes. Without this orval makes it a mutation, which a
-          // search box would have to drive by hand.
-          search_patrons: {
-            query: {
-              useQuery: true,
-              useMutation: false,
-            },
-          },
         },
       },
     },

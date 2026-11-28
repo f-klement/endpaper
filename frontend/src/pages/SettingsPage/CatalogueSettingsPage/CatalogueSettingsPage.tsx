@@ -8,7 +8,6 @@ import CatalogueLoginsSection from "./components/CatalogueLoginsSection";
 import CredentialKeySection from "./components/CredentialKeySection";
 import GoogleBooksSection from "./components/GoogleBooksSection";
 import ProviderSection from "./components/ProviderSection";
-import RegistrySection from "./components/RegistrySection";
 
 /**
  * Where a book's details come from.
@@ -38,10 +37,6 @@ export default function CatalogueSettingsPage() {
         {(settings) => (
           <>
             <ProviderSection settings={settings} onSave={state.save} />
-
-            {/* Under the list it would one day join: a pick is recorded
-                here and not yet asked, which its hint says. */}
-            <RegistrySection />
 
             {/* Logins first, the key they are sealed with beneath them: the
                 notice on an unreadable login points down at it, and a key with

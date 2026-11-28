@@ -48,9 +48,6 @@ beforeEach(() => {
     },
   });
   api.on(/\/api\/settings$/, { body: SETTINGS });
-  api.on("/api/settings/catalogue-registry", {
-    body: { listed_by: [], taken_on: "2026-11-22", aged: false, entries: [] },
-  });
 });
 
 describe("CatalogueSettingsPage", () => {

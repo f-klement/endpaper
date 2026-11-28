@@ -15,18 +15,16 @@ import * as backup from "../../src/api/generated/endpoints/backup/backup";
 import * as books from "../../src/api/generated/endpoints/books/books";
 import * as collections from "../../src/api/generated/endpoints/collections/collections";
 import * as covers from "../../src/api/generated/endpoints/covers/covers";
-import * as imports from "../../src/api/generated/endpoints/imports/imports";
 import * as kosync from "../../src/api/generated/endpoints/kosync/kosync";
 import * as loans from "../../src/api/generated/endpoints/loans/loans";
 import * as opds from "../../src/api/generated/endpoints/opds/opds";
-import * as patrons from "../../src/api/generated/endpoints/patrons/patrons";
 import * as publicCatalogue from "../../src/api/generated/endpoints/public/public";
 import * as readwise from "../../src/api/generated/endpoints/readwise/readwise";
 import * as settings from "../../src/api/generated/endpoints/settings/settings";
 import * as stats from "../../src/api/generated/endpoints/stats/stats";
 import * as system from "../../src/api/generated/endpoints/system/system";
 import * as users from "../../src/api/generated/endpoints/users/users";
-import { HeadingUse, Locale } from "../../src/api/generated/model";
+import { Locale } from "../../src/api/generated/model";
 import { invalidateWith, isCatalogueQuery } from "../../src/api/invalidate";
 
 /**
@@ -58,7 +56,6 @@ const KEYS: Record<string, readonly unknown[]> = {
   listBooks: books.getListBooksQueryKey(),
   listBooksInfinite: books.getListBooksInfiniteQueryKey(),
   getBook: books.getGetBookQueryKey(7),
-  getBookByAccession: books.getGetBookByAccessionQueryKey("200047116"),
   listCopies: books.getListCopiesQueryKey(7),
   getNotes: books.getGetNotesQueryKey(7),
   getCustomFields: books.getGetCustomFieldsQueryKey(7),
@@ -101,25 +98,6 @@ const KEYS: Record<string, readonly unknown[]> = {
   // `useBookHighlights` and the import hook, which invalidate this key. A merge
   // moves them onto the survivor, and merging calls `everything()`.
   getHighlights: books.getGetHighlightsQueryKey(7),
-  // A book's images beside its shelf cover, a child of `/api/books/{id}`
-  // classified with notes and quotes: `useBookCoverImages` writes them and
-  // invalidates this key itself. Shelving one rewrites the book's cover, and
-  // that hook drops the book too. A merge calls `everything()`.
-  listCoverImages: books.getListCoverImagesQueryKey(7),
-  // The headings a harvest suggested for a book, a child of `/api/books/{id}`
-  // classified with notes and quotes: `useBookPendingHeadings` settles them
-  // and invalidates this key, and a harvest drops every book's from its own
-  // hook. A merge calls `everything()`.
-  listPendingHeadings: books.getListPendingHeadingsQueryKey(7),
-  // The heading field's vocabularies and suggestions, children of
-  // `/api/books/{id}` that read the local vocabulary copy and the setting,
-  // never the books table, so no book write moves them.
-  listSuggestingVocabularies: books.getListSuggestingVocabulariesQueryKey(7),
-  suggestHeadings: books.getSuggestHeadingsQueryKey(7, {
-    scheme: "gnd",
-    q: "Info",
-    use: HeadingUse.subject,
-  }),
   listAuthors: books.getListAuthorsQueryKey(),
   listAuthorSuggestions: books.getListAuthorSuggestionsQueryKey(),
   listSeries: books.getListSeriesQueryKey(),
@@ -133,21 +111,17 @@ const KEYS: Record<string, readonly unknown[]> = {
   exportBooks: books.getExportBooksQueryKey(),
   lookupIsbn: books.getLookupIsbnQueryKey({ isbn: "9780441013593" }),
   searchBooks: books.getSearchBooksQueryKey({ q: "dune" }),
-  // The catalogues a cataloguer may narrow one lookup to. Read off the
-  // settings, so no book write moves it and no catalogue group holds it.
-  listNarrowableCatalogues: books.getListNarrowableCataloguesQueryKey(),
   authorAuthority: books.getAuthorAuthorityQueryKey({
     author: "Ursula K. Le Guin",
   }),
   authorWikipedia: books.getAuthorWikipediaQueryKey({ lang: Locale.en }),
   listCollections: collections.getListCollectionsQueryKey(),
-  // The published catalogue, and the **first four keys in this file with no
+  // The published catalogue, and the **first three keys in this file with no
   // session behind them**. They are deliberately not part of any write: see
   // "leaves the published catalogue to its own staleness rule" below.
   listPublicBooks: publicCatalogue.getListPublicBooksQueryKey(),
   listPublicBooksInfinite: publicCatalogue.getListPublicBooksInfiniteQueryKey(),
   getPublicBook: publicCatalogue.getGetPublicBookQueryKey(7),
-  getPublicAvailability: publicCatalogue.getGetPublicAvailabilityQueryKey(7),
   listLoans: loans.getListLoansQueryKey(),
   listOverdue: loans.getListOverdueQueryKey(),
   myOverdue: loans.getMyOverdueQueryKey(),
@@ -157,22 +131,6 @@ const KEYS: Record<string, readonly unknown[]> = {
   getLoginImage: settings.getGetLoginImageQueryKey(),
   getSenderHealth: settings.getGetSenderHealthQueryKey(),
   getCredentialKey: settings.getGetCredentialKeyQueryKey(),
-  // The classification schemes a heading may quote. Under `/api/settings`, so
-  // a catalogue write leaves it; only the settings section writes a scheme,
-  // and it refreshes this key itself.
-  listClassificationSchemes: settings.getListClassificationSchemesQueryKey(),
-  // Each subject vocabulary's local copy, admin only. Configuration like the
-  // schemes above; only its own section starts a download, and it refreshes
-  // this key itself.
-  listVocabularies: settings.getListVocabulariesQueryKey(),
-  // The curated catalogue registry, admin only. Configuration under
-  // `/api/settings`, so a catalogue write leaves it; a pick or a drop answers
-  // with the whole registry, which its hook writes into this key itself.
-  getCatalogueRegistry: settings.getGetCatalogueRegistryQueryKey(),
-  // The admin's patron register. Under `/api/patrons`, so a catalogue write
-  // leaves it; only its own routes write a patron.
-  searchPatrons: patrons.getSearchPatronsQueryKey({ q: "pat" }),
-  getPatron: patrons.getGetPatronQueryKey(7),
   listUsers: users.getListUsersQueryKey(),
   getMyAppearance: users.getGetMyAppearanceQueryKey(),
   getMyEmail: users.getGetMyEmailQueryKey(),
@@ -185,9 +143,6 @@ const KEYS: Record<string, readonly unknown[]> = {
   me: auth.getMeQueryKey(),
   downloadBackup: backup.getDownloadBackupQueryKey(),
   getCover: covers.getGetCoverQueryKey(7, "jpg"),
-  // One of those images as a file, read by URL in an `<img>` as the shelf
-  // cover is and never through react-query.
-  getCoverImage: covers.getGetCoverImageQueryKey(7, 3, "jpg"),
   getLoginBackground: covers.getGetLoginBackgroundQueryKey("jpg"),
   healthz: system.getHealthzQueryKey(),
   // The household's own OPDS servers. **Deliberately not catalogue queries**:
@@ -209,10 +164,6 @@ const KEYS: Record<string, readonly unknown[]> = {
   // pull hooks refresh it themselves. A book gaining a match shows here only
   // after the next pull, which is when the server learns of it too.
   getReadwiseAccount: readwise.getGetReadwiseAccountQueryKey(),
-  // The truncated harvest run the card offers to carry on from. Not under
-  // `/api/books`, so a catalogue write leaves it: only a harvest moves it, and
-  // `useHarvestImport` asks it again after every apply and every refused read.
-  resumableHarvest: imports.getResumableHarvestQueryKey(),
 };
 
 /**
@@ -339,40 +290,7 @@ describe("the inventory is complete", () => {
     //
     // 63 on 2026-11-07, counted with that same command: the scan card's
     // duplicate warning, one route and one key.
-    //
-    // 65 on 2026-11-19, counted with that same command: a book's further cover
-    // images, two reads (the list and one image's file) among five routes.
-    //
-    // 66 on 2026-11-19, counted with that same command: whether a published
-    // record is on the shelf or on loan, one route and one key.
-    //
-    // 67 on 2026-11-19, counted with that same command: the catalogues one
-    // lookup or search may be narrowed to, one route and one key.
-    //
-    // 68 on 2026-11-20, counted with that same command: the classification
-    // schemes a library may add to, four routes, one of them a read.
-    //
-    // 69 on 2026-11-20, counted with that same command: the subject
-    // vocabularies' local copies, two routes, one of them a read.
-    //
-    // 71 on 2026-11-20, counted with that same command: the admin's patron
-    // register, five routes, two of them reads (the search and one record).
-    //
-    // 72 on 2026-11-21, counted with that same command: a book's headings a
-    // harvest suggested, three routes, one of them a read.
-    //
-    // 73 on 2026-11-22, counted with that same command: the truncated harvest
-    // run a harvest may carry on from, the first read under `imports`.
-    //
-    // 74 on 2026-11-22, counted with that same command: the curated catalogue
-    // registry, four routes, one of them a read.
-    //
-    // 76 on 2026-11-22, counted with that same command: a book's heading
-    // field, three routes, two of them reads.
-    //
-    // 77 on 2026-11-22, counted with that same command: a copy found by the
-    // accession number on its label, one read.
-    expect(Object.keys(KEYS).length).toBe(77);
+    expect(Object.keys(KEYS).length).toBe(63);
   });
 });
 
@@ -385,9 +303,6 @@ describe("the catalogue is everything derived from the books table", () => {
       // a stale "not held" hides the warning from the next copy scanned.
       "alreadyHeld",
       "getBook",
-      // The same record found by its label's accession number, so a bulk
-      // assign moves it as it moves the record.
-      "getBookByAccession",
       "getStats",
       "listAuthorSuggestions",
       "listAuthors",
@@ -450,7 +365,7 @@ describe("the catalogue is everything derived from the books table", () => {
   it("leaves the published catalogue to its own staleness rule", () => {
     // **Excluded by decision, and the decision is not the one the four outward
     // lookups get.** Those four are excluded because no write can make them
-    // stale. These four can, a loan included: editing a book does change what a visitor sees.
+    // stale. These three can: editing a book does change what a visitor sees.
     //
     // What decides it is who pays. The public queries are the only ones in
     // this file with no session behind them, and they are answered under a
@@ -464,7 +379,7 @@ describe("the catalogue is everything derived from the books table", () => {
     // What is given up is small and bounded. A signed-out reader never calls
     // any of this, because a session with no writes never invalidates
     // anything; the only client holding both is an admin previewing through
-    // "See what a visitor sees", and every public hook carries
+    // "See what a visitor sees", and both public hooks carry
     // `staleTime: 60_000`, so that preview is at most a minute behind.
     //
     // Measured rather than read off the regex: `/api/public/books` is not in
@@ -475,7 +390,6 @@ describe("the catalogue is everything derived from the books table", () => {
       "listPublicBooks",
       "listPublicBooksInfinite",
       "getPublicBook",
-      "getPublicAvailability",
     ]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }
@@ -493,16 +407,8 @@ describe("the catalogue is everything derived from the books table", () => {
       "getCustomFields",
       "listAccessRequests",
       "getHighlights",
-      "listCoverImages",
-      "listPendingHeadings",
       "listKosyncDocuments",
     ]) {
-      expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
-    }
-  });
-
-  it("leaves the heading field's reads of the vocabulary copy alone", () => {
-    for (const name of ["listSuggestingVocabularies", "suggestHeadings"]) {
       expect(isCatalogueQuery(query(KEYS[name]!)), name).toBe(false);
     }
   });
@@ -538,8 +444,6 @@ describe("the catalogue is everything derived from the books table", () => {
       "getMyEmail",
       "listEmails",
       "listTestAccounts",
-      "searchPatrons",
-      "getPatron",
       "authConfig",
       "me",
       "healthz",

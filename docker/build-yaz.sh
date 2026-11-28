@@ -150,13 +150,6 @@ cd "yaz-${YAZ_VERSION}"
 make -j"$(nproc)"
 make install
 
-# YAZ's licence asks for its notice to travel with binary copies, and the runtime subset
-# below drops share/doc. So the text is kept aside, from the source tree, for the image's
-# notices file (docker/notices.py), outside /opt/yaz-runtime so it ships once, in that
-# file. A release without a LICENSE fails here rather than shipping a silent gap.
-mkdir -p /opt/yaz-notice
-cp LICENSE /opt/yaz-notice/LICENSE
-
 cd /
 rm -rf "/tmp/yaz.tar.gz" "/tmp/yaz-${YAZ_VERSION}"
 
@@ -187,7 +180,7 @@ rm -f /opt/yaz/lib/*.la
 #
 #   include/            796 KiB   headers, a build-time need. Kept in /opt/yaz so the
 #                                 builder image can still compile a binding against it.
-#   share/doc, share/man 1,048 KiB  the licence is kept aside, above, for the notices
+#   share/doc, share/man 1,048 KiB
 #   share/yaz/z39.50, ill         .asn sources, consumed by yaz-asncomp at build time
 #   share/yaz/etc        124 KiB  CQL to PQF maps and MARC21 XSLTs. Nothing needs them
 #                                 while queries are written as PQF. A CQL front end

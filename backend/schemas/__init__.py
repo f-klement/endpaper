@@ -56,7 +56,6 @@ from schemas.book import (
     IdentifierBackfillOut,
     LocationOut,
     MergeRequest,
-    NarrowableCatalogue,
     OwnershipUpdate,
     PrivacyUpdate,
     PurgeResult,
@@ -68,12 +67,8 @@ from schemas.classification import (
     ClassificationFacets,
     ClassificationIn,
     ClassificationOut,
-    ClassificationSchemeCreate,
-    ClassificationSchemeOut,
-    ClassificationSchemeRename,
     DivisionFacetOut,
     HeadingFacetOut,
-    SuggestingVocabularyOut,
 )
 from schemas.collection import (
     CollectionAssign,
@@ -82,7 +77,6 @@ from schemas.collection import (
     CollectionUpdate,
 )
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID, Page
-from schemas.cover_image import CoverImageOut
 from schemas.custom_field import (
     CustomFieldCreate,
     CustomFieldOut,
@@ -118,14 +112,11 @@ from schemas.identifier import (
     BookIdentifierOut,
 )
 from schemas.imports import (
-    HarvestPreviewOut,
-    HarvestResultOut,
     ImportPreviewOut,
     ImportPreviewRow,
     ImportResultOut,
     MarcPreviewOut,
     MarcPreviewRow,
-    ResumableHarvestOut,
 )
 from schemas.kosync import KosyncAccountOut, KosyncDocumentOut, KosyncPasswordOut
 from schemas.loan import LoanCreate, LoanOut, MyOverdueOut
@@ -138,11 +129,8 @@ from schemas.opds import (
     OpdsServerSummaryOut,
     OpdsSyncOut,
 )
-from schemas.patron import LoanPatronOut, PatronCreate, PatronLoanOut, PatronOut, PatronSearch, PatronUpdate
 from schemas.progress import ProgressCreate, ProgressOut
 from schemas.public import (
-    PublicAvailability,
-    PublicAvailabilityOut,
     PublicBookOut,
     PublicBookSort,
     PublicClassificationOut,
@@ -155,7 +143,6 @@ from schemas.readwise import (
     ReadwiseTokenIn,
     ReadwiseWaitingOut,
 )
-from schemas.registry import CatalogueRegistryOut, ProbeEvidenceOut, RegistryEntryOut, SourceTestIn
 from schemas.settings import (
     CatalogueSourceOut,
     CatalogueSourcePreference,
@@ -194,7 +181,6 @@ from schemas.user import (
     VerificationRedeem,
     VerificationRequest,
 )
-from schemas.vocabulary import VocabularyOut, VocabularyProgressOut
 
 # Resolve the BookColumns/BookOut <-> LoanOut forward references now that all
 # three are imported.
@@ -258,15 +244,11 @@ __all__ = [
     "BookStatusUpdate",
     "BulkRequest",
     "BulkResult",
-    "CatalogueRegistryOut",
     "CatalogueSourceOut",
     "CatalogueSourcePreference",
     "ClassificationFacets",
     "ClassificationIn",
     "ClassificationOut",
-    "ClassificationSchemeCreate",
-    "ClassificationSchemeOut",
-    "ClassificationSchemeRename",
     "CollectionAssign",
     "CollectionCreate",
     "CollectionOut",
@@ -275,7 +257,6 @@ __all__ = [
     "ConfirmedIdentifierOut",
     "CopyCreate",
     "CoverBackfillOut",
-    "CoverImageOut",
     "CredentialKeyOut",
     "CurrencyTotal",
     "CustomFieldCreate",
@@ -291,8 +272,6 @@ __all__ = [
     "DuplicateReport",
     "EmailUpdate",
     "FeatureFlagsOut",
-    "HarvestPreviewOut",
-    "HarvestResultOut",
     "HeadingFacetOut",
     "HighlightImportOut",
     "HighlightOut",
@@ -314,7 +293,6 @@ __all__ = [
     "KosyncPasswordOut",
     "LoanCreate",
     "LoanOut",
-    "LoanPatronOut",
     "LocationOut",
     "LoginImageOut",
     "LoginRequest",
@@ -327,7 +305,6 @@ __all__ = [
     "MonthStat",
     "MyOverdueOut",
     "MySecurityOut",
-    "NarrowableCatalogue",
     "NoteCreate",
     "NoteOut",
     "OnlineLinkOut",
@@ -339,18 +316,10 @@ __all__ = [
     "OverdueNotifyResult",
     "OwnershipUpdate",
     "Page",
-    "PatronCreate",
-    "PatronLoanOut",
-    "PatronOut",
-    "PatronSearch",
-    "PatronUpdate",
     "PerUserStat",
     "PrivacyUpdate",
-    "ProbeEvidenceOut",
     "ProgressCreate",
     "ProgressOut",
-    "PublicAvailability",
-    "PublicAvailabilityOut",
     "PublicBookOut",
     "PublicBookSort",
     "PublicClassificationOut",
@@ -367,13 +336,11 @@ __all__ = [
     "RecoveryPhraseOut",
     "RefusedAssertionOut",
     "RegistrationOut",
-    "RegistryEntryOut",
     "ResetCodeOut",
     "ResetRedeem",
     "ResetRequest",
     "ResetRequestOut",
     "RestoreResult",
-    "ResumableHarvestOut",
     "SenderHealth",
     "SenderOutcome",
     "SeriesOut",
@@ -381,9 +348,7 @@ __all__ = [
     "SettingsUpdate",
     "SightingIn",
     "SourceCredentialIn",
-    "SourceTestIn",
     "StatsOut",
-    "SuggestingVocabularyOut",
     "SweepIn",
     "SweepOut",
     "TagCreate",
@@ -395,8 +360,6 @@ __all__ = [
     "VerificationRedeem",
     "VerificationRequest",
     "ViewerFields",
-    "VocabularyOut",
-    "VocabularyProgressOut",
     # The tag key rule as a function, the other half of `KnownTagKey` above.
     # Exported because a test exercises it directly.
     "known_key",

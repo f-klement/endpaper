@@ -54,27 +54,6 @@ describe("LoanRow", () => {
     expect(screen.getByText(/borrower/)).toBeInTheDocument();
   });
 
-  it("says a registered patron has the book, and never which one", () => {
-    row({ loaned_to: null, loaned_to_user_id: null, to_patron: true });
-
-    expect(
-      screen.getByText("Loaned to a registered patron by lender"),
-    ).toBeInTheDocument();
-  });
-
-  it("names the patron and the card where the server sent them", () => {
-    row({
-      loaned_to: null,
-      loaned_to_user_id: null,
-      to_patron: true,
-      patron: { name: "Kim Ode", card_number: "K-41" },
-    });
-
-    expect(
-      screen.getByText("Loaned to Kim Ode, card K-41, by lender"),
-    ).toBeInTheDocument();
-  });
-
   it("names the author under the title", () => {
     row({ book: makeBook({ title: "Piranesi", author: "Susanna Clarke" }) });
 

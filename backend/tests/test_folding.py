@@ -23,7 +23,6 @@ from fastapi import HTTPException
 from sqlalchemy import Column, ForeignKey, Integer, MetaData, Table
 from sqlalchemy.orm import Session
 
-import accession
 import folding
 import models
 from database import Base, engine
@@ -343,7 +342,7 @@ def _unbounded_reads(source: str) -> list[int]:
 #: refuses a shape and asks nobody to look, so the looking is this number's job.
 #:
 #: Eleven: five queries, two `Session.delete`s of a row in hand, the
-#: `Session.expire` of each Book after its lock, and three `flush`es. The fifth
+#: `Session.expire` of the keeper after its lock and three `flush`es. The fifth
 #: query is `_carry_highlights`, bounded to the losers' ids.
 READ_ROOTS = 11
 
@@ -734,43 +733,3 @@ class TestAMergeCountsTheKeeperAsItStands:
 
         held = db.query(DigitalReference).filter(DigitalReference.book_id == keeper["id"]).count()
         assert held == MAX_DIGITAL_REFERENCES_PER_BOOK
-
-
-class TestAMergeFillsTheAccessionNumberAndNeverOverwritesIt:
-    """`book_columns.COPY_IDENTITY`: the label on the object the rows were."""
-
-    @staticmethod
-    def _labelled(db, make_book, admin, *, numbered: list[bool]) -> list[Book]:
-        books = [db.get(Book, make_book(admin["headers"], title="Dune")["id"]) for _ in numbered]
-        for book, has_one in zip(books, numbered, strict=True):
-            book.accession = accession.mint(book.id) if has_one else None
-        db.commit()
-        return books
-
-    def test_a_survivor_without_one_takes_the_losers(self, admin, make_book, db):
-        """Released in its own flush first: both UPDATEs in one statement would
-        set the survivor's before clearing the loser's and trip the index."""
-        keeper, loser = self._labelled(db, make_book, admin, numbered=[False, True])
-        code = loser.accession
-
-        folding.fold(db, keeper, [loser])
-        db.delete(loser)
-        db.commit()
-
-        assert keeper.accession == code
-
-    def test_a_survivor_with_one_keeps_it(self, admin, make_book, db):
-        keeper, loser = self._labelled(db, make_book, admin, numbered=[True, True])
-        own = keeper.accession
-
-        folding.fold(db, keeper, [loser])
-
-        assert keeper.accession == own
-
-    def test_the_first_numbered_loser_is_the_one_taken(self, admin, make_book, db):
-        keeper, unnumbered, numbered = self._labelled(db, make_book, admin, numbered=[False, False, True])
-        code = numbered.accession
-
-        folding.fold(db, keeper, [unnumbered, numbered])
-
-        assert keeper.accession == code

@@ -413,10 +413,9 @@ def _words_crossed(tree: ast.AST, ours: dict[str, dict[str, list[str] | None]]) 
             if taken is None and func.id in functions:
                 where, called = functions[func.id]
                 taken = ours[where].get(called)
-        elif (
-            isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in modules
-        ):
-            taken = ours[modules[func.value.id]].get(func.attr)
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            if func.value.id in modules:
+                taken = ours[modules[func.value.id]].get(func.attr)
         bound += list(zip(taken or [], call.args, strict=False))
         for slot, value in bound:
             means_slot = _what_a_name_means(slot)

@@ -14,7 +14,7 @@ import notifications
 import settings_store
 import sources
 import targets
-from enums import CatalogueSource, Disposition, OverdueNotifyReason, OverdueSender, SettingKey
+from enums import CatalogueSource, OverdueNotifyReason, OverdueSender, SettingKey
 from routers import settings as settings_router
 from schemas import RecoveryPhraseOut
 from tests.conftest import forget_any_encryption_key
@@ -243,176 +243,10 @@ class TestUpdateSettings:
     @pytest.mark.parametrize("field", sorted(settings_router._STORED_BOOL))
     @pytest.mark.parametrize("value", [True, False])
     def test_a_stored_switch_is_written_as_it_was_sent(self, client, admin, db, field, value):
-        # The two switches with a precondition: each refuses on without an address.
-        settings_store.set_value(db, SettingKey.OAI_ADMIN_EMAIL, "catalogue@library.example")
-        settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, "http://10.0.0.10/oai")
         res = client.put("/api/settings", json={field: value}, headers=admin["headers"])
 
         assert res.status_code == 200, res.text
         assert settings_store.get_bool(db, settings_router._STORED_BOOL[field]) is value
-
-    def test_a_member_cannot_switch_the_sru_server_on(self, client, member, db):
-        res = client.put("/api/settings", json={"sru_server_enabled": True}, headers=member["headers"])
-
-        assert res.status_code == 403
-        assert settings_store.get_bool(db, SettingKey.SRU_SERVER_ENABLED) is False
-
-    def test_a_member_cannot_switch_the_oai_provider_on(self, client, member, db):
-        res = client.put("/api/settings", json={"oai_provider_enabled": True}, headers=member["headers"])
-
-        assert res.status_code == 403
-        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is False
-
-    def test_the_oai_provider_is_refused_without_a_contact_address(self, client, admin, db):
-        res = client.put("/api/settings", json={"oai_provider_enabled": True}, headers=admin["headers"])
-
-        assert res.status_code == 409
-        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is False
-
-    def test_the_oai_provider_turns_on_with_its_address_in_the_same_write(self, client, admin, db):
-        body = {"oai_provider_enabled": True, "oai_admin_email": "catalogue@library.example"}
-        res = client.put("/api/settings", json=body, headers=admin["headers"])
-
-        assert res.status_code == 200
-        assert res.json()["oai_admin_email"] == "catalogue@library.example"
-        assert settings_store.get_bool(db, SettingKey.OAI_PROVIDER_ENABLED) is True
-
-    def test_the_address_cannot_be_cleared_while_the_provider_is_on(self, client, admin, db):
-        body = {"oai_provider_enabled": True, "oai_admin_email": "catalogue@library.example"}
-        client.put("/api/settings", json=body, headers=admin["headers"])
-        res = client.put("/api/settings", json={"oai_admin_email": ""}, headers=admin["headers"])
-
-        assert res.status_code == 409
-        db.expire_all()
-        assert settings_store.get_raw(db, SettingKey.OAI_ADMIN_EMAIL) == "catalogue@library.example"
-
-    def test_a_contact_address_that_is_not_one_is_refused(self, client, admin):
-        res = client.put("/api/settings", json={"oai_admin_email": "nobody here"}, headers=admin["headers"])
-
-        assert res.status_code == 422
-
-    def test_a_member_cannot_switch_the_harvester_on(self, client, member, db):
-        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": "https://repository.example/oai"}
-        res = client.put("/api/settings", json=body, headers=member["headers"])
-
-        assert res.status_code == 403
-        assert settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED) is False
-        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == ""
-
-    def test_the_harvester_is_refused_without_a_repository(self, client, admin, db):
-        res = client.put("/api/settings", json={"oai_harvest_enabled": True}, headers=admin["headers"])
-
-        assert res.status_code == 409
-        assert settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED) is False
-
-    def test_the_harvester_turns_on_with_its_repository_in_the_same_write(self, client, admin, db):
-        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": " https://repository.example/oai "}
-        res = client.put("/api/settings", json=body, headers=admin["headers"])
-
-        assert res.status_code == 200
-        assert res.json()["oai_harvest_enabled"] is True
-        assert res.json()["oai_harvest_base_url"] == "https://repository.example/oai"
-        assert settings_store.get_bool(db, SettingKey.OAI_HARVEST_ENABLED) is True
-
-    def test_the_repository_cannot_be_cleared_while_the_harvester_is_on(self, client, admin, db):
-        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": "https://repository.example/oai"}
-        client.put("/api/settings", json=body, headers=admin["headers"])
-        res = client.put("/api/settings", json={"oai_harvest_base_url": ""}, headers=admin["headers"])
-
-        assert res.status_code == 409
-        db.expire_all()
-        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == "https://repository.example/oai"
-
-    def test_the_harvester_and_its_repository_are_cleared_together(self, client, admin, db):
-        body = {"oai_harvest_enabled": True, "oai_harvest_base_url": "https://repository.example/oai"}
-        client.put("/api/settings", json=body, headers=admin["headers"])
-        body = {"oai_harvest_enabled": False, "oai_harvest_base_url": ""}
-        res = client.put("/api/settings", json=body, headers=admin["headers"])
-
-        assert res.status_code == 200
-        assert res.json()["oai_harvest_enabled"] is False
-        assert res.json()["oai_harvest_base_url"] == ""
-
-    @pytest.mark.parametrize(
-        "address",
-        [
-            "http://10.0.0.10/oai",
-            "http://localhost:8080/oai",
-            "http://172.16.5.20/cgi-bin/oai",
-            "http://127.0.0.1/oai",
-        ],
-    )
-    def test_a_household_repository_is_accepted_over_http(self, client, admin, db, address):
-        """The owner's decision: migrating off a system on the same network is
-        the case the harvester exists for."""
-        res = client.put("/api/settings", json={"oai_harvest_base_url": address}, headers=admin["headers"])
-
-        assert res.status_code == 200, res.text
-        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == address
-
-    @pytest.mark.parametrize(
-        "address",
-        [
-            "ftp://repository.example/oai",
-            "https://harvest:secret@repository.example/oai",
-            "https://repository.example/oai?verb=Identify",
-            "https://repository.example/oai#records",
-            "http://169.254.169.254/latest",
-            "https:///oai",
-            "https://repository.example:70000/oai",
-            "repository.example/oai",
-        ],
-    )
-    def test_a_repository_address_the_harvester_may_not_reach_is_refused(self, client, admin, db, address):
-        res = client.put("/api/settings", json={"oai_harvest_base_url": address}, headers=admin["headers"])
-
-        assert res.status_code == 400
-        assert "http or https" in res.json()["detail"]
-        assert address not in res.text
-        assert settings_store.get_raw(db, SettingKey.OAI_HARVEST_BASE_URL) == ""
-
-    def test_a_member_cannot_switch_public_availability_on(self, client, member, db):
-        body = {"public_availability_enabled": True}
-        res = client.put("/api/settings", json=body, headers=member["headers"])
-
-        assert res.status_code == 403
-        assert settings_store.get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED) is False
-
-    def test_the_vocabulary_offer_starts_undismissed(self, client, admin):
-        body = client.get("/api/settings", headers=admin["headers"]).json()
-
-        assert body["vocabulary_offer_dismissed"] is False
-
-    def test_a_dismissed_vocabulary_offer_reads_back_dismissed(self, client, admin):
-        client.put("/api/settings", json={"vocabulary_offer_dismissed": True}, headers=admin["headers"])
-
-        body = client.get("/api/settings", headers=admin["headers"]).json()
-        assert body["vocabulary_offer_dismissed"] is True
-
-    def test_a_member_cannot_dismiss_the_vocabulary_offer(self, client, member, db):
-        body = {"vocabulary_offer_dismissed": True}
-        res = client.put("/api/settings", json=body, headers=member["headers"])
-
-        assert res.status_code == 403
-        assert settings_store.get_bool(db, SettingKey.VOCABULARY_OFFER_DISMISSED) is False
-
-    def test_the_heading_field_switch_reads_back_as_stored_outside_library_mode(self, client, admin):
-        """The admin's intent, not what is in force: the field also needs library mode."""
-        body = client.get("/api/settings", headers=admin["headers"]).json()
-        assert (body["library_mode"], body["headings_from_vocabulary"]) == (False, True)
-
-        body = client.put(
-            "/api/settings", json={"headings_from_vocabulary": False}, headers=admin["headers"]
-        ).json()
-        assert body["headings_from_vocabulary"] is False
-
-    def test_the_sru_switch_reads_back_as_stored_while_nothing_is_published(self, client, admin):
-        """The admin's intent, not what is served: the route also needs the
-        catalogue published, which `public_catalogue_published` reports."""
-        body = client.put("/api/settings", json={"sru_server_enabled": True}, headers=admin["headers"]).json()
-
-        assert body["sru_server_enabled"] is True
-        assert body["public_catalogue_published"] is False
 
     def test_an_absent_field_is_left_alone(self, client, admin):
         """The reason the update is partial.
@@ -1291,7 +1125,7 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
 
         **This is one of two legs and it guards the near one.** A write reaching
         `_store` still clears nothing if its `SettingKey` is absent from
-        `notifications._CONFIGURED_BY`, because `senders_for` then answers none;
+        `notifications._CONFIGURED_BY`, because `sender_for` then answers `None`;
         that leg is held by
         `TestEverySenderSettingIsOwned::test_every_settings_row_the_senders_read_belongs_to_one`
         and is invisible from here. Named so a reader does not take a green run
@@ -1456,69 +1290,6 @@ class TestEverySettingsWriteClearsWhatItInvalidates:
         assert next(e for e in after if e["sender"] == "telegram")["failures"] == 1
 
 
-def _notices(db) -> tuple[bool, bool]:
-    """The patron notice's switch and the service digest's, as stored."""
-    return (
-        settings_store.get_bool(db, SettingKey.OVERDUE_PATRON_MAIL_ENABLED),
-        settings_store.get_bool(db, SettingKey.OVERDUE_MAIL_ENABLED),
-    )
-
-
-class TestLibraryModeTurnsTheOverdueNoticesOnOnce:
-    """#24: both notices default on when library mode is switched on, once, and
-    a mode switch never turns them off."""
-
-    def test_switching_library_mode_on_turns_both_notices_on(self, client, admin, db):
-        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
-
-        assert _notices(db) == (True, True)
-
-    def test_a_later_switch_on_leaves_a_notice_the_operator_turned_off(self, client, admin, db):
-        for body in (
-            {"library_mode": True},
-            {"overdue_patron_mail_enabled": False, "overdue_mail_enabled": False},
-            {"library_mode": False},
-            {"library_mode": True},
-        ):
-            client.put("/api/settings", json=body, headers=admin["headers"])
-
-        assert _notices(db) == (False, False)
-
-    def test_switching_library_mode_off_leaves_both_notices_as_they_were(self, client, admin, db):
-        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
-        client.put("/api/settings", json={"library_mode": False}, headers=admin["headers"])
-
-        assert _notices(db) == (True, True)
-
-    def test_a_mode_already_on_is_not_a_switch(self, client, admin, db):
-        """An upgrade that finds library mode on changes nobody's mail by itself."""
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-
-        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
-
-        assert _notices(db) == (False, False)
-
-    def test_the_first_switch_on_keeps_a_notice_switched_off_before_it(self, client, admin, db):
-        """A default fills a value nobody chose. The household email switched off
-        on purpose stays off; the patron notice, never set, still comes on."""
-        client.put("/api/settings", json={"overdue_mail_enabled": False}, headers=admin["headers"])
-        client.put("/api/settings", json={"library_mode": True}, headers=admin["headers"])
-
-        assert _notices(db) == (True, False)
-
-    def test_a_notice_set_in_the_same_request_has_the_last_word(self, client, admin, db):
-        body = {"library_mode": True, "overdue_patron_mail_enabled": False}
-        client.put("/api/settings", json=body, headers=admin["headers"])
-
-        assert _notices(db) == (False, True)
-
-    def test_the_patron_notice_reads_back_as_stored(self, client, admin):
-        client.put("/api/settings", json={"overdue_patron_mail_enabled": True}, headers=admin["headers"])
-
-        body = client.get("/api/settings", headers=admin["headers"]).json()
-        assert body["overdue_patron_mail_enabled"] is True
-
-
 class TestTheProviderList:
     """`/api/settings` carries the catalogue roster, and a write merges it.
 
@@ -1535,19 +1306,6 @@ class TestTheProviderList:
     def test_the_whole_roster_is_returned_in_order(self, client, admin):
         listed = [row["source"] for row in self._sources(client, admin)]
         assert listed == [source.value for source in sources.DEFAULT_ORDER]
-
-    def test_a_row_carries_how_its_catalogue_is_asked_and_never_its_address(self, client, admin):
-        """The four facts a compliance reader needs reach the wire, and the URL
-        does not: it changes without the policy changing."""
-        loc = next(row for row in self._sources(client, admin) if row["source"] == "loc")
-        assert {key: loc[key] for key in ("protocol", "record_schema", "encrypted", "credential")} == {
-            "protocol": "sru",
-            "record_schema": "mods",
-            "encrypted": False,
-            "credential": "none",
-        }
-        assert "lcc" in loc["classification_schemes"]
-        assert not any("loc.gov" in str(value) for value in loc.values())
 
     def test_a_switched_off_source_is_still_listed(self, client, admin):
         """Or "off" and "not in this build" would look the same on screen."""
@@ -1738,13 +1496,6 @@ class TestARouteRefusesRatherThanAnsweringNothing:
         response = client.post(f"/api/books/{book_id}/enrich", headers=admin["headers"])
         assert response.status_code == 409
 
-    def test_a_library_asking_only_a_pick_is_not_refused_enrichment(self, client, admin):
-        """The up front refusal counts a pick, as a lookup's NO_SOURCES does."""
-        client.put("/api/settings/catalogue-registry/csic", headers=admin["headers"])
-        book_id = self._book(client, admin)
-        response = client.post(f"/api/books/{book_id}/enrich", headers=admin["headers"])
-        assert response.status_code == 200, response.text
-
     def test_the_refusal_names_the_setting_rather_than_the_book(self, client, admin):
         response = client.get("/api/books/search", params={"q": "anything"}, headers=admin["headers"])
         detail = response.json()["detail"]
@@ -1928,18 +1679,18 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
     def test_discarding_reports_what_it_stranded(self, client, admin):
         client.post("/api/settings/credential-key", headers=admin["headers"])
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
         body = client.delete("/api/settings/credential-key", headers=admin["headers"]).json()
-        assert body["unreadable_sources"] == ["bnu"]
+        assert body["unreadable_sources"] == ["bne"]
 
     def test_a_new_key_is_refused_while_sealed_logins_are_stranded(self, client, admin):
         """The restore onto a new machine. The phrase is the answer, not a new key."""
         client.post("/api/settings/credential-key", headers=admin["headers"])
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
@@ -1951,12 +1702,12 @@ class TestTheKeyRoutesReportAboutTheKeyAndNeverTheKey:
     def test_and_removing_the_logins_clears_the_way(self, client, admin):
         client.post("/api/settings/credential-key", headers=admin["headers"])
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
         client.delete("/api/settings/credential-key", headers=admin["headers"])
-        client.delete("/api/settings/catalogue-sources/bnu/credential", headers=admin["headers"])
+        client.delete("/api/settings/catalogue-sources/bne/credential", headers=admin["headers"])
         assert client.post("/api/settings/credential-key", headers=admin["headers"]).status_code == 200
 
     def test_discarding_the_key_is_admin_only(self, client, member):
@@ -2044,18 +1795,18 @@ class TestACredentialIsStoredSealedAndShownMasked:
 
     def test_storing_one_reports_it_masked(self, client, keyed):
         body = client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "a-long-username", "password": "hunter2"},
             headers=keyed["headers"],
         ).json()
-        row = self._row(body, "bnu")
+        row = self._row(body, "bne")
         assert row["credential_provenance"] == "stored"
         assert row["credential_username_preview"].endswith("name")
         assert "hunter2" not in str(body)
 
     def test_and_the_password_is_nowhere_in_the_settings_response(self, client, keyed):
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=keyed["headers"],
         )
@@ -2064,7 +1815,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
 
     def test_storing_one_without_a_key_is_refused_with_advice(self, client, admin):
         response = client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
@@ -2076,7 +1827,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
         that is not a phrase reaches `put` and is refused there."""
         monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", "not a recovery phrase")
         response = client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
@@ -2085,45 +1836,45 @@ class TestACredentialIsStoredSealedAndShownMasked:
 
     def test_a_rotated_key_is_reported_as_needing_re_entry(self, client, keyed):
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=keyed["headers"],
         )
         credentials.store_key(credentials.generate_phrase())
         body = client.get("/api/settings", headers=keyed["headers"]).json()
-        row = self._row(body, "bnu")
+        row = self._row(body, "bne")
         assert row["credential_provenance"] == "stored"
         assert row["credential_unreadable"] is True
         assert row["credential_username_preview"] == ""
 
     def test_and_the_key_screen_counts_it(self, client, keyed):
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=keyed["headers"],
         )
         credentials.store_key(credentials.generate_phrase())
         body = client.get("/api/settings/credential-key", headers=keyed["headers"]).json()
-        assert body["unreadable_sources"] == ["bnu"]
+        assert body["unreadable_sources"] == ["bne"]
 
-    def test_removing_one_falls_back_to_the_shipped_login(self, client, keyed):
+    def test_removing_one_leaves_the_row_empty(self, client, keyed):
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=keyed["headers"],
         )
         body = client.delete(
-            "/api/settings/catalogue-sources/bnu/credential", headers=keyed["headers"]
+            "/api/settings/catalogue-sources/bne/credential", headers=keyed["headers"]
         ).json()
-        assert self._row(body, "bnu")["credential_provenance"] == "shipped"
+        assert self._row(body, "bne")["credential_provenance"] == "none"
 
     def test_removing_one_that_is_not_there_is_not_an_error(self, client, keyed):
-        response = client.delete("/api/settings/catalogue-sources/bnu/credential", headers=keyed["headers"])
+        response = client.delete("/api/settings/catalogue-sources/bne/credential", headers=keyed["headers"])
         assert response.status_code == 200
 
     def test_a_username_with_a_colon_is_a_422(self, client, keyed):
         response = client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice:smith", "password": "hunter2"},
             headers=keyed["headers"],
         )
@@ -2131,7 +1882,7 @@ class TestACredentialIsStoredSealedAndShownMasked:
 
     def test_and_a_422_does_not_echo_the_password_back(self, client, keyed):
         response = client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice:smith", "password": "hunter2"},
             headers=keyed["headers"],
         )
@@ -2141,9 +1892,9 @@ class TestACredentialIsStoredSealedAndShownMasked:
 
     def test_a_pinned_variable_that_is_not_a_credential_is_shown_as_broken(self, client, keyed, monkeypatch):
         """Ignoring it offered an edit while the stored login was used instead."""
-        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNU", "bob")
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob")
         body = client.get("/api/settings", headers=keyed["headers"]).json()
-        row = self._row(body, "bnu")
+        row = self._row(body, "bne")
         assert row["credential_provenance"] == "env"
         assert row["credential_unreadable"] is True
 
@@ -2163,17 +1914,6 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert response.status_code == 200
         assert credentials.stored_envelope(db, "a-catalogue-that-went-away") == ""
 
-    @pytest.mark.parametrize("source", ["bne", "google_books"])
-    def test_a_source_whose_credential_is_not_a_login_refuses_one(self, client, keyed, db, source):
-        """BNE answers anonymously and Google Books reads a key; nothing reads a login for either."""
-        response = client.put(
-            f"/api/settings/catalogue-sources/{source}/credential",
-            json={"username": "alice", "password": "hunter2"},
-            headers=keyed["headers"],
-        )
-        assert response.status_code == 409
-        assert credentials.stored_envelope(db, source) == ""
-
     def test_an_unknown_source_is_404(self, client, keyed):
         response = client.put(
             "/api/settings/catalogue-sources/no-such-place/credential",
@@ -2183,20 +1923,20 @@ class TestACredentialIsStoredSealedAndShownMasked:
         assert response.status_code == 404
 
     def test_a_pinned_credential_refuses_the_write_and_names_the_variable(self, client, keyed, monkeypatch):
-        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNU", "bob:correcthorse")
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
         response = client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=keyed["headers"],
         )
         assert response.status_code == 409
-        assert "CATALOGUE_CREDENTIAL_BNU" in response.json()["detail"]
+        assert "CATALOGUE_CREDENTIAL_BNE" in response.json()["detail"]
         assert "correcthorse" not in response.json()["detail"]
 
     def test_a_pinned_credential_is_reported_as_such(self, client, keyed, monkeypatch):
-        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNU", "bob:correcthorse")
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
         body = client.get("/api/settings", headers=keyed["headers"]).json()
-        row = self._row(body, "bnu")
+        row = self._row(body, "bne")
         assert row["credential_provenance"] == "env"
         assert "correcthorse" not in str(body)
 
@@ -2277,15 +2017,11 @@ class TestACredentialIsStoredSealedAndShownMasked:
 class TestNoCredentialReachesTheUnauthenticatedFlags:
     def test_the_feature_flags_carry_nothing_about_a_credential(self, client, admin):
         client.post("/api/settings/credential-key", headers=admin["headers"])
-        stored = client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+        client.put(
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
-        # A refused write stores nothing, and the three assertions below would then hold
-        # whatever the flags carried: the guard would be green and empty, as it is on any
-        # source whose credential is not a login, which answers 409.
-        assert stored.status_code == 200
         body = client.get("/api/settings/features").text
         assert "credential" not in body
         assert "alice" not in body
@@ -2305,27 +2041,27 @@ class TestASealedRowUnderAPinnedSourceIsNotADeadEnd:
     def test_the_row_blocks_a_new_key(self, client, admin, db, monkeypatch):
         client.post("/api/settings/credential-key", headers=admin["headers"])
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
         client.delete("/api/settings/credential-key", headers=admin["headers"])
-        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNU", "bob:correcthorse")
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
         response = client.post("/api/settings/credential-key", headers=admin["headers"])
         assert response.status_code == 409
-        assert "bnu" in response.json()["detail"]
+        assert "bne" in response.json()["detail"]
 
     def test_and_can_be_removed_so_the_key_can_be_made(self, client, admin, db, monkeypatch):
         client.post("/api/settings/credential-key", headers=admin["headers"])
         client.put(
-            "/api/settings/catalogue-sources/bnu/credential",
+            "/api/settings/catalogue-sources/bne/credential",
             json={"username": "alice", "password": "hunter2"},
             headers=admin["headers"],
         )
         client.delete("/api/settings/credential-key", headers=admin["headers"])
-        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNU", "bob:correcthorse")
+        monkeypatch.setenv("CATALOGUE_CREDENTIAL_BNE", "bob:correcthorse")
 
-        removed = client.delete("/api/settings/catalogue-sources/bnu/credential", headers=admin["headers"])
+        removed = client.delete("/api/settings/catalogue-sources/bne/credential", headers=admin["headers"])
         assert removed.status_code == 200
         assert client.post("/api/settings/credential-key", headers=admin["headers"]).status_code == 200
 
@@ -2390,60 +2126,3 @@ class TestASettingsSecretIsSealedOnTheScreen:
         assert response.status_code == 200, response.text
         db.expire_all()
         assert credentials.is_sealed(settings_store.get_raw(db, SettingKey.TELEGRAM_BOT_TOKEN))
-
-
-class TestCatalogueRegistry:
-    """The registry routes and the source test, admin only."""
-
-    @pytest.fixture
-    def answering(self, monkeypatch) -> None:
-        async def probe(target, isbn, *, access):
-            return Disposition.ANSWERED
-
-        monkeypatch.setattr(metadata, "probe", probe)
-
-    def test_a_member_may_not_read_the_registry(self, client, member):
-        assert client.get("/api/settings/catalogue-registry", headers=member["headers"]).status_code == 403
-
-    def test_a_member_may_not_test_a_source(self, client, member, answering):
-        response = client.post("/api/settings/catalogue-sources/nls/test", json={}, headers=member["headers"])
-        assert response.status_code == 403
-
-    def test_a_pick_shows_on_the_registry(self, client, admin):
-        client.put("/api/settings/catalogue-registry/csic", headers=admin["headers"])
-        entries = client.get("/api/settings/catalogue-registry", headers=admin["headers"]).json()["entries"]
-        assert {entry["source"] for entry in entries if entry["picked"]} == {"csic"}
-
-    def test_picking_a_name_the_registry_does_not_hold_is_a_404(self, client, admin):
-        assert client.put("/api/settings/catalogue-registry/bne", headers=admin["headers"]).status_code == 404
-
-    def test_a_registry_entry_cannot_be_handed_a_login(self, client, admin):
-        response = client.put(
-            "/api/settings/catalogue-sources/nls/credential",
-            json={"username": "alice", "password": "hunter2"},
-            headers=admin["headers"],
-        )
-        assert response.status_code == 404
-
-    def test_testing_a_source_nobody_ships_is_a_404(self, client, admin, answering):
-        response = client.post("/api/settings/catalogue-sources/nope/test", json={}, headers=admin["headers"])
-        assert response.status_code == 404
-
-    def test_testing_with_a_string_that_is_no_isbn_is_a_422(self, client, admin, answering):
-        response = client.post(
-            "/api/settings/catalogue-sources/dnb/test", json={"isbn": "123"}, headers=admin["headers"]
-        )
-        assert response.status_code == 422
-
-    def test_a_test_reports_a_disposition_and_nothing_the_host_said(self, client, admin, answering):
-        response = client.post(
-            "/api/settings/catalogue-sources/nls/test",
-            json={"isbn": "978-0-9713390-8-8"},
-            headers=admin["headers"],
-        )
-        assert response.status_code == 200
-        assert response.json() | {"probed_on": None} == {
-            "probed_on": None,
-            "isbn": "9780971339088",
-            "disposition": "answered",
-        }

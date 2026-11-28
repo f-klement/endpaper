@@ -6,7 +6,6 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { BookFormat } from "./bookFormat.ts";
-import type { BookOrigin } from "./bookOrigin.ts";
 import type { BookSort } from "./bookSort.ts";
 import type { LendingWillingness } from "./lendingWillingness.ts";
 import type { OwnershipStatus } from "./ownershipStatus.ts";
@@ -32,10 +31,6 @@ export type ListBooksParams = {
   unrated?: boolean;
   /** Only books somebody has offered to talk about */
   discuss?: boolean;
-  /** Library mode only. Only the books a harvest created, or only every other */
-  origin?: BookOrigin | null;
-  /** Library mode only. Only the books this harvest run created */
-  harvest?: number | null;
   /** Only books carrying this heading, as `scheme:number`. Repeat the parameter for more than one; they are ANDed. */
   classification?: string[] | null;
   ddc?: string | null;

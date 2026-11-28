@@ -6,7 +6,7 @@ four to `Book`, so a column added to the schema joined none of them and no
 diagnostic said so. Completeness held by accident of nullability and by nobody
 noticing.
 
-**A partition, not a list of disciplines.** The eight sets below are disjoint and
+**A partition, not a list of disciplines.** The seven sets below are disjoint and
 their union is every column of `books`, checked against the mapper at import. What
 each writer then does with a set stays at that writer: fill only, overwrite on
 request, refuse. Those rules differ per writer and there is no enum over them.
@@ -111,18 +111,6 @@ COPY_DETAIL: Final[tuple[str, ...]] = (
 #: is where it is confirmed afterwards.
 COPY_STANDING: Final[tuple[str, ...]] = ("copy_group", "ownership")
 
-#: What names this physical object: the accession number on its label.
-#:
-#: Its own cell because its rules are its own. A **copy** starts with none, so
-#: it is not in `COPIED_FROM_THE_BOOK`: another object carries another label. A
-#: **merge** fills it but never overwrites it: a merge says the rows were one
-#: object, so the label on it is the loser's where the survivor has none, and a
-#: survivor with its own keeps it. It is not in `FILLABLE_FROM_ANOTHER_ROW`
-#: either, for the ISBN's reason: it is unique (`uq_books_accession`), so the
-#: losing row has to let go in its own flush first, which `folding.fold` does by
-#: hand. Copy side, so the item takes it when the instance is split out (#145).
-COPY_IDENTITY: Final[tuple[str, ...]] = ("accession",)
-
 #: Facts about the row rather than about the book, written by the database or by
 #: the act of filing, and never filled from a losing row by a merge: none is in
 #: `FILLABLE_FROM_ANOTHER_ROW`. A **copy** inherits `is_private` at the insert,
@@ -132,23 +120,13 @@ COPY_IDENTITY: Final[tuple[str, ...]] = ("accession",)
 #: to whoever created it, so absorbing one would reattribute it. `deleted_at` is
 #: the trash marker `Shelf` reads. `is_private` is the privacy rule's own column,
 #: and a copy inherits it because a copy of a private book that came back public
-#: would disclose the book. `oai_datestamp` is `harvest.py`'s, which moves it on
-#: every write a harvester could see, so no writer carries it from another row.
-#: `harvest_id` stands where `added_by_user_id` would on a harvested row, so it
-#: is kept for the same reason; and a copy, which takes the caller as its adder,
-#: must not inherit it, since `ck_books_harvested_is_nobodys_and_public` refuses
-#: a harvested row with an adder. `harvested_identifier` ties the row to the
-#: record a harvest created it from, so a copy or a merge's survivor that took
-#: it would be the Book the next run matches in its place.
+#: would disclose the book.
 ROW_KEEPING: Final[tuple[str, ...]] = (
     "id",
     "added_at",
     "added_by_user_id",
-    "harvest_id",
-    "harvested_identifier",
     "deleted_at",
     "is_private",
-    "oai_datestamp",
 )
 
 #: Where the record came from and whether anything here changed it since: facts
@@ -167,7 +145,6 @@ PARTITION: Final[tuple[tuple[str, ...], ...]] = (
     WORK_COVER,
     COPY_DETAIL,
     COPY_STANDING,
-    COPY_IDENTITY,
     ROW_KEEPING,
     RECORD_PROVENANCE,
 )

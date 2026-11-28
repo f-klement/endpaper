@@ -10,7 +10,6 @@ import logging
 import os
 import re
 import sqlite3
-from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -26,7 +25,6 @@ from database import Base, engine
 from enums import (
     AuthorityProvenance,
     AuthorityScheme,
-    AuthoritySupplier,
     BookFormat,
     CatalogueSource,
     ClassificationScheme,
@@ -35,7 +33,6 @@ from models import (
     AUTHORITY_IDENTIFIER_MAX,
     CLASSIFICATION_NUMBER_MAX,
     CLASSIFICATION_SORT_KEY_MAX,
-    HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL,
     ONE_BORROWER_SQL,
     OPDS_CREDENTIAL_PREFIX,
     AuthorIdentifier,
@@ -43,12 +40,10 @@ from models import (
     Collection,
     Loan,
     Note,
-    Patron,
     Quote,
     Tag,
     User,
     UserBook,
-    harvested_is_nobodys_and_public,
     is_switch_target,
     names_exactly_one_borrower,
     new_opds_credential_key,
@@ -753,92 +748,6 @@ class TestTheBorrowerRule:
         assert db.query(Loan).count() == 1
 
 
-class TestThreeKindsOfBorrower:
-    """Exactly one of a member, a patron and a typed name, or none once erased.
-
-    Every combination of the three, with and without `borrower_anonymised_at`,
-    written through the ORM to the migrated table and asked of the predicate.
-    Sixteen rows rather than the six the ticket names, because the rows nobody
-    names are where `<>` chained over three columns would have passed: parity
-    admits all three at once.
-    """
-
-    COMBINATIONS = [
-        (member, patron, named, erased)
-        for member in (False, True)
-        for patron in (False, True)
-        for named in (False, True)
-        for erased in (False, True)
-    ]
-
-    @staticmethod
-    def _expected(member: bool, patron: bool, named: bool, erased: bool) -> bool:
-        return member + patron + named == (0 if erased else 1)
-
-    @pytest.mark.parametrize(("member", "patron", "named", "erased"), COMBINATIONS)
-    def test_the_database_and_the_predicate_agree_with_the_rule(
-        self, db, book, user, member, patron, named, erased
-    ):
-        card = Patron(card_number="C1", name="Pat Lee")
-        db.add(card)
-        db.commit()
-        user_id = user.id if member else None
-        patron_id = card.id if patron else None
-        name = "the neighbour" if named else None
-        db.add(
-            Loan(
-                book_id=book.id,
-                loaned_by_user_id=user.id,
-                loaned_to_user_id=user_id,
-                loaned_to_patron_id=patron_id,
-                loaned_to_name=name,
-                borrower_anonymised_at=datetime(2026, 11, 20) if erased else None,
-            )
-        )
-        try:
-            db.commit()
-            stored = True
-        except IntegrityError:
-            db.rollback()
-            stored = False
-        predicate = names_exactly_one_borrower(user_id, name, patron_id=patron_id, anonymised=erased)
-        assert (stored, predicate) == (self._expected(member, patron, named, erased),) * 2
-
-
-class TestAHarvestedRowHasOneSpelling:
-    """`HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL` and its Python reading agree on every
-    row the three columns can make, against a table built from the constant
-    through `sqlite3`, for `TestTheBorrowerRuleHasOneSpelling`'s reason."""
-
-    def test_the_two_spellings_agree_on_every_row(self):
-        connection = sqlite3.connect(":memory:")
-        connection.execute(
-            "CREATE TABLE probe (harvest_id INTEGER, added_by_user_id INTEGER, "
-            f"is_private BOOLEAN NOT NULL, CHECK ({HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL}))"
-        )
-
-        def accepted(row: tuple[int | None, int | None, bool]) -> bool:
-            try:
-                connection.execute("INSERT INTO probe VALUES (?, ?, ?)", row)
-            except sqlite3.IntegrityError:
-                return False
-            connection.execute("DELETE FROM probe")
-            return True
-
-        rows = list(itertools.product((None, 1), (None, 5), (False, True)))
-        verdicts = {row: accepted(row) for row in rows}
-
-        assert [row for row in rows if verdicts[row] != harvested_is_nobodys_and_public(*row)] == []
-        # Anti vacuity: the constraint refuses the three harvested rows with an
-        # adder or private, and stores the rest.
-        # A set, because sorting tuples that mix None and int raises TypeError.
-        assert {row for row in rows if not verdicts[row]} == {
-            (1, None, True),
-            (1, 5, False),
-            (1, 5, True),
-        }
-
-
 class TestTheBorrowerRuleHasOneSpelling:
     """The rule above, stated twice on purpose, and asked rather than read.
 
@@ -1049,8 +958,7 @@ class TestTheBorrowerRuleHasOneSpelling:
         """
         connection = sqlite3.connect(":memory:")
         connection.execute(
-            "CREATE TABLE probe (loaned_to_user_id INTEGER, loaned_to_name TEXT, "
-            f"loaned_to_patron_id INTEGER, borrower_anonymised_at TIMESTAMP, CHECK ({ONE_BORROWER_SQL}))"
+            f"CREATE TABLE probe (loaned_to_user_id INTEGER, loaned_to_name TEXT, CHECK ({ONE_BORROWER_SQL}))"
         )
 
         def accepted(user_id: int | None, name: str | None) -> bool:
@@ -1059,7 +967,7 @@ class TestTheBorrowerRuleHasOneSpelling:
             # catching it would say the opposite of what the docstring above is
             # at pains to say.
             try:
-                connection.execute("INSERT INTO probe VALUES (?, ?, NULL, NULL)", (user_id, name))
+                connection.execute("INSERT INTO probe VALUES (?, ?)", (user_id, name))
             except sqlite3.IntegrityError:
                 return False
             connection.execute("DELETE FROM probe")
@@ -1242,7 +1150,6 @@ class TestTheAuthorityIdentifierConstraints:
                 "scheme": AuthorityScheme.GND,
                 "identifier": "1042243212",
                 "provenance": AuthorityProvenance.CATALOGUE,
-                "asserted_by": AuthoritySupplier.CATALOGUE,
             }
             | overrides
         )
@@ -1323,9 +1230,7 @@ class TestTheAuthorityIdentifierConstraints:
         assert shared == {"gnd"}
 
     def test_a_provenance_that_is_neither_is_refused(self, db):
-        # A member supplier, so `ck_author_identifiers_supplier` holds and
-        # the provenance CHECK is the only one this row breaks.
-        self._row(db, provenance="robot", asserted_by=AuthoritySupplier.MEMBER)
+        self._row(db, provenance="robot")
         with pytest.raises(IntegrityError) as refusal:
             db.commit()
 
@@ -1343,12 +1248,7 @@ class TestTheAuthorityIdentifierConstraints:
     def test_a_member_assertion_with_no_person_is_allowed(self, db):
         """The other direction is deliberately open, so a row whose author is
         gone still reads `member` rather than becoming a machine's."""
-        self._row(
-            db,
-            provenance=AuthorityProvenance.MEMBER,
-            created_by_user_id=None,
-            asserted_by=AuthoritySupplier.MEMBER,
-        )
+        self._row(db, provenance=AuthorityProvenance.MEMBER, created_by_user_id=None)
         db.commit()
 
         assert db.query(AuthorIdentifier).count() == 1
@@ -1416,7 +1316,9 @@ class TestTheShelfKeyFitsItsColumn:
         return "Q1" + "x" * (CLASSIFICATION_NUMBER_MAX - 2)
 
     def test_the_widest_key_the_number_column_can_produce_still_fits(self):
-        widest = max(len(rule.sort_key(self._worst_number())) for rule in filing.FILING_RULES.values())
+        widest = max(
+            len(filing.rule_for(scheme).sort_key(self._worst_number())) for scheme in ClassificationScheme
+        )
 
         assert widest == CLASSIFICATION_SORT_KEY_MAX
 

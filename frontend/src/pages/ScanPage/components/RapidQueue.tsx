@@ -6,7 +6,6 @@ import type { BookLookup, BookMatch } from "../../../api/generated/model";
 import type { AudioFailure } from "../../../lib/audiobook";
 import type { FileFailure } from "../../../lib/fileReaders";
 import { isBeingDecided } from "../queue";
-import MatchSource from "./MatchSource";
 import type {
   NamedScanReason,
   QueueFigures,
@@ -128,12 +127,6 @@ const ROW_LINE: Record<
   "looking-up": (_entry, t) => (
     <span className="text-paper-600 dark:text-paper-400">
       {t("rapid.lookingUp")}
-    </span>
-  ),
-  // Asked at the pace, so it can wait a while: it says what it is waiting on.
-  listed: (entry, t) => (
-    <span className="text-paper-600 dark:text-paper-400">
-      {t("rapid.listed", { isbn: entry.isbn })}
     </span>
   ),
   reading: (entry, t) => (
@@ -278,8 +271,6 @@ interface RapidQueueProps {
    */
   figures: QueueFigures;
   isLookingUp: boolean;
-  /** How far the paced run has got, `null` when none is running. */
-  lookUpProgress: BulkProgress | null;
   onLookUp: () => void;
   onStopLookUp: () => void;
   onChoose: (key: string, match: BookMatch) => void;
@@ -322,11 +313,6 @@ interface RapidQueueProps {
    */
   onAddAsCopy: (key: string) => void;
   isAddingCopy: boolean;
-  /**
-   * Whether each offered record names the catalogues that produced it, as the
-   * title search does. A household never sees it.
-   */
-  libraryMode: boolean;
 }
 
 /**
@@ -351,7 +337,6 @@ export default function RapidQueue({
   onStopAdding,
   figures,
   isLookingUp,
-  lookUpProgress,
   onLookUp,
   onStopLookUp,
   onChoose,
@@ -364,7 +349,6 @@ export default function RapidQueue({
   onDropSubject,
   onAddAsCopy,
   isAddingCopy,
-  libraryMode,
 }: RapidQueueProps) {
   const { t } = useTranslation();
   // A copy in flight counts: a batch started then re-walks the row it is
@@ -409,7 +393,6 @@ export default function RapidQueue({
         waiting={figures.waiting}
         paceMinutes={figures.paceMinutes}
         isLookingUp={isLookingUp}
-        progress={lookUpProgress}
         isAdding={isAdding}
         onLookUp={onLookUp}
         onStopLookUp={onStopLookUp}
@@ -439,7 +422,6 @@ export default function RapidQueue({
             entry={entry}
             busy={busy}
             actions={actions}
-            libraryMode={libraryMode}
           />
         ))}
       </ul>
@@ -606,7 +588,6 @@ function LookUpControls({
   waiting,
   paceMinutes,
   isLookingUp,
-  progress,
   isAdding,
   onLookUp,
   onStopLookUp,
@@ -614,14 +595,21 @@ function LookUpControls({
   waiting: number;
   paceMinutes: number;
   isLookingUp: boolean;
-  progress: BulkProgress | null;
   isAdding: boolean;
   onLookUp: () => void;
   onStopLookUp: () => void;
 }) {
   const { t } = useTranslation();
   if (isLookingUp) {
-    return <StopLookingUp progress={progress} onStop={onStopLookUp} />;
+    return (
+      <button
+        type="button"
+        onClick={onStopLookUp}
+        className="w-full py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
+      >
+        {t("fallback.stop")}
+      </button>
+    );
   }
   // Offered, never automatic. A folder of several hundred files is several
   // hundred catalogue calls, a name's fan out or a stated ISBN's lookup,
@@ -645,52 +633,15 @@ function LookUpControls({
   );
 }
 
-/**
- * The paced run's stop, and how far it has got.
- *
- * **Not a live region**, for the reason the add's progress is not: it moves
- * once per row, and announcing it would read a list of five hundred aloud.
- */
-function StopLookingUp({
-  progress,
-  onStop,
-}: {
-  progress: BulkProgress | null;
-  onStop: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={onStop}
-        className="w-full py-2 rounded-xl border border-paper-200 text-sm font-medium text-paper-700 hover:bg-paper-50 dark:border-paper-700 dark:text-paper-200 dark:hover:bg-paper-800"
-      >
-        {t("fallback.stop")}
-      </button>
-      {progress && (
-        <p className="text-xs text-paper-600 mt-1.5 dark:text-paper-400">
-          {t("fallback.progress", {
-            done: progress.done,
-            total: progress.total,
-          })}
-        </p>
-      )}
-    </div>
-  );
-}
-
 /** One queued book: its line, why it is where it is, and what can be pressed. */
 function QueueRow({
   entry,
   busy,
   actions,
-  libraryMode,
 }: {
   entry: ScannedEntry;
   busy: boolean;
   actions: RowActions;
-  libraryMode: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -763,7 +714,6 @@ function QueueRow({
           matches={entry.matches}
           onChoose={actions.onChoose}
           onKeepName={actions.onKeepName}
-          libraryMode={libraryMode}
         />
       )}
     </li>
@@ -973,13 +923,11 @@ function Matches({
   matches,
   onChoose,
   onKeepName,
-  libraryMode,
 }: {
   entry: ScannedEntry;
   matches: BookMatch[];
   onChoose: (key: string, match: BookMatch) => void;
   onKeepName: (key: string) => void;
-  libraryMode: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -993,11 +941,8 @@ function Matches({
             key={`${match.google_books_id ?? match.isbn13 ?? ""}:${index}`}
             className="flex items-center gap-2 text-xs"
           >
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-paper-700 dark:text-paper-200">
-                {recordLine(match)}
-              </span>
-              {libraryMode && <MatchSource source={match.source ?? ""} />}
+            <span className="min-w-0 flex-1 truncate text-paper-700 dark:text-paper-200">
+              {recordLine(match)}
             </span>
             <button
               type="button"

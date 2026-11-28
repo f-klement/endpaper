@@ -4,8 +4,8 @@ A catalogue answers in MARC21, in Dublin Core, in MODS or in its own JSON, and
 the same rules decide what the values inside mean: which language a code names,
 how many pages an extent statement claims, whether a title is a volume slot
 rather than a work, whether a person's name is in catalogue order. Every decoder
-in `metadata.py`, `marc.py` and `harvester.py` reads a `catalogue.Record` into
-existence and none of them owns these.
+in `metadata.py` and `marc.py` reads a `catalogue.Record` into existence and none
+of them owns these.
 
 **The membership test is one sentence: a rule about what a bibliographic value
 means, independent of the serialisation it arrived in.** It admits everything
@@ -48,9 +48,7 @@ from collections.abc import Iterable
 from typing import Final
 
 from authors import join_authors
-from isbn import normalise as normalise_isbn
-from isbn import parse as parse_isbn
-from models import MAX_PAGE_NUMBER_IN_A_BOOK, MAX_YEAR, MIN_YEAR
+from models import MAX_PAGE_NUMBER_IN_A_BOOK
 
 #: ISO 639-2/B, which is what every MARC derived source emits, to the 639-1
 #: codes stored elsewhere.
@@ -248,14 +246,13 @@ def is_placeholder_title(title: str) -> bool:
 #: `is_physical_book` being what the search paths and K10plus ask.
 #:
 #: **This is the fallback now, and a code test stands in front of it.**
-#: `is_physical_book` is reached from nineteen sources, the whole roster less the
+#: `is_physical_book` is reached from eighteen sources, the whole roster less the
 #: two that never ask it: the DNB, K10plus, the OENB, the NLG, the BNE, the
 #: BN_PL, LIBRIS, Melinda, BIBSYS, the Royal Danish Library, the SBN, PORBASE,
-#: the OSZK, the SNK, the NKP, the BNA, the BNU, the BnF and the Library of
-#: Congress. Fifteen of them state the carrier in codes and are asked those
-#: first, the fourteen MARC ones through
-#: `marc_fields.Fields.describes_a_book`, PORBASE's after the UNIMARC
-#: crosswalk, and the Library of Congress through
+#: the OSZK, the NKP, the BNA, the BNU, the BnF and the Library of Congress.
+#: Fourteen of them state the carrier in codes and are asked those first, the
+#: thirteen MARC ones through `marc_fields.Fields.describes_a_book`, PORBASE's
+#: after the UNIMARC crosswalk, and the Library of Congress through
 #: `metadata._loc_carrier_is_book`. The four Dublin Core sources decide it from
 #: prose alone, and two of them state their own,
 #: `metadata._NKP_ONLINE` and `metadata._BNF_ONLINE`. **The BNA states none,
@@ -265,9 +262,9 @@ def is_placeholder_title(title: str) -> bool:
 #: read by the same reader, states none either.
 #:
 #: **So a reader who has met a new wording should not lengthen this.** Widening
-#: it still changes what all nineteen refuse, and #124 is the record of what that
+#: it still changes what all eighteen refuse, and #124 is the record of what that
 #: buys: the wording is a property of the language, the language list is open,
-#: and fifteen of the nineteen never needed the wording at all.
+#: and fourteen of the eighteen never needed the wording at all.
 _ONLINE_FORMS: Final = r"online[- ]?(?:ressource|resource)|elektronische ressource|streaming"
 _DISC_FORMS: Final = r"audio disc|sound (?:disc|recording)|videodisc|dvd|blu-?ray"
 
@@ -565,98 +562,3 @@ def credit_line(names: Iterable[str]) -> str | None:
     the list may not carry, or one it does not carry yet.
     """
     return join_authors(flip_catalogue_name(name) for name in names)
-
-
-# ── Dublin Core's free lists ─────────────────────────────────────────────────
-#
-# Three rules for values a record lists with no field saying which is which:
-# Dublin Core's `identifier`, `date` and `language`. `harvester._dublin_core_record`,
-# for an OAI-PMH repository, and `metadata._bnf_record` take all three from here.
-# `metadata._nkp_record` takes the date and language rules and stamps the ISBN it
-# was asked for.
-#
-# **Each is written for the repository, the looser source, and stores the same
-# year, ISBN and language as a catalogue specific rule would on the BnF's and the
-# NKP's records.**
-# Over 500 live records from the BnF's SRU and 61 from the NKP's (2026-11-22),
-# the one value a rule of their own would read differently is a BnF `dc:date` of
-# `30707`: no year stands alone in it, and its first four digits, 3070, are past
-# `MAX_YEAR`, so `catalogue.Record` would drop that year anyway. The BnF names
-# every ISBN it lists (`ISBN 2070360245`), so refusing a bare ten digits refuses
-# nothing it writes. The other catalogues `_nkp_record` reads are not measured.
-# `metadata._nkp_claims_isbn` compares every identifier with the ISBN asked for,
-# which is a different question: a ten digit number equal to the one asked about
-# is not one local number in eleven.
-
-
-#: A `dc:identifier` naming itself an ISBN: `URN:ISBN:` as Koha and `oai.py`
-#: write it, `ISBN` as the BnF does, and `ISBN-13:`, `ISBN 13:`, `ISBN10` and the
-#: like. The spaced `13` or `10` must not be followed by a digit, or it would be
-#: the head of an ISBN-10 such as `ISBN 1350000000`, eaten as a label.
-_NAMES_AN_ISBN: Final = re.compile(r"\s*(?:urn:isbn:|isbn(?:-?1[03]|\s1[03](?!\d))?)[\s:]*", re.IGNORECASE)
-
-#: The ISMN's EAN prefix. A score's ISMN-13 is a valid EAN-13 in the Bookland
-#: range, so `isbn.parse` accepts it, and no ISBN is ever issued under it.
-_ISMN_PREFIX: Final = "9790"
-
-
-def isbn_among_identifiers(identifiers: Iterable[str]) -> str | None:
-    """The first of a record's identifiers that is an ISBN, as ISBN-13, or None.
-
-    **One naming itself an ISBN, or a bare ISBN-13, and never a bare ten
-    digits.** The list holds whatever identifies the record, a local number
-    among them, and a ten digit number passes the ISBN-10 checksum one time in
-    eleven. A thirteen digit one must also start with a Bookland prefix, which
-    `isbn.parse` asks, and not with the ISMN's, which it does not. A trailing
-    qualifier, `(pbk.)`, is dropped first.
-    """
-    for value in identifiers:
-        named = _NAMES_AN_ISBN.match(value)
-        candidate = value[named.end() if named else 0 :].split("(", 1)[0]
-        parsed = parse_isbn(candidate)
-        if parsed is None or parsed.startswith(_ISMN_PREFIX):
-            continue
-        # `parsed` is always an ISBN-13, so a bare value must have been one.
-        if named or len(normalise_isbn(candidate)) == len(parsed):
-            return parsed
-    return None
-
-
-#: A run of four digits standing alone, as a year is written in a date.
-_A_YEAR: Final = re.compile(r"(?<!\d)\d{4}(?!\d)")
-
-#: The year of `0001-01-01`, a date never set, though `MIN_YEAR` admits it.
-_UNSET_YEAR: Final = 1
-
-
-def earliest_year(dates: Iterable[str]) -> int | None:
-    """The earliest year among a record's dates, or None.
-
-    **The earliest, not the first**: DSpace writes the date a record was
-    accessioned and made available beside the date it was issued, each a
-    `dc:date`, and the publication is never later than its cataloguing.
-
-    **Only a year `books.year` can hold is a candidate, and year one is not**,
-    since it is a date never set: the minimum date of .NET and several ORMs
-    (`0001-01-01`). Taken as the minimum, a year outside the range would be one
-    `catalogue.Record` drops, costing the real year beside it, and year one
-    would be stored as the year. A database's zero date (`0000-00-00`) is below
-    the range.
-    """
-    years = [
-        year
-        for value in dates
-        for found in _A_YEAR.findall(value)
-        if MIN_YEAR <= (year := int(found)) <= MAX_YEAR and year != _UNSET_YEAR
-    ]
-    return min(years, default=None)
-
-
-def two_letter_language(codes: Iterable[str]) -> str | None:
-    """The first language code as a two letter one, or None.
-
-    ISO 639-2 through `LANGUAGES`, and ISO 639-1 or an RFC 5646 tag (`en-GB`)
-    as itself where that table answers with it. A language's name is not read.
-    """
-    code = next(iter(codes), "").lower().split("-", 1)[0]
-    return LANGUAGES.get(code) or (code if code in LANGUAGES.values() else None)

@@ -11,6 +11,3 @@ GHSA-3g3m-2fjr-6pw4 exp:2027-02-03
 
 # minimatch 10.2.6: build time only, held by glob 11 under workbox-build 7.4.1; the fix is 11.0.1.
 GHSA-g3hv-75wg-m249 exp:2027-02-03
-
-# picomatch 4.0.7: build and test time only, under vite, vitest, tinyglobby and @rollup/pluginutils; the image carries no copy. 4.0.7 is the latest release, no patched one exists, and GitHub withdrew the advisory on 2026-11-18.
-GHSA-fc5q-39xc-vjpf exp:2027-02-17

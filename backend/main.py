@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session as DBSession
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 from starlette.routing import BaseRoute
 from starlette.types import Scope
 
@@ -31,10 +31,8 @@ import metadata
 import notifications
 import readwise as readwise_pull
 import refusals
-import registry
 import settings_store
 import targets
-from auth import get_current_user
 from config import (
     DATA_DIR,
     cors_origins,
@@ -64,9 +62,7 @@ from routers import (
     imports,
     kosync,
     loans,
-    oai,
     opds,
-    patrons,
     public,
     readwise,
     settings,
@@ -333,10 +329,6 @@ def seed_catalogue_targets() -> None:
             else:
                 for name, value in fields.items():
                     setattr(row, name, value)
-        # The registry's entries are constants too, so a disagreement among them
-        # fails the boot the same way. They have no row: `registry` says why.
-        for entry in registry.ENTRIES.values():
-            metadata.resolve(entry.target)
         db.commit()
 
 
@@ -428,13 +420,6 @@ app = FastAPI(
     ),
     generate_unique_id_function=custom_operation_id,
     lifespan=lifespan,
-    # FastAPI's schema route would answer without a session: `_schema` serves it
-    # behind one instead. Its two viewers are gone rather than gated, because the
-    # page's CSP refuses their CDN script and inline bootstrap, so neither ever
-    # rendered: see `middleware._CSP`.
-    openapi_url=None,
-    docs_url=None,
-    redoc_url=None,
     # Ahead of every route's own dependencies: see `refuse_a_nul`.
     dependencies=[Depends(refuse_a_nul)],
 )
@@ -482,7 +467,6 @@ app.include_router(kosync.device)
 app.add_exception_handler(kosync_protocol.Refused, kosync.refused_answer)
 app.include_router(loans.router)
 app.include_router(opds.router)
-app.include_router(patrons.router)
 # Before the SPA mount, like every router, and that matters more here than
 # elsewhere: this one owns `/robots.txt`, which a build emitting one would
 # otherwise be answered from disk. It is also the one router whose routes
@@ -495,9 +479,6 @@ app.include_router(readwise.router)
 # the SPA mount for the reason `/robots.txt` is, since `/sru` is likewise a path
 # outside `/api` that a build emitting a file of that name would otherwise claim.
 app.include_router(sru.router)
-# The third, OAI-PMH, behind the same gate and its own switch, before the SPA
-# mount for `/sru`'s reason: see `routers/oai.py`.
-app.include_router(oai.router)
 app.include_router(settings.router)
 app.include_router(stats.router)
 app.include_router(users.router)
@@ -720,26 +701,6 @@ app.include_router(_fallback)
 # answer a missing cover with the shell: see `CachePolicyStaticFiles`.
 app.include_router(covers.router)
 
-# ── The schema, behind sign in ────────────────────────────────────────────────
-#
-# Every route docstring is in the schema, and the owner ruled it is for members:
-# any signed in member, in every auth mode, by `get_current_user`. That is a
-# bearer token under local and ldap, and the proxy's header under proxy. The
-# client is generated from `app.openapi()` in process, by
-# `scripts/dump_openapi.py`, so the gate is no obstacle to regenerating it. The
-# dependency is on the router and not on `include_router`, which
-# `refusals.declare` would not read.
-_schema = APIRouter(include_in_schema=False, dependencies=[Depends(get_current_user)])
-
-
-@_schema.get("/openapi.json")
-def openapi_document() -> JSONResponse:
-    """The schema, through `app.openapi` so `openapi_with_work_facts` applies."""
-    return JSONResponse(app.openapi())
-
-
-app.include_router(_schema)
-
 # **Below every `include_router` above, and that placement is the rule.** This ran
 # from where `custom_operation_id` is defined until 2026-09-26, so it examined the
 # twelve routers included there and none of `healthz`, the API fallbacks or the
@@ -884,10 +845,8 @@ class CachePolicyStaticFiles(StaticFiles):
         * **Not a path the API owns.** The gate is `is_api_path`, and its list
           is all six of `errors.API_PREFIXES`: `/api/`, `/auth/`, `/covers/`,
           `/openapi.json`, `/docs`, `/redoc`. Not `_fallback`, which claims only
-          the first two: the covers router and `_schema` claim two more, and
-          `/docs` and `/redoc`, whose viewers are gone, stay on the list so a
-          browser opening one gets a JSON 404 rather than the shell. `wants_html`
-          refuses all six here regardless. An API typo
+          the first two: the covers router and FastAPI's own routes claim the
+          rest, and `wants_html` refuses all six here regardless. An API typo
           must stay a JSON 404 rather than becoming a 200 with HTML in it, which
           is the confusing bug `_fallback` was written for.
 

@@ -27,16 +27,13 @@ from bibliographic import (
     BIBLIOGRAPHIC_CODES,
     LANGUAGES,
     credit_line,
-    earliest_year,
     flip_catalogue_name,
     is_placeholder_title,
-    isbn_among_identifiers,
     pages_from_extent,
     split_title_statement,
     strip_isbd_punctuation,
-    two_letter_language,
 )
-from models import MAX_PAGE_NUMBER_IN_A_BOOK, MAX_YEAR
+from models import MAX_PAGE_NUMBER_IN_A_BOOK
 from tests.corpus import BACKEND, application_modules
 from tests.strategies import text_around, witness
 
@@ -431,63 +428,6 @@ class TestOnlyTheBranchThatFlipsACellMayTakeItsFullStop:
         character run of spaces, against 1 microsecond once collapsed.
         """
         assert flip_catalogue_name("a" + " " * 498 + "b") == "a b"
-
-
-class TestAnIsbnAmongARepositorysIdentifiers:
-    @pytest.mark.parametrize(
-        "identifier",
-        [
-            "urn:isbn:9780441172719",
-            "URN:ISBN:0-441-17271-7",
-            "ISBN 0441172717 (pbk.)",
-            "ISBN-13: 978-0-441-17271-9",
-            "ISBN 13: 978-0-441-17271-9",
-            "ISBN13 9780441172719",
-            "ISBN-10: 0-441-17271-7",
-            "978-0-441-17271-9",
-        ],
-    )
-    def test_an_identifier_naming_an_isbn_or_a_bare_isbn13_is_the_isbn(self, identifier):
-        assert isbn_among_identifiers(["https://repository.example/item/7", identifier]) == "9780441172719"
-
-    def test_a_bare_ten_digit_identifier_is_not_taken_for_an_isbn(self):
-        """It passes the ISBN-10 checksum, as one local number in eleven does."""
-        assert isbn_among_identifiers(["0441172717"]) is None
-
-    def test_an_ismn_is_not_taken_for_an_isbn(self):
-        """`9790` is a valid EAN-13 in the Bookland range, and a score's number."""
-        assert isbn_among_identifiers(["9790060115615"]) is None
-
-    def test_a_named_isbn10_starting_13_is_not_read_as_a_label(self):
-        """`ISBN 13` is a label only when no digit follows it."""
-        assert isbn_among_identifiers(["ISBN 1350000000"]) == "9781350000001"
-
-
-class TestTheEarliestYear:
-    def test_the_year_is_the_earliest_date_named(self):
-        """DSpace lists the accession and availability dates beside the issue date."""
-        assert earliest_year(["2015-03-02T10:11:12Z", "1965", "20150302"]) == 1965
-
-    def test_a_zero_date_does_not_cost_the_real_year(self):
-        assert earliest_year(["0000-00-00", "1965"]) == 1965
-
-    def test_an_unset_date_of_year_one_does_not_cost_the_real_year(self):
-        """`0001-01-01` is the minimum date of .NET and several ORMs."""
-        assert earliest_year(["0001-01-01", "1965"]) == 1965
-
-    def test_a_year_past_the_column_is_not_a_candidate(self):
-        assert earliest_year([str(MAX_YEAR + 1)]) is None
-
-
-class TestATwoLetterLanguage:
-    @pytest.mark.parametrize(
-        ("written", "read"), [("ger", "de"), ("en", "en"), ("en-GB", "en"), ("English", None)]
-    )
-    def test_the_language_is_read_as_a_two_letter_code(self, written, read):
-        assert two_letter_language([written]) == read
-
-    def test_no_language_is_none(self):
-        assert two_letter_language([]) is None
 
 
 class TestTheTwoLanguageTablesAreOneTable:

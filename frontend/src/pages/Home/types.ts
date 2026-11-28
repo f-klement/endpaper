@@ -1,7 +1,6 @@
 import { DEFAULT_FILTERS } from "../../lib/bookFilters";
 import type { BookFilters } from "../../lib/bookFilters";
 import {
-  BookOrigin,
   BookSort,
   LendingWillingness,
   OwnershipStatus,
@@ -123,16 +122,6 @@ export const LENDING_FILTERS: {
   { label: "lending.happy", value: LendingWillingness.happy },
   { label: "lending.in_use", value: LendingWillingness.in_use },
   { label: "lending.never", value: LendingWillingness.never },
-];
-
-/** Drawn in library mode only, where a harvest can have created a book. */
-export const ORIGIN_FILTERS: {
-  label: MessageKey;
-  value: BookOrigin | null;
-}[] = [
-  { label: "library.originAll", value: null },
-  { label: "library.originHarvested", value: BookOrigin.harvested },
-  { label: "library.originAdded", value: BookOrigin.added },
 ];
 
 export const SORT_OPTIONS: { label: MessageKey; value: BookSort }[] = [

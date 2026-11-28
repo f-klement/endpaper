@@ -330,7 +330,7 @@ class TestEveryVerbHasAHandler:
     """
 
     def test_the_table_and_the_enum_agree(self):
-        """The live pairing, red the day a member lands without one."""
+        """The live pairing, red the day an eighth member lands without one."""
         assert set(books_router._BULK_HANDLERS) == set(BulkAction)
 
     def test_a_verb_with_no_handler_is_reported(self):

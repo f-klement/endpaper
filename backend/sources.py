@@ -16,23 +16,12 @@ permutation of this roster reproduces today's search belief. The full argument i
 in `docs/decisions.md`.
 """
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from types import MappingProxyType
 from typing import Any, Final
-from urllib.parse import urlsplit
 
-import decoders
 import isbn
 import targets
-from enums import (
-    Capability,
-    CatalogueSource,
-    ClassificationScheme,
-    CredentialKind,
-    RegisteredCatalogue,
-    Transport,
-)
+from enums import Capability, CatalogueSource
 
 
 @dataclass(frozen=True)
@@ -79,7 +68,7 @@ class Measured:
 #: What each lookup source that needs no credential does, measured 2026-08-30,
 #: except the rows from the BNE's down, each of which says its own date.
 #:
-#: **The set is the sixteen that need nothing, which is two short of what a stock
+#: **The set is the fifteen that need nothing, which is two short of what a stock
 #: install asks**, and the gap is the whole of what this heading has to be
 #: careful about. The Argentine and Uruguayan national libraries each need a
 #: login and ship one, so a household that has typed nothing does ask them; they
@@ -156,12 +145,6 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
     # sample has no Hungarian frame; what it answers on Hungarian books is in
     # `metadata`'s block for it.
     CatalogueSource.OSZK: Measured(answered=2, of=500, p90_seconds=0.076),
-    # The same date and the same caveat, a later pass that day. 16 answers: 10
-    # in the Czech frame, which shares `978-80` with Slovak publishing, and 6
-    # Austrian and German editions. The sample has no Slovak frame; what it
-    # answers on Slovak books is in `metadata`'s block for it. Timed with an
-    # ISBN-10 retry the row no longer makes, so the p90 is an upper bound.
-    CatalogueSource.SNK: Measured(answered=16, of=500, p90_seconds=0.066),
 }
 
 #: What the best tier of each size answers, of the same 500 ISBNs as `MEASURED`.
@@ -171,13 +154,10 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
 #: ones, and a per source table has no way of saying so. Each entry is the best
 #: tier of that size that `FIRST_TIER_BUDGET_SECONDS` allows: K10plus alone,
 #: then K10plus with the DNB, then both with LIBRIS, then those three with the
-#: SNK, then those four with the BN_PL, and from six on each size adds one book
-#: or none, up to all ten. That is every source the tier **rule** allows, which
-#: is narrower than every source inside the budget: fourteen are inside the
-#: budget and ten are inside it and are not refused by
-#: `TIER_MAX_CONCENTRATION`. The SNK is among the ten because it adds 4 books to
-#: the pair that ships, fewer than `SLOT_MUST_EARN`, so its concentration is
-#: not read; all 4 are Czech.
+#: BN_PL, and from five on several tiers tie, each adding one book or none, up
+#: to all nine. That is every source the tier **rule** allows, which is
+#: narrower than every source inside the budget: thirteen are inside the budget
+#: and nine are inside it and are not refused by `TIER_MAX_CONCENTRATION`.
 #:
 #: **It exists to pin the tier's size against something other than the tier.**
 #: Without it, a guard that derives the tier from `MEASURED` slices with
@@ -195,18 +175,7 @@ MEASURED: Final[dict[CatalogueSource, Measured]] = {
 #: at **254**, against **222** for the pair that ships. That pair reaches 42
 #: books the shipping pair does not, and **40 of the 42 are Czech**. The BNE,
 #: the NLG and the SBN pairs are the same shape, at 250, 244 and 243.
-TIER_UNION: Final[dict[int, int]] = {
-    1: 210,
-    2: 222,
-    3: 228,
-    4: 232,
-    5: 235,
-    6: 236,
-    7: 237,
-    8: 238,
-    9: 238,
-    10: 238,
-}
+TIER_UNION: Final[dict[int, int]] = {1: 210, 2: 222, 3: 228, 4: 231, 5: 232, 6: 233, 7: 234, 8: 234, 9: 234}
 
 #: How much of what a source adds to the tier may sit in one frame and still be
 #: asked on **every** lookup.
@@ -238,9 +207,9 @@ TIER_MAX_CONCENTRATION: Final = 2 / 3
 #: missed it answers, over the same 500 and the frames committed beside them.
 #:
 #: **The tail's rule is marginal and no per source count can express it.** In
-#: the order below, the pooled counts read 37, 9, 35, 99, 40, 2, 16, 237, 55,
-#: 59, 57, 70, 32 and 48, and the answers to books the leading pair missed 34,
-#: 30, 29, 26, 25, 17, 4, 90, 1, 43, 40, 9, 7 and 7. So the pooled rule would ask the
+#: the order below, the pooled counts read 37, 9, 35, 99, 40, 2, 237, 55, 59,
+#: 57, 70, 32 and 48, and the answers to books the leading pair missed 34, 30,
+#: 29, 26, 25, 17, 90, 1, 43, 40, 9, 7 and 7. So the pooled rule would ask the
 #: SBN second, LIBRIS third and the OeNB ahead of the NLG; the books the tier
 #: missed put LIBRIS and the two Nordic union catalogues last.
 #:
@@ -250,16 +219,13 @@ TIER_MAX_CONCENTRATION: Final = 2 / 3
 #: none, a frame of 50 drawn the way the sample's frames were is committed
 #: beside it, and every row is counted over that too. There are three: Polish,
 #: Danish and Hungarian, 50 ISBNs each from Wikidata by publisher country,
-#: measured 2026-11-16, with the SBN, PORBASE, OSZK and SNK columns 2026-11-17.
-#: Of the 278 books in the 500 the leading pair missed, the rows below answer
-#: 34, 0, 0, 26, 25, 0, 4, 82, 1, 42, 40, 6, 3 and 2; of the 39 in the Polish
-#: frame, 0, 30, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 2 and 0; of the 39 in the Danish
-#: one, 0, 0, 29, 0, 0, 0, 0, 1, 0, 0, 0, 3, 1 and 4; of the 22 in the
-#: Hungarian one, 0, 0, 0, 0, 0, 17, 0, 3, 0, 1, 0, 0, 1 and 1. Each figure here
-#: is the sum. The Italian and Portuguese books are the sample's own frames, and
-#: so are the SNK's: its remit is `978-80`, which Czech and Slovak publishers
-#: share and the sample's Czech frame holds, so it is counted on those fifty
-#: and no Slovak frame is committed. **A frame is
+#: measured 2026-11-16, with the SBN, PORBASE and OSZK columns 2026-11-17. Of
+#: the 278 books in the 500 the leading pair missed, the rows below answer 34,
+#: 0, 0, 26, 25, 0, 82, 1, 42, 40, 6, 3 and 2; of the 39 in the Polish frame,
+#: 0, 30, 0, 0, 0, 0, 4, 0, 0, 0, 0, 2 and 0; of the 39 in the Danish one, 0,
+#: 0, 29, 0, 0, 0, 1, 0, 0, 0, 3, 1 and 4; of the 22 in the Hungarian one, 0,
+#: 0, 0, 0, 0, 17, 3, 0, 1, 0, 0, 1 and 1. Each figure here is the sum. The
+#: Italian and Portuguese books are the sample's own frames. **A frame is
 #: committed for a remit and for nothing else**: a country frame for a source
 #: with no remit would count its own catalogue's books over every other row's,
 #: and that row is ranked on the whole sample like the rest.
@@ -270,7 +236,7 @@ TIER_MAX_CONCENTRATION: Final = 2 / 3
 #: ISBN in a named group, a swap of the two changes the walk for no other book,
 #: since the remitted row is never asked about one. **A `979` ISBN, or one whose
 #: group `isbn.registration_group` cannot name, is the exception**: `_serves`
-#: asks every remitted row about it, so such a lookup asks every remitted row
+#: asks every remitted row about it, so such a lookup asks the six remitted rows
 #: ahead of Open Library before it, where none is likely to answer, at the cost
 #: `SERVES_GROUPS` states. The owner accepted that cost. Two rows that **both have a remit, or
 #: neither**, are compared on this table.
@@ -291,11 +257,10 @@ TIER_MAX_CONCENTRATION: Final = 2 / 3
 #: ones the Royal Danish Library 29 and Open Library 1, and on its `978-3` ones
 #: the OeNB 1 and Open Library 3, against 0 for the NKP. On its Italian books
 #: the SBN answers 26 and Open Library 13, on its Portuguese ones PORBASE 25
-#: and Open Library 11, on its Hungarian ones the OSZK 17 and Open Library 3,
-#: and on its `978-80` ones the SNK 4 and Open Library 1, against 40 for the
-#: NKP. So the NLG, the BN_PL, the Royal Danish Library, the SBN, PORBASE, the
-#: OSZK and the SNK go ahead of Open Library, in that order by this table, and
-#: the OeNB behind Open Library and ahead of the NKP.
+#: and Open Library 11, and on its Hungarian ones the OSZK 17 and Open Library
+#: 3. So the NLG, the BN_PL, the Royal Danish Library, the SBN, PORBASE and the
+#: OSZK go ahead of Open Library, in that order by this table, and the OeNB
+#: behind Open Library and ahead of the NKP.
 #:
 #: **Two unremitted rows tie, Melinda and BIBSYS at 7**, and the rule says
 #: nothing about a tie between two rows it compares on this table. Melinda goes
@@ -318,7 +283,6 @@ TAIL_MARGINAL: Final[dict[CatalogueSource, int]] = {
     CatalogueSource.SBN: 26,
     CatalogueSource.PORBASE: 25,
     CatalogueSource.OSZK: 17,
-    CatalogueSource.SNK: 4,
     CatalogueSource.OPEN_LIBRARY: 90,
     CatalogueSource.OENB: 1,
     CatalogueSource.NKP: 43,
@@ -330,8 +294,8 @@ TAIL_MARGINAL: Final[dict[CatalogueSource, int]] = {
 
 #: For each tail source with a remit, what it and each tail source with none
 #: answer of the books the leading pair missed **inside that remit**: 46 Greek,
-#: 38 Polish, 37 Danish, 5 in `978-3`, 30 Italian, 33 Portuguese, 20
-#: Hungarian and 41 in `978-80`, over the sample and the frames as
+#: 38 Polish, 37 Danish, 5 in `978-3`, 30 Italian, 33 Portuguese and 20
+#: Hungarian, over the sample and the frames as
 #: `TAIL_MARGINAL` counts them.
 #:
 #: Only the pairs `TAIL_MARGINAL`'s rule compares this way are here, a remitted
@@ -402,15 +366,6 @@ TAIL_INSIDE_REMIT: Final[dict[CatalogueSource, dict[CatalogueSource, int]]] = {
         CatalogueSource.MELINDA: 1,
         CatalogueSource.BIBSYS: 1,
     },
-    CatalogueSource.SNK: {
-        CatalogueSource.SNK: 4,
-        CatalogueSource.OPEN_LIBRARY: 1,
-        CatalogueSource.NKP: 40,
-        CatalogueSource.BNE: 0,
-        CatalogueSource.LIBRIS: 0,
-        CatalogueSource.MELINDA: 0,
-        CatalogueSource.BIBSYS: 0,
-    },
 }
 
 #: What one more concurrent slot has to answer before it is worth its request.
@@ -459,16 +414,16 @@ FIRST_TIER_BUDGET_SECONDS: Final = 1.0
 #: one of them**. A reorder is never the fix for a book the chain misses.
 #:
 #: **That modelling ran over the seven sources that needed no credential then**,
-#: which is eleven short of what a stock install asks now: the Argentine and
+#: which is ten short of what a stock install asks now: the Argentine and
 #: Uruguayan rows ship the logins their libraries publish, and the BN_PL,
-#: LIBRIS, the three Nordic catalogues and the four Z39.50 ones arrived after
+#: LIBRIS, the three Nordic catalogues and the three Z39.50 ones arrived after
 #: it. It is left as measured rather than bumped: the conclusion is that
 #: permutation does not move coverage, and adding a source the modelling never
 #: permuted would not support it. The BN_PL answers no book of the 500 that the
 #: seven do not, LIBRIS one, BIBSYS and the Royal Danish Library one more
 #: between them and Melinda one, so the twelve answer 398; the SBN adds 15,
-#: PORBASE 16 more and the OSZK and the SNK none, so the sixteen that need
-#: nothing answer 429.
+#: PORBASE 16 more and the OSZK none, so the fifteen that need nothing answer
+#: 429.
 #:
 #: **The first tier is a latency budget.** `ALWAYS_ASKED` sources are gathered,
 #: so the tier costs its slowest member rather than their sum, and membership is
@@ -489,7 +444,6 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
     CatalogueSource.SBN,
     CatalogueSource.PORBASE,
     CatalogueSource.OSZK,
-    CatalogueSource.SNK,
     CatalogueSource.OPEN_LIBRARY,
     CatalogueSource.OENB,
     CatalogueSource.NKP,
@@ -526,7 +480,7 @@ DEFAULT_ORDER: Final[tuple[CatalogueSource, ...]] = (
 #: a different question, and `metadata.resolve` is where it went: whether the
 #: reader a row names can actually read what the target answers with.
 LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    source for source, target in targets.SEEDED.items() if target.can(Capability.ANSWERS_ISBN)
+    target.source for target in targets.SEEDED.values() if target.can(Capability.ANSWERS_ISBN)
 )
 
 #: The sources that can answer a title search.
@@ -566,7 +520,7 @@ LOOKUP_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
 #: `targets.SEEDED[CatalogueSource.NKP]` does not declare
 #: `Capability.ANSWERS_TITLE_SEARCH`, on the row, with the measurement beside it.
 SEARCH_SOURCES: Final[frozenset[CatalogueSource]] = frozenset(
-    source for source, target in targets.SEEDED.items() if target.can(Capability.ANSWERS_TITLE_SEARCH)
+    target.source for target in targets.SEEDED.values() if target.can(Capability.ANSWERS_TITLE_SEARCH)
 )
 
 #: Catalogues whose title search does not fit the default deadline, so the
@@ -584,7 +538,7 @@ SLOW_SEARCHES: Final[frozenset[CatalogueSource]] = frozenset()
 #: Sources that cost money per request, so asking one for a book another source
 #: already answered is a bill for nothing. See `Plan.lookup_together`.
 METERED: Final[frozenset[CatalogueSource]] = frozenset(
-    source for source, target in targets.SEEDED.items() if target.can(Capability.METERED)
+    target.source for target in targets.SEEDED.values() if target.can(Capability.METERED)
 )
 
 #: Sources that need a credential the household supplies, so an install without
@@ -603,7 +557,7 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: had to be checked rather than assumed when they came apart.
 #:
 #: **This is much of the chain's coverage, and most installs do not have it.**
-#: The eighteen sources a stock install asks answer 441 of the 500 ISBNs behind `MEASURED` and miss
+#: The seventeen sources a stock install asks answer 441 of the 500 ISBNs behind `MEASURED` and miss
 #: 59, and outside German language publishing they miss 55 of 400. #91
 #: measured the same books with a key: Italy 36% missed keyless against 0% with
 #: one, Greece 86% against 54%. So "the chain covers this country" is a claim
@@ -622,13 +576,13 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #:
 #: The 395 stays stated because it is what was measured and because it is the
 #: figure for an install that pins both `CATALOGUE_CREDENTIAL_BNA` and
-#: `CATALOGUE_CREDENTIAL_BNU` to something it cannot use: the sixteen sources
+#: `CATALOGUE_CREDENTIAL_BNU` to something it cannot use: the fifteen sources
 #: that need no credential at all answer 429 of the 500 and miss 71. The first
 #: seven answered 395; the BN_PL adds no book to them, LIBRIS one, an Italian
 #: edition, BIBSYS and the Royal Danish Library one between them, a Brazilian
 #: book both hold, and Melinda one, a Greek book. Nothing else in the chain
 #: holds any of those three. The SBN then adds 15, all Italian, PORBASE 16, all
-#: Portuguese, and the OSZK and the SNK none.
+#: Portuguese, and the OSZK none.
 #:
 #: **"Most of the chain's coverage" was true when it was written and is not
 #: now**, which is why this paragraph says "much". Five things moved the free
@@ -640,24 +594,7 @@ METERED: Final[frozenset[CatalogueSource]] = frozenset(
 #: two steps rather than one: **7 of 50 keyless before either change, 8 with the
 #: `020` fix alone, and 39 with the NLG**, none of it involving a key.
 NEEDS_A_KEY: Final[frozenset[CatalogueSource]] = frozenset(
-    source for source, target in targets.SEEDED.items() if target.can(Capability.NEEDS_A_CREDENTIAL)
-)
-
-#: The sources whose credential is an institution's login rather than this
-#: deployment's own key: `targets.Target.credential_kind`.
-#:
-#: **The one subject both credential loops in `settings_store` range over**, the
-#: one that admits a source to the plan on a held login and the one that
-#: resolves the login its request carries. One set rather than a predicate at
-#: each, because a source in the first and not the second goes out
-#: unauthenticated with nothing saying so.
-#: `metadata.resolve` refuses a LOGIN row whose door carries none, at boot, so
-#: every member here is a row whose request a login can ride.
-#:
-#: `SHIPS_A_CREDENTIAL` below is a subset by construction:
-#: `targets.Target._check_waivers` refuses a shipped pair on any other kind.
-NEEDS_A_LOGIN: Final[frozenset[CatalogueSource]] = frozenset(
-    source for source, target in targets.SEEDED.items() if target.credential_kind is CredentialKind.LOGIN
+    target.source for target in targets.SEEDED.values() if target.can(Capability.NEEDS_A_CREDENTIAL)
 )
 
 #: The sources this build carries a login for, because their library publishes
@@ -672,7 +609,7 @@ NEEDS_A_LOGIN: Final[frozenset[CatalogueSource]] = frozenset(
 #: `targets.ShippedCredential` is why any of these exist. Derived from the rows,
 #: so a second one is a field on a row rather than a list to remember.
 SHIPS_A_CREDENTIAL: Final[frozenset[CatalogueSource]] = frozenset(
-    source for source, target in targets.SEEDED.items() if target.shipped_credential is not None
+    target.source for target in targets.SEEDED.values() if target.shipped_credential is not None
 )
 
 #: The lookup sources a household that has configured nothing actually asks.
@@ -754,8 +691,7 @@ STOCK_INSTALL_ASKS: Final[frozenset[CatalogueSource]] = LOOKUP_SOURCES - (NEEDS_
 #: inside the budget. As a third slot it earns **1**, a Brazilian book the tail
 #: reaches anyway, so it buys **0 books**. BIBSYS and Melinda, union
 #: catalogues with p90s of 0.362s and 0.251s, earn **2** and **3** and buy
-#: **0** on the same reading, and so does the SNK, p90 0.066s, which earns
-#: **4**, all Czech books the tail reaches through it.
+#: **0** on the same reading.
 #:
 #: **The SBN would earn a slot and is refused on what it adds.** Fast, p90
 #: 0.337s with its ISBN-10 retry, and 99 answers, more than the DNB's 91, so the
@@ -774,20 +710,20 @@ ALWAYS_ASKED: Final = 2
 #: sources whose remit is one, and nothing at all for the sources whose is not.
 #:
 #: **What it buys**, modelled over the 500 ISBN sample across `lookup`'s two
-#: phases: **2.376s mean without this table, 1.263s with it**, for the same
-#: **429** books, with **781** tail requests instead of **2,325**. Per frame it
-#: runs from 0.166s, in the German frame where the leading pair answers most
-#: books before the tail is reached, to 2.209s in the Czech one. Seven remitted
-#: rows head the tail, so without the table all seven are asked on every tail
+#: phases: **2.366s mean without this table, 1.268s with it**, for the same
+#: **429** books, with **748** tail requests instead of **2,151**. Per frame it
+#: runs from 0.163s, in the German frame where the leading pair answers most
+#: books before the tail is reached, to 2.239s in the Czech one. Six remitted
+#: rows head the tail, so without the table all six are asked on every tail
 #: walk and with it only inside their groups; the sample holds no `978-83`,
 #: `978-87`, `978-963` or `978-615` ISBN at all. LIBRIS, Melinda and BIBSYS add
 #: to both arms alike, having no remit.
 #:
 #: **What a lookup this table cannot narrow pays**, a `979` ISBN or one whose
-#: group `isbn.registration_group` cannot name: all seven remitted rows before
-#: Open Library. Their `MEASURED` p90s sum to about 3.4s, against about 1.3s for
+#: group `isbn.registration_group` cannot name: all six remitted rows before
+#: Open Library. Their `MEASURED` p90s sum to about 3.3s, against about 1.3s for
 #: the three remitted rows that preceded the Z39.50 ones. A lookup has no
-#: overall deadline, so each of the four Z39.50 rows that cannot be reached
+#: overall deadline, so each of the three Z39.50 rows that cannot be reached
 #: costs up to `z3950.TIMEOUT_SECONDS` on top.
 #:
 #: **Those figures are the chain of sources that need no credential**, and the
@@ -833,10 +769,7 @@ ALWAYS_ASKED: Final = 2
 #: ones clear it with no book of their own in the sample at all, which is the
 #: bar's own reading: what it measures is a book lost outside the remit, and the
 #: BN_PL answers 9 outside it and the Royal Danish Library 35, every one held by
-#: a source still asked about it. The SNK clears it the same way: it answers 6
-#: of the 500 outside `978-80`, 4 Austrian and 2 German, each held by a source
-#: still asked about it. **`978-80` is the NKP's group too**, and the NKP carries
-#: no remit, so a Czech or Slovak book is asked of both.
+#: a source still asked about it.
 #:
 #: **Derived from the rows rather than written out here.** The literal lived in
 #: this module until the owner's decision of 2026-09-07, and the reason for
@@ -847,7 +780,7 @@ ALWAYS_ASKED: Final = 2
 #: which is what keeps `_serves` reading "no row" and "no groups" as one thing;
 #: its docstring's last paragraph is the argument.
 SERVES_GROUPS: Final[dict[CatalogueSource, frozenset[str]]] = {
-    source: target.serves_groups for source, target in targets.SEEDED.items() if target.serves_groups
+    target.source: target.serves_groups for target in targets.SEEDED.values() if target.serves_groups
 }
 
 
@@ -924,26 +857,12 @@ class Preference:
 class Plan:
     """Which sources to ask on one request, resolved once and passed in.
 
-    **`preferences` is a permutation of the roster, always.** `parse` guarantees
-    it, so nothing downstream has to handle a name `targets.SEEDED` has no row
-    for, and there is no `KeyError` to reach on the hourly path.
+    **A permutation of the roster, always.** `parse` guarantees it, so nothing
+    downstream has to handle a name `targets.SEEDED` has no row for, and
+    there is no `KeyError` to reach on the hourly path.
     """
 
     preferences: tuple[Preference, ...]
-    #: The registry entries this library picked, as the snapshot's own targets,
-    #: asked after `lookup_in_turn` and on no other path.
-    #:
-    #: **The tail, and lookup only**, the place `docs/decisions.md` gives a new
-    #: catalogue: nothing measured where an entry would earn a slot, so it costs
-    #: a request only on an ISBN the whole chain missed, never one in the tier
-    #: `ALWAYS_ASKED` fixes. `registry.with_picks` fills it from the stored pick,
-    #: and only `catalogue_access` calls that, so a plan parsed from settings,
-    #: and any plan `in_force` returns, carries none.
-    #:
-    #: **Targets rather than names**, because `metadata` reaches no database and
-    #: imports nothing that does, so it cannot look a name up in `registry`. Each
-    #: is `registry.ENTRIES`' own, so no address comes from a stored row.
-    picked: tuple[targets.Target, ...] = ()
 
     @property
     def asked(self) -> tuple[CatalogueSource, ...]:
@@ -1050,28 +969,14 @@ class Plan:
     def lookup_chain(self) -> tuple[CatalogueSource, ...]:
         """Every enabled source that can answer an ISBN at all, in order.
 
-        **Public because it is the roster a narrowed lookup may name**, and the
-        seeded half of `lookup_roster`, whose emptiness is what
-        `metadata.Outcome.NO_SOURCES` means. That is a different question from
-        what any one ISBN is asked. `lookup_in_turn` can be empty because this
-        library's catalogues do not reach one registration group, which is a
-        fact about the book; the roster being empty is a fact about the
-        library, and it is the one the 409 and its "switch one back on" wording
-        describe.
+        **Public because emptiness here is what `metadata.Outcome.NO_SOURCES`
+        means**, and that is a different question from what any one ISBN is
+        asked. `lookup_in_turn` can be empty because this library's catalogues
+        do not reach one registration group, which is a fact about the book;
+        this being empty is a fact about the library, and it is the one the 409
+        and its "switch one back on" wording describe.
         """
         return tuple(name for name in self.asked if name in LOOKUP_SOURCES)
-
-    @property
-    def lookup_roster(self) -> tuple[CatalogueSource | RegisteredCatalogue, ...]:
-        """Everything an ISBN lookup may ask: `lookup_chain`, then the picks.
-
-        **Public because emptiness here is what `metadata.Outcome.NO_SOURCES`
-        means**: a library that switched every seeded source off and picked a
-        registry entry still has a catalogue to ask, and its miss is a fact
-        about the book. It is also the lookup cache's key, so picking or
-        dropping an entry is never answered from a lookup made before it.
-        """
-        return (*self.lookup_chain, *(target.source for target in self.picked))
 
 
 #: What a library that has never opened the settings screen gets.
@@ -1208,92 +1113,6 @@ class Described:
     #: `asked_first` first, which is what `ProviderSection.statusOf` does and
     #: says.
     serves_groups: tuple[str, ...]
-    #: **How this catalogue is asked, for a policy to be written against.** A
-    #: compliance reader cannot tell from a name whether queries leave in clear
-    #: text or reach a commercial API, so the row says. Every value is read off
-    #: the source's `targets.Target` by `_how_asked` and none is stored; the
-    #: address itself is deliberately not among them, because it changes without
-    #: the policy changing.
-    protocol: Transport
-    #: The SRU version spoken, and empty on every other transport.
-    protocol_version: str
-    #: The `recordSchema` asked for over SRU, the record syntax over Z39.50, and
-    #: empty where none is named: the two JSON APIs, and the SRU targets whose
-    #: answer carries its own Dublin Core whatever is asked for.
-    record_schema: str
-    #: Whether the address is `https`. False for plain HTTP **and** for every
-    #: Z39.50 door, which has no transport security here at all.
-    encrypted: bool
-    credential: CredentialKind
-    #: The classification schemes this catalogue's reader can supply, in the
-    #: enum's order. `CLASSIFIES` decides it and says why it is keyed on
-    #: the reader; the screen reads it to warn before switching off the last
-    #: enabled supplier of one.
-    classification_schemes: tuple[ClassificationScheme, ...]
-
-
-#: Which classification schemes each catalogue reader can put into a record's
-#: `headings`, so a source's suppliers follow from `targets.Target.reader`.
-#:
-#: **Keyed on the reader, never on the source.** Which schemes a record can
-#: carry is decided by the parser: `MARC_GND` harvests the GND headings for
-#: every row whose reader it is, and Open Library supplies LCC beside the
-#: Library of Congress. A table per source would have
-#: named the DNB alone for GND and the Library of Congress alone for LCC, which
-#: is what the provider list's sole supplier warning must not believe.
-#:
-#: **Here rather than beside the readers**: `decoders.py` imports nothing of
-#: this application, and the implementations are `metadata.py`'s, which the
-#: settings screen should not have to import. This module is what the screen
-#: reads through `describe`.
-#:
-#: **A capability, not a promise about any one catalogue's records.** A reader
-#: that can produce a scheme counts as a supplier whether or not a particular
-#: library fills those fields, so the warning that reads this errs towards
-#: silence rather than towards a false alarm.
-#:
-#: `tests/test_decoders.py::TestEveryReaderDeclaresTheSchemesItProduces` holds
-#: each entry to the decoder it describes from both sides: every declared
-#: scheme is produced from a literal, and nothing drawn produces one undeclared.
-CLASSIFIES: Final[Mapping[decoders.Reader, frozenset[ClassificationScheme]]] = MappingProxyType(
-    {
-        decoders.Reader.MARC_GND: frozenset({ClassificationScheme.DDC, ClassificationScheme.GND}),
-        decoders.Reader.MARC_PLAIN: frozenset({ClassificationScheme.DDC}),
-        # Converted to MARC21 and read through the `MARC_PLAIN` arm: `676` is
-        # renamed `082`, and nothing else carries a scheme across.
-        decoders.Reader.UNIMARC: frozenset({ClassificationScheme.DDC}),
-        decoders.Reader.MODS: frozenset(
-            {ClassificationScheme.DDC, ClassificationScheme.LCC, ClassificationScheme.LCSH}
-        ),
-        decoders.Reader.OPEN_LIBRARY: frozenset({ClassificationScheme.DDC, ClassificationScheme.LCC}),
-        decoders.Reader.DUBLIN_CORE: frozenset(),
-        # Held by reading alone: the test's property arm draws from
-        # `metadata.READERS`, which holds neither. Neither builds `headings`
-        # today, and one that starts to errs towards a false alarm here.
-        decoders.Reader.DUBLIN_CORE_BARE: frozenset(),
-        decoders.Reader.GOOGLE_BOOKS: frozenset(),
-    }
-)
-
-# Refused at import rather than left to a test: a catalogue reader missing here
-# would raise a `KeyError` on the settings screen for every source it reads.
-if set(CLASSIFIES) != decoders.CATALOGUE_READERS:
-    _unplaced = set(CLASSIFIES) ^ decoders.CATALOGUE_READERS
-    raise RuntimeError(f"sources.CLASSIFIES must name every catalogue reader: {_unplaced}")
-
-
-def _how_asked(source: CatalogueSource) -> dict[str, Any]:
-    """The fields of `Described` that read the source's row, and nothing else."""
-    target = targets.SEEDED[source]
-    schemes = CLASSIFIES[target.reader]
-    return {
-        "protocol": target.transport,
-        "protocol_version": target.sru_version,
-        "record_schema": target.record_schema,
-        "encrypted": urlsplit(target.base_url).scheme == "https",
-        "credential": target.credential_kind,
-        "classification_schemes": tuple(scheme for scheme in ClassificationScheme if scheme in schemes),
-    }
 
 
 def in_force(plan: Plan, ready: frozenset[CatalogueSource]) -> Plan:
@@ -1316,11 +1135,6 @@ def in_force(plan: Plan, ready: frozenset[CatalogueSource]) -> Plan:
     `stored_catalogue_sources` is what the settings screen reads, for the reason
     `get_raw` exists beside `in_force`: a screen must show what an admin typed,
     or they turn a switch on and watch it come back off.
-
-    **The picks do not survive**, deliberately: this is what a narrowed lookup
-    goes through, and a lookup narrowed to the catalogues a cataloguer named
-    asks only those. The standing plan gains its picks after this, in
-    `catalogue_access`.
     """
     return Plan(
         tuple(Preference(entry.source, entry.enabled and entry.source in ready) for entry in plan.preferences)
@@ -1387,7 +1201,6 @@ def describe(
             # make one field answer two questions and lose the ability to say
             # "regional, but promoted, so asked about everything".
             serves_groups=tuple(sorted(SERVES_GROUPS.get(entry.source, ()))),
-            **_how_asked(entry.source),
         )
         for entry in plan.preferences
     )

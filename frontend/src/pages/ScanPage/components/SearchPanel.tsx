@@ -1,4 +1,4 @@
-import type { FormEvent, ReactNode } from "react";
+import { useMemo, type FormEvent } from "react";
 
 import type { BookMatch, CatalogueSource } from "../../../api/generated/model";
 import { Button, HelpButton } from "../../../components";
@@ -6,7 +6,6 @@ import { errorText } from "../../../components/ErrorState";
 import { useTranslation } from "../../../i18n";
 import { catalogueName } from "../../../lib/catalogueName";
 import { CoverImage } from "../../components";
-import MatchSource, { useNameList } from "./MatchSource";
 
 interface SearchPanelProps {
   /**
@@ -32,18 +31,6 @@ interface SearchPanelProps {
   onSearchHarder: () => void;
   isSearchingHarder: boolean;
   hasSearchedHarder: boolean;
-  /**
-   * Whether each row names the catalogues that produced it. A cataloguer must
-   * be able to say where a record came from; a household never sees it.
-   */
-  libraryMode: boolean;
-  /**
-   * The "ask only these" control, under the box, in library mode. A slot rather
-   * than its props, so this panel stays a renderer of results.
-   */
-  narrowing?: ReactNode;
-  /** The line naming what the search on screen was narrowed to, above its answer. */
-  narrowedTo?: ReactNode;
 }
 
 /** A one-line description of an edition, skipping the parts it lacks. */
@@ -80,9 +67,6 @@ export default function SearchPanel({
   onSearchHarder,
   isSearchingHarder,
   hasSearchedHarder,
-  libraryMode,
-  narrowing,
-  narrowedTo,
 }: SearchPanelProps) {
   const { t } = useTranslation();
 
@@ -117,7 +101,6 @@ export default function SearchPanel({
           {t("search.button")}
         </Button>
       </form>
-      {narrowing}
 
       {/* Not a disabled state: search works. This says what a key adds, so an
           admin knows the option exists without anyone else being blocked. */}
@@ -143,8 +126,6 @@ export default function SearchPanel({
         </p>
       )}
 
-      {narrowedTo}
-
       {isEmpty && (
         <p className="text-sm text-paper-600 text-center mt-4 dark:text-paper-400">
           {t("search.noResults")}
@@ -168,11 +149,7 @@ export default function SearchPanel({
         hasSearchedHarder={hasSearchedHarder}
       />
 
-      <Matches
-        matches={matches}
-        onChoose={onChoose}
-        libraryMode={libraryMode}
-      />
+      <Matches matches={matches} onChoose={onChoose} />
     </div>
   );
 }
@@ -200,8 +177,14 @@ function SlowCatalogues({
   SearchPanelProps,
   "unasked" | "onSearchHarder" | "isSearchingHarder" | "hasSearchedHarder"
 >) {
-  const { t } = useTranslation();
-  const names = useNameList();
+  const { t, locale } = useTranslation();
+  // The same conjunction list the settings screen uses for registration groups,
+  // and for the same reason: it gets "and" right in both languages and handles
+  // one, two and three without a branch here.
+  const names = useMemo(
+    () => new Intl.ListFormat(locale, { type: "conjunction" }),
+    [locale],
+  );
 
   return (
     <>
@@ -253,8 +236,7 @@ function SlowCatalogues({
 function Matches({
   matches,
   onChoose,
-  libraryMode,
-}: Pick<SearchPanelProps, "matches" | "onChoose" | "libraryMode">) {
+}: Pick<SearchPanelProps, "matches" | "onChoose">) {
   const { t } = useTranslation();
   if (matches.length === 0) return null;
   return (
@@ -269,7 +251,6 @@ function Matches({
             key={`${match.google_books_id ?? match.isbn13 ?? ""}-${index}`}
             match={match}
             onChoose={onChoose}
-            libraryMode={libraryMode}
           />
         ))}
       </ul>
@@ -283,11 +264,9 @@ function Matches({
 function MatchRow({
   match,
   onChoose,
-  libraryMode,
 }: {
   match: BookMatch;
   onChoose: (match: BookMatch) => void;
-  libraryMode: boolean;
 }) {
   return (
     <li>
@@ -314,7 +293,6 @@ function MatchRow({
           <span className="block text-xs text-paper-600 truncate mt-0.5 dark:text-paper-400">
             {summarise(match)}
           </span>
-          {libraryMode && <MatchSource source={match.source ?? ""} />}
         </span>
       </button>
     </li>

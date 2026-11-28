@@ -23,14 +23,12 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import func, nullslast, or_
 from sqlalchemy.orm import Query as RowQuery
 from sqlalchemy.orm import Session, joinedload
 
-import accession
 import authority
 import book_columns
 import catalogue
@@ -52,11 +50,8 @@ import koreader_highlights
 import lending
 import marc
 import metadata
-import pending_headings
 import recognition
 import settings_store
-import vocabularies
-import vocabulary_copy
 from auth import require_admin
 from authors import AUTHOR_NAME_MAX, MATCHERS, MatcherName
 from authorship import (
@@ -67,10 +62,9 @@ from authorship import (
     RecordedAssertions,
 )
 from categories import join_categories
-from classifications import add_headings, bounded_headings, unknown_schemes
-from database import hold_book_ceilings, on_commit, on_rollback
+from classifications import add_headings, bounded_headings
+from database import on_commit
 from dependencies import (
-    BookForAdmin,
     BookForOwner,
     BookForRead,
     BookForWrite,
@@ -90,15 +84,11 @@ from dependencies import headings as parse_headings
 from enums import (
     EXPORT_MEDIA_TYPES,
     AuthorityScheme,
-    AuthoritySupplier,
     BookFormat,
     BookIdentifierScheme,
-    BookOrigin,
     BookSort,
     BulkAction,
-    CatalogueSource,
     ExportFormat,
-    HeadingUse,
     LendingWillingness,
     Locale,
     OwnershipStatus,
@@ -113,21 +103,17 @@ from logvalues import clipped
 from models import (
     AUTHOR_KEY_MAX,
     AUTHOR_LINE_MAX,
-    CLASSIFICATION_SCHEME_CODE_MAX,
     DIGITAL_REFERENCE_PATH_MAX,
     ISBN_MAX,
     LOCATION_MAX,
-    MAX_COVER_IMAGES_PER_BOOK,
     MAX_SERIES_INDEX,
     QUOTE_TEXT_MAX,
     SERIES_NAME_MAX,
     TITLE_MAX,
-    VOCABULARY_LABEL_MAX,
     AccessRequest,
     AuthorIdentifier,
     Book,
     BookIdentifier,
-    CoverImage,
     CustomField,
     DigitalReference,
     Highlight,
@@ -138,7 +124,6 @@ from models import (
     User,
     book_tags,
     copy_group_token,
-    harvested_is_nobodys_and_public,
     highlight_visible_to,
     note_visible_to,
 )
@@ -146,7 +131,6 @@ from ratelimit import (
     authority_limiter,
     cover_backfill_limiter,
     export_limiter,
-    heading_suggest_limiter,
 )
 from reading import Reading, Records
 from refusals import refuses
@@ -184,13 +168,10 @@ from schemas import (
     BulkRequest,
     BulkResult,
     ClassificationFacets,
-    ClassificationIn,
-    ClassificationOut,
     CollectionAssign,
     ConfirmedIdentifierOut,
     CopyCreate,
     CoverBackfillOut,
-    CoverImageOut,
     CustomFieldCreate,
     CustomFieldOut,
     CustomFieldRename,
@@ -213,7 +194,6 @@ from schemas import (
     LocationOut,
     MergeRequest,
     MissingDigitalReferenceOut,
-    NarrowableCatalogue,
     NoteCreate,
     NoteOut,
     OwnershipUpdate,
@@ -227,7 +207,6 @@ from schemas import (
     QuoteWithBookOut,
     RefusedAssertionOut,
     SeriesOut,
-    SuggestingVocabularyOut,
     SweepIn,
     SweepOut,
     TagCreate,
@@ -708,58 +687,12 @@ def delete_custom_field(
     logger.info("Deleted custom field %r and %d value(s) under it", name, removed)
 
 
-#: The per request narrowing, as the lookup and the search take it.
-#:
-#: **Bounded by the roster's size**, so a query string repeating one name cannot
-#: grow the set the server builds from it. Absent asks the standing plan, and
-#: there is no empty value to send: the narrowed constructors refuse an empty set.
-_Only = Annotated[
-    list[CatalogueSource] | None,
-    Query(
-        max_length=len(CatalogueSource),
-        description=(
-            "Library mode only. Ask only these catalogues, for this request and no other. "
-            "Each must be one this Library asks for this kind of request, or the request is refused."
-        ),
-    ),
-]
-
-
-@router.get("/lookup/catalogues", response_model=list[NarrowableCatalogue])
-@refuses(403)
-def list_narrowable_catalogues(db: DbSession, current_user: CurrentUser) -> list[NarrowableCatalogue]:
-    """The catalogues a cataloguer may narrow one lookup or search to.
-
-    **Library mode only, refused with the narrowing's own 403**, because a
-    household is never offered the narrowing and this list exists to offer it.
-    Read off the plan in force rather than the stored one, so a source with no
-    key is not offered: naming it would be refused.
-
-    Declared before `/{book_id}`, like `/export`.
-    """
-    if not settings_store.library_mode(db):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=catalogue_access.NARROWING_NEEDS_LIBRARY_MODE,
-        )
-    plan = settings_store.catalogue_sources(db)
-    lookups = frozenset(plan.lookup_chain)
-    searches = frozenset(plan.searched_harder)
-    return [
-        NarrowableCatalogue(
-            source=source, answers_lookup=source in lookups, answers_search=source in searches
-        )
-        for source in plan.asked
-    ]
-
-
 @router.get("/lookup", response_model=BookLookup)
-@refuses(403, 404)
+@refuses(404)
 async def lookup_isbn(
     db: DbSession,
     current_user: CurrentUser,
     isbn: Annotated[str, Query(min_length=10, max_length=ISBN_MAX)],
-    only: _Only = None,
 ) -> BookLookup:
     # Validated before either upstream is called: a misread barcode would
     # otherwise cost two network round trips to learn nothing.
@@ -775,13 +708,7 @@ async def lookup_isbn(
             detail="Not a valid ISBN. Check the digits and try again.",
         )
 
-    # Narrowed only when asked, and the narrowed door refuses a name outside the
-    # plan in force rather than dropping it: see `catalogue_access._narrowed_access`.
-    enquiry = (
-        catalogue_access.Enquiry.for_a_narrowed_lookup(db, member=current_user.username, only=frozenset(only))
-        if only
-        else catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
-    )
+    enquiry = catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
     result = await enquiry.lookup(canonical)
     if not result.found:
         raise _lookup_failure(result)
@@ -910,30 +837,7 @@ def already_held(
     return AlreadyHeldOut(match=None, book_ids=[])
 
 
-@router.get("/accession/{code}", response_model=BookOut)
-@refuses(404)
-def get_book_by_accession(code: str, db: DbSession, current_user: CurrentUser) -> BookOut:
-    """The copy whose label carries this accession number.
-
-    What a scanned label resolves through, so it answers what `GET /{book_id}`
-    answers: **404 for a copy the caller may not see**, private to somebody
-    else or in the trash, never 403, since a 403 would confirm the label
-    exists. A string that is not an accession number at all, a mistyped check
-    digit included, is 400, the house status for a refused value: that says
-    nothing about any Book.
-
-    Declared before `/{book_id}`, which would otherwise take `accession` as an id.
-    """
-    if not accession.is_accession(code):
-        raise HTTPException(status_code=400, detail="Not an accession number")
-    book = Shelf.seen_by(db, current_user.id).labelled(code).first(load=Loading.SERIALISED)
-    if book is None:
-        raise HTTPException(status_code=404, detail="Book not found")
-    return book_to_out(book, current_user, db)
-
-
 @router.get("/search", response_model=BookSearchOut)
-@refuses(403)
 async def search_books(
     db: DbSession,
     current_user: CurrentUser,
@@ -952,7 +856,6 @@ async def search_books(
             )
         ),
     ] = False,
-    only: _Only = None,
 ) -> BookSearchOut:
     """Free-text search, for adding a book nobody can scan.
 
@@ -982,16 +885,9 @@ async def search_books(
     # `lang` is the reader's own language, so a German library searching a
     # German title gets the German printing first. It breaks ties only: an
     # English title still returns the English book.
-    #
-    # `only` narrows this search alone, as on the lookup above.
-    enquiry = (
-        catalogue_access.Enquiry.for_a_narrowed_title_search(
-            db, member=current_user.username, only=frozenset(only)
-        )
-        if only
-        else catalogue_access.Enquiry.for_a_member_request(db, member=current_user.username)
-    )
-    found = await enquiry.title_search(q, limit=limit, prefer_language=lang, harder=harder)
+    found = await catalogue_access.Enquiry.for_a_member_request(
+        db, member=current_user.username
+    ).title_search(q, limit=limit, prefer_language=lang, harder=harder)
 
     # Both read off what the fan out did rather than off `harder`, which is only
     # what the reader wanted: a harder search runs the ordinary one when the two
@@ -1583,15 +1479,6 @@ def _html_chunks(db: Session, viewer_id: int) -> Iterator[str]:
     spreadsheet wants.
     The rows are the other formats' rows, from the same `_export_pages` walk.
 
-    **No covers, by either route.** One by URL is either this server's
-    `/covers/` route, behind sign in and out of reach of the person handed
-    the file, or a third party's, which would learn who opened the page;
-    the page's own policy refuses both. One embedded as data is up to
-    `covers.MAX_COVER_BYTES` a book, a third more as base64, so a thousand
-    books could reach gigabytes. `TestTheHtmlExport` refuses `src` and the
-    other fetching attributes it lists, so an `<img>` cover fails it; a CSS
-    `url()` is left to the policy.
-
     The head is yielded before the first page, so an empty shelf still
     downloads a page that opens, with its headings and no rows.
     """
@@ -1754,7 +1641,6 @@ def _price_column(minor: int | None) -> str:
 
 
 @router.get("", response_model=Page[BookOut])
-@refuses(403)
 def list_books(
     db: DbSession,
     current_user: CurrentUser,
@@ -1790,15 +1676,6 @@ def list_books(
     unfiled: Annotated[bool, Query(description="Only books in no collection at all")] = False,
     unrated: Annotated[bool, Query(description="Only books you have not rated")] = False,
     discuss: Annotated[bool, Query(description="Only books somebody has offered to talk about")] = False,
-    origin: Annotated[
-        BookOrigin | None,
-        Query(description="Library mode only. Only the books a harvest created, or only every other"),
-    ] = None,
-    harvest: Annotated[
-        int | None,
-        # Bounded above for the reason `collection_id` is.
-        Query(ge=1, le=MAX_ROW_ID, description="Library mode only. Only the books this harvest run created"),
-    ] = None,
     classification: HeadingList = None,
     ddc_division: Annotated[DivisionList, Query(alias="ddc")] = None,
     sort: Annotated[BookSort, Query()] = BookSort.TITLE_ASC,
@@ -1817,17 +1694,6 @@ def list_books(
         raise HTTPException(
             status_code=400,
             detail="Ask for one collection or for the unfiled books, not both.",
-        )
-
-    # **Refused rather than ignored outside library mode**, as the MARC export
-    # and the catalogue narrowing are: a harvest is a library mode feature, and
-    # a filter answered with the whole shelf is a 200 that lies. One settings
-    # read, paid only by a request that names either filter, so the listing's
-    # statement count is unchanged for everybody else.
-    if (origin is not None or harvest is not None) and not settings_store.library_mode(db):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Filtering by harvest is a library mode feature.",
         )
 
     # The author name is resolved to ids **here**, not on the shelf: deciding
@@ -1857,8 +1723,6 @@ def list_books(
         unfiled=unfiled,
         unrated=unrated,
         discuss=discuss,
-        origin=origin,
-        harvest_id=harvest,
         headings=parse_headings(classification),
         ddc_divisions=parse_divisions(ddc_division),
     )
@@ -1964,35 +1828,7 @@ def _checked_collection(db: Session, collection_id: int | None, viewer_id: int) 
     return collection_id
 
 
-def _refuse_unknown_schemes(headings: list[ClassificationIn], db: Session) -> None:
-    """A 422 naming each posted heading whose scheme has no row.
-
-    **Refused rather than dropped**, unlike a heading in a record
-    (`classifications._quoting_a_scheme`): a member named this scheme, and a
-    typo or a wrong case (`DDC`) is the ordinary way to name one that does not
-    exist. A drop answered 201 with the heading silently gone. The neighbouring
-    Dewey check in `ClassificationIn` refuses with 422 for the same reason.
-    Shaped like the validation error it would have been while the scheme was
-    a closed enum, so a client reads it the same way.
-    """
-    unknown = unknown_schemes(headings, db)
-    if unknown:
-        raise RequestValidationError(
-            [
-                {
-                    "type": "value_error",
-                    "loc": ("body", "classifications", index, "scheme"),
-                    "msg": f"Value error, no classification scheme has the code {headings[index].scheme!r}.",
-                    "input": headings[index].scheme,
-                }
-                for index in unknown
-            ]
-        )
-
-
 def _create_book(payload: BookCreate, current_user: User, db: Session, conflict: str) -> BookOut:
-    # First, while nothing has been flushed: see the function.
-    _refuse_unknown_schemes(payload.classifications, db)
     # Before the ISBN question below, which purges trashed rows to free the
     # number, so a bad collection id is refused before any purge is flushed. The
     # other order would lose nothing: the purge is flushed and not committed, so
@@ -2387,32 +2223,6 @@ def _bulk_delete(
     return len(books), 0
 
 
-def _bulk_assign_accession(
-    db: Session, books: list[Book], value: str | int | None, current_user: User
-) -> tuple[int, int]:
-    """Give each owned copy in the selection an accession number. `value` is unused.
-
-    **Owned rows only**: a label names an object the library holds, so a wanted
-    or harvested record gets none. Such a row, one already numbered, and one
-    whose id is past what a code can carry are all counted unchanged, the
-    bucket `_bulk_add_tag` already uses for a refusal: `BulkResult` has three
-    and a fourth is a response shape change. The number is the row's own
-    (`accession.mint`), so assigning twice gives the same code and a peeled
-    label is reprinted rather than renumbered.
-    """
-    assignable = [book for book in books if _takes_an_accession(book)]
-    for book in assignable:
-        book.accession = accession.mint(book.id)
-    return len(assignable), len(books) - len(assignable)
-
-
-def _takes_an_accession(book: Book) -> bool:
-    """Whether `_bulk_assign_accession` numbers this row."""
-    return (
-        book.accession is None and book.ownership == OwnershipStatus.OWNED and book.id <= accession.MAX_SERIAL
-    )
-
-
 def _require_tag(db: Session, value: str | int | None, viewer_id: int) -> Tag:
     """The Tag a bulk verb names, or a refusal.
 
@@ -2528,7 +2338,6 @@ _BULK_HANDLERS: dict[BulkAction, _BulkHandler] = _dispatch_table(
         BulkAction.SET_LOCATION: _bulk_set_location,
         BulkAction.SET_COLLECTION: _bulk_set_collection,
         BulkAction.DELETE: _bulk_delete,
-        BulkAction.ASSIGN_ACCESSION: _bulk_assign_accession,
     },
     set(BulkAction),
 )
@@ -2894,9 +2703,9 @@ async def author_authority(
     number, or failing both a confirmed ORCID iD, that number is a key: it
     resolves to exactly one record, and the spelling on it is the suggestion
     this feature exists to offer. Where it holds none, the author's name is put
-    to a name search of the GND and the LCNAF, the GND's people first, and in
-    library mode of ORCID where both find nobody. A name is not a key. Two
-    people are spelled `Stevenson, Robert Louis` in the GND.
+    to a name search of the GND and the LCNAF, the GND's people first, and of
+    ORCID only where both find nobody. A name is not a key. Two people are
+    spelled `Stevenson, Robert Louis` in the GND.
 
     **`q` steers that search and forces it.** Without it the query is the
     author's own display name, which is exactly wrong when the shelf spells
@@ -2939,15 +2748,11 @@ async def author_authority(
     # into them, and `fetch.get_once` gives every call its own budget when it is
     # passed none. `authority.DEADLINE_SECONDS` carries the measurement.
     deadline = authority.deadline_from_now()
-    # ORCID by name in library mode only: outside it nearly every hit is a
-    # researcher sharing a novelist's name. A stored ORCID iD below is a key
-    # and is resolved in either mode. `authority.search` has the measurement.
-    ask_orcid = settings_store.library_mode(db)
     try:
         if q is not None:
             # A retyped name is a search whatever is stored: the member is
             # saying the shelf spelling is not the one to look up.
-            found = await authority.search(q, deadline=deadline, ask_orcid=ask_orcid)
+            found = await authority.search(q, deadline=deadline)
         elif stored:
             # Which stored numbers are asked, and of which file, is
             # `resolve_stored`'s: a number the file no longer holds answers
@@ -2956,9 +2761,7 @@ async def author_authority(
                 [(row.scheme, row.identifier) for row in stored], deadline=deadline
             )
         else:
-            found = await authority.search(
-                authorship.display_name(author), deadline=deadline, ask_orcid=ask_orcid
-            )
+            found = await authority.search(authorship.display_name(author), deadline=deadline)
     except authority.AuthorityUnavailable:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -2983,45 +2786,11 @@ def _identifier_out(row: AuthorIdentifier, spelling: str) -> AuthorIdentifierOut
         scheme=row.scheme,
         identifier=row.identifier,
         provenance=row.provenance,
-        asserted_by=row.asserted_by,
-        checked_by=row.checked_by,
     )
 
 
-async def _checked_by_the_gnd(
-    authorship: Authorship, row: AuthorIdentifier
-) -> dict[AuthorityScheme, authority.SuppliedIdentifier]:
-    """The cross references a confirmed GND number's record carries, with the
-    confirmed row recorded as checked by lobid where lobid's record for that
-    number names the author.
-
-    **After the commit, not before it**, so the 409 for a retype stays free of
-    outbound requests.
-
-    **Naming the author, not holding the number.** The member picked the
-    number from a lobid search, so lobid holding it says nothing; a wrong but
-    existing number is held too. Unchecked, the row stays where the admin
-    recheck finds it.
-
-    **An unchecked record's cross references go unchecked too.** Wikidata and
-    the BNP corroborate the record lobid returned, so where that record names
-    somebody else their check vouches for that person, not this author. Kept
-    rather than dropped, beside the unchecked GND row where the recheck finds
-    them; keeping their check would file "two files agree" under the wrong
-    author.
-    """
-    checked, references = await _cross_references_for(row.identifier, row.author_key)
-    if not checked:
-        return {scheme: found.unchecked() for scheme, found in references.items()}
-    authorship.record_check(row, AuthoritySupplier.LOBID)
-    return references
-
-
-async def _cross_references_for(
-    identifier: str, key: str
-) -> tuple[bool, dict[AuthorityScheme, authority.SuppliedIdentifier]]:
-    """Whether lobid's record for this GND number names the spelling under
-    `key`, and what that record says this person is called elsewhere.
+async def _cross_references_for(identifier: str) -> dict[AuthorityScheme, str]:
+    """What the confirmed GND record says this person is called elsewhere.
 
     **Resolved by the server, never read off the request body**, so a caller
     cannot name a record it did not confirm.
@@ -3034,26 +2803,19 @@ async def _cross_references_for(
     collision, which would silently prefer the fetched one.
 
     **Never raises, and an empty mapping is an ordinary answer**, because a
-    person with no other names is not an error. lobid unreachable answers
-    False, as a number it does not hold does: neither has been checked.
-
-    **Only the record lobid returns as this number's own counts.** A retired
-    number can resolve to its successor, and that is not lobid naming the
-    value the member confirmed.
+    person with no other names is not an error.
     """
     deadline = authority.deadline_from_now()
     try:
         candidate = await authority.resolve(identifier, deadline=deadline)
     except authority.AuthorityUnavailable:
         logger.info("Could not resolve a confirmed identifier for its cross references")
-        return False, {}
+        return {}
     if candidate is None:
-        return False, {}
-    references = authority.cross_references(candidate) | await authority.national_identifiers(
+        return {}
+    return authority.cross_references(candidate) | await authority.national_identifiers(
         candidate, deadline=deadline
     )
-    checked = candidate.identifier == identifier and authority.names_the_spelling(candidate, key)
-    return checked, references
 
 
 @router.post(
@@ -3076,15 +2838,12 @@ async def confirm_author_identifier(
     request is well formed and the state refuses it.
 
     **Confirming a GND number stores the cross references that came with it**,
-    and the six national numbers, which cost the extra requests; a Portuguese
-    one is kept only where the BNP's record names the person. A confirmation
-    is up to nine outbound calls, which is why it is a deliberate action rather
+    and the six national numbers, which cost the extra requests. A confirmation
+    is up to eight outbound calls, which is why it is a deliberate action rather
     than something a lookup does on the way past.
 
     **The cross references only for `gnd`.** An LCNAF or ORCID record is
-    stored as confirmed and nothing else is read from it. A GND number whose
-    lobid record names the author is recorded as checked by lobid; any other
-    confirmation is the member's word, unchecked.
+    stored as confirmed and nothing else is read from it.
 
     **A cross reference colliding with a stored value is reported, not raised.**
     The confirmation is already committed, so failing here would report a write
@@ -3110,7 +2869,9 @@ async def confirm_author_identifier(
             detail="That spelling already carries a different identifier. Remove it first.",
         ) from None
 
-    references = await _checked_by_the_gnd(authorship, row) if payload.scheme is AuthorityScheme.GND else {}
+    references = (
+        await _cross_references_for(payload.identifier) if payload.scheme is AuthorityScheme.GND else {}
+    )
     recorded = RecordedAssertions(stored=[], refused=[])
     if references:
         try:
@@ -3484,12 +3245,10 @@ def merge_books(
     # here is this transaction's own business: the covers on disk, the copy
     # group tokens, and when the commit happens.
     #
-    # **A writer holding a loser can deadlock with the merge**, which holds
-    # every Book it touches in ascending id, and Postgres then aborts one of
-    # the two; and another merge can delete one of those Books while this one
-    # waits for it, which `fold` raises as `MetAnotherChange`. Either way the
-    # merge has written nothing: every write is before this commit, and the
-    # cover files move only after it.
+    # **A writer holding a loser can deadlock with the merge**, which holds its
+    # keeper and then deletes the loser, and Postgres then aborts one of the
+    # two. Aborted, the merge has written nothing: every write is before this
+    # commit, and the cover files move only after it.
     with a_lost_race_answers_409(db, _MET_ANOTHER_CHANGE):
         folding.fold(db, keeper, losers)
 
@@ -3561,8 +3320,7 @@ def _merge_parties(payload: MergeRequest, db: Session, current_user: User) -> tu
     return keeper, losers
 
 
-#: The 409 for a merge Postgres aborted to break a deadlock, or one that found
-#: a Book another merge deleted.
+#: The 409 for a merge Postgres aborted to break a deadlock.
 _MET_ANOTHER_CHANGE = (
     "Another change to the same books met this merge, and nothing was merged. Merge them again."
 )
@@ -3595,7 +3353,7 @@ class _MergeCovers:
 
         Called for each loser while it is still loaded, before it is deleted.
         """
-        if covers.unversioned(self._keeper.cover_url) == covers.local_url_for(loser.id):
+        if self._keeper.cover_url == covers.local_url_for(loser.id):
             planned = covers.adoption_url(self._keeper.id, loser.id)
             self._keeper.cover_url = planned
             if planned is not None:
@@ -4678,15 +4436,9 @@ def _purge(book: Book, db: Session) -> None:
     """
     book_id = book.id
     token = book.copy_group
-    # Read before the delete, which cascades the rows away. The cascade loads
-    # this collection to delete it anyway, so naming the files costs nothing
-    # the delete did not already spend.
-    slots = [image.id for image in book.cover_images]
     db.delete(book)
     # A partial rather than a lambda, so a failure's log line names the id.
     on_commit(db, partial(cover_store.remove, book_id))
-    for image_id in slots:
-        on_commit(db, partial(cover_store.remove_image_slot, image_id))
 
     # Only when this row was one of several copies, which almost none are. The
     # flush is what makes the count in `_normalise_copy_group` see the delete,
@@ -5255,13 +5007,6 @@ def set_collection(
     return book_to_out(book, current_user, db)
 
 
-#: Why a harvested Book stays public: the 409 `set_privacy` answers.
-_HARVESTED_STAYS_PUBLIC: Final = (
-    "A harvested book belongs to nobody, so it cannot be made private: nobody could see it. "
-    "Move it to the trash instead if it should not be shown."
-)
-
-
 @router.patch("/{book_id}/privacy", response_model=BookOut)
 def set_privacy(
     payload: PrivacyUpdate,
@@ -5269,17 +5014,6 @@ def set_privacy(
     db: DbSession,
     current_user: CurrentUser,
 ) -> BookOut:
-    """Make a Book private or public.
-
-    **A harvested Book cannot be made private, and the refusal is a 409 here
-    rather than the database's.** It has no adder, so private it would be seen
-    by nobody, the admin who pressed the switch included, and
-    `ck_books_harvested_is_nobodys_and_public` refuses the row: without this
-    check that refusal surfaces as a 500. Only an admin reaches a harvested Book
-    through `BookForOwner`, so the refusal says what to do instead.
-    """
-    if not harvested_is_nobodys_and_public(book.harvest_id, book.added_by_user_id, payload.is_private):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_HARVESTED_STAYS_PUBLIC)
     book.is_private = payload.is_private
     db.commit()
     db.refresh(book)
@@ -5682,17 +5416,9 @@ async def upload_cover(
     # refusal. What the file is called, and that the other formats of this book
     # go with it, are `cover_store`'s.
     data = await read_image_upload(file)
-    # Held before the file is written, because a swap writes the same name
-    # under the same lock (`_held_for_a_swap`). Taken at the commit's UPDATE
-    # instead, the two wrote over each other and each settled against a
-    # `before` the other had changed, so one row could name a file the other
-    # swept.
-    _hold_the_book(db, book)
     before = cover_store.on_disk(book.id)
     destination = cover_store.write(book.id, data)
-    # Versioned, because the same format writes the same name and a browser
-    # would otherwise show the old image for a week (`covers.replaced_url`).
-    book.cover_url = covers.replaced_url(book.id, destination.suffix.lstrip("."))
+    book.cover_url = covers.local_url(book.id, destination.suffix.lstrip("."))
     # The other formats go once the row names the new file, and the new file
     # goes if it never does. `cover_store.settle` says what each half stops.
     covers.settle(db, book.id, book.cover_url, before)
@@ -5701,324 +5427,7 @@ async def upload_cover(
     return book_to_out(book, current_user, db)
 
 
-# ── Further cover images ──────────────────────────────────────────────────────
-#
-# A back cover, a spine, a dust jacket variant: images of the book a member
-# keeps beside the shelf cover, as evidence of which edition they hold.
-# `models.CoverImage` says why the shelf cover stays `books.cover_url` and why a
-# file is named by its row. Read through `Book.cover_images` only, since the
-# rows carry no member and the book is their whole privacy.
-
-
-def _hold_the_book(db: Session, book: Book) -> None:
-    """`hold_book_ceilings` for a route writing one Book's cover files, or 404.
-
-    **404 where a merge deleted the Book while this waited for it**, the
-    answer the route's own dependency gives the second send, raised before
-    anything is written. Going on wrote a file named for the dead id, which
-    the merge could then move onto its keeper, and answered 500 at the stale
-    UPDATE or the foreign key.
-    """
-    if not hold_book_ceilings(db, book.id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-
-
-#: The `detail.code` on the 409 when an upload would put the Book past
-#: `MAX_COVER_IMAGES_PER_BOOK`.
-COVER_IMAGE_CEILING: Final = "cover_image_ceiling"
-
-
-def _cover_image(book: Book, image_id: int) -> CoverImage:
-    """One of this book's further images, or 404 as if it did not exist.
-
-    Through the book's own collection, so an image id belonging to another
-    book, visible or not, is the same 404 as one that was never issued.
-    """
-    image = next((held for held in book.cover_images if held.id == image_id), None)
-    if image is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    return image
-
-
-def _keep_cover_image(db: Session, book: Book, data: bytes) -> CoverImage:
-    """Add a row for `data` and write its file, tied to `db`'s transaction.
-
-    The row first, because the file is named by its id. The file goes if the
-    row never commits, by name, which `cover_store.remove_image_slot` says is
-    safe for a slot where it is not for a shelf cover. Raises `NotAnImage` and
-    `OSError` as `cover_store.write_image_slot` does.
-    """
-    image = CoverImage(book_id=book.id, extension=cover_store.extension_of(data))
-    db.add(image)
-    db.flush()
-    on_rollback(db, partial(cover_store.remove_image_slot, image.id))
-    cover_store.write_image_slot(image.id, data)
-    return image
-
-
-@router.get("/{book_id}/cover-images", response_model=list[CoverImageOut])
-def list_cover_images(book: BookForRead) -> list[CoverImage]:
-    """The further images kept of this book, oldest first. Not the shelf cover.
-
-    **Served here rather than on `BookOut`**, like notes: no listing shows
-    them, and putting them on every card would cost every page a query.
-    `BookForRead` is the whole privacy check, as it is for quotes.
-    """
-    return list(book.cover_images)
-
-
-@router.post(
-    "/{book_id}/cover-images",
-    response_model=list[CoverImageOut],
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_cover_image(
-    book: BookForWrite,
-    db: DbSession,
-    file: Annotated[UploadFile, File()],
-) -> list[CoverImage]:
-    """Keep one more image of this book. Answers with the whole list.
-
-    The bounds of the shelf cover's upload, through the same reader: 413 past
-    the size cap and 400 for anything but a JPEG, PNG or WebP image.
-
-    **409 `cover_image_ceiling` past `MAX_COVER_IMAGES_PER_BOOK`**, counted
-    after the insert and under the lock a merge onto the book takes, the rule
-    the file reference ceiling keeps, so two uploads at once cannot both pass.
-    A refused upload's file goes with its rollback.
-    """
-    data = await read_image_upload(file)
-    _hold_the_book(db, book)
-    _keep_cover_image(db, book, data)
-    db.refresh(book, ["cover_images"])
-    if len(book.cover_images) > MAX_COVER_IMAGES_PER_BOOK:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "message": f"This book already keeps {MAX_COVER_IMAGES_PER_BOOK} further images",
-                "code": COVER_IMAGE_CEILING,
-            },
-        )
-    db.commit()
-    db.refresh(book, ["cover_images"])
-    return list(book.cover_images)
-
-
-@router.delete("/{book_id}/cover-images/{image_id}", status_code=status.HTTP_204_NO_CONTENT)
-@refuses(404)
-def delete_cover_image(image_id: RowId, book: BookForWrite, db: DbSession) -> None:
-    """Let one further image go. The file goes once the delete commits."""
-    image = _cover_image(book, image_id)
-    db.delete(image)
-    on_commit(db, partial(cover_store.remove_image_slot, image.id))
-    db.commit()
-
-
-@router.put("/{book_id}/cover-images/{image_id}/shelf", response_model=BookOut)
-@refuses(404)
-def shelve_cover_image(
-    image_id: RowId,
-    book: BookForWrite,
-    db: DbSession,
-    current_user: CurrentUser,
-) -> BookOut:
-    """Make one further image the cover the shelf shows. A swap, not a copy.
-
-    The image becomes the book's stored cover, written through the same store
-    door an upload is, and its row goes. **The cover it replaces becomes a
-    further image in its place**, so the count is unchanged and nothing a
-    member kept is lost. A cover that is only a catalogue's link, with no file
-    behind it, is let go rather than kept: a slot holds a file, and refreshing
-    the metadata asks the catalogue for it again. Answers with the book.
-    """
-    image = _held_for_a_swap(db, book, image_id)
-    data = cover_store.image_slot_bytes(image.id, image.extension)
-    if data is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    _demote_the_shelf_cover(db, book)
-    before = cover_store.on_disk(book.id)
-    # `write_over` rather than `write`: a rollback puts the old cover back,
-    # since the further image it was copied to goes with the same rollback.
-    destination = cover_store.write_over(db, book.id, data)
-    book.cover_url = covers.replaced_url(book.id, destination.suffix.lstrip("."))
-    # `upload_cover`'s settle, for its reason: the other formats go once the
-    # row names the new file, and the new file goes if it never does.
-    covers.settle(db, book.id, book.cover_url, before)
-    db.delete(image)
-    on_commit(db, partial(cover_store.remove_image_slot, image.id))
-    db.commit()
-    db.refresh(book)
-    return book_to_out(book, current_user, db)
-
-
-def _held_for_a_swap(db: Session, book: Book, image_id: int) -> CoverImage:
-    """The image to shelve, read under the lock both cover uploads and a merge take.
-
-    Without the lock, two swaps on one book each demoted the same old cover and
-    the last write won, so one chosen image survived nowhere; and a swap on a
-    book a merge was carrying away deleted a row the merge had just moved.
-    **`cover_url` is expired after it**, because `BookForWrite` loaded it
-    before: on Postgres a shelf cover uploaded meanwhile was read as the remote
-    link it replaced, so it was not demoted and the write went over it. SQLite
-    cannot show this, since its stale snapshot fails the first write. Those two
-    attributes and not the whole book, so nothing here reloads the row itself:
-    a book a merge deleted meanwhile is `_hold_the_book`'s 404.
-    """
-    _hold_the_book(db, book)
-    db.expire(book, ["cover_url", "cover_images"])
-    return _cover_image(book, image_id)
-
-
-def _demote_the_shelf_cover(db: Session, book: Book) -> None:
-    """Keep the book's stored cover as a further image, before it is replaced.
-
-    Nothing when the cover is not a file this app holds: a remote link names
-    no bytes to keep, which is the one loss `shelve_cover_image` records.
-    """
-    if not covers.is_local(book.cover_url):
-        return
-    data = cover_store.cover_bytes(book.id)
-    if data is not None:
-        _keep_cover_image(db, book, data)
-
-
 # ── Metadata refresh ──────────────────────────────────────────────────────────
-
-
-@router.get("/{book_id}/pending-headings", response_model=list[ClassificationOut])
-def list_pending_headings(book: BookForAdmin) -> list[ClassificationOut]:
-    """The headings a harvest raised on this Book and nobody has settled.
-
-    Admin only, as the harvest is: 404 for a Book the caller cannot see, then
-    403 for a member. Empty for a Book no harvest raised any on, and for one
-    whose set was confirmed or discarded. `models.PendingHeading` says why a
-    harvest suggests rather than writes.
-    """
-    return [ClassificationOut.model_validate(row) for row in pending_headings.pending_on(book)]
-
-
-@router.post("/{book_id}/pending-headings/confirm", response_model=BookOut)
-def confirm_pending_headings(book: BookForAdmin, db: DbSession, current_user: CurrentUser) -> BookOut:
-    """Write the Book's whole pending set as its headings, and answer the Book.
-
-    The whole set, as selecting a picker row confirms a whole record (ADR
-    0006). A heading past the ceiling, or under a scheme deleted since, is
-    dropped as a catalogue's is. Confirming an empty set changes nothing.
-    """
-    pending_headings.confirm(book, db)
-    db.commit()
-    db.refresh(book)
-    return book_to_out(book, current_user, db)
-
-
-@router.post("/{book_id}/pending-headings/discard", status_code=status.HTTP_204_NO_CONTENT)
-def discard_pending_headings(book: BookForAdmin, db: DbSession) -> None:
-    """Drop the Book's whole pending set without writing it.
-
-    Remembered: a later harvest of the same record does not raise these
-    headings again, while one the record newly carries is raised.
-    """
-    pending_headings.discard(book)
-    db.commit()
-
-
-# ── Headings from a vocabulary ───────────────────────────────────────────────
-
-
-@router.get("/{book_id}/headings/vocabularies", response_model=list[SuggestingVocabularyOut])
-def list_suggesting_vocabularies(book: BookForWrite, db: DbSession) -> list[SuggestingVocabularyOut]:
-    """The vocabularies this Book's heading field offers headings from.
-
-    Those with a local copy loaded, and **none while the setting is not in
-    force**: library mode off, or `headings_from_vocabulary` switched off. An
-    empty list is how a client knows to draw no field, so it is an answer
-    rather than a refusal.
-    """
-    if not settings_store.headings_from_vocabulary(db):
-        return []
-    suggestible = vocabulary_copy.suggestible(db)
-    return [SuggestingVocabularyOut(scheme=scheme.id, name=scheme.name) for scheme in suggestible]
-
-
-@router.get("/{book_id}/headings/suggest", response_model=list[ClassificationOut])
-@refuses(403)
-def suggest_headings(
-    book: BookForWrite,
-    db: DbSession,
-    current_user: CurrentUser,
-    scheme: Annotated[str, Query(min_length=1, max_length=CLASSIFICATION_SCHEME_CODE_MAX)],
-    q: Annotated[str, Query(min_length=vocabulary_copy.SUGGEST_MIN, max_length=VOCABULARY_LABEL_MAX)],
-    use: HeadingUse = HeadingUse.SUBJECT,
-) -> list[ClassificationOut]:
-    """Headings from `scheme`'s local copy with a label beginning with `q`, as
-    the heading field offers them while a cataloguer types.
-
-    **The local copy only**, never a vocabulary service, so a keystroke costs
-    this server and nobody else. Bounded three ways: `q` of at least
-    `SUGGEST_MIN` characters, at most `SUGGEST_MAX` headings, and
-    `ratelimit.HEADING_SUGGEST_LIMIT` per member.
-
-    `use` is the field's own, MARC 21 authority `008/14` to `16`: a heading the
-    copies cannot serve as it is never offered. Empty for a vocabulary with no
-    copy loaded; 403 while the setting is not in force.
-
-    **Each heading is the row a pick writes**, already in the form an import of
-    it writes (`vocabularies.classification_row`), so a pick posts it back
-    unchanged and lands on the row an imported record of the same heading
-    holds, rather than beside it under the copy's `$0` spelling.
-    """
-    _require_headings_from_vocabulary(db)
-    heading_suggest_limiter.check(current_user.username)
-    # Folded by row, since two entries can make one: an LCSH heading and a
-    # subdivision record of the same string are both that string.
-    rows = dict.fromkeys(
-        vocabularies.classification_row(scheme, heading.identifier, heading.label)
-        for heading in vocabulary_copy.suggest(db, scheme, q, use)
-    )
-    return [ClassificationOut(scheme=scheme, number=number, label=label) for number, label in rows]
-
-
-@router.post("/{book_id}/headings", response_model=BookOut)
-@refuses(403)
-def add_heading(
-    payload: ClassificationIn, book: BookForWrite, db: DbSession, current_user: CurrentUser
-) -> BookOut:
-    """Add the heading a Member picked on this Book's heading field, and answer the Book.
-
-    **Not checked against a copy**: the setting filters what the field offers
-    and refuses nothing here, as `docs/decisions.md` records for #135, until a
-    batch matcher can mark a heading no copy holds rather than refuse it. A
-    heading the Book carries already, or one past the ceiling, changes nothing;
-    a scheme with no row is a 422. 403 while the setting is not in force, since
-    the field this serves is not drawn then.
-    """
-    _require_headings_from_vocabulary(db)
-    if unknown_schemes([payload], db):
-        raise RequestValidationError(
-            [
-                {
-                    "type": "value_error",
-                    "loc": ("body", "scheme"),
-                    "msg": f"Value error, no classification scheme has the code {payload.scheme!r}.",
-                    "input": payload.scheme,
-                }
-            ]
-        )
-    if evidence.confirm_picked_heading(book, payload, db):
-        db.commit()
-        db.refresh(book)
-    return book_to_out(book, current_user, db)
-
-
-def _require_headings_from_vocabulary(db: Session) -> None:
-    """Refuse a heading field route while the setting is not in force.
-
-    403 rather than 404 for the reason `routers.imports._require_library_mode`
-    gives: the caller is a signed in member and library mode is public.
-    """
-    if not settings_store.headings_from_vocabulary(db):
-        raise HTTPException(status_code=403, detail="Headings from a vocabulary are not offered here.")
 
 
 @router.put("/{book_id}/refresh", response_model=BookOut)
@@ -6859,7 +6268,7 @@ async def enrich_book(
     without that middle step it is matched by its title, which is the weakest
     instrument here. **Which
     catalogues either of those asks is the library's own provider list**, set
-    in Settings: the roster holds nineteen lookup sources that answer an ISBN and
+    in Settings: the roster holds eighteen lookup sources that answer an ISBN and
     eight search sources that answer a title, the leading pair is asked together
     and the rest one at a time, and a source switched off is not asked on either
     path. Google Books answers only when its own section is on and a key is in
@@ -7047,7 +6456,6 @@ def apply_enrichment(
     that confirmation, so they write none of them, but for the volume id a
     lookup by the book's own id found and that carries it.
     """
-    _refuse_unknown_schemes(payload.classifications, db)
     # The body goes in whole. `evidence.confirm` reads the twelve names it
     # writes off the `BookMatch`, so `source` and `suggested_tag_ids` are
     # excluded by it never naming them, and a field added to the schema cannot

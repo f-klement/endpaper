@@ -3,7 +3,7 @@
 import logging
 import re
 import secrets
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Final, TypeGuard
 
@@ -23,21 +23,16 @@ from sqlalchemy import (
     Table,
     Text,
     and_,
-    event,
     func,
-    inspect,
     or_,
-    select,
     text,
 )
-from sqlalchemy.engine import Connection
-from sqlalchemy.orm import Mapped, Mapper, Session, mapped_column, object_session, relationship, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.types import TypeDecorator
 
 import covers
 import filing
-from accession import ACCESSION_LENGTH
 from authors import AUTHOR_NAME_MAX
 from database import Base
 from dialect import DialectSQL
@@ -46,16 +41,13 @@ from enums import (
     AuthMode,
     AuthorityProvenance,
     AuthorityScheme,
-    AuthoritySupplier,
     BookCondition,
     BookFormat,
     BookIdentifierScheme,
+    ClassificationScheme,
     CustomFieldKind,
-    FilingRuleName,
-    HarvestFormat,
     HeadingKind,
     HighlightSource,
-    ImageExtension,
     LendingWillingness,
     LinkRelationship,
     MemberLoginService,
@@ -231,16 +223,6 @@ MAX_SERIES_INDEX = 1000
 #: interpolates it into SQL, and a CHECK constraint that disagreed with the
 #: schema would turn a 422 into a 500 for exactly the values in between.
 MAX_PAGE_NUMBER_IN_A_BOOK = 100_000
-
-#: The years `books.year` takes. Loose bounds, meant to catch a typo or a scanner
-#: misread rather than to adjudicate publishing history.
-#:
-#: Here rather than in `schemas/book.py`, which bounds its bodies by them, to
-#: break an import cycle: `bibliographic.earliest_year` filters by the range, and
-#: `schemas.book` imports `bibliographic`, so `bibliographic` cannot import the
-#: schema module.
-MIN_YEAR = 1
-MAX_YEAR = 2200
 
 
 class Collection(Base):
@@ -653,37 +635,6 @@ class AuthorIdentifier(Base):
             "provenance <> 'catalogue' OR created_by_user_id IS NULL",
             name="ck_author_identifiers_asserter",
         ),
-        CheckConstraint(
-            _enum_check("asserted_by", AuthoritySupplier),
-            name="ck_author_identifiers_asserted_by",
-        ),
-        # A check is a second file naming the same value. A member is not a
-        # file, and `unrecorded` is a gap in the record rather than a checker.
-        CheckConstraint(
-            _enum_check(
-                "checked_by",
-                AuthoritySupplier,
-                nullable=True,
-                excluding=(AuthoritySupplier.MEMBER, AuthoritySupplier.UNRECORDED),
-            ),
-            name="ck_author_identifiers_checked_by",
-        ),
-        # A file agreeing with itself is not a check. Without this a writer
-        # could stamp one file as both and the row would read as corroborated.
-        CheckConstraint(
-            "checked_by IS NULL OR checked_by <> asserted_by",
-            name="ck_author_identifiers_second_file",
-        ),
-        # Where provenance and supplier overlap they must agree: a `catalogue`
-        # row is supplied by the catalogue, and nothing else is. `unrecorded`
-        # is exempt because rows stored before this column were backfilled
-        # with it whatever their provenance, which is the owner's call.
-        CheckConstraint(
-            "asserted_by = 'unrecorded'"
-            " OR (provenance = 'catalogue' AND asserted_by = 'catalogue')"
-            " OR (provenance <> 'catalogue' AND asserted_by <> 'catalogue')",
-            name="ck_author_identifiers_supplier",
-        ),
         # The byte arm is what makes the ceiling bind on a Core insert; the
         # floor needs none, because a NUL shortens the count and so makes a
         # floor stricter rather than weaker. See `ck_digital_references_bounds`
@@ -725,16 +676,6 @@ class AuthorIdentifier(Base):
     identifier: Mapped[str] = mapped_column(String(AUTHORITY_IDENTIFIER_MAX), nullable=False)
 
     provenance: Mapped[AuthorityProvenance] = mapped_column(String(20), nullable=False)
-
-    # No default, in the model or the database: every writer names the file
-    # the value came from, so a new writer that forgets fails at the insert
-    # rather than storing `unrecorded` for a row that could have said. The
-    # revision that added the column used a server default only to backfill.
-    asserted_by: Mapped[AuthoritySupplier] = mapped_column(String(20), nullable=False)
-
-    # Null where no second file named the value. Set at the write or later by
-    # a recheck, never changed once set and never touching `identifier`.
-    checked_by: Mapped[AuthoritySupplier | None] = mapped_column(String(20), nullable=True)
 
     # Set only on a `MEMBER` row, and null on a `CATALOGUE` one by check
     # constraint. Deliberately not indexed, like `author_aliases`: no query
@@ -1069,35 +1010,6 @@ CURRENCY_LENGTH = 3
 #: lived in `schemas/loan.py` documented as matching the ORM, which is 304's
 #: direction reversed and is how a schema and a column come to disagree.
 BORROWER_NAME_MAX = 120
-#: The widths of a patron's columns, each its own fact for the reason
-#: `LOCATION_MAX` gives. The name is a borrower's name, so it shares that width
-#: by naming it rather than by repeating the number.
-PATRON_NAME_MAX = BORROWER_NAME_MAX
-#: What a scanner reads off a card, or a person types from one. Koha's
-#: `cardnumber` is 32 wide, and nothing a library prints is longer.
-PATRON_CARD_NUMBER_MAX = 32
-PATRON_PHONE_MAX = 40
-PATRON_STREET_MAX = 120
-PATRON_HOUSE_NUMBER_MAX = 20
-PATRON_POSTCODE_MAX = 20
-PATRON_CITY_MAX = 80
-#: The widths of a harvest run's own columns. The repository address shares
-#: `BASE_URL_MAX`'s number, the width every typed address here has, and is its
-#: own constant because the settings field that names it is a different door.
-HARVEST_BASE_URL_MAX = 255
-#: An OAI-PMH `setSpec` is a colon separated path of short labels; no
-#: repository the ticket names serves one near this wide.
-HARVEST_SET_SPEC_MAX = 255
-#: `marcxml` and `oai_dc` are what a harvest asks for. Free text rather than an
-#: enum, because a repository names its own formats.
-HARVEST_METADATA_PREFIX_MAX = 32
-#: An OAI-PMH record identifier is a URI, usually `oai:<host>:<local id>`. One
-#: wider is not kept, and its record is then matched as a file's record is.
-HARVESTED_IDENTIFIER_MAX = 255
-#: The widest resumption token a run keeps, which `harvester.MAX_TOKEN_LENGTH`
-#: names: a wider one is refused while the run reads it, so every token a row
-#: stores fits. A real token is an offset or a cursor, a few dozen characters.
-HARVEST_RESUMPTION_TOKEN_MAX = 2_000
 
 
 #: The free text columns of `books` where a blank string and a null would
@@ -1137,93 +1049,6 @@ def blank_as_none[T](value: T) -> T | None:
     return value
 
 
-#: **A harvested Book is nobody's, and public.** A row naming a harvest has no
-#: adder and is never private (owner's decision on issue #177, 2026-11-20).
-#:
-#: An ownerless private row is seen by nobody, admins included, because
-#: `visible_to`'s ownership arm compares a null; so a harvest that wrote one
-#: would lose the record without an error. The CHECK is what makes that
-#: unstorable by every writer, a restore and the next import included.
-#: **At most one, not exactly one**: a Book with neither an adder nor a harvest
-#: already exists by design ("A Book with no adder goes to an admin" in
-#: `docs/decisions.md`), so a rule refusing both null would refuse those rows.
-#:
-#: One spelling for both engines: `NOT` over a boolean is a boolean on
-#: Postgres and `NOT 0` is `1` on SQLite, where `= 0` would be a type error on
-#: the first. `is_private` is `NOT NULL`, so no third value reaches the `NOT`.
-HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL = "harvest_id IS NULL OR (added_by_user_id IS NULL AND NOT is_private)"
-
-
-def harvested_is_nobodys_and_public(
-    harvest_id: int | None, added_by_user_id: int | None, is_private: bool
-) -> bool:
-    """Whether these three columns are a row the constraint above stores.
-
-    The Python reading of `HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL`, clause for
-    clause, asserted against it row by row in `tests/test_models.py` rather than
-    read beside it, for `names_exactly_one_borrower`'s reason.
-    """
-    return harvest_id is None or (added_by_user_id is None and not is_private)
-
-
-def datestamp_now() -> datetime:
-    """Now, as naive UTC to the second. Stored to the second so a write's order
-    is kept; `oai.py` serves only the day (owner's decision on ticket 176)."""
-    return datetime.now(UTC).replace(tzinfo=None, microsecond=0)
-
-
-class Harvest(Base):
-    """One run of the OAI-PMH harvester: which repository, which set, when.
-
-    **What a harvested Book points at instead of an owner.** The run is the
-    actor, so the Book says what happened to it: it came from this repository
-    on this day. Not a `users` row, because every sign in resolves a `users`
-    row by username, so a proxy or LDAP identity of the same name would adopt
-    it with every Book it held.
-    Nothing here has a username, a hash or a session, so nothing can sign in
-    as it.
-
-    `run_by_user_id` is who pressed the button, an audit fact and never an
-    owner: no rule reads it to decide who may see or change a Book.
-    """
-
-    __tablename__ = "harvests"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    base_url: Mapped[str] = mapped_column(String(HARVEST_BASE_URL_MAX), nullable=False)
-    set_spec: Mapped[str | None] = mapped_column(String(HARVEST_SET_SPEC_MAX), nullable=True)
-    metadata_prefix: Mapped[str] = mapped_column(String(HARVEST_METADATA_PREFIX_MAX), nullable=False)
-    # Deliberately not indexed, like `loans.loaned_by_user_id`: nothing queries
-    # by it, and there is no delete account path whose child check it would
-    # speed up.
-    run_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    records_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    records_added: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
-    # Null on a run recorded before the column, which no resume reads: such a
-    # run kept no resumption point either.
-    metadata_format: Mapped[HarvestFormat | None] = mapped_column(
-        DegradingEnum(HarvestFormat, 20), nullable=True
-    )
-    # **Where the run stopped, kept so the next run can carry on from there.**
-    # `resume_skip` is null on a run that read the repository to its end, and
-    # set on one a cap, the deadline or a busy repository cut short: the
-    # records of the page `resume_token` asks for that this run already read.
-    # A null token with a skip is the run's first request, cut inside its first
-    # page. `harvester.Resume` is the pair, and `docs/decisions.md`, *A
-    # truncated harvest carries on as a new run*, says why a new row.
-    resume_token: Mapped[str | None] = mapped_column(String(HARVEST_RESUMPTION_TOKEN_MAX), nullable=True)
-    resume_skip: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # The run this one carried on from, or null for a run from the start.
-    # **No foreign key, deliberately**: `backup.restore` inserts a table's rows
-    # in the order the archive holds them, which nothing orders, so a key into
-    # this same table could refuse a restore whenever a later run came first.
-    # Nothing reads it to decide anything; it is the audit fact that this run's
-    # counts start part way through the repository.
-    continues_harvest_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-
 class Book(Base):
     __tablename__ = "books"
 
@@ -1251,12 +1076,6 @@ class Book(Base):
             sqlite_where=text("copy_group IS NULL"),
             postgresql_where=text("copy_group IS NULL"),
         ),
-        # **Unique over every row, trashed ones included**, so a restore can
-        # never be refused for a code the button says nothing about: the lesson
-        # `_normalise_copy_group` records. Minted codes cannot collide, since
-        # each is its row's id; the index is what makes a future writer that
-        # could (a typed code, an item table renumbered from 1) fail loudly.
-        Index("uq_books_accession", "accession", unique=True),
         # `backup.restore` inserts through Core, where no Pydantic model and no
         # `@validates` fires, so an archive decides this value. A value outside
         # the enum then raises in `OwnershipStatus(...)` at every read.
@@ -1277,8 +1096,6 @@ class Book(Base):
             _enum_check("ownership", OwnershipStatus),
             name="ck_books_ownership",
         ),
-        # `HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL` says why.
-        CheckConstraint(HARVESTED_IS_NOBODYS_AND_PUBLIC_SQL, name="ck_books_harvested_is_nobodys_and_public"),
         # **A deleted Book's id is never given to another Book.** Without it
         # SQLite gives an insert `max(rowid) + 1`, so a merge deleting the
         # highest id Book handed its id to the next Book created, and an import
@@ -1440,38 +1257,12 @@ class Book(Base):
     # asked of it, and it is asked on every book detail page.
     copy_group: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
 
-    # The accession number: the code on this object's label, which names the
-    # copy rather than the book. `accession.py` holds its shape and is its one
-    # minting rule; `POST /api/books/bulk` with `ASSIGN_ACCESSION` is its one
-    # writer, so null means nobody asked for a label yet, which is every row
-    # that existed before the column (owner, 2026-11-22). Withheld from every
-    # public surface, since it is how the library handles an object rather than
-    # a fact about the work. A copy starts with none and a merge fills it but
-    # never overwrites it: `book_columns.COPY_IDENTITY`.
-    accession: Mapped[str | None] = mapped_column(String(ACCESSION_LENGTH), nullable=True)
-
     added_by_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True, index=True
     )
     # Indexed for the "Recently Added" sort and the per-month statistic.
     added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
     is_private: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
-    # The harvest run this row came from, or null for every row a person or a
-    # file import created. Set only on a row the harvest created, never on a
-    # matched one, and then the row has no adder and is public: the CHECK in
-    # `__table_args__`. Indexed for "what did this run add".
-    harvest_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("harvests.id", name="fk_books_harvest_id"), nullable=True, index=True
-    )
-    # The OAI identifier of the record a harvest created this row from, and
-    # null on every other row. **What a re-run matches first**
-    # (`importing.HarvestKeys`): a record with no ISBN otherwise matches only
-    # on title and author, which a cataloguer may have corrected since.
-    # Unique only within its repository, which `harvest_id` names, so it is
-    # matched together with the run's address. Indexed for that match.
-    harvested_identifier: Mapped[str | None] = mapped_column(
-        String(HARVESTED_IDENTIFIER_MAX), nullable=True, index=True
-    )
 
     # When this book was moved to the trash, or null while it is on the shelf.
     #
@@ -1484,22 +1275,6 @@ class Book(Base):
     # Indexed because the trash listing filters on it and the ordinary case
     # (`IS NULL`) is every other query in the app.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
-
-    #: When what a harvester reads of this record last changed: the OAI-PMH
-    #: datestamp, which selective harvesting filters on.
-    #:
-    #: **Written by `harvest.py` and by no route**: its flush listener moves it on
-    #: every write that changes the published record, a child row's included,
-    #: so a write path added later cannot forget it. A write to a withheld
-    #: column leaves it alone, since a moving datestamp would tell a harvester
-    #: that something it cannot see changed. Indexed for the `from` and `until`
-    #: range a harvest asks for.
-    oai_datestamp: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        server_default=func.now(),
-        index=True,
-    )
 
     # Whether a copy is physically here. Defaults to OWNED because the ordinary
     # way a book arrives is somebody scanning the barcode on its back cover,
@@ -1582,14 +1357,6 @@ class Book(Base):
         cascade="all, delete-orphan",
         order_by="Classification.id",
     )
-    # Cascaded like the headings: a purged book's suggestions describe
-    # nothing. Ordered by id, the order the record listed them. No
-    # `back_populates`: `PendingHeading` says why it has no `book`.
-    pending_headings: Mapped[list[PendingHeading]] = relationship(
-        "PendingHeading",
-        cascade="all, delete-orphan",
-        order_by="PendingHeading.id",
-    )
     # Cascaded like the notes and the quotes, and ordered by the definition
     # rather than by this row: a Book reads its fields in the order the Library
     # defined them, so two Books list the same fields the same way.
@@ -1624,14 +1391,6 @@ class Book(Base):
         back_populates="book",
         cascade="all, delete-orphan",
         order_by="OnlineLink.id",
-    )
-    # Cascaded, and the files go with the row through `_purge`. Ordered by id,
-    # which is the order they were added.
-    cover_images: Mapped[list[CoverImage]] = relationship(
-        "CoverImage",
-        back_populates="book",
-        cascade="all, delete-orphan",
-        order_by="CoverImage.id",
     )
 
     @validates(*BLANK_IS_NULL)
@@ -1979,39 +1738,21 @@ class KosyncDocument(Base):
 #: close a category. `LoanCreate` strips on Python's rule before storing, so no
 #: route reaches it, and `tests/test_models.py` pins the gap by name rather than
 #: leaving it to be rediscovered.
-#:
-#: **Three kinds of borrower, and an erased one.** A member, a patron or a
-#: typed name: exactly one while `borrower_anonymised_at` is null, and none
-#: once it is set. The second half is `patrons.erase`, which takes a patron's
-#: name off a loan and keeps the dates, so a right to erasure is not something
-#: a loan history can veto. The count is a sum of `CASE` arms rather than a
-#: chain of `<>`, because `<>` between three booleans is parity, which admits
-#: all three at once.
 ONE_BORROWER_SQL = (
-    "(CASE WHEN loaned_to_user_id IS NULL THEN 0 ELSE 1 END "
-    "+ CASE WHEN loaned_to_patron_id IS NULL THEN 0 ELSE 1 END "
-    "+ CASE WHEN loaned_to_name IS NULL THEN 0 ELSE 1 END) "
-    "= (CASE WHEN borrower_anonymised_at IS NULL THEN 1 ELSE 0 END) "
+    "(loaned_to_user_id IS NULL) <> (loaned_to_name IS NULL) "
     "AND (loaned_to_name IS NULL OR length(trim(loaned_to_name)) > 0)"
 )
 
 
-def names_exactly_one_borrower(
-    user_id: int | None,
-    name: str | None,
-    *,
-    patron_id: int | None = None,
-    anonymised: bool = False,
-) -> bool:
-    r"""Whether this loan's borrower columns are a row the constraint stores.
+def names_exactly_one_borrower(user_id: int | None, name: str | None) -> bool:
+    r"""Whether this pair identifies somebody a book can be asked back from.
 
     The Python reading of `ONE_BORROWER_SQL` above, clause for clause, and the
     two are asserted against each other row by row rather than read side by
     side, because two careful readings are one instrument twice.
 
-    A member, a patron **or** a free-text name, exactly one of the three, and
-    a name of nothing but spaces is not a name. An `anonymised` loan names none
-    of them, which is what `patrons.erase` leaves behind.
+    A member **or** a free-text name, never both and never neither, and a name
+    of nothing but spaces is not a name.
 
     **It answers what the constraint will accept, not what a person would call
     a name**, and the two questions part on two SQLite behaviours that no
@@ -2043,48 +1784,9 @@ def names_exactly_one_borrower(
     `tests/test_models.py::TestTheBorrowerRuleHasOneSpelling` drives every pair
     through both, including the whitespace a corpus of spaces cannot show.
     """
-    named = sum(value is not None for value in (user_id, patron_id, name))
-    return named == (0 if anonymised else 1) and (name is None or bool(name.strip(" ").partition("\x00")[0]))
-
-
-class Patron(Base):
-    """A registered borrower who is not a member: somebody the library can contact.
-
-    **The most sensitive row this application stores.** A real person's name
-    and contact details, held by an operator in the EU, so three rules bind on
-    it and none is optional:
-
-    * **Only an admin reads or writes it.** `routers/patrons.py` takes
-      `require_admin` on every route. The one other reader is a loan's
-      `patron`, the name and card alone, which `patrons.named_on_loans` fills
-      for an admin and for nobody else.
-    * **It never reaches the public catalogue**, not as a field and not as a
-      count. Nothing under `routers/public.py`, OAI, OPDS or SRU joins it.
-    * **Deletion works whatever the loan history.** `patrons.erase` takes the
-      patron off every loan, keeping the dates, then deletes the row.
-
-    `card_number` is what a scanner reads and a person reads off a card, so it
-    is human facing, unique and separate from the primary key, which is never
-    shown and never reassigned. `expires_on` is when the registration lapses,
-    which is what a scheduled erasure would key on. **No guarantor**: it would
-    store a second person's data for a case nobody has asked for.
-    """
-
-    __tablename__ = "patrons"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    card_number: Mapped[str] = mapped_column(
-        String(PATRON_CARD_NUMBER_MAX), nullable=False, unique=True, index=True
+    return (user_id is None) != (name is None) and (
+        name is None or bool(name.strip(" ").partition("\x00")[0])
     )
-    name: Mapped[str] = mapped_column(String(PATRON_NAME_MAX), nullable=False)
-    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
-    phone: Mapped[str | None] = mapped_column(String(PATRON_PHONE_MAX), nullable=True)
-    street: Mapped[str | None] = mapped_column(String(PATRON_STREET_MAX), nullable=True)
-    house_number: Mapped[str | None] = mapped_column(String(PATRON_HOUSE_NUMBER_MAX), nullable=True)
-    postcode: Mapped[str | None] = mapped_column(String(PATRON_POSTCODE_MAX), nullable=True)
-    city: Mapped[str | None] = mapped_column(String(PATRON_CITY_MAX), nullable=True)
-    expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
-    enrolled_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class Loan(Base):
@@ -2129,17 +1831,6 @@ class Loan(Base):
     # the people most likely to keep one are exactly those who will never have
     # an account here. Free text, capped, and never joined on.
     loaned_to_name: Mapped[str | None] = mapped_column(String(BORROWER_NAME_MAX), nullable=True)
-    # A registered borrower with no account: `Patron`. No `ondelete`, on
-    # purpose: a patron leaves through `patrons.erase`, which clears this and
-    # stamps `borrower_anonymised_at` first, and the foreign key refuses any
-    # other path that would leave a loan pointing at nobody.
-    loaned_to_patron_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("patrons.id"), nullable=True, index=True
-    )
-    # When this loan's borrower was erased, or null. The marker that lets a
-    # loan name nobody without being a loan nobody recorded a borrower for:
-    # `ck_loans_one_borrower` admits no borrower only beside it.
-    borrower_anonymised_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     loaned_by_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     loaned_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     returned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -2150,8 +1841,8 @@ class Loan(Base):
     # record a loan in the first place.
     due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # When the overdue digest last went out on a channel for this loan, or null
-    # if it never has. The whole state the digest keeps, and it is what makes the
+    # When an overdue reminder last went out for this loan, or null if none
+    # ever has. The whole state the digest keeps, and it is what makes the
     # difference between the two ways this feature goes wrong: without it the
     # digest either sends once and forgets a loan that is still out, or repeats
     # the same list into the library's channel every single run.
@@ -2161,13 +1852,6 @@ class Loan(Base):
     # than a "sent" flag set before the request.
     notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # The same, for the patron's own notice (#24): when a mail about this loan
-    # last reached the patron holding it. Its own column rather than
-    # `notified_at`, so a failure on one audience never silences the other: one
-    # stamp for both would let a digest that delivered hold back a patron whose
-    # mail failed, for the whole reminder interval (owner, 2026-11-22).
-    patron_notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
     book: Mapped[Book] = relationship("Book", back_populates="loans")
     loaned_to: Mapped[User | None] = relationship(
         "User", foreign_keys=[loaned_to_user_id], back_populates="loans_received"
@@ -2175,7 +1859,6 @@ class Loan(Base):
     loaned_by: Mapped[User] = relationship(
         "User", foreign_keys=[loaned_by_user_id], back_populates="loans_given"
     )
-    loaned_to_patron: Mapped[Patron | None] = relationship("Patron")
 
 
 #: A request is undecided, or carries all three halves of its decision.
@@ -3014,57 +2697,6 @@ CLASSIFICATION_LABEL_MAX = 200
 CLASSIFICATION_SORT_KEY_MAX = CLASSIFICATION_NUMBER_MAX + filing.MAX_KEY_GROWTH
 
 
-#: The longest code a classification scheme may have, and the width of
-#: `classifications.scheme`, which holds one.
-CLASSIFICATION_SCHEME_CODE_MAX = 20
-
-#: The longest name a classification scheme may have.
-CLASSIFICATION_SCHEME_NAME_MAX = 80
-
-
-class ClassificationSchemeRow(Base):
-    """One classification scheme a `classifications` row may quote.
-
-    **A row rather than an enum member**, so a library shelving by UDC or SuDoc
-    adds one rather than waiting for a release. The four this
-    code names are seeded and locked: `enums.ClassificationScheme` and
-    `classification_schemes.BUILT_IN` say why.
-
-    **`code` is the primary key and the value `classifications.scheme` holds**,
-    so the foreign key landed on the existing column and the migration
-    rewrote no row. It never changes: a heading's identity is the scheme and
-    the number together, so a code that moved would move every heading.
-
-    **What a row costs that an enum did not**, and where each answer is:
-
-    * A book pointing at a row that is gone. `fk_classifications_scheme`
-      refuses the delete while any heading quotes the row, and
-      `classification_schemes.remove` names how many books that is.
-    * The closed union in the generated client. A response's `scheme` is a
-      string now, and the client names a scheme it has no row for by its code.
-    * The check constraint. `scheme` is a foreign key instead, and
-      `backup.restore` adds a row for any code an archive's headings quote
-      that its schemes do not.
-    """
-
-    __tablename__ = "classification_schemes"
-
-    __table_args__ = (
-        CheckConstraint(_enum_check("filing", FilingRuleName), name="ck_classification_schemes_filing"),
-    )
-
-    code: Mapped[str] = mapped_column(String(CLASSIFICATION_SCHEME_CODE_MAX), primary_key=True)
-    name: Mapped[str] = mapped_column(String(CLASSIFICATION_SCHEME_NAME_MAX), nullable=False)
-    # Which rule in `filing.py` files this scheme's numbers. Fixed when the
-    # scheme is defined, because every stored key was computed under it.
-    filing: Mapped[FilingRuleName] = mapped_column(
-        String(20),
-        nullable=False,
-        default=FilingRuleName.GENERIC,
-        server_default=FilingRuleName.GENERIC.value,
-    )
-
-
 class Classification(Base):
     """One published scheme's assertion about what a book is about.
 
@@ -3125,12 +2757,14 @@ class Classification(Base):
             "number",
             unique=True,
         ),
-        # **A CHECK here and a foreign key on `scheme` beside it.** A CHECK
-        # costs a batch table rebuild every time its enum grows, which is a
-        # fair price for an enum that is closed. The schemes are rows a
-        # library adds. `HeadingKind` does not grow: it answers whether a
-        # record was talking about the work, its form or the object in your
-        # hand, and adding a catalogue cannot add a fourth answer.
+        # **Constrained where `scheme` beside it is not**, and the split is the
+        # one `tests/test_house_rules.py` holds: a CHECK costs a batch table
+        # rebuild every time the enum grows, which is a fair price for an enum
+        # that is closed and a recurring tax on one that is not.
+        # `ClassificationScheme` grows whenever a catalogue source is added.
+        # `HeadingKind` does not: it answers whether a record was talking about
+        # the work, its form or the object in your hand, and adding a catalogue
+        # cannot add a fourth answer.
         #
         # What it buys is the failure `b8e2f4c7a913` was written for.
         # `backup.restore` inserts through Core, where neither a Pydantic model
@@ -3167,14 +2801,7 @@ class Classification(Base):
     # column, so a second index on it would be a write cost with no read
     # behind it. The same reasoning as `quotes.book_id`.
     book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    # A string, not `ClassificationScheme`: any row of `classification_schemes`
-    # may be quoted, and the four the enum names are only the seeded ones.
-    # `RESTRICT` is the delete refusal the owner chose; see that model.
-    scheme: Mapped[str] = mapped_column(
-        String(CLASSIFICATION_SCHEME_CODE_MAX),
-        ForeignKey("classification_schemes.code", name="fk_classifications_scheme", ondelete="RESTRICT"),
-        nullable=False,
-    )
+    scheme: Mapped[ClassificationScheme] = mapped_column(String(20), nullable=False)
     number: Mapped[str] = mapped_column(String(CLASSIFICATION_NUMBER_MAX), nullable=False)
     # Null where the source carries the number alone. MARC 082 is exactly that
     # shape: the field holds the number and the printed schedule holds the
@@ -3191,7 +2818,7 @@ class Classification(Base):
     kind: Mapped[HeadingKind | None] = mapped_column(String(20), nullable=True)
     # Where this number stands on a shelf, under its own scheme's rule. See the
     # class docstring for why it is a column rather than an expression, and
-    # `_file_the_numbers` below for what keeps it in step.
+    # `_file_the_number` for what keeps it in step.
     #
     # **NOT NULL and no default, which is the enforcement.** A writer that
     # reached this table without deriving the key would otherwise store a null,
@@ -3202,127 +2829,37 @@ class Classification(Base):
 
     book: Mapped[Book] = relationship("Book", back_populates="classifications")
 
+    @validates("scheme", "number")
+    def _file_the_number(self, key: str, value: str) -> str:
+        """Keep `sort_key` in step with every ORM write of the two it derives from.
 
-class PendingHeading(Base):
-    """A heading a harvested record carries that nobody has confirmed yet.
+        The shape `Collection._fold_the_name` and `Tag._drop_the_key_on_a_rename`
+        already use, for the reason the first of them gives: a derivation a
+        writer could forget is a derivation that will eventually be forgotten.
+        Here there are two columns rather than one, because the rule is chosen
+        by the scheme and applied to the number.
 
-    **Not a `Classification`**, because ADR 0006 has a heading reach a Book only
-    through a door a Member's choice opened, and naming a repository once
-    confirms no record. So a harvest raises its record's headings here, and an
-    admin confirms or discards a Book's whole set (`pending_headings.py`).
+        **Both attributes, and the order they are assigned in does not matter.**
+        SQLAlchemy assigns constructor kwargs in the order given and fires this
+        once per assignment, so whichever of the two is set second recomputes
+        the key with the first already on the instance. `value` is used for the
+        attribute being set, because the assignment has not happened yet.
 
-    **A settled row stays, with `settled_at` set, whether it was confirmed or
-    discarded**, so the next harvest of the same record does not raise it
-    again; a heading the record newly carries is raised. Kept after a confirm
-    too, so a heading a Member later removed, or one the ceiling dropped at
-    the confirm, is not offered again on every run.
+        **The other one being absent is an insert in progress, not an error.**
+        `Classification(scheme=...)` with no number yet leaves the key alone,
+        and if the number never arrives the NOT NULL on this column and on
+        `number` both refuse the row. Deriving from a `None` number would raise
+        `AttributeError` from inside a constructor instead.
 
-    **Raised only on a Book the record is**: one the harvest created, or one
-    it matched by the record's identifier. A Book matched by ISBN or by author
-    and title gets none, as before.
-
-    **`scheme` has no foreign key**, unlike `classifications.scheme`: a
-    suggestion must not block deleting a scheme. `add_headings` drops one whose
-    scheme has gone, at the confirm.
-
-    **No `book` relationship**: Book owned with no Member of its own, read only
-    off `Book.pending_headings`, so its visibility is the Book's entirely.
-    Named in `BOOK_OWNED_TABLES` in `tests/test_shelf.py`.
-    """
-
-    __tablename__ = "pending_headings"
-
-    __table_args__ = (
-        # One suggestion per heading per Book, whatever its state, which is
-        # what lets a discard be remembered. Leads with `book_id`, so that
-        # column needs no index of its own.
-        Index("uq_pending_headings_book_scheme_number", "book_id", "scheme", "number", unique=True),
-        # `ck_classifications_kind`'s rule, for its reason: `backup.restore`
-        # writes through Core, and a confirm hands the value to the schema.
-        CheckConstraint(
-            _enum_check("kind", HeadingKind, nullable=True, excluding=(HeadingKind.SUBJECT,)),
-            name="ck_pending_headings_kind",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    book_id: Mapped[int] = mapped_column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    # The run that raised it: provenance, never read to decide anything.
-    harvest_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("harvests.id", name="fk_pending_headings_harvest_id"), nullable=False
-    )
-    scheme: Mapped[str] = mapped_column(String(CLASSIFICATION_SCHEME_CODE_MAX), nullable=False)
-    number: Mapped[str] = mapped_column(String(CLASSIFICATION_NUMBER_MAX), nullable=False)
-    label: Mapped[str | None] = mapped_column(String(CLASSIFICATION_LABEL_MAX), nullable=True)
-    kind: Mapped[HeadingKind | None] = mapped_column(String(20), nullable=True)
-    # Null while pending. Set by a confirm or a discard and never cleared,
-    # which is what remembers a settled heading: see the class docstring.
-    settled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-#: Where `_file_the_numbers` keeps a session's filing rules, in `Session.info`.
-_FILING_RULES_KEY: Final = "classification_filing_rules"
-
-
-def filing_rules(session: Session, connection: Connection | None = None) -> dict[str, str]:
-    """Every scheme's code and the filing rule it names, read once per session.
-
-    **Once per session rather than once per row**, because a MARC import
-    writes a whole file of headings through one session and a statement per
-    heading would be the N+1 the cost tests exist to catch. A rule cannot go
-    stale inside a session that did not change it: `filing` is fixed when a
-    scheme is defined. The one way to change it is to delete the scheme and
-    define it again, which needs no heading to quote it; a session that does
-    either calls `forget_filing_rules`. **Another session doing so is not
-    seen**: a long session that cached the rules before another deleted and
-    redefined `x`, or defined it, files later headings under `x` by the rule
-    it cached, or the generic one. That needs an admin's redefine racing a
-    long write under a library's own scheme, which no reader produces today.
-
-    `connection` is the flush's own, from inside a mapper event, where issuing
-    a statement through the session is not allowed.
-    """
-    rules = session.info.get(_FILING_RULES_KEY)
-    if rules is None:
-        statement = select(ClassificationSchemeRow.code, ClassificationSchemeRow.filing)
-        executed = connection.execute(statement) if connection is not None else session.execute(statement)
-        rules = {str(code): str(rule) for code, rule in executed}
-        session.info[_FILING_RULES_KEY] = rules
-    return rules
-
-
-def forget_filing_rules(session: Session) -> None:
-    """Make the next `filing_rules` on this session read the table again."""
-    session.info.pop(_FILING_RULES_KEY, None)
-
-
-def _file_the_numbers(_mapper: Mapper[Classification], connection: Connection, row: Classification) -> None:
-    """Keep `sort_key` in step with every ORM write of the two it derives from.
-
-    **At the flush rather than at assignment**, which is where it used to be,
-    as a `@validates` hook. The rule is a column of the scheme's row now, and
-    an attribute hook has no session to read it through. A flush has one.
-
-    An update that changed neither `scheme` nor `number` keeps its key, so
-    filling in a caption reads no rule. A Core insert never fires this, which
-    is `backup.restore`: `backup._parse_row` derives the key there, through the
-    same `filing.sort_key_under`.
-
-    A scheme with no row files under the generic rule here, and the foreign
-    key refuses the row in the same flush, so no wrong key is stored.
-    """
-    state = inspect(row)
-    if state.persistent and not (
-        state.attrs.scheme.history.has_changes() or state.attrs.number.history.has_changes()
-    ):
-        return
-    session = object_session(row)
-    rules = filing_rules(session, connection) if session is not None else {}
-    row.sort_key = filing.sort_key_under(rules.get(row.scheme), row.number)
-
-
-event.listen(Classification, "before_insert", _file_the_numbers)
-event.listen(Classification, "before_update", _file_the_numbers)
+        A Core insert never fires this, which is `backup.restore`:
+        `backup._parse_row` derives the key there, through the same
+        `filing.sort_key_for`.
+        """
+        scheme = value if key == "scheme" else self.scheme
+        number = value if key == "number" else self.number
+        if number is not None:
+            self.sort_key = filing.sort_key_for(scheme, number)
+        return value
 
 
 #: The longest identifier a store gives one Book.
@@ -3618,60 +3155,6 @@ class OnlineLink(Base):
     book: Mapped[Book] = relationship("Book", back_populates="online_links")
 
 
-#: How many images a Book keeps beside its shelf cover: a back cover, a spine,
-#: a dust jacket variant and room to spare. With the shelf cover that is eight,
-#: so one Book holds at most eight times `config.MAX_UPLOAD_BYTES` on disk
-#: through the writers that add one. `docs/decisions.md` records why eight.
-MAX_COVER_IMAGES_PER_BOOK = 7
-
-
-class CoverImage(Base):
-    """A further image of a Book, kept beside the cover the shelf shows.
-
-    **The shelf cover stays `books.cover_url`**, so every listing, the OPDS feed
-    and the public catalogue read exactly what they read before; a row here is
-    only ever shown on the book page. Choosing one as the shelf cover swaps the
-    two: `routers/books.shelve_cover_image` says how.
-
-    **Book owned, with no Member of its own**, like `OnlineLink`: an image of a
-    Book is the household's evidence of which edition it holds, so its
-    visibility is the Book's entirely. Named in `BOOK_OWNED_TABLES` in
-    `tests/test_shelf.py`, and read only through `Book.cover_images`.
-
-    **The file is named by this row's id, not the Book's**: see
-    `cover_store.write_image_slot`. That is what lets a merge carry a row to
-    the survivor without touching the disk.
-
-    **`sqlite_autoincrement`**, because the id is the file's name and a reused
-    id on SQLite would hand a new row a cached URL that once served somebody
-    else's image. Postgres never reissues a sequence value.
-    """
-
-    __tablename__ = "cover_images"
-
-    __table_args__ = (
-        # The extensions `cover_store` writes, which are the ones the cover
-        # route serves. A row naming another could never be served. Derived,
-        # and the migration writes out the set as it stood that day.
-        CheckConstraint(_enum_check("extension", ImageExtension), name="ck_cover_images_extension"),
-        {"sqlite_autoincrement": True},
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    book_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    extension: Mapped[str] = mapped_column(String(4), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    book: Mapped[Book] = relationship("Book", back_populates="cover_images")
-
-    @property
-    def url(self) -> str:
-        """Where the cover route serves this image, behind the Book's read rule."""
-        return covers.image_slot_url(self.book_id, self.id, self.extension)
-
-
 #: The longest name a Library may give one of its own fields.
 #:
 #: Shorter than a Tag's 100 because this one is a **label read beside a value**
@@ -3895,34 +3378,6 @@ class CustomFieldValue(Base):
     # way it takes the notes and the quotes. There is deliberately no `field`
     # to walk in the other direction: see `CustomField`.
     book: Mapped[Book] = relationship("Book", back_populates="custom_field_values")
-
-
-class OaiTombstone(Base):
-    """A record a harvester could have seen and can no longer see.
-
-    `Identify` advertises `deletedRecord` as `persistent` (owner, ticket 176), so
-    a Book that leaves the public shelf, by the trash, by being made private, by
-    a merge or by any other way, keeps answering as a deleted header forever.
-    `harvest.py` writes and removes these rows; nothing else does.
-
-    **Two columns and nothing else about the book**, which is the owner's
-    condition: the row outlives the Book it names, so anything more on it would
-    be a copy of a record that is no longer public. No foreign key either, for
-    the same reason: the Book may be purged, and a key would take the tombstone
-    with it.
-
-    `book_id` is safe as the identity because an id is never issued twice:
-    `AUTOINCREMENT` and a Postgres sequence never step back at head, and
-    `harvest.wholesale` raises the counter past every tombstone after a
-    restore, which carries Books but not the counter. A Book back on the public
-    shelf has its tombstone removed in the same flush, so one id is never both.
-    """
-
-    __tablename__ = "oai_tombstones"
-
-    book_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    #: When the record left the public shelf, stored to the second, served to the day.
-    datestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
 
 
 class Setting(Base):
@@ -4413,16 +3868,6 @@ class CatalogueTarget(Base):
             ),
             name="ck_catalogue_targets_use_attribute",
         ),
-        # **The bound `targets.Target._check_timeout` refuses**, so a restore
-        # cannot write a row the dataclass would refuse when one is read back.
-        # The 10.0 is `targets.TIMEOUT_CEILING_SECONDS` as a literal, which
-        # `test_targets.py` holds the two together on. NaN is refused on
-        # Postgres because it compares above every number there; SQLite stores
-        # it as NULL.
-        CheckConstraint(
-            "timeout_seconds IS NULL OR (timeout_seconds > 0 AND timeout_seconds <= 10.0)",
-            name="ck_catalogue_targets_timeout",
-        ),
     )
 
     #: The `CatalogueSource` this row is, and the primary key. Closed, because
@@ -4454,8 +3899,8 @@ class CatalogueTarget(Base):
     refuses_component_parts: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     requires_isbn_claim: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     reads_author_identifiers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    #: `targets.Target.timeout_seconds`, which says what reads it and why a
-    #: Z39.50 row's seed carries an extra second.
+    #: NULL on every seeded row. #132 enforces it, under
+    #: `metadata.SEARCH_DEADLINE_SECONDS` as the ceiling over the whole fan out.
     timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     #: Whether this row is still the application's rather than the household's.
     #:
@@ -5088,96 +4533,3 @@ class ReadwiseBook(Base):
     #: rather than an inference from `book_id`, which is committed first: a pull
     #: stopping between the two would otherwise never ask again.
     whole_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
-
-
-# ── The local copy of a subject vocabulary ───────────────────────────────────
-
-#: The longest label a vocabulary copy keeps, in characters: a classification's
-#: caption, since a label is what a heading picked from the copy would store
-#: there. A longer one is passed over by the load and counted.
-VOCABULARY_LABEL_MAX: Final = CLASSIFICATION_LABEL_MAX
-
-#: The longest entry identifier a copy keeps. The two shipped forms are
-#: `(DE-588)` and a GND number, and an id.loc.gov URI of about fifty characters.
-VOCABULARY_IDENTIFIER_MAX: Final = 120
-
-
-class VocabularyCopy(Base):
-    """What is loaded of one declared vocabulary, and which load is current.
-
-    **One row per vocabulary, written only by the swap** in `vocabulary_copy.py`,
-    in the transaction that makes a finished load the one lookups read. So a
-    row exists only for a vocabulary that has completed a load at least once,
-    and its dates and count describe the rows `generation` names.
-
-    `released` is the source's own date for the release, its `Last-Modified`;
-    `fetched_at` is when this application fetched it. Both are naive UTC.
-    """
-
-    __tablename__ = "vocabulary_copies"
-
-    scheme: Mapped[str] = mapped_column(String(CLASSIFICATION_SCHEME_CODE_MAX), primary_key=True)
-    generation: Mapped[int] = mapped_column(Integer, nullable=False)
-    entries: Mapped[int] = mapped_column(Integer, nullable=False)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    released: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-class VocabularyLabel(Base):
-    """One label of one entry of a vocabulary's local copy.
-
-    **Labels and identifiers, not authority records**: an entry's preferred
-    label is one row and each alternate label another, under the same
-    `identifier`, so a search for a variant reaches the entry and from it the
-    preferred term.
-
-    **Rows of a load in progress sit beside the current ones** under the next
-    `generation`, and nothing reads them until `VocabularyCopy.generation` names
-    it. A load that stops halfway leaves rows no lookup joins, removed by the
-    next load of that vocabulary.
-    """
-
-    __tablename__ = "vocabulary_labels"
-
-    __table_args__ = (
-        # One label once per entry per load. Leads with what a lookup from a
-        # variant to its preferred term filters on.
-        Index("uq_vocabulary_labels_entry_label", "scheme", "generation", "identifier", "label", unique=True),
-        # The exact label lookup.
-        Index("ix_vocabulary_labels_label", "scheme", "generation", "label"),
-        # The byte arm beside each character arm for the reason
-        # `ck_digital_references_bounds` gives: `backup.restore` writes through
-        # Core and SQLite's `length()` stops at a NUL.
-        CheckConstraint(
-            DialectSQL(
-                sqlite=(
-                    f"length(label) BETWEEN 1 AND {VOCABULARY_LABEL_MAX} "
-                    f"AND length(CAST(label AS BLOB)) <= {4 * VOCABULARY_LABEL_MAX} "
-                    f"AND length(identifier) BETWEEN 1 AND {VOCABULARY_IDENTIFIER_MAX} "
-                    f"AND length(CAST(identifier AS BLOB)) <= {4 * VOCABULARY_IDENTIFIER_MAX}"
-                ),
-                postgresql=(
-                    f"length(label) BETWEEN 1 AND {VOCABULARY_LABEL_MAX} "
-                    f"AND octet_length(label) <= {4 * VOCABULARY_LABEL_MAX} "
-                    f"AND length(identifier) BETWEEN 1 AND {VOCABULARY_IDENTIFIER_MAX} "
-                    f"AND octet_length(identifier) <= {4 * VOCABULARY_IDENTIFIER_MAX}"
-                ),
-            ),
-            name="ck_vocabulary_labels_bounds",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    scheme: Mapped[str] = mapped_column(String(CLASSIFICATION_SCHEME_CODE_MAX), nullable=False)
-    generation: Mapped[int] = mapped_column(Integer, nullable=False)
-    identifier: Mapped[str] = mapped_column(String(VOCABULARY_IDENTIFIER_MAX), nullable=False)
-    label: Mapped[str] = mapped_column(String(VOCABULARY_LABEL_MAX), nullable=False)
-    preferred: Mapped[bool] = mapped_column(Boolean, nullable=False)
-
-
-# Last, and for its side effect: the session events that keep `Book.oai_datestamp`
-# and `OaiTombstone` true. Here rather than in `main.py` so that any process able
-# to name a Book has them, a script or a test that never imports the app
-# included. A module import rather than a name, so the cycle it closes is safe:
-# `harvest` reads nothing from this module until a session flushes.
-import harvest  # noqa: E402, F401

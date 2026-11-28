@@ -25,22 +25,22 @@ conjunction that must not be spelled twice.
 import json
 import logging
 import secrets
-from typing import Any, Final, assert_never
+from typing import Any, Final
 
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import config
 import credentials
 import sources
 import targets
-from enums import CatalogueSource, CredentialKind, Locale, SettingKey
-from models import Setting, datestamp_now
+from enums import CatalogueSource, Locale, SettingKey
+from models import Setting
 
 logger = logging.getLogger(__name__)
 
-#: **`metadata` is not imported here, and a module level import of it is a
-#: cycle**: the chain measured on 2026-09-17 is
+#: **`metadata` is imported inside each function that needs it, never at module
+#: level.** A module level import is a cycle: the chain measured on 2026-09-17 is
 #: `mailer` -> this module -> `metadata` -> `catalogue` -> `schemas.book` ->
 #: `schemas` -> `schemas.user` -> `mailer`, which reaches `mailer.MAX_ADDRESS`
 #: before `mailer` has defined it and fails at collection with an
@@ -99,11 +99,6 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     # household that has configured nothing being told nothing is the whole
     # complaint this channel answers, and an off switch would reproduce it.
     SettingKey.OVERDUE_IN_APP_ENABLED: "true",
-    # The patron's own notice, off like the other pushing senders: it sends a
-    # patron's address and their loans to a mail server. Switching library mode
-    # on turns it on, once: see `routers/settings._default_notices_on`.
-    SettingKey.OVERDUE_PATRON_MAIL_ENABLED: "false",
-    SettingKey.LIBRARY_MODE_NOTICES_DEFAULTED: "false",
     # Library mode and the public catalogue, both off. The second is the only
     # setting in this table that makes catalogue rows readable **without a
     # session at all**, so its default is the one that matters most here: a
@@ -112,51 +107,18 @@ DEFAULTS: Final[dict[SettingKey, str]] = {
     SettingKey.PUBLIC_CATALOGUE_ENABLED: "false",
     # Off, so a published catalogue is `noindex` until somebody says otherwise.
     SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED: "false",
-    # Off, so a catalogue published to people is not also served over SRU until
-    # an admin says so; the owner's decision on issue #178 is that every export
-    # protocol starts off. **A deployment already serving SRU keeps it**:
-    # revision `f73ebc9f0436` writes the row on where the catalogue was
-    # published before the switch existed, since otherwise this default would
-    # read there and withdraw it.
-    SettingKey.SRU_SERVER_ENABLED: "false",
-    # Off everywhere, fresh and upgraded alike: unlike SRU there is no endpoint
-    # an upgrade could withdraw, since none answered before the switch did.
-    SettingKey.OAI_PROVIDER_ENABLED: "false",
-    # No contact address until an admin gives one, so the switch above stays
-    # off until then: `routers/settings.py` refuses it.
-    SettingKey.OAI_ADMIN_EMAIL: "",
-    # Never served. Not a preference: no field in `SettingsUpdate`, and written
-    # by `record_oai_service` alone.
-    SettingKey.OAI_FIRST_SERVED: "",
-    # Off, with no repository: the one setting that makes this server connect
-    # where a person typed starts silent, like every sender above.
-    SettingKey.OAI_HARVEST_ENABLED: "false",
-    SettingKey.OAI_HARVEST_BASE_URL: "",
-    # Off: a public record says nothing about loans until an admin says so
-    # (owner's decision on issue #29). See `availability_is_shown`.
-    SettingKey.PUBLIC_AVAILABILITY_ENABLED: "false",
     # An empty JSON object: no sender has run yet. Not a preference, so it has
     # no field in `SettingsUpdate` and never reaches `_read_settings`.
     SettingKey.SENDER_HEALTH: "{}",
-    # The provider list. An empty object rather than the twenty one sources spelled
+    # The provider list. An empty object rather than the twenty sources spelled
     # out, because `sources.parse` already answers "absent means the defaults"
     # and writing them twice is two places for the default order to drift.
     SettingKey.CATALOGUE_SOURCES: "{}",
-    # Nothing picked: no registry entry is asked or listed as chosen until an
-    # admin picks it.
-    SettingKey.PICKED_CATALOGUES: "{}",
     # Off, so a household that reads no setting asks nobody to prove anything.
     # On, it means accounts here are held by people outside the household, and
     # a new local account cannot sign in until its address is verified or an
     # admin says otherwise.
     SettingKey.ACCOUNTS_OPEN_TO_OUTSIDERS: "false",
-    # Not dismissed: an installation with no copy is offered one until an
-    # admin loads a copy or says no.
-    SettingKey.VOCABULARY_OFFER_DISMISSED: "false",
-    # On: a library offers controlled headings unless an admin says otherwise
-    # (owner, 2026-11-22). Read with library mode, so a household that reads
-    # no setting never meets it.
-    SettingKey.HEADINGS_FROM_VOCABULARY: "true",
 }
 
 # Settings whose value must never be sent back to a browser in full, and which are
@@ -199,22 +161,6 @@ def get_raw(db: Session, key: SettingKey) -> str:
 
 def get_bool(db: Session, key: SettingKey) -> bool:
     return get_raw(db, key).strip().lower() in _TRUE_VALUES
-
-
-def unchosen(db: Session, keys: tuple[SettingKey, ...]) -> tuple[SettingKey, ...]:
-    """Those of `keys` nobody chose: neither pinned by the environment nor stored.
-
-    What a default may fill, and the difference `get_raw` cannot see between a
-    value nobody chose and a choice that happens to equal the default. A row
-    cleared to `None` by `set_value` reads as unchosen, as it reads the default.
-    Takes the keys together, so a caller names them as one table rather than
-    through a loop variable no reader rule can read.
-    """
-    rows = db.query(Setting.key).filter(
-        Setting.key.in_([key.value for key in keys]), Setting.value.isnot(None)
-    )
-    stored = {row.key for row in rows}
-    return tuple(key for key in keys if key.value not in stored and not is_from_env(key))
 
 
 def get_int(db: Session, key: SettingKey, *, minimum: int, maximum: int) -> int:
@@ -529,17 +475,41 @@ def google_books_api_key(db: Session, state: credentials.KeyState | None = None)
     return in_force_if_readable(db, SettingKey.GOOGLE_BOOKS_API_KEY, state)
 
 
+#: The sources whose credential is a **settings row** rather than a sealed login.
+#:
+#: **One member, named here rather than spelled inline**, and the distinction it
+#: draws is the one `credentials.py` opens with: Google Books' credential is an
+#: API key in a query string, this deployment's own, held in `settings`. Every
+#: other source that needs one needs a login at somebody else's server, held
+#: sealed in `catalogue_credentials`. Two kinds of secret, and this is where the
+#: routing between them lives.
+#:
+#: **A set is not the right shape and this is not the fix.** Which store a
+#: source's secret uses is a property of the source, so it belongs beside
+#: `Capability.NEEDS_A_CREDENTIAL` as a second capability, read through
+#: `Target.can` like every other. That is an enum member, a column on
+#: `models.CatalogueTarget`, a value on every seeded row, a line in the seeder
+#: and a migration, which is more than this ticket may take for a rule with one
+#: member. #210 carries this paragraph. Until then the
+#: exception is named and in one place, which is what stops it being a
+#: condition somebody has to notice inside a comprehension.
+_SECRET_IS_A_SETTINGS_ROW: Final[frozenset[CatalogueSource]] = frozenset({CatalogueSource.GOOGLE_BOOKS})
+
+
 def _sources_with_a_credential(
     db: Session, state: credentials.KeyState | None = None
 ) -> set[CatalogueSource]:
-    """Which sources whose credential is a login hold a readable one, from any level.
+    """Which credential-needing sources hold a readable login, from any level.
 
-    **Over `sources.NEEDS_A_LOGIN`, the subject `catalogue_logins` resolves for**,
-    so a source this admits to the plan is one whose login is resolved for its
-    request. The store is read off the row by `targets.Target.credential_kind`;
-    a source whose secret is a settings row is `_sources_with_a_key`'s.
-    Written for the set rather than for its members, so a login source arriving
-    on the roster costs this nothing.
+    **Two sources today, and that is a fact about the roster rather than about
+    this function.** It was empty while `sources.NEEDS_A_KEY` was Google Books
+    alone, whose secret is a settings row; the Argentine and Uruguayan national
+    libraries are the two members whose secret is not one, so the loop runs
+    twice and the key is resolved on every call that reaches here. It was written
+    for the set rather than for the member, which is why that cost the roster
+    nothing to arrive at.
+    `tests/test_settings_store.py` exercises it against a roster with a second
+    such source in it.
 
     **Not "holds a sealed row", which is what this used to say.** `is_held` asks
     the whole ladder, so a source whose login this build ships answers true with
@@ -553,51 +523,14 @@ def _sources_with_a_credential(
     The key is resolved once for the whole loop rather than per source: see
     `credentials.KeyState`.
     """
-    if not sources.NEEDS_A_LOGIN:
+    sealed = sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW
+    if not sealed:
         return set()
     resolved = _resolved(state)
     return {
         source
-        for source in sources.NEEDS_A_LOGIN
+        for source in sealed
         if credentials.is_held(db, source.value, targets.SEEDED[source].base_url, resolved)
-    }
-
-
-def _key_in_force(
-    db: Session, secret: targets.Secret, state: credentials.KeyState | None, *, switched_on: bool
-) -> bool:
-    """Whether the settings row key `secret` names is readable, and its section switched on if asked.
-
-    **A `match` with an `assert_never` tail, as `metadata._bespoke_lookup` has**,
-    so a second `Secret` member is a mypy error here as well as there. Naming
-    Google Books in `ready_sources` instead let a second key source type check
-    and never be ready. Each arm names its keys literally, so
-    `TestAnOverriddenSettingIsReadWhereItIsPinned` can read them. A row whose
-    credential is a key names a secret, by `targets.Target.credential_kind`, so
-    `Secret.NONE` is refused.
-
-    `switched_on` is `ready_sources`' question and not `source_credentials`'.
-    The switch is read first, so a source switched off resolves no key.
-    """
-    match secret:
-        case targets.Secret.GOOGLE_BOOKS_KEY:
-            if switched_on and not get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED):
-                return False
-            return bool(google_books_api_key(db, state))
-        case targets.Secret.NONE:
-            raise ValueError("a source whose credential is a key names the secret it reads")
-    assert_never(secret)
-
-
-def _sources_with_a_key(
-    db: Session, state: credentials.KeyState | None, *, switched_on: bool
-) -> set[CatalogueSource]:
-    """Which sources whose credential is a settings row key hold a readable one. See `_key_in_force`."""
-    return {
-        source
-        for source in sources.NEEDS_A_KEY
-        if targets.SEEDED[source].credential_kind is CredentialKind.API_KEY
-        and _key_in_force(db, targets.SEEDED[source].secret, state, switched_on=switched_on)
     }
 
 
@@ -616,7 +549,9 @@ def source_credentials(db: Session) -> frozenset[CatalogueSource]:
     many levels there are.
     """
     held = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
-    return frozenset(held | _sources_with_a_key(db, None, switched_on=False) | _sources_with_a_credential(db))
+    if google_books_api_key(db):
+        held.add(CatalogueSource.GOOGLE_BOOKS)
+    return frozenset(held | _sources_with_a_credential(db))
 
 
 def ready_sources(db: Session, state: credentials.KeyState | None = None) -> frozenset[CatalogueSource]:
@@ -628,9 +563,9 @@ def ready_sources(db: Session, state: credentials.KeyState | None = None) -> fro
     anyway is what sent an ISBN to a third party with the feature switched off.
     """
     ready = set(sources.DEFAULT_ORDER) - sources.NEEDS_A_KEY
-    return frozenset(
-        ready | _sources_with_a_key(db, state, switched_on=True) | _sources_with_a_credential(db, state)
-    )
+    if get_bool(db, SettingKey.GOOGLE_BOOKS_ENABLED) and google_books_api_key(db, state):
+        ready.add(CatalogueSource.GOOGLE_BOOKS)
+    return frozenset(ready | _sources_with_a_credential(db, state))
 
 
 def stored_catalogue_sources(db: Session) -> sources.Plan:
@@ -665,7 +600,7 @@ def catalogue_sources(db: Session, state: credentials.KeyState | None = None) ->
     **One row read and one `json.loads` per request that reaches a catalogue**,
     and that is accepted rather than cached. It is the same cost
     `google_books_api_key` already pays beside it on the same call sites, a
-    populated row holds twenty one sources, and the alternative is a process local
+    populated row holds twenty sources, and the alternative is a process local
     cache that has to be invalidated on write: a second source of truth for a
     value whose whole point is that turning a source off takes effect
     immediately. If this ever shows up in a measurement, the honest fix is to
@@ -677,24 +612,24 @@ def catalogue_sources(db: Session, state: credentials.KeyState | None = None) ->
 def sources_whose_door_carries_a_login() -> list[CatalogueSource]:
     """Which catalogues a login is resolved for, in a stable order.
 
-    **`sources.NEEDS_A_LOGIN`, the subject `_sources_with_a_credential` admits to
-    the plan over, so the plan and the logins cannot disagree about who needs
-    one.** A source admitted there and skipped here would sit in the plan with no
-    entry in `catalogue_logins` and be asked with no credential. Not filtered by
-    `metadata.carries_a_credential`: `metadata.resolve` refuses, at boot, a LOGIN
-    row whose door carries none, so the filter would drop nothing that booted.
+    **One home for the predicate, because two readers of it disagreeing silently is the
+    gap `catalogue_logins` describes.** That function resolves the logins and
+    `catalogue_access._warn_about_any_source_asked_with_no_login` checks the plan against
+    them; when each spelled this itself, widening one left the other behind in the miss
+    direction, which is a request going out with no credential and nothing saying so.
 
-    **One home, because two readers of it disagreeing silently is the gap above.**
-    `catalogue_logins` resolves the logins and
-    `catalogue_access._warn_about_any_source_asked_with_no_login` checks the plan
-    against them.
-
-    **Pure, and that is what keeps it cheap to ask twice.** It reads the seed table,
-    takes no `Session`, and resolves no key, so asking it does not move the one
-    resolution per request that
+    **Pure, and that is what keeps it cheap to ask twice.** It reads the seed table and
+    the capability rule, takes no `Session`, and resolves no key, so asking it does not
+    move the one resolution per request that
     `tests/test_settings_store.py::TestTheKeyIsResolvedOncePerRequest` holds.
     """
-    return sorted(sources.NEEDS_A_LOGIN)
+    import metadata  # function level, for the cycle above
+
+    return [
+        source
+        for source in sorted(sources.NEEDS_A_KEY)
+        if metadata.carries_a_credential(targets.SEEDED[source])
+    ]
 
 
 def catalogue_logins(
@@ -709,16 +644,40 @@ def catalogue_logins(
     next request send", which is `credentials.for_request`'s own question, and
     `catalogue_access._resolved_access` hands the answer over as an argument.
 
-    **Over `sources_whose_door_carries_a_login`, the set `ready_sources` admits a
-    login source from**, so a source in the plan on a held login is one this loop
-    resolves for. Which rows those are is `targets.Target.credential_kind`, and
-    `metadata.resolve` refuses one whose door would drop the login.
+    **Only the targets whose door carries one**, which is
+    `metadata.carries_a_credential` and is asked rather than restated here: the
+    rule and this loop must not be able to disagree about which rows to resolve,
+    because a row skipped here is a request that goes out unauthenticated with
+    nothing saying so.
 
-    **What is left of the gap is logged and not refused, deliberately.** `is_held`
-    and `for_request` are two reads of the keychain, so a key rotated between them
-    is a legitimate disagreement, and a raise here would turn a silent
-    unauthenticated request into a 500 for a cause the caller cannot fix. What the
-    warning buys is that the silent case stops being silent.
+    **That agreement is not the one that matters, and this paragraph is the
+    correction.** The sentence above buys agreement between this loop and
+    `carries_a_credential`. What decides whether a request goes out
+    unauthenticated is agreement between this loop and **`ready_sources`**, which
+    is what admits a credentialled source to the plan, and the two ask different
+    questions of different subjects: `ready_sources` asks `credentials.is_held`
+    over `sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW`, and this asks
+    `credentials.for_request` over `sources.NEEDS_A_KEY` filtered by
+    `carries_a_credential`. A source admitted there and skipped here sits in the
+    plan with no entry in this mapping, and `metadata` asks it with no
+    credential.
+
+    **They agree on today's roster, on a set of size two, and nothing made them.**
+    `NEEDS_A_KEY` is Google Books and the Argentine and Uruguayan national
+    libraries, `_SECRET_IS_A_SETTINGS_ROW` is Google Books, and both subjects come
+    out as those two rows. `carries_a_credential` answers False for every
+    transport but SRU, so the first catalogue that needs a key, keeps its secret
+    sealed rather than in a settings row, and speaks anything else falls in the
+    gap. `tests/test_settings_store.py::TestThePlanAndTheLoginsAgreeOnWhoNeedsOne`
+    fails on the row that opens it.
+
+    **The gap is logged and not refused, deliberately.** A raise here would turn a
+    silent unauthenticated request into a 500, and it would do so on a case that
+    cannot happen today for a cause the caller cannot fix: `is_held` and
+    `for_request` are two reads of the keychain, so a key rotated between them is
+    a legitimate disagreement. What the warning buys is that the silent case stops
+    being silent; what the test buys is that it is caught when the row is added
+    rather than when a member's search goes out bare.
 
     **The warning lives in `catalogue_access._resolved_access` and not here**,
     because it needs the plan beside these logins and this function holds only the
@@ -758,15 +717,15 @@ def catalogue_logins(
     Written for the set rather than for its members because the next source to
     declare that capability is the reason this plumbing exists.
     """
-    doors = sources_whose_door_carries_a_login()
+    doors = [targets.SEEDED[source] for source in sources_whose_door_carries_a_login()]
     if not doors:
         return {}
     key = _resolved(state)
     resolved: dict[CatalogueSource, credentials.Credential] = {}
-    for source in doors:
-        login = credentials.for_request(db, source.value, targets.SEEDED[source].base_url, key)
+    for target in doors:
+        login = credentials.for_request(db, target.source.value, target.base_url, key)
         if login is not None:
-            resolved[source] = login
+            resolved[target.source] = login
     return resolved
 
 
@@ -831,79 +790,6 @@ def public_catalogue_may_be_indexed(db: Session) -> bool:
     return public_catalogue_is_published(db) and get_bool(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED)
 
 
-def sru_is_served(db: Session) -> bool:
-    """Whether the SRU server answers.
-
-    Its own switch **and** the publish state, the same shape as
-    `public_catalogue_may_be_indexed` and for the same reason: a switch that
-    could turn the protocol on while nothing is published would be a way to
-    publish the catalogue without saying so. `routers.sru` runs the public gate
-    before asking this, so the conjunction is repeated there on purpose: this
-    answer stays right for any caller that asks it alone.
-    """
-    return public_catalogue_is_published(db) and get_bool(db, SettingKey.SRU_SERVER_ENABLED)
-
-
-def oai_is_served(db: Session) -> bool:
-    """Whether the OAI-PMH provider answers: its own switch **and** the publish
-    state, for the reason `sru_is_served` gives, **and** a contact address.
-    Neither protocol's switch reads the other's, so turning one on cannot turn
-    the other on.
-
-    The address is refused empty at the write while the switch is on; it is
-    read here too because a restore or a hand edit can store the pair without
-    that write, and `Identify` must name an address."""
-    return (
-        public_catalogue_is_published(db)
-        and get_bool(db, SettingKey.OAI_PROVIDER_ENABLED)
-        and bool(get_raw(db, SettingKey.OAI_ADMIN_EMAIL).strip())
-    )
-
-
-def harvest_repository(db: Session) -> str | None:
-    """The repository address stored for the harvester, or None while it may not run.
-
-    Library mode, the harvester's own switch **and** an address that is not
-    blank, which a restore can store without passing the settings route. **The
-    address is not validated here**: `harvester.configured_repository` applies
-    `harvester.is_harvestable` to what this answers, because that rule reaches
-    `fetch` and this layer sits below it.
-    """
-    if not (get_bool(db, SettingKey.LIBRARY_MODE) and get_bool(db, SettingKey.OAI_HARVEST_ENABLED)):
-        return None
-    return get_raw(db, SettingKey.OAI_HARVEST_BASE_URL).strip() or None
-
-
-def oai_has_served(db: Session) -> bool:
-    """Whether the OAI-PMH provider has ever answered a request."""
-    return bool(get_raw(db, SettingKey.OAI_FIRST_SERVED))
-
-
-def record_oai_service(db: Session) -> None:
-    """Note the first request the OAI-PMH provider answers, once.
-
-    Two first requests at once both find the row missing; the second insert
-    then fails on the key and is dropped, since the first has recorded a moment
-    a second earlier at most.
-    """
-    if oai_has_served(db):
-        return
-    try:
-        set_value(db, SettingKey.OAI_FIRST_SERVED, datestamp_now().isoformat())
-    except IntegrityError:
-        db.rollback()
-
-
-def availability_is_shown(db: Session) -> bool:
-    """Whether a public record says if its book is on the shelf or on loan.
-
-    Its own switch **and** the publish state, for `sru_is_served`'s reason: a
-    switch that answered while nothing is published would be a way to publish
-    something without saying so.
-    """
-    return public_catalogue_is_published(db) and get_bool(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED)
-
-
 def accounts_are_open_to_outsiders(db: Session) -> bool:
     """Whether accounts here belong to people outside the household.
 
@@ -949,17 +835,3 @@ def bump_token_epoch(db: Session) -> str:
     fresh = secrets.token_hex(8)
     set_value(db, SettingKey.TOKEN_EPOCH, fresh)
     return fresh
-
-
-def headings_from_vocabulary(db: Session) -> bool:
-    """Whether a book's heading field offers headings from the local vocabulary copies.
-
-    **Its own switch and library mode**, the conjunction `public_catalogue_is_published`
-    makes for the same reason: the row defaults on, so without library mode in
-    it every household would be offered a cataloguer's field.
-
-    **It filters what the field offers and refuses nothing.** A heading posted
-    that no copy holds is written as any member's heading is, as
-    `docs/decisions.md` records for #135; `routers.books.add_heading` says why.
-    """
-    return library_mode(db) and get_bool(db, SettingKey.HEADINGS_FROM_VOCABULARY)

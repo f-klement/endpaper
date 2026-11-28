@@ -9,7 +9,7 @@ union types like `"unread" | "reading" | "read"` instead of `string`.
 
 import logging
 from enum import StrEnum
-from typing import Final, overload
+from typing import overload
 
 from logvalues import clipped
 
@@ -337,49 +337,30 @@ class TagKey(StrEnum):
     ADULT = "adult"
 
 
-class FilingRuleName(StrEnum):
-    """Which filing rule a classification scheme's numbers sort under.
-
-    **Closed, and constrained by `ck_classification_schemes_filing`, where the
-    scheme beside it is open.** A rule is arithmetic in `filing.py`, so a row
-    naming a rule nothing implements would be a row that lies, which is the
-    argument `AuthorityScheme` makes about a reader. The names are Koha's.
-    """
-
-    #: No rule of its own: the number files as its own text and no shelf is
-    #: ordered by it. The column's default.
-    GENERIC = "generic"
-    DEWEY = "dewey"
-    LCC = "lcc"
-
-
 class ClassificationScheme(StrEnum):
-    """The schemes this application's own code reads or writes.
+    """Published schemes a `classifications` row may quote.
 
-    **A `classifications` row may quote any scheme in the
-    `classification_schemes` table, and these four are the rows that table is
-    seeded with.** A library on UDC adds a row rather than asking for a code
-    change: whether UDC exists is not this project's business. What makes
-    these four different is that code names them. A catalogue reader produces
-    them (`sources.CLASSIFIES`, held to the decoders by its test), `BookSort`
-    orders a shelf by two of them, and the MARC export writes a field for each.
-    So `classification_schemes.BUILT_IN` seeds them, and their rows can be
-    neither renamed nor deleted nor refiled: a row this code reads changing
-    under it would be the failure a closed enum used to make impossible.
+    A closed set rather than free text, because the scheme is what makes the
+    number mean anything: `004` is computing in Dewey and nothing at all in
+    Library of Congress notation. A row whose scheme nobody recognises is a
+    number with no reading.
 
-    The scheme is still what makes the number mean anything: `004` is
-    computing in Dewey and nothing at all in Library of Congress notation. A
-    row is the place a library states that reading for a scheme of its own.
+    All four are produced today. DDC comes from the DNB and K10plus (MARC
+    082) and from the Library of Congress (`classification authority="ddc"`);
+    LCC comes from the Library of Congress alone (`authority="lcc"`); GND comes
+    from the DNB's subject fields, 650, 651, 655, 689 and 600; LCSH comes from
+    the same Library of Congress record as the other two, `<subject
+    authority="lcsh">` beside the `<classification>` elements.
 
     **GND is an authority file rather than a shelf order, and it still belongs
     here.** What the column called `number` holds is the scheme's own identifier
     for a heading, which is the half that does not change while the caption
     does. For Dewey that was measured: `004` is Informatik in a German record
     and Computing in an English one. For GND it is a property of the identifier
-    rather than something this app will see, German being its only caption:
-    `4203576-4` names one heading whatever a record calls it. What differs is
-    that a Dewey number also sorts, and a GND number does not. That is now a
-    visible difference rather than a latent one:
+    rather than something this app will see, the DNB being its only supplier
+    here and German its only caption: `4203576-4` names one heading whatever a
+    record calls it. What differs is that a Dewey number also sorts, and a GND
+    number does not. That is now a visible difference rather than a latent one:
     `BookSort.DDC` and `BookSort.LCC` order a shelf by the two schemes that
     place a book on one, each under its own rule in `filing.py`, and there is
     deliberately no counterpart for GND or LCSH because a subject vocabulary
@@ -394,8 +375,7 @@ class ClassificationScheme(StrEnum):
     honest and worth knowing: a heading the Library of Congress later revises
     (`Afro-Americans` became `African Americans`) changes this scheme's
     identifier, where a GND number or a Dewey notation survives its own
-    recaptioning. That is why LCSH sorts last of these four in
-    `classifications.SCHEME_ORDER`.
+    recaptioning. That is why LCSH sorts last in `classifications.SCHEME_ORDER`.
 
     **A person's identifier is not one of these**, though the DNB writes it in
     the same `$0`: `100 $0` says who wrote the book, and every scheme here says
@@ -417,8 +397,8 @@ class ClassificationScheme(StrEnum):
     now: a book shows the headings it carries, and any of them can be filtered
     on. What DDC has that the others do not is a second reading, the division,
     which is what makes it browsable as well as filterable. **Sortable is no
-    longer one of the things it has alone**: every scheme row names a filing
-    rule, and LCC's orders a shelf too.
+    longer one of the things it has alone**: every scheme names a filing rule
+    in `filing.py`, and LCC's orders a shelf too.
     """
 
     DDC = "ddc"
@@ -481,23 +461,6 @@ class HeadingKind(StrEnum):
     CONTENT = "content"
     #: What physical thing it is: `$2 gnd-carrier`, which is CD-ROM.
     CARRIER = "carrier"
-
-
-class HeadingUse(StrEnum):
-    """What an authority heading may be used as: MARC 21 authority `008/14` to `16`.
-
-    The suggest field asks with the use of the field it fills, so a field adding
-    a subject is never offered a name heading: one would resolve and carry an
-    identifier, and still be filed under the wrong kind of thing, which nothing
-    downstream can detect. `vocabulary_copy.suggest` applies it.
-    """
-
-    #: `008/14`: valid as a main or added entry, a name.
-    NAME = "name"
-    #: `008/15`: valid as a subject added entry.
-    SUBJECT = "subject"
-    #: `008/16`: valid as a series added entry.
-    SERIES = "series"
 
 
 class LinkRelationship(StrEnum):
@@ -660,47 +623,6 @@ class AuthorityProvenance(StrEnum):
     MEMBER = "member"
 
 
-# **Beside `AuthorityProvenance`, not instead of it**, and the two answer
-# different questions about one row. Provenance says who tied the number to
-# this author: a record fetched for this book, or a person. This says which
-# file the number itself came from and which other file named it too. A cross
-# reference is `member` by provenance, because a person confirmed the record,
-# and `lobid` or `viaf` by supplier, because that file carried the number.
-# `ck_author_identifiers_supplier` couples them where they overlap: a
-# `catalogue` row is supplied by the catalogue and by nothing else.
-class AuthoritySupplier(StrEnum):
-    """Which file supplied an author identifier, or checked it.
-
-    `asserted_by` names the file the value came from and `checked_by` a
-    second file that tied the same value to the same person, or null where
-    none did: for a cross reference, a file whose own record carries the
-    value; for a member's GND number, lobid, where its record for that number
-    names the author. A reader can tell a number two files agree on from one
-    that a single file carried, which looked identical before either was
-    recorded.
-
-    `unrecorded` is a row stored before the supplier was recorded. It is never
-    a guess: the same scheme under the same provenance arrived by more than
-    one route, so the row cannot say which.
-    """
-
-    #: The catalogue record fetched for this book's own ISBN.
-    CATALOGUE = "catalogue"
-    #: A member's request named the value.
-    MEMBER = "member"
-    #: The GND, read through lobid.
-    LOBID = "lobid"
-    WIKIDATA = "wikidata"
-    VIAF = "viaf"
-    #: The Library of Congress name authority file.
-    LOC = "loc"
-    ORCID = "orcid"
-    #: The Biblioteca Nacional de Portugal.
-    BNP = "bnp"
-    #: Stored before the supplier was recorded.
-    UNRECORDED = "unrecorded"
-
-
 class ExportFormat(StrEnum):
     """What `GET /api/books/export` may write.
 
@@ -759,22 +681,6 @@ if _FORMATS_WITHOUT_A_MEDIA_TYPE:
         "values in the published schema, so a missing entry is both a failed "
         "export and a document that is short a promise."
     )
-
-
-class BookOrigin(StrEnum):
-    """Accepted values for `GET /api/books?origin=`: who brought a Book in.
-
-    **Two values rather than a boolean**, so the parameter names what it asks
-    and the filter panel offers it as one select beside format and lending.
-    Absent is every Book.
-
-    HARVESTED is a Book an OAI-PMH harvest created, `books.harvest_id` set.
-    ADDED is every other: a member's, a file import's, or a row with no
-    recorded adder that no harvest wrote.
-    """
-
-    HARVESTED = "harvested"
-    ADDED = "added"
 
 
 class BookSort(StrEnum):
@@ -891,14 +797,6 @@ class SettingKey(StrEnum):
     # the entire argument for its existence.
     OVERDUE_IN_APP_ENABLED = "overdue_in_app_enabled"
 
-    # The patron's own overdue notice: one mail per patron, about the loans
-    # that patron holds and nothing else, to the address on their record.
-    OVERDUE_PATRON_MAIL_ENABLED = "overdue_patron_mail_enabled"
-    # Whether switching library mode on has already turned on the patron
-    # notice and the service digest. Not a preference: written once, by the
-    # settings router, so a later switch on finds it set and changes nothing.
-    LIBRARY_MODE_NOTICES_DEFAULTED = "library_mode_notices_defaulted"
-
     # Library mode and the public catalogue. Two switches, nested, never one:
     # library mode changes what a **cataloguer** sees and publishes nothing,
     # and a library running it internally without publishing is the common
@@ -923,44 +821,6 @@ class SettingKey(StrEnum):
     # different decisions, so the second is its own row. Off by default, which
     # is what makes the public routes send `X-Robots-Tag: noindex`.
     PUBLIC_CATALOGUE_INDEXING_ENABLED = "public_catalogue_indexing_enabled"
-    # Whether the SRU server answers, as a third switch under the two above.
-    # Publishing a catalogue to people and serving it to another library's
-    # software are separate decisions: an archive may want the first without
-    # the second. `settings_store.sru_is_served` reads it together with the
-    # publish state, so it can never publish a catalogue on its own. Each
-    # export protocol gets a row of its own beside this one rather than a
-    # shared one, because a shared row is where two switches become one.
-    SRU_SERVER_ENABLED = "sru_server_enabled"
-    # Whether the OAI-PMH provider answers, the second export protocol's own
-    # switch beside SRU's and for the same reasons. `settings_store.oai_is_served`
-    # reads it with the publish state. No migration writes it on: nothing was
-    # ever harvested over OAI-PMH, so off is the default for a fresh deployment
-    # and an upgraded one alike.
-    OAI_PROVIDER_ENABLED = "oai_provider_enabled"
-    # The repository contact address `Identify` serves as `adminEmail`. Its own
-    # setting rather than a member's address, so nobody's personal address is
-    # published by accident; the switch above cannot be turned on while it is
-    # empty (owner's decision on issue #176).
-    OAI_ADMIN_EMAIL = "oai_admin_email"
-    # When the OAI-PMH provider first answered a request, in ISO form, or empty
-    # for never. Not a preference: `harvest.py` writes no tombstone before it,
-    # since no harvester could have seen a record that left earlier.
-    OAI_FIRST_SERVED = "oai_first_served"
-    # The OAI-PMH harvester's switch and the repository it reads, the import
-    # half of issue #178. One setting in two rows: the switch cannot be stored
-    # on while the address is empty, which `routers/settings.py` refuses and
-    # `settings_store.harvest_repository` reads again. No migration: nothing
-    # was ever harvested, so off is the default everywhere.
-    OAI_HARVEST_ENABLED = "oai_harvest_enabled"
-    OAI_HARVEST_BASE_URL = "oai_harvest_base_url"
-    # Whether a public record says if the book is on the shelf or on loan.
-    # Its own row, off by default: a loan is a member's activity, and showing
-    # a stranger that one is open is a decision of its own rather than part of
-    # publishing. `settings_store.availability_is_shown` reads it with the
-    # publish state, so it can never publish anything on its own. No migration:
-    # nothing showed availability before, so off is the default for a fresh
-    # deployment and an upgraded one alike.
-    PUBLIC_AVAILABILITY_ENABLED = "public_availability_enabled"
 
     # The last outcome of each reminder sender, as one JSON object keyed by
     # sender. A settings row rather than a table because a table would need a
@@ -983,12 +843,6 @@ class SettingKey(StrEnum):
     # `targets.SEEDED` has no entry for. See `settings_store.catalogue_sources`.
     CATALOGUE_SOURCES = "catalogue_sources"
 
-    # Which entries of the curated registry this library has picked, as
-    # `RegisteredCatalogue` names and nothing else. **Names, never addresses**:
-    # an entry's address is always `registry.ENTRIES`, so no row holds one and
-    # nothing reads one back. See `registry.picked`.
-    PICKED_CATALOGUES = "picked_catalogues"
-
     # Whether accounts here are held by people outside the household.
     #
     # **Its own row, deliberately, and derived from nothing.** It draws a line
@@ -1007,19 +861,6 @@ class SettingKey(StrEnum):
     # above and for the same reason: an account policy turned on by mistake has
     # to be correctable without a redeploy.
     ACCOUNTS_OPEN_TO_OUTSIDERS = "accounts_open_to_outsiders"
-
-    # Whether an admin has put away the library page's offer of a local
-    # vocabulary copy. Per installation rather than per browser, by the owner's
-    # decision of 2026-11-20 on issue #139: one admin dismissing it answers for
-    # the library, and a browser preference would bring it back on every
-    # other device. Loading a copy ends the offer anyway; this row only ends
-    # it sooner.
-    VOCABULARY_OFFER_DISMISSED = "vocabulary_offer_dismissed"
-
-    # Whether a book's heading field offers headings from the local vocabulary
-    # copies as a cataloguer types (#135). On by default and read with library
-    # mode, so a household never meets it: `settings_store.headings_from_vocabulary`.
-    HEADINGS_FROM_VOCABULARY = "headings_from_vocabulary"
 
 
 class OverdueSender(StrEnum):
@@ -1042,12 +883,6 @@ class OverdueSender(StrEnum):
     WEBHOOK = "webhook"
     EMAIL = "email"
     TELEGRAM = "telegram"
-    #: One mail per patron, about that patron's own overdue loans, to the
-    #: address on their record. The one pushing sender whose audience is a
-    #: person rather than a channel, so the one that names a private Book: the
-    #: borrower holding it (owner, 2026-11-22). Its loans are its own selection,
-    #: `notifications.due_for_patrons`, not the digest the other three share.
-    PATRON_MAIL = "patron_mail"
 
 
 class OverdueNotifyReason(StrEnum):
@@ -1093,12 +928,6 @@ class OverdueNotifyReason(StrEnum):
     #: because nothing says it is transient either. The server log names the
     #: exception's type and where it was raised; the loans are left to retry.
     UNEXPECTED = "unexpected"
-    #: A patron with an overdue loan has no usable email address, so the
-    #: patron notice for that loan was not sent. Reported rather than skipped,
-    #: so a notice nobody could address is never a notice nobody hears about.
-    #: Decided before any socket is opened, like `MISCONFIGURED`, and cleared by
-    #: a person: an address on the record, or the switch off.
-    NO_ADDRESS = "no_address"
 
 
 class Locale(StrEnum):
@@ -1139,9 +968,6 @@ class BulkAction(StrEnum):
     # it, the same way SET_LOCATION's empty string unpacks a box.
     SET_COLLECTION = "set_collection"
     DELETE = "delete"
-    # Give each owned copy in the selection an accession number, minted from
-    # its row. Idempotent: a copy that has one keeps it.
-    ASSIGN_ACCESSION = "assign_accession"
 
 
 class CustomFieldKind(StrEnum):
@@ -1181,7 +1007,7 @@ class CatalogueSource(StrEnum):
     **Not every source answers every question**, and the split is real rather
     than incidental. BNF and LOC are title search only, because neither was
     worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL, LIBRIS, KB_DK, BIBSYS,
-    MELINDA, SBN, PORBASE, OSZK and SNK are the other way round, **lookup only**, and
+    MELINDA, SBN, PORBASE and OSZK are the other way round, **lookup only**, and
     for two different reasons. The NKP's,
     the BNA's and the BNU's is the server's: each renders one populated record
     per response whatever page size is asked for, so a search for ten
@@ -1244,57 +1070,6 @@ class CatalogueSource(StrEnum):
     #: The Országos Széchényi Könyvtár, Hungary's national library. Z39.50 and
     #: MARC21.
     OSZK = "oszk"
-    #: The Slovenská národná knižnica, Slovakia's national library. Z39.50 and
-    #: MARC21.
-    SNK = "snk"
-
-
-class RegisteredCatalogue(StrEnum):
-    """A catalogue in the curated registry this build ships: `registry.ENTRIES`.
-
-    **Closed, and a second enum rather than more `CatalogueSource` members.** A
-    `CatalogueSource` is asked by default and has a measured place in
-    `sources.DEFAULT_ORDER`; one of these is asked by nobody until an admin
-    picks it, and has no measurement to place it by, so a pick is asked only
-    after the whole chain missed: `sources.Plan.picked`. Folding them would put
-    an unmeasured catalogue into every household's roster on upgrade.
-
-    **Closed because the registry is vendored**: a member is a reachable host
-    this build ships, so adding one is a diff somebody reads, which is the
-    property ticket 148 exists for. `registry` refuses at import a member with
-    no entry and an entry with no member, and a value one `CatalogueSource`
-    already spells: the test route tries `CatalogueSource` first, so the entry
-    could not be named, and logins and `sources.Plan` key on the same string.
-    """
-
-    #: The National Library of Scotland. Alma SRU, MARC21.
-    NLS = "nls"
-    #: The National Library of Israel. Alma SRU, MARC21.
-    NLI = "nli"
-    #: The CSIC library network, the union catalogue of Spain's National
-    #: Research Council. Alma SRU, MARC21.
-    CSIC = "csic"
-
-
-class Disposition(StrEnum):
-    """How one catalogue answered one question, and nothing about what it said.
-
-    **The vocabulary `z3950.py` names**, refused, unreachable and answered
-    nothing, plus the case those three are the failures of. A registry entry's
-    evidence and an admin's test of a source both report one, so a curation
-    record and a probe result are one shape (owner, 2026-09-05).
-    """
-
-    #: It returned a record for the ISBN asked that the reader believed.
-    ANSWERED = "answered"
-    #: It replied and returned nothing this build believes: no record, or one
-    #: whose identity check failed.
-    ANSWERED_NOTHING = "answered_nothing"
-    #: It replied, and the reply was a no: a diagnostic, an error status, a
-    #: rate limit, or bytes no reader could take.
-    REFUSED = "refused"
-    #: Nothing replied inside the bound: no connection, or no answer in time.
-    UNREACHABLE = "unreachable"
 
 
 # A member per `CatalogueSource` is checked below the class rather than
@@ -1307,15 +1082,7 @@ class RecordOrigin(StrEnum):
     **A closed set rather than a free string**, so every surface can label each
     value and a stored value nobody can name degrades to unknown rather than
     arriving on screen untranslated. Every `CatalogueSource` is a member under
-    its own value, and so is every `RegisteredCatalogue`; the rest are the
-    origins that are not a catalogue.
-
-    **Closed across a registry refresh because a refresh is a commit.** A new
-    `RegisteredCatalogue` member without an origin is refused at import below,
-    and the frontend's catalogue name test then refuses a frontend with no
-    label for it. An entry a later snapshot drops may keep its member here,
-    so the books it supplied keep their label; removing it is safe too, since
-    a stored value nobody names reads as unknown.
+    its own value; the rest are the origins that are not a catalogue.
 
     **Where the record came from, never whether it was changed since.** That is
     `books.record_modified_here`, and why the two are two columns is on
@@ -1342,11 +1109,6 @@ class RecordOrigin(StrEnum):
     SBN = "sbn"
     PORBASE = "porbase"
     OSZK = "oszk"
-    SNK = "snk"
-    #: The registry's entries, `RegisteredCatalogue`, asked on a scan once picked.
-    NLS = "nls"
-    NLI = "nli"
-    CSIC = "csic"
     #: Typed by a member, or sent by a client that named no other origin.
     MANUAL = "manual"
     #: Read off the book's own file, or its name, on the scan page.
@@ -1361,8 +1123,6 @@ class RecordOrigin(StrEnum):
     CALIBRE_IMPORT = "calibre_import"
     #: A store's export or a reading device's database, read in the browser.
     STORE_IMPORT = "store_import"
-    #: Another repository's records, harvested over OAI-PMH: `harvester.py`.
-    OAI_HARVEST = "oai_harvest"
 
     @classmethod
     def of_catalogue(cls, name: str) -> RecordOrigin | None:
@@ -1370,41 +1130,20 @@ class RecordOrigin(StrEnum):
 
         A name rather than a `CatalogueSource`, because `catalogue.Record.leading`
         is a string: a record a test or a file reader labels `marc` is no
-        catalogue's, and answers None rather than raising. A picked registry
-        entry is a catalogue: without it, a book a pick supplied would read as
-        having no origin, and a refresh from one would flag the book as changed
-        here rather than say where the record came from.
+        catalogue's, and answers None rather than raising.
         """
-        return cls(name) if name in _CATALOGUES else None
+        return cls(name) if name in set(CatalogueSource) else None
 
-
-#: Every name a catalogue's record can lead with: the roster and the registry.
-_CATALOGUES: Final[frozenset[str]] = frozenset(map(str, CatalogueSource)) | frozenset(
-    map(str, RegisteredCatalogue)
-)
 
 #: Refused at import, for `book_columns._MISFILED`'s reason: a catalogue added to
-#: the roster or the registry without an origin of its own would answer a lookup
-#: whose record then reads as coming from nowhere.
-_SOURCES_WITHOUT_AN_ORIGIN = _CATALOGUES - set(map(str, RecordOrigin))
+#: the roster without an origin of its own would answer a lookup whose record
+#: then reads as coming from nowhere.
+_SOURCES_WITHOUT_AN_ORIGIN = set(map(str, CatalogueSource)) - set(map(str, RecordOrigin))
 if _SOURCES_WITHOUT_AN_ORIGIN:
     raise RuntimeError(
-        "Every CatalogueSource and RegisteredCatalogue is a RecordOrigin under the same value, and these "
+        "Every CatalogueSource is a RecordOrigin under the same value, and these "
         f"are not: {sorted(_SOURCES_WITHOUT_AN_ORIGIN)}. Add each to RecordOrigin."
     )
-
-
-class HarvestFormat(StrEnum):
-    """The serialisation a harvest read a repository in: `harvester.py` chooses it.
-
-    MARCXML wherever a repository offers it, and Dublin Core only where it does
-    not, since that is the protocol's mandatory format and carries less: no
-    heading, no series, no role on a name. The preview and the result name it so
-    an admin knows a Dublin Core run brings thinner Books.
-    """
-
-    MARCXML = "marcxml"
-    DUBLIN_CORE = "dublin_core"
 
 
 class SourceFamily(StrEnum):
@@ -1573,24 +1312,6 @@ class CredentialProvenance(StrEnum):
     SHIPPED = "shipped"
 
 
-class CredentialKind(StrEnum):
-    """What a catalogue wants before it answers, as a compliance reader names it.
-
-    **Two kinds and not one flag**, because a policy is written about them
-    separately: an API key is this deployment's own account at a commercial
-    service, sent in a query string; a login is the institution's account at
-    another library's server. `targets.Target.credential_kind` derives it from
-    the row's `needs_key` and `secret`.
-    """
-
-    #: Answers anybody.
-    NONE = "none"
-    #: The deployment's own key at a metered commercial API. Google Books.
-    API_KEY = "api_key"
-    #: A username and password at the catalogue's own server.
-    LOGIN = "login"
-
-
 class HighlightSource(StrEnum):
     """Where a highlight came from, which is half of what names it there.
 
@@ -1603,22 +1324,6 @@ class HighlightSource(StrEnum):
     KOREADER = "koreader"
     #: Readwise's own highlight id, written by the pull in `readwise.py`.
     READWISE = "readwise"
-
-
-class ImageExtension(StrEnum):
-    """An image format a cover, a further image or the login background is
-    stored in. `config.ALLOWED_IMAGE_EXTENSIONS` is these values.
-
-    **SVG is deliberately absent**: these files are served back from the
-    app's own origin, and an SVG can carry script, which would make it a
-    stored XSS vector. A member here is also a value
-    `ck_cover_images_extension` admits, so adding one needs a revision.
-    """
-
-    JPEG = "jpeg"
-    JPG = "jpg"
-    PNG = "png"
-    WEBP = "webp"
 
 
 class MemberLoginService(StrEnum):
@@ -1718,23 +1423,3 @@ def member_or[E: StrEnum](
             default,
         )
         return default
-
-
-class VocabularyLoadPhase(StrEnum):
-    """Where a background load of a vocabulary's local copy stands.
-
-    Held in memory by `vocabulary_copy` and never stored: a load that finished
-    is a `vocabulary_copies` row, and one under way when the process stopped is
-    simply not running any more.
-    """
-
-    #: Waiting for another vocabulary's load to finish.
-    QUEUED = "queued"
-    #: Downloading the release from its source.
-    FETCHING = "fetching"
-    #: Turning the release into entries.
-    CONVERTING = "converting"
-    #: Writing the entries beside the copy in use.
-    LOADING = "loading"
-    #: Stopped. The copy in use, or none, still answers.
-    FAILED = "failed"

@@ -33,7 +33,8 @@ from sqlalchemy.orm import Session
 import ddc
 from auth import get_current_user, get_current_user_for_cover
 from database import get_db
-from models import CLASSIFICATION_NUMBER_MAX, CLASSIFICATION_SCHEME_CODE_MAX, Book, User
+from enums import ClassificationScheme
+from models import CLASSIFICATION_NUMBER_MAX, Book, User
 from refusals import refuses
 from schemas.common import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MAX_ROW_ID, one_line
 from shelf import Loading, Shelf
@@ -138,10 +139,10 @@ def row_ids(raw: str | None, *, field: str) -> list[int]:
 
 #: The longest `scheme:number` that could name a stored row.
 #:
-#: The longest scheme code a library may define, plus the colon, plus
-#: `CLASSIFICATION_NUMBER_MAX`. A value longer than this cannot match any row,
-#: whatever it says.
-MAX_HEADING_CHARS = CLASSIFICATION_SCHEME_CODE_MAX + 1 + CLASSIFICATION_NUMBER_MAX
+#: `lcsh` is the longest scheme spelling at four characters, plus the colon,
+#: plus `CLASSIFICATION_NUMBER_MAX`. A value longer than this cannot match any
+#: row, whatever it says.
+MAX_HEADING_CHARS = 5 + CLASSIFICATION_NUMBER_MAX
 
 #: How many values the repeated heading parameter may carry before Pydantic
 #: refuses the request outright.
@@ -189,31 +190,29 @@ DivisionList = Annotated[
 ]
 
 
-def _heading(value: str) -> tuple[str, str] | None:
+def _heading(value: str) -> tuple[ClassificationScheme, str] | None:
     """One `scheme:number` value as its pair, or None where `headings` drops it."""
     if len(value) > MAX_HEADING_CHARS:
         return None
     scheme_name, separator, number = value.partition(":")
     if not separator:
         return None
-    # No arm drops a scheme by its spelling, empty or longer than any code: it
-    # names no row, so it matches no book. Dropping it would widen the listing to
-    # the whole library, silently, for a link that asked for less.
-    scheme = scheme_name.strip().lower()
+    try:
+        scheme = ClassificationScheme(scheme_name.strip().lower())
+    except ValueError:
+        return None
     collapsed = one_line(number)
     return (scheme, collapsed) if collapsed else None
 
 
-def headings(raw: list[str] | None) -> list[tuple[str, str]]:
+def headings(raw: list[str] | None) -> list[tuple[ClassificationScheme, str]]:
     """`["lcsh:Mental health"]` as the pairs the shelf filters on.
 
     **Split on the first colon only.** An LCSH heading may contain one
     (`Photography: a history`), and splitting on every colon would turn that
     into a scheme nobody recognises plus a fragment. Taking the first is
-    unambiguous because a scheme's code holds no colon
-    (`schemas.classification.SCHEME_CODE_PATTERN`). A prefix naming no scheme
-    is not dropped: it matches no heading, which is the answer it deserves, and
-    asking the table here would cost every listing a statement.
+    unambiguous because the left half is then checked against a closed enum: a
+    value whose prefix is not one of four known schemes is dropped.
 
     **Dropped rather than refused**, which is `row_ids`'s contract and the
     reason to match it: `?tags=abc` has always been ignored, a link is not a
@@ -242,7 +241,7 @@ def headings(raw: list[str] | None) -> list[tuple[str, str]]:
     """
     if not raw:
         return []
-    found: dict[tuple[str, str], None] = {}
+    found: dict[tuple[ClassificationScheme, str], None] = {}
     for value in raw:
         heading = _heading(value)
         if heading is not None:
@@ -310,8 +309,8 @@ def book_for_read(
 
     Eager-loads `added_by`, so resolving the book does not cost a query for the
     member who added it. The collections are not loaded here, and what happens
-    to them next depends on the route rather than on this dependency: **38 of
-    the 58** routes fed from here serialise no Book at all, nearly two in
+    to them next depends on the route rather than on this dependency: **31 of
+    the 48** routes fed from here serialise no Book at all, nearly two in
     three, and those that do get their tags from `books_to_out`, which re-reads and
     loads them itself.
     `shelf.Loading` carries the measurement, including the one arm of one route
@@ -409,22 +408,6 @@ def book_for_owner(
     return book
 
 
-@refuses(403)
-def book_for_admin(
-    book: Annotated[Book, Depends(book_for_read)],
-    current_user: Annotated[User, Depends(get_current_user)],
-) -> Book:
-    """The book at `book_id`, if the caller is an admin.
-
-    Resolved through `book_for_read` first, as `book_for_owner` is, so a Book
-    the caller cannot see is 404 before the role is asked: a 403 would confirm
-    the id exists.
-    """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only an admin can do that")
-    return book
-
-
 #: Past any real library, and small enough that `page * page_size` stays far
 #: inside SQLite's INTEGER range.
 MAX_PAGE_NUMBER = 1_000_000
@@ -465,7 +448,6 @@ BookInTrash = Annotated[Book, Depends(book_in_trash)]
 BookForCover = Annotated[Book, Depends(book_for_cover)]
 BookForWrite = Annotated[Book, Depends(book_for_write)]
 BookForOwner = Annotated[Book, Depends(book_for_owner)]
-BookForAdmin = Annotated[Book, Depends(book_for_admin)]
 Paging = Annotated[PageParams, Depends()]
 CurrentUser = Annotated[User, Depends(get_current_user)]
 DbSession = Annotated[Session, Depends(get_db)]

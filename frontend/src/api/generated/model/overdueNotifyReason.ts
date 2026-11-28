@@ -30,5 +30,4 @@ export const OverdueNotifyReason = {
   misconfigured: "misconfigured",
   in_app_only: "in_app_only",
   unexpected: "unexpected",
-  no_address: "no_address",
 } as const;

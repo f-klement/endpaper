@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useLibraryMode } from "../../app/hooks";
 import { Button, ErrorState, Icon, Spinner } from "../../components";
 import { FolderSweepNotice, LocationField } from "../components";
 import { useTranslation, type MessageKey } from "../../i18n";
@@ -9,15 +8,10 @@ import { parseIsbn } from "../../lib/isbn";
 import BarcodeScanner from "./components/BarcodeScanner";
 import CarriedFields from "./components/CarriedFields";
 import FilePickPanel from "./components/FilePickPanel";
-import IsbnListPanel from "./components/IsbnListPanel";
-import CatalogueNarrowing, {
-  NarrowedTo,
-} from "./components/CatalogueNarrowing";
 import SearchPanel from "./components/SearchPanel";
 import GoogleBooksHelp from "../components/GoogleBooksHelp";
 import { useFolderSweep } from "../hooks";
 import LookupResult from "./components/LookupResult";
-import PrintedIsbnReader from "./components/PrintedIsbnReader";
 import RapidQueue from "./components/RapidQueue";
 import {
   useBookSearch,
@@ -55,11 +49,9 @@ function RapidSwitch({
 function RapidPanel({
   rapid,
   onRejected,
-  libraryMode,
 }: {
   rapid: UseRapidIntakeResult;
   onRejected: (code: string) => void;
-  libraryMode: boolean;
 }) {
   const { t } = useTranslation();
 
@@ -110,7 +102,6 @@ function RapidPanel({
             onStopAdding={rapid.stopAdding}
             figures={rapid.figures}
             isLookingUp={rapid.isLookingUp}
-            lookUpProgress={rapid.lookUpProgress}
             onLookUp={rapid.lookUpTheNames}
             onStopLookUp={rapid.stopLookingUp}
             onChoose={rapid.chooseFor}
@@ -123,7 +114,6 @@ function RapidPanel({
             onDropSubject={rapid.dropSubject}
             onAddAsCopy={rapid.addAsCopy}
             isAddingCopy={rapid.isAddingCopy}
-            libraryMode={libraryMode}
           />
         </>
       )}
@@ -138,27 +128,13 @@ function RapidPanel({
 function LookupFailure({
   scan,
 }: {
-  scan: Pick<
-    UseScanFlowResult,
-    | "lookupError"
-    | "retryLookup"
-    | "enterByHand"
-    | "lookupAskedOnly"
-    | "lookupNarrowingRefused"
-  >;
+  scan: Pick<UseScanFlowResult, "lookupError" | "retryLookup" | "enterByHand">;
 }) {
   const { t } = useTranslation();
   if (scan.lookupError == null) return null;
   return (
     <div className="mb-4 space-y-2">
-      {/* A refused narrowing offers no retry: it would send the same names
-          and be refused again. The boxes below are the roster asked afresh. */}
-      {scan.lookupNarrowingRefused ? (
-        <ErrorState error={t("search.narrow.refused")} />
-      ) : (
-        <ErrorState error={scan.lookupError} onRetry={scan.retryLookup} />
-      )}
-      <NarrowedTo asked={scan.lookupAskedOnly} />
+      <ErrorState error={scan.lookupError} onRetry={scan.retryLookup} />
       <Button variant="secondary" size="sm" onClick={scan.enterByHand}>
         {t("scan.addByHand")}
       </Button>
@@ -199,7 +175,6 @@ function Drafted({
   if (!draft) return null;
   return (
     <>
-      <NarrowedTo asked={scan.lookupAskedOnly} />
       <CarriedFields
         pending={scan.pending}
         onChange={scan.update}
@@ -226,124 +201,16 @@ function Drafted({
   );
 }
 
-/**
- * What the entry panel's camera is doing: nothing, decoding barcodes, or
- * reading the printed number for a barcode that will not scan.
- */
-type CameraMode = "off" | "barcode" | "printed";
-
-/** The camera's picture while it is off. */
-function CameraIdle() {
-  const { t } = useTranslation();
-  return (
-    <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
-      <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
-        <Icon name="camera" className="w-5 h-5" />
-      </span>
-      <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
-        {t("scan.cameraIdle")}
-      </p>
-      <p className="text-xs text-paper-600 text-center px-8 dark:text-paper-400">
-        {t("scan.cameraIdleHint")}
-      </p>
-    </div>
-  );
-}
-
-/** The camera's picture for its mode. */
-function CameraView({
-  mode,
-  onDetected,
-  onRejected,
-}: {
-  mode: CameraMode;
-  onDetected: (isbn: string) => void;
-  onRejected: (code: string) => void;
-}) {
-  if (mode === "barcode") {
-    return (
-      <BarcodeScanner active onDetected={onDetected} onRejected={onRejected} />
-    );
-  }
-  if (mode === "printed") return <PrintedIsbnReader onConfirm={onDetected} />;
-  return <CameraIdle />;
-}
-
-/** Starts the barcode camera, or stops whichever reading is on. */
-function CameraSwitch({
-  mode,
-  onMode,
-}: {
-  mode: CameraMode;
-  onMode: (mode: CameraMode) => void;
-}) {
-  const { t } = useTranslation();
-  const look =
-    mode === "off"
-      ? {
-          variant: "primary" as const,
-          icon: <Icon name="camera" className="w-4 h-4" />,
-          next: "barcode" as const,
-          label: t("scan.startScanning"),
-        }
-      : {
-          variant: "secondary" as const,
-          icon: null,
-          next: "off" as const,
-          label: t("scan.stopScanning"),
-        };
-  return (
-    <Button
-      variant={look.variant}
-      fullWidth
-      className="mt-3"
-      icon={look.icon}
-      onClick={() => onMode(look.next)}
-    >
-      {look.label}
-    </Button>
-  );
-}
-
-/**
- * The fallback for a barcode that is damaged, creased past reading or
- * missing: the same camera reads the digits printed with it. Offered from the
- * idle camera too, for a book that never had a barcode.
- */
-function PrintedSwitch({
-  mode,
-  onMode,
-}: {
-  mode: CameraMode;
-  onMode: (mode: CameraMode) => void;
-}) {
-  const { t } = useTranslation();
-  const look =
-    mode === "printed"
-      ? { next: "barcode" as const, label: t("scan.printed.close") }
-      : { next: "printed" as const, label: t("scan.printed.open") };
-  return (
-    <Button
-      variant="ghost"
-      fullWidth
-      className="mt-2"
-      onClick={() => onMode(look.next)}
-    >
-      {look.label}
-    </Button>
-  );
-}
-
-/** The camera, idle or reading, its switches, and what it last refused. */
+/** The camera, idle or reading, its switch, and what it last refused. */
 function CameraPanel({
-  mode,
-  onMode,
+  isOn,
+  onToggle,
   onDetected,
   rejectedCode,
   onRejected,
 }: {
-  mode: CameraMode;
-  onMode: (mode: CameraMode) => void;
+  isOn: boolean;
+  onToggle: () => void;
   onDetected: (isbn: string) => void;
   rejectedCode: string | null;
   onRejected: (code: string) => void;
@@ -351,9 +218,35 @@ function CameraPanel({
   const { t } = useTranslation();
   return (
     <>
-      <CameraView mode={mode} onDetected={onDetected} onRejected={onRejected} />
-      <CameraSwitch mode={mode} onMode={onMode} />
-      <PrintedSwitch mode={mode} onMode={onMode} />
+      {isOn ? (
+        <BarcodeScanner
+          active
+          onDetected={onDetected}
+          onRejected={onRejected}
+        />
+      ) : (
+        <div className="w-full aspect-[4/3] rounded-2xl border border-dashed border-paper-300 bg-paper-100/50 flex flex-col items-center justify-center gap-3 dark:border-paper-700 dark:bg-paper-900/50">
+          <span className="grid place-items-center w-11 h-11 rounded-full bg-paper-200/60 text-paper-600 dark:bg-paper-800 dark:text-paper-400">
+            <Icon name="camera" className="w-5 h-5" />
+          </span>
+          <p className="text-sm font-medium text-paper-600 dark:text-paper-300">
+            {t("scan.cameraIdle")}
+          </p>
+          <p className="text-xs text-paper-600 text-center px-8 dark:text-paper-400">
+            {t("scan.cameraIdleHint")}
+          </p>
+        </div>
+      )}
+
+      <Button
+        variant={isOn ? "secondary" : "primary"}
+        fullWidth
+        className="mt-3"
+        icon={isOn ? null : <Icon name="camera" className="w-4 h-4" />}
+        onClick={onToggle}
+      >
+        {isOn ? t("scan.stopScanning") : t("scan.startScanning")}
+      </Button>
 
       {/* A barcode that decoded but is not a book. Saying so is the whole
           point: silence here reads as a scanner that does not work, when
@@ -440,7 +333,6 @@ export default function ScanPage({ accountId }: ScanPageProps) {
   const { t } = useTranslation();
   const scan = useScanFlow((bookId) => navigate(`/book/${bookId}`), accountId);
   const search = useBookSearch();
-  const libraryMode = useLibraryMode();
   const rapid = useRapidIntake();
   const folderSweep = useFolderSweep();
   const [showSearchHelp, setShowSearchHelp] = useState(false);
@@ -453,7 +345,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
   // left, so walking past the Scan tab lit the phone's camera indicator and
   // held it there. Opening a camera is not something a page should do because
   // somebody looked at it.
-  const [camera, setCamera] = useState<CameraMode>("off");
+  const [isCameraOn, setIsCameraOn] = useState(false);
   const [rejectedCode, setRejectedCode] = useState<string | null>(null);
 
   // The one field of the pending book this page reads for itself: it decides
@@ -477,7 +369,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
     // Close the camera on a hit. The next step is confirming a draft, and
     // leaving the stream running behind that form keeps the indicator lit for
     // as long as somebody takes to check a title.
-    setCamera("off");
+    setIsCameraOn(false);
     setRejectedCode(null);
     scan.lookup(isbn);
   }
@@ -492,18 +384,14 @@ export default function ScanPage({ accountId }: ScanPageProps) {
           <RapidSwitch
             rapid={rapid}
             onSwitch={() => {
-              setCamera("off");
+              setIsCameraOn(false);
               setRejectedCode(null);
             }}
           />
         )}
       </div>
 
-      <RapidPanel
-        rapid={rapid}
-        onRejected={setRejectedCode}
-        libraryMode={libraryMode}
-      />
+      <RapidPanel rapid={rapid} onRejected={setRejectedCode} />
 
       {/* Above the entry panel, which is back on screen so a different book
           can be scanned instead. */}
@@ -512,10 +400,10 @@ export default function ScanPage({ accountId }: ScanPageProps) {
       {showEntry && (
         <>
           <CameraPanel
-            mode={camera}
-            onMode={(mode) => {
+            isOn={isCameraOn}
+            onToggle={() => {
               setRejectedCode(null);
-              setCamera(mode);
+              setIsCameraOn((on) => !on);
             }}
             onDetected={handleDetected}
             rejectedCode={rejectedCode}
@@ -532,14 +420,6 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             onError={setManualError}
             onLookup={scan.lookup}
           />
-          {/* Narrows the camera's next ISBN as well as a typed one: both
-              reach the same lookup. */}
-          <CatalogueNarrowing
-            catalogues={scan.lookupCatalogues}
-            chosen={scan.lookupOnly}
-            onChange={scan.setLookupOnly}
-            hint="search.narrow.lookupHint"
-          />
 
           {/* The third way in, for a book with no barcode, a damaged one, or
               one printed before ISBNs existed. Always available: it no longer
@@ -552,11 +432,7 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             matches={search.matches}
             isSearching={search.isSearching}
             isEmpty={search.isEmpty}
-            error={
-              search.narrowingRefused
-                ? t("search.narrow.refused")
-                : search.error
-            }
+            error={search.error}
             onQueryChange={search.setQuery}
             onSubmit={search.submit}
             onChoose={scan.chooseMatch}
@@ -565,16 +441,6 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             onSearchHarder={search.searchHarder}
             isSearchingHarder={search.isSearchingHarder}
             hasSearchedHarder={search.hasSearchedHarder}
-            libraryMode={libraryMode}
-            narrowing={
-              <CatalogueNarrowing
-                catalogues={search.catalogues}
-                chosen={search.only}
-                onChange={search.setOnly}
-                hint="search.narrow.searchHint"
-              />
-            }
-            narrowedTo={<NarrowedTo asked={search.askedOnly} />}
           />
 
           {/* The fourth way in, and the only one that starts from something
@@ -598,14 +464,6 @@ export default function ScanPage({ accountId }: ScanPageProps) {
             failed={folderSweep.failed}
             isMarking={folderSweep.isMarking}
             onMarkMissing={folderSweep.markMissing}
-          />
-          {/* The fifth way in, for a list kept somewhere else: a spreadsheet,
-              another app's export, or ISBNs typed off a shelf. It fills the
-              same queue and the same paced run as the file picker, and sits
-              after the sweep notice, which reports on that picker. */}
-          <IsbnListPanel
-            onList={rapid.listIsbns}
-            waiting={rapid.figures.waiting}
           />
         </>
       )}

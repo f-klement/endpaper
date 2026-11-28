@@ -26,10 +26,9 @@ import respx
 
 import mailer
 import notifications
-import patrons
 import settings_store
 from enums import OverdueNotifyReason, OverdueSender, SettingKey
-from models import Book, Loan, Patron, User
+from models import Book, Loan, User
 from tests.conftest import forget_any_encryption_key
 
 HOOK = "https://hooks.example.org/t/abcdef"
@@ -662,77 +661,13 @@ def test_the_ticker_is_off_under_test():
     assert config.overdue_ticker_enabled() is False
 
 
-def test_a_loan_to_a_member_or_a_typed_name_names_its_borrower(db, lend, admin):
-    """`ck_loans_one_borrower` sets one of the two on such a loan, so the
-    digest carries it. A patron's loan is the exception, below."""
+def test_the_borrower_is_always_named(db, lend, admin):
+    """`ck_loans_one_borrower` guarantees exactly one of the two, so the digest
+    never carries a null borrower."""
     lend()
     digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
     assert digest["loans"][0]["borrower"]
     assert db.query(User).count() >= 1
-
-
-#: In every text column of the patron below, so a field the digest picks up
-#: from the record, whichever it is, shows as this.
-PATRON_MARKER = "Qzpatronmark"
-
-
-@pytest.fixture
-def patron_loan(db, admin):
-    """An overdue loan to a patron whose every text column carries the marker."""
-    patron = Patron(
-        card_number=f"C{PATRON_MARKER}",
-        name=f"Name {PATRON_MARKER}",
-        email=f"{PATRON_MARKER}@example.org",
-        phone=f"+43 {PATRON_MARKER}",
-        street=f"Street {PATRON_MARKER}",
-        house_number=PATRON_MARKER,
-        postcode=PATRON_MARKER,
-        city=f"City {PATRON_MARKER}",
-    )
-    book = Book(title="Dune", added_by_user_id=admin["user"]["id"])
-    db.add_all([patron, book])
-    db.flush()
-    loan = Loan(
-        book_id=book.id,
-        loaned_to_patron_id=patron.id,
-        loaned_by_user_id=admin["user"]["id"],
-        due_at=now() - timedelta(days=3),
-    )
-    db.add(loan)
-    db.commit()
-    return loan
-
-
-class TestAPatronNeverLeavesForAChannel:
-    """A channel is a third party, so a patron's record never reaches one.
-
-    The digest names the borrower from the loan's member or typed name, both
-    null on a patron's loan. A fallback to the patron's name would read as a
-    helpful fix, and these go red on it.
-    """
-
-    def test_the_digest_carries_nothing_of_the_patron(self, db, patron_loan):
-        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
-
-        assert digest["count"] == 1
-        assert PATRON_MARKER not in json.dumps(digest)
-
-    def test_the_text_says_no_name_was_sent(self, db, patron_loan):
-        text = notifications.render_text(
-            notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
-        )
-
-        assert PATRON_MARKER not in text
-        assert "Dune: no name sent, 3 days overdue" in text
-
-    def test_an_erased_borrower_sends_no_name_either(self, db, patron_loan):
-        patrons.erase(db, [patron_loan.loaned_to_patron_id], now())
-        db.commit()
-
-        digest = notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
-
-        assert digest["loans"][0]["borrower"] is None
-        assert "Dune: no name sent" in notifications.render_text(digest)
 
 
 # ── The two senders added beside the webhook ─────────────────────────────────
@@ -801,18 +736,6 @@ class TestRenderText:
             notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
         )
         assert text.startswith("2 overdue books.")
-
-    def test_a_loan_one_day_overdue_reads_in_the_singular(self, db, lend):
-        lend(title="Dune", days=1)
-        text = notifications.render_text(
-            notifications.build_digest(notifications.due_for_reminder(db, now(), 7), now())
-        )
-        assert "Dune: Kim, 1 day overdue" in text
-
-    def test_a_loan_overdue_by_less_than_a_day_reads_in_the_plural(self):
-        """Whole days, so a loan overdue by hours is 0 of them, and 0 is plural."""
-        digest = {"count": 1, "loans": [{"title": "Dune", "borrower": "Kim", "days_overdue": 0}]}
-        assert "Dune: Kim, 0 days overdue" in notifications.render_text(digest)
 
     def test_a_limit_drops_entries_and_says_how_many(self, db, lend):
         for index in range(20):
@@ -1099,12 +1022,10 @@ class TestThreeSendersOneDigest:
         assert [entry["title"] for entry in webhook_body["loans"]] == ["Dune"]
         assert "Dune" in chat_text
         assert "Dune" in sent_mail[0][2]
-        # The four on, in app included: it reports what it is showing rather
-        # than receiving the digest, and a report missing a switched-on channel
-        # is what #82 exists to stop. The patron notice is off here.
-        assert {entry["sender"] for entry in result["senders"]} == set(OverdueSender) - {
-            OverdueSender.PATRON_MAIL
-        }
+        # All four, in app included: it reports what it is showing rather than
+        # receiving the digest, and a report missing a switched-on channel is
+        # what #82 exists to stop.
+        assert {entry["sender"] for entry in result["senders"]} == set(OverdueSender)
 
     @pytest.mark.asyncio
     async def test_the_withheld_count_is_reported_per_sender(
@@ -1450,7 +1371,7 @@ class TestTheInAppChannel:
         as a delivery, which stamps `notified_at` on loans nothing chased.
         """
         with pytest.raises(AssertionError, match="does not push"):
-            await notifications._deliver(OverdueSender.IN_APP, db, {}, "subject", None)
+            await notifications._deliver(OverdueSender.IN_APP, db, {}, "subject")
 
     def test_a_log_line_about_it_names_the_app_rather_than_raising(self, db):
         """`_destination` runs on the failure path, before a send. A raise there
@@ -2153,363 +2074,3 @@ class TestTheInAppCountIsCounted:
         # arrive unnoticed either: the count is the loan query plus the
         # `library_mode` row `sees_every_loan` asks for.
         assert len(statements) == 2, statements
-
-
-# ── The patron's own notice (#24) ─────────────────────────────────────────────
-
-
-@pytest.fixture
-def patron_mail_on(db):
-    """The patron notice on, over a mail server, with the digest's mailbox set."""
-    settings_store.set_value(db, SettingKey.OVERDUE_PATRON_MAIL_ENABLED, "true")
-    settings_store.set_value(db, SettingKey.MAIL_SERVER, "smtp.example.org")
-    settings_store.set_value(db, SettingKey.MAIL_DEFAULT_SENDER, "library@example.org")
-    settings_store.set_value(db, SettingKey.OVERDUE_MAIL_TO, "house@example.org")
-    return db
-
-
-@pytest.fixture
-def lend_to_patron(db, admin):
-    """Put a book out to a new patron, overdue by three days unless told otherwise, and return the loan."""
-
-    def _lend(*, name: str, email: str | None, title: str, private: bool = False, days_late: int = 3) -> Loan:
-        patron = Patron(card_number=f"C-{name}", name=name, email=email)
-        book = Book(title=title, is_private=private, added_by_user_id=admin["user"]["id"])
-        db.add_all([patron, book])
-        db.flush()
-        loan = Loan(
-            book_id=book.id,
-            loaned_to_patron_id=patron.id,
-            loaned_by_user_id=admin["user"]["id"],
-            due_at=now() - timedelta(days=days_late),
-        )
-        db.add(loan)
-        db.commit()
-        db.refresh(loan)
-        return loan
-
-    return _lend
-
-
-def _patron_entry(result):
-    return next(entry for entry in result["senders"] if entry["sender"] is OverdueSender.PATRON_MAIL)
-
-
-class TestThePatronsOwnNotice:
-    @pytest.mark.asyncio
-    async def test_each_patron_is_mailed_their_own_loans_and_no_one_elses(
-        self, patron_mail_on, lend_to_patron, sent_mail
-    ):
-        lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        lend_to_patron(name="Bo", email="bo@example.org", title="Emma")
-
-        await notifications.run_digest(patron_mail_on)
-
-        mailed = {config.recipients: body for config, _subject, body, _thread in sent_mail}
-        assert set(mailed) == {("ada@example.org",), ("bo@example.org",)}
-        ada, bo = mailed[("ada@example.org",)], mailed[("bo@example.org",)]
-        assert ("Dune" in ada, "Emma" in ada) == (True, False)
-        assert ("Emma" in bo, "Dune" in bo) == (True, False)
-
-    @pytest.mark.asyncio
-    async def test_a_private_book_is_named_to_its_borrower_and_withheld_from_the_digest(
-        self, patron_mail_on, mail_on, lend_to_patron, sent_mail
-    ):
-        """Privacy protects a book from other members, not from the patron holding it
-        (owner, 2026-11-22). The service digest still only counts it."""
-        lend_to_patron(name="Ada", email="ada@example.org", title="Diary", private=True)
-
-        result = await notifications.run_digest(patron_mail_on)
-
-        mailed = {config.recipients: body for config, _subject, body, _thread in sent_mail}
-        assert "Diary" in mailed[("ada@example.org",)]
-        assert ("house@example.org",) not in mailed
-        assert _patron_entry(result)["skipped_private"] == 0
-        assert result["skipped_private"] == 1
-
-    @pytest.mark.asyncio
-    async def test_a_digest_that_goes_out_still_withholds_a_patrons_private_book(
-        self, patron_mail_on, mail_on, lend, lend_to_patron, sent_mail
-    ):
-        """The case above sends no digest at all, so it cannot see the patrons'
-        selection merged into the channels'. Here the digest has a loan of its own."""
-        lend(title="Emma")
-        lend_to_patron(name="Ada", email="ada@example.org", title="Diary", private=True)
-
-        await notifications.run_digest(patron_mail_on)
-
-        mailed = {config.recipients: body for config, _subject, body, _thread in sent_mail}
-        household = mailed[("house@example.org",)]
-        assert ("Emma" in household, "Diary" in household) == (True, False)
-
-    @pytest.mark.asyncio
-    async def test_a_patron_with_no_address_is_reported_and_left_unstamped(
-        self, db, patron_mail_on, lend_to_patron, sent_mail
-    ):
-        loan = lend_to_patron(name="Ada", email=None, title="Dune", private=True)
-
-        result = await notifications.run_digest(patron_mail_on)
-
-        assert sent_mail == []
-        assert _patron_entry(result)["reason"] is OverdueNotifyReason.NO_ADDRESS
-        db.refresh(loan)
-        assert (loan.notified_at, loan.patron_notified_at) == (None, None)
-
-    @pytest.mark.asyncio
-    async def test_a_loan_is_mailed_once_per_reminder_interval(
-        self, patron_mail_on, lend_to_patron, sent_mail
-    ):
-        lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-
-        await notifications.run_digest(patron_mail_on)
-        await notifications.run_digest(patron_mail_on)
-
-        assert len(sent_mail) == 1
-
-    @pytest.mark.asyncio
-    async def test_a_recipient_the_server_refuses_does_not_hold_back_the_next_patron(
-        self, db, patron_mail_on, lend_to_patron, monkeypatch
-    ):
-        refused = lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        reached = lend_to_patron(name="Bo", email="bo@example.org", title="Emma")
-
-        def send(config, subject, body):
-            if config.recipients == ("ada@example.org",):
-                raise smtplib.SMTPRecipientsRefused({"ada@example.org": (550, b"no")})
-
-        monkeypatch.setattr(mailer, "send", send)
-        result = await notifications.run_digest(patron_mail_on)
-
-        db.refresh(refused)
-        db.refresh(reached)
-        assert (refused.patron_notified_at, reached.patron_notified_at is not None) == (None, True)
-        assert _patron_entry(result)["reason"] is OverdueNotifyReason.UNREACHABLE
-
-    @pytest.mark.asyncio
-    async def test_the_patron_is_greeted_by_name_and_asked_for_the_books_back(
-        self, patron_mail_on, lend_to_patron, sent_mail
-    ):
-        loan = lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-
-        await notifications.run_digest(patron_mail_on)
-
-        [(_config, _subject, body, _thread)] = sent_mail
-        assert body.startswith("Hello Ada,")
-        assert f"Dune: due {loan.due_at.date().isoformat()}, 3 days overdue" in body
-        assert "Please bring it back" in body
-        assert "no name sent" not in body
-
-    @pytest.mark.asyncio
-    async def test_two_loans_read_in_the_plural(self, db, patron_mail_on, lend_to_patron, sent_mail):
-        first = lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        book = Book(title="Emma", added_by_user_id=first.loaned_by_user_id)
-        db.add(book)
-        db.flush()
-        db.add(
-            Loan(
-                book_id=book.id,
-                loaned_to_patron_id=first.loaned_to_patron_id,
-                loaned_by_user_id=first.loaned_by_user_id,
-                due_at=first.due_at,
-            )
-        )
-        db.commit()
-
-        await notifications.run_digest(patron_mail_on)
-
-        [(_config, _subject, body, _thread)] = sent_mail
-        assert ("these books you borrowed" in body, "bring them back" in body) == (True, True)
-
-    @pytest.mark.asyncio
-    async def test_one_loan_a_day_overdue_reads_in_the_singular(
-        self, patron_mail_on, lend_to_patron, sent_mail
-    ):
-        lend_to_patron(name="Ada", email="ada@example.org", title="Dune", days_late=1)
-
-        await notifications.run_digest(patron_mail_on)
-
-        [(_config, _subject, body, _thread)] = sent_mail
-        singular = ("1 day overdue", "this book you borrowed", "bring it back")
-        assert [phrase for phrase in singular if phrase not in body] == []
-
-    def test_a_mail_server_setting_configures_both_mail_senders(self):
-        """A fix to the server has to clear the patron notice's health record too."""
-        assert notifications.senders_for(SettingKey.MAIL_SERVER) == (
-            OverdueSender.EMAIL,
-            OverdueSender.PATRON_MAIL,
-        )
-
-    @pytest.mark.asyncio
-    async def test_the_patron_notice_never_falls_back_to_the_household_mailbox(self, patron_mail_on):
-        with pytest.raises(AssertionError, match="no address"):
-            await notifications._deliver(
-                OverdueSender.PATRON_MAIL,
-                patron_mail_on,
-                notifications.build_digest([], now()),
-                "subject",
-                None,
-            )
-
-
-def _mail_to(
-    monkeypatch, *, failing: tuple[str, ...] = (), error: Exception | None = None
-) -> list[tuple[str, ...]]:
-    """`mailer.send` recorded per recipient list, raising `error` for each address in `failing`."""
-    attempts: list[tuple[str, ...]] = []
-
-    def send(config, subject, body):
-        attempts.append(config.recipients)
-        if set(config.recipients) & set(failing):
-            raise error or OSError("unreachable")
-
-    monkeypatch.setattr(mailer, "send", send)
-    return attempts
-
-
-class TestThePatronNoticeSelection:
-    def test_a_loan_to_a_member_or_a_typed_name_is_no_patrons_to_be_mailed(
-        self, db, lend_to_patron, lend, lend_to, member
-    ):
-        """Without the patron clause such a loan joins the selection under no
-        patron, and reports a false `no_address` on every run."""
-        lend_to(borrower=member["user"]["id"])
-        lend(borrower="Kim")
-        held = lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-
-        assert [loan.id for loan in notifications.due_for_patrons(db, now(), 7)] == [held.id]
-
-
-class TestThePatronLoopStops:
-    @pytest.mark.asyncio
-    async def test_a_server_that_cannot_be_reached_is_tried_once_not_once_per_patron(
-        self, patron_mail_on, lend_to_patron, monkeypatch
-    ):
-        lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        lend_to_patron(name="Bo", email="bo@example.org", title="Emma")
-        attempts = _mail_to(monkeypatch, failing=("ada@example.org", "bo@example.org"))
-
-        result = await notifications.run_digest(patron_mail_on)
-
-        assert len(attempts) == 1
-        assert _patron_entry(result)["reason"] is OverdueNotifyReason.UNREACHABLE
-
-    @pytest.mark.asyncio
-    async def test_a_login_the_server_rejects_is_tried_once_not_once_per_patron(
-        self, patron_mail_on, lend_to_patron, monkeypatch
-    ):
-        """A wrong password tried once per patron an hour is how a provider locks an account."""
-        lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        lend_to_patron(name="Bo", email="bo@example.org", title="Emma")
-        attempts = _mail_to(
-            monkeypatch,
-            failing=("ada@example.org", "bo@example.org"),
-            error=smtplib.SMTPAuthenticationError(535, b"no"),
-        )
-
-        await notifications.run_digest(patron_mail_on)
-
-        assert len(attempts) == 1
-
-    @pytest.mark.asyncio
-    async def test_a_refused_configuration_is_reported_once_and_mails_nobody(
-        self, db, patron_mail_on, lend_to_patron, monkeypatch
-    ):
-        lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        lend_to_patron(name="Bo", email="bo@example.org", title="Emma")
-        settings_store.set_value(db, SettingKey.MAIL_SERVER, "")
-        refusals = []
-        real = mailer.checked_config
-
-        def counted(*args, **kwargs):
-            refusals.append(kwargs.get("recipients"))
-            return real(*args, **kwargs)
-
-        monkeypatch.setattr(mailer, "checked_config", counted)
-        attempts = _mail_to(monkeypatch)
-
-        result = await notifications.run_digest(patron_mail_on)
-
-        assert (len(refusals), attempts) == (1, [])
-        assert _patron_entry(result)["reason"] is OverdueNotifyReason.MISCONFIGURED
-
-    @pytest.mark.asyncio
-    async def test_an_address_the_server_cannot_carry_does_not_hold_back_the_next_patron(
-        self, patron_mail_on, lend_to_patron, monkeypatch
-    ):
-        """`smtplib` raises `SMTPNotSupportedError` for a non ASCII address on a
-        server without `SMTPUTF8`: a failure about that patron's address alone."""
-        lend_to_patron(name="Jürgen", email="jürgen@example.org", title="Dune")
-        lend_to_patron(name="Bo", email="bo@example.org", title="Emma")
-        attempts = _mail_to(
-            monkeypatch,
-            failing=("jürgen@example.org",),
-            error=smtplib.SMTPNotSupportedError("SMTPUTF8 not supported by server"),
-        )
-
-        await notifications.run_digest(patron_mail_on)
-
-        assert attempts == [("jürgen@example.org",), ("bo@example.org",)]
-
-    @pytest.mark.asyncio
-    async def test_a_server_without_starttls_is_tried_once_not_once_per_patron(
-        self, patron_mail_on, lend_to_patron, monkeypatch
-    ):
-        """The same error for an ASCII address is the server's, the same for every patron."""
-        lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        lend_to_patron(name="Bo", email="bo@example.org", title="Emma")
-        attempts = _mail_to(
-            monkeypatch,
-            failing=("ada@example.org", "bo@example.org"),
-            error=smtplib.SMTPNotSupportedError("STARTTLS extension not supported by server."),
-        )
-
-        await notifications.run_digest(patron_mail_on)
-
-        assert len(attempts) == 1
-
-
-class TestEachAudienceKeepsItsOwnStamp:
-    """The digest and the patron notice each stamp their own column, so a
-    failure on one audience never silences the other (owner, 2026-11-22)."""
-
-    @pytest.mark.asyncio
-    async def test_a_patron_whose_mail_failed_is_chased_again_though_the_digest_delivered(
-        self, db, patron_mail_on, mail_on, lend_to_patron, monkeypatch
-    ):
-        loan = lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        _mail_to(monkeypatch, failing=("ada@example.org",))
-        await notifications.run_digest(db)
-
-        attempts = _mail_to(monkeypatch)
-        await notifications.run_digest(db)
-
-        db.refresh(loan)
-        assert attempts == [("ada@example.org",)]
-        assert (loan.notified_at is not None, loan.patron_notified_at is not None) == (True, True)
-
-    @pytest.mark.asyncio
-    async def test_the_household_is_chased_again_though_the_patron_was_mailed(
-        self, db, patron_mail_on, mail_on, lend_to_patron, monkeypatch
-    ):
-        loan = lend_to_patron(name="Ada", email="ada@example.org", title="Dune")
-        _mail_to(monkeypatch, failing=("house@example.org",))
-        await notifications.run_digest(db)
-
-        attempts = _mail_to(monkeypatch)
-        await notifications.run_digest(db)
-
-        db.refresh(loan)
-        assert attempts == [("house@example.org",)]
-        assert (loan.notified_at is not None, loan.patron_notified_at is not None) == (True, True)
-
-
-@pytest.mark.asyncio
-async def test_the_patron_notice_alone_reports_no_private_book_left_out(
-    patron_mail_on, lend_to_patron, sent_mail
-):
-    """The private Book went to its borrower; with no channel on, nothing was withheld."""
-    lend_to_patron(name="Ada", email="ada@example.org", title="Diary", private=True)
-
-    result = await notifications.run_digest(patron_mail_on)
-
-    assert (result["sent"], result["skipped_private"]) == (True, 0)

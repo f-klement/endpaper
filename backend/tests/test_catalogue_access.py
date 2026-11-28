@@ -22,20 +22,14 @@ import logging
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 
 import catalogue_access
-import isbn
 import metadata
 import ratelimit
-import registry
 import settings_store
 import sources
-import targets
-from enums import CatalogueSource, Disposition, RegisteredCatalogue, SettingKey
 from tests.bindings import SourceNames
 from tests.corpus import application_sources
-from tests.helpers import enable_google_books
 
 TREE_GUARDS = {
     "TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings": ("application_sources",),
@@ -71,7 +65,7 @@ DOOR = "catalogue_access.py"
 #: `test_metadata.py` is: deriving the subject from "which functions take an access"
 #: means removing the parameter removes the function from the guard's subject in the
 #: same edit, and the guard stays green on the change that broke it.
-DOORS_TAKING_AN_ACCESS = frozenset({"lookup", "search", "title_search", "candidates", "probe"})
+DOORS_TAKING_AN_ACCESS = frozenset({"lookup", "search", "title_search", "candidates"})
 
 #: The door that takes the key and the plan apart instead, and still may not be
 #: called from outside.
@@ -85,9 +79,7 @@ ASKING_DOORS = DOORS_TAKING_AN_ACCESS | DOORS_TAKING_THEM_APART
 
 
 #: The named constructors, which are the one legitimate way to mention an asking type.
-CONSTRUCTORS = frozenset(
-    {"for_a_member_request", "for_a_narrowed_lookup", "for_a_narrowed_title_search", "for_a_batch_backfill"}
-)
+CONSTRUCTORS = frozenset({"for_a_member_request", "for_a_batch_backfill"})
 
 
 def _references_to(
@@ -405,8 +397,6 @@ class TestNeitherAskingTypeWidens:
     SURFACE = {
         "Enquiry": {
             "for_a_member_request",
-            "for_a_narrowed_lookup",
-            "for_a_narrowed_title_search",
             "refuse_if_nothing_is_asked",
             "lookup",
             "title_search",
@@ -608,9 +598,10 @@ class TestABareCatalogueIsAudible:
     """The credential gap's runtime half, which nothing was invoking.
 
     **This is the half that can actually fire.** The test in
-    `test_settings_store.py` says the two loops range over one subject; this says that
-    when a key is rotated between their two keychain reads, the request that goes out
-    with no credential says so. Before this arm the warning was at the **stated** rung: deleting its body
+    `test_settings_store.py` says the two predicates agree on today's roster, which is a
+    fact about the seed table; this says that when they do not agree, or when a key is
+    rotated between the two keychain reads, the request that goes out with no credential
+    says so. Before this arm the warning was at the **stated** rung: deleting its body
     left nothing red.
 
     `settings_store.catalogue_logins` carries why this is a warning and not a refusal.
@@ -690,8 +681,6 @@ class TestEachDoorChargesItsOwnLimiter:
         ("constructor", "limiter"),
         [
             ("Enquiry.for_a_member_request", "metadata_limiter"),
-            ("Enquiry.for_a_narrowed_lookup", "metadata_limiter"),
-            ("Enquiry.for_a_narrowed_title_search", "metadata_limiter"),
             ("GoogleVolumes.for_a_batch_backfill", "identifier_backfill_limiter"),
         ],
     )
@@ -804,7 +793,7 @@ class TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings:
 
     def test_every_handler_behind_the_door_is_covered_above(self):
         tree = ast.parse(application_sources()["routers/books.py"])
-        constructors = CONSTRUCTORS
+        constructors = {"for_a_member_request", "for_a_batch_backfill"}
         reaching = {
             node.name
             for node in ast.walk(tree)
@@ -818,110 +807,3 @@ class TestAnUnauthenticatedCallerIsNeverToldAboutTheSettings:
             f"{sorted(self.HANDLERS)}. Add the new one here and its path to the "
             "parametrisation above, or an unauthenticated caller reaches it unchecked"
         )
-
-
-class TestTheBackfillRefusalTellsAMemberOnlyWhatAnybodyCanRead:
-    """`GOOGLE_BOOKS_IS_NOT_ASKED` tells a member whether this library asks Google
-    Books, which is safe only because `GET /api/settings/features` publishes that to
-    anybody as `google_books_ready`, deliberately.
-
-    **Narrowing the flag fails here**, and that is the point: the refusal then
-    discloses what the flag no longer does, so the narrowing has to take the refusal
-    with it. The flag is the conjunction of the switch and a key, the refusal reads
-    the plan; under the default source list the two answer alike.
-    """
-
-    @pytest.mark.parametrize("ready", [False, True])
-    def test_a_caller_with_no_session_reads_what_the_refusal_tells_a_member(self, client, member, db, ready):
-        if ready:
-            enable_google_books(db)
-
-        anybody = client.get("/api/settings/features")
-        refused = client.post("/api/books/identifiers/backfill", headers=member["headers"]).status_code == 409
-
-        assert anybody.status_code == 200
-        assert anybody.json()["google_books_ready"] is not refused
-
-
-class TestTheSourceTest:
-    """`catalogue_access.probe`: charged before anything is sent, and what it asks by default."""
-
-    @pytest.fixture
-    def asked(self, monkeypatch) -> list[tuple[str, str]]:
-        """Each `(base_url, isbn)` handed to `metadata.probe`, which answers `answered`."""
-        calls: list[tuple[str, str]] = []
-
-        async def probe(target, isbn, *, access):
-            calls.append((target.base_url, isbn))
-            return Disposition.ANSWERED
-
-        monkeypatch.setattr(metadata, "probe", probe)
-        return calls
-
-    @pytest.fixture
-    def handed(self, monkeypatch) -> list[metadata.Access]:
-        """Each access handed to `metadata.probe`, which answers `answered`."""
-        accesses: list[metadata.Access] = []
-
-        async def probe(target, isbn, *, access):
-            accesses.append(access)
-            return Disposition.ANSWERED
-
-        monkeypatch.setattr(metadata, "probe", probe)
-        return accesses
-
-    async def test_a_seeded_source_is_handed_the_resolved_logins_and_key(self, db, handed):
-        """The access as a lookup would resolve it, not an empty one.
-
-        Without the login a credentialled source is tested anonymously, and
-        without the key Google Books is: either reads REFUSED for a catalogue that
-        answers the scan. The logins are the roster's shipped ones.
-        """
-        enable_google_books(db, "a-stored-key")
-        await catalogue_access.probe(db, min(sources.SHIPS_A_CREDENTIAL), None)
-        (access,) = handed
-        assert (access.api_key, frozenset(access.logins)) == ("a-stored-key", sources.SHIPS_A_CREDENTIAL)
-
-    async def test_past_the_limit_nothing_is_sent(self, db, asked):
-        for _ in range(ratelimit.SOURCE_TEST_LIMIT.max_attempts):
-            await catalogue_access.probe(db, RegisteredCatalogue.NLS, None)
-        with pytest.raises(HTTPException) as refused:
-            await catalogue_access.probe(db, RegisteredCatalogue.NLS, None)
-        assert refused.value.status_code == 429
-        assert len(asked) == ratelimit.SOURCE_TEST_LIMIT.max_attempts
-
-    async def test_a_registry_entry_is_asked_its_own_evidence_isbn_by_default(self, db, asked):
-        entry = registry.ENTRIES[RegisteredCatalogue.CSIC]
-        evidence = await catalogue_access.probe(db, RegisteredCatalogue.CSIC, None)
-        assert asked == [(entry.target.base_url, entry.evidence.isbn)]
-        assert (evidence.isbn, evidence.disposition) == (entry.evidence.isbn, Disposition.ANSWERED)
-
-    async def test_a_seeded_source_is_asked_the_default_isbn(self, db, asked):
-        await catalogue_access.probe(db, CatalogueSource.DNB, None)
-        assert asked == [(targets.SEEDED[CatalogueSource.DNB].base_url, catalogue_access.DEFAULT_TEST_ISBN)]
-
-    def test_the_default_isbn_is_a_normalised_isbn(self):
-        assert isbn.parse(catalogue_access.DEFAULT_TEST_ISBN) == catalogue_access.DEFAULT_TEST_ISBN
-
-
-class TestAPickReachesTheStandingPlanAndNoNarrowedOne:
-    """`registry.with_picks` at its one call site, `_resolved_access`."""
-
-    def test_the_resolved_access_asks_this_librarys_picks(self, db):
-        registry.pick(db, RegisteredCatalogue.CSIC)
-        plan = catalogue_access._resolved_access(db).plan
-        assert plan.picked == (registry.ENTRIES[RegisteredCatalogue.CSIC].target,)
-
-    def test_a_dropped_pick_is_gone_on_the_next_request(self, db):
-        registry.pick(db, RegisteredCatalogue.CSIC)
-        catalogue_access._resolved_access(db)
-        registry.drop(db, RegisteredCatalogue.CSIC)
-        assert catalogue_access._resolved_access(db).plan.picked == ()
-
-    def test_a_narrowed_lookup_asks_no_pick(self, db):
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        registry.pick(db, RegisteredCatalogue.CSIC)
-        enquiry = catalogue_access.Enquiry.for_a_narrowed_lookup(
-            db, member="cataloguer", only=frozenset({CatalogueSource.DNB})
-        )
-        assert enquiry._access.plan.picked == ()

@@ -7,7 +7,6 @@
  */
 import type { AuthorityProvenance } from "./authorityProvenance.ts";
 import type { AuthorityScheme } from "./authorityScheme.ts";
-import type { AuthoritySupplier } from "./authoritySupplier.ts";
 
 /**
  * Which record in an authority file one spelling of this name means.
@@ -21,16 +20,8 @@ import type { AuthoritySupplier } from "./authoritySupplier.ts";
  * list has to be able to tell an assertion a catalogue made from one somebody
  * chose, and inferring it from an absent user id would make a deleted account
  * look like a machine. See `enums.AuthorityProvenance`.
- *
- * `asserted_by` is the file the value came from and `checked_by` a second
- * file that tied the same value to the same person, or null where none did,
- * so a number two files agree on reads differently from one a single file
- * carried. A row stored before either was recorded reads `unrecorded`. See
- * `enums.AuthoritySupplier`.
  */
 export interface AuthorIdentifierOut {
-  asserted_by: AuthoritySupplier;
-  checked_by: AuthoritySupplier | null;
   id: number;
   identifier: string;
   provenance: AuthorityProvenance;

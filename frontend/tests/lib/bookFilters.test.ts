@@ -18,7 +18,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   BookFormat,
-  BookOrigin,
   BookSort,
   LendingWillingness,
   OwnershipStatus,
@@ -124,12 +123,6 @@ describe("readFilters", () => {
     expect(read("?collection=-3").collection).toBeNull();
     expect(read("?collection=1.5").collection).toBeNull();
   });
-
-  it("starts on the harvest run a link names, and ignores one that is no id", () => {
-    expect(read("?harvest=12").harvest).toBe(12);
-    expect(read("?harvest=0").harvest).toBeNull();
-    expect(read("?harvest=latest").harvest).toBeNull();
-  });
 });
 
 /**
@@ -153,8 +146,6 @@ const CARRIED_BY_A_LINK: { [K in keyof BookFilters]?: [string, string] } = {
   lending: ["lending", LendingWillingness.happy],
   collection: ["collection", "3"],
   discuss: ["discuss", "1"],
-  origin: ["origin", BookOrigin.harvested],
-  harvest: ["harvest", "12"],
   sort: ["sort", BookSort.author],
   // Both spellings the classification filter uses. `classification` repeats
   // rather than joining, because an LCSH heading carries commas; `ddc` joins,
@@ -264,18 +255,6 @@ describe("toParams", () => {
     expect(toParams(DEFAULT_FILTERS)).not.toHaveProperty("discuss");
   });
 
-  it("sends the origin only when one is picked", () => {
-    expect(
-      toParams({ ...DEFAULT_FILTERS, origin: BookOrigin.harvested }).origin,
-    ).toBe(BookOrigin.harvested);
-    expect(toParams(DEFAULT_FILTERS)).not.toHaveProperty("origin");
-  });
-
-  it("sends the harvest run only when a link names one", () => {
-    expect(toParams({ ...DEFAULT_FILTERS, harvest: 12 }).harvest).toBe(12);
-    expect(toParams(DEFAULT_FILTERS)).not.toHaveProperty("harvest");
-  });
-
   it("sends headings as a repeated parameter, not a joined string", () => {
     // The one filter that cannot follow `tags`. An LCSH number is the
     // authorised heading string and those carry commas, so a joined list
@@ -350,8 +329,6 @@ const SAMPLES: { [K in keyof BookFilters]-?: BookFilters[K] } = {
   lending: LendingWillingness.happy,
   collection: 4,
   discuss: true,
-  origin: BookOrigin.added,
-  harvest: 12,
   sort: BookSort.year_desc,
   tagIds: [1, 2],
   headings: ["lcsh:Mental health", "ddc:004"],

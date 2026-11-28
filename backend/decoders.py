@@ -98,8 +98,8 @@ class Reader(StrEnum):
     members each.
 
     **Keyed on here rather than on the source**, which is what makes one decoder
-    serve several sources: every row in `targets.py` whose reader is `MARC_GND`
-    is read by one function. It is also what will let one decoder serve two
+    serve several sources: `MARC_GND` reads the DNB, the ÖNB, the NLG and the
+    BNE through one function. It is also what will let one decoder serve two
     families, since a family is a property of the source and not of the parser.
     """
 

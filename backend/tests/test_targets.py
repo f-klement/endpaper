@@ -2,21 +2,16 @@
 
 import ast
 import dataclasses
-import math
 import pathlib
 import re
 
 import pytest
-from sqlalchemy import CheckConstraint
 
 import decoders
-import fetch
-import models
 import sources
 import targets
 import z3950
-from database import Base
-from enums import Capability, CatalogueSource, CredentialKind, RecordCharset
+from enums import Capability, CatalogueSource, RecordCharset
 from tests.helpers import z3950_row
 
 
@@ -178,38 +173,9 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
             CatalogueSource.DNB
         }
 
-    def test_every_seeded_bound_is_whole_seconds(self):
-        """YAZ is handed whole seconds, so a fraction in a seed is a wait nobody gets.
-
-        `Target.timeout_seconds` says why a Z39.50 seed carries a second more.
-        """
-        bounds = [target.timeout_seconds for target in targets.SEEDED.values()]
-        assert all(bound is None or bound == int(bound) for bound in bounds)
-
-    @pytest.mark.parametrize(
-        "seconds", [0.0, -1.0, math.nan, math.inf, targets.TIMEOUT_CEILING_SECONDS + 0.5]
-    )
-    def test_a_bound_outside_one_requests_ceiling_is_refused(self, seconds):
-        """NaN is the one an inverted comparison lets through: it fails every comparison."""
-        with pytest.raises(ValueError, match="timeout_seconds"):
-            z3950_row(timeout_seconds=seconds)
-
-    def test_a_bound_at_one_requests_ceiling_is_accepted(self):
-        ceiling = targets.TIMEOUT_CEILING_SECONDS
-        assert z3950_row(timeout_seconds=ceiling).timeout_seconds == ceiling
-
-    def test_the_ceiling_is_the_lower_of_the_two_transports(self):
-        """An SRU row is bounded by `fetch`'s wait, so the Z39.50 figure alone could widen it."""
-        assert min(fetch.TIMEOUT_SECONDS, z3950.TIMEOUT_SECONDS) == targets.TIMEOUT_CEILING_SECONDS
-
-    def test_the_database_rule_is_the_same_ceiling(self):
-        """`ck_catalogue_targets_timeout` carries the figure as a literal, as a revision must."""
-        check = next(
-            one
-            for one in Base.metadata.tables[models.CatalogueTarget.__tablename__].constraints
-            if isinstance(one, CheckConstraint) and one.name == "ck_catalogue_targets_timeout"
-        )
-        assert f"timeout_seconds <= {targets.TIMEOUT_CEILING_SECONDS}" in str(check.sqltext)
+    def test_no_seeded_row_carries_a_timeout(self):
+        """The column is #132's. Pinned so it cannot be read as working."""
+        assert all(target.timeout_seconds is None for target in targets.SEEDED.values())
 
     def test_every_row_is_seeded_with_an_origin_its_transport_speaks(self):
         """Every address parses to an origin, and none carries a credential."""
@@ -223,11 +189,11 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
             assert origin.startswith(schemes), target.source
 
     def test_the_origins_are_one_per_host_and_carry_the_scheme(self):
-        """Scheme and port, not a bare host: nine targets speak no TLS and a
+        """Scheme and port, not a bare host: eight targets speak no TLS and a
         hostname allowlist would let the HTTPS ones join them.
 
         **Counted rather than listed**, and the count is the thing: two of the
-        nine authenticate, so a plaintext origin is no longer only a question
+        eight authenticate, so a plaintext origin is no longer only a question
         of what an eavesdropper reads.
         `tests/test_metadata.py::TestThePlaintextSourcesAreCounted` names them
         and checks the two documents that state the number.
@@ -236,7 +202,7 @@ class TestTheSeededRosterSaysWhatTheRulesSay:
             targets.origin(target.base_url) for target in targets.SEEDED.values()
         } == targets.SEEDED_ORIGINS
         plaintext = {o for o in targets.SEEDED_ORIGINS if not o.startswith("https://")}
-        assert len(plaintext) == 9
+        assert len(plaintext) == 8
 
 
 class TestARowCannotCarryQueryStructure:
@@ -749,18 +715,6 @@ class TestARowNamesTheSecretItsOwnDoorTakes:
         one that is believed: a bespoke row needing a credential and naming no
         secret is refused by `metadata.resolve`."""
         assert _seeded().secret is targets.Secret.NONE
-
-    @pytest.mark.parametrize(
-        ("source", "kind"),
-        [
-            (CatalogueSource.BNE, CredentialKind.NONE),
-            (CatalogueSource.GOOGLE_BOOKS, CredentialKind.API_KEY),
-            (CatalogueSource.BNA, CredentialKind.LOGIN),
-        ],
-    )
-    def test_the_store_a_credential_lives_in_is_read_off_the_row(self, source, kind):
-        """One row of each kind, so a projection answering one value for all is red."""
-        assert targets.SEEDED[source].credential_kind is kind
 
 
 #: The readers a catalogue row may name, derived from the import registry rather

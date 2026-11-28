@@ -11,7 +11,7 @@
  */
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { useInvalidate } from "../../api/invalidate";
 import {
@@ -24,7 +24,6 @@ import {
 import {
   getGetCustomFieldsQueryKey,
   getListAccessRequestsQueryKey,
-  getListPendingHeadingsQueryKey,
   getListCustomFieldsQueryKey,
   getGetHighlightsQueryKey,
   getGetNotesQueryKey,
@@ -43,23 +42,12 @@ import {
   getForgetOnlineLinkMutationOptions,
   getForgetDigitalReferenceMutationOptions,
   getListDigitalReferencesQueryKey,
-  getListCoverImagesQueryKey,
-  getDeleteCoverImageMutationOptions,
-  getShelveCoverImageMutationOptions,
   getRemoveBookTagMutationOptions,
   useAddBookTag,
   useAddCopy,
-  useAddHeading,
-  useListSuggestingVocabularies,
-  useSuggestHeadings,
-  useConfirmPendingHeadings,
-  useDiscardPendingHeadings,
-  useListPendingHeadings,
   useDecideAccess,
   useListAccessRequests,
   useListDigitalReferences,
-  useListCoverImages,
-  useUploadCoverImage,
   useListCopies,
   useRequestAccess,
   useAddProgress,
@@ -109,7 +97,7 @@ import {
   useListKosyncInbox,
   useUnlinkKosyncDocument,
 } from "../../api/generated/endpoints/kosync/kosync";
-import { useGoogleBooksReady, useLibraryMode } from "../../app/hooks";
+import { useGoogleBooksReady } from "../../app/hooks";
 import { useToast } from "../../app/toast";
 import type { Borrower } from "./components/LoanPanel";
 import { useRowWrite } from "../hooks";
@@ -120,10 +108,8 @@ import type {
   BookMatch,
   BookDetailsUpdate,
   BookIdentifierOut,
-  ClassificationOut,
   OnlineLinkOut,
   CollectionOut,
-  CoverImageOut,
   DigitalReferenceOut,
   CustomFieldOut,
   CustomFieldValueOut,
@@ -141,9 +127,8 @@ import type {
   TagOut,
   UserOut,
   KosyncDocumentOut,
-  SuggestingVocabularyOut,
 } from "../../api/generated/model";
-import { BookFormat, HeadingUse } from "../../api/generated/model";
+import { BookFormat } from "../../api/generated/model";
 
 export interface UseBookResult {
   book: BookOut | undefined;
@@ -678,9 +663,9 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
   const complete = useReturnLoan({ mutation });
 
   return {
-    // Exactly one of the three borrower fields, which is what the API accepts
+    // Exactly one of the two borrower fields, which is what the API accepts
     // and what the CHECK constraint behind it enforces. The union is what
-    // stops a request naming two, or none, being expressible at all.
+    // stops the both-or-neither request being expressible at all.
     lend: (borrower, dueAt, acknowledgeNotLendable = false) =>
       create.mutate({
         data: {
@@ -688,8 +673,6 @@ export function useBookLoan(bookId: number): UseBookLoanResult {
           loaned_to_user_id:
             borrower.kind === "member" ? borrower.userId : null,
           loaned_to_name: borrower.kind === "external" ? borrower.name : null,
-          loaned_to_patron_id:
-            borrower.kind === "patron" ? borrower.patronId : null,
           due_at: dueAt ?? null,
           // A book marked "never lent" is a 409 without this. It says
           // something about one request and is not stored, so it is passed
@@ -755,201 +738,6 @@ export function useBookAccess(
       answer.mutate({ bookId, requestId, data: { granted } }),
     isBusy: ask.isPending || answer.isPending,
     error: requests.error ?? ask.error ?? answer.error,
-  };
-}
-
-export interface UseBookPendingHeadingsResult {
-  /** The headings a harvest suggested and nobody has settled. Empty for a member. */
-  headings: ClassificationOut[];
-  /** Write the whole set as this book's headings. */
-  confirm: () => void;
-  /** Drop the whole set, after asking: the server remembers a discard. */
-  discard: () => void;
-  isBusy: boolean;
-  error: unknown;
-}
-
-/**
- * A harvest's suggested headings on this book, which an admin settles.
- *
- * **Read only for an admin**, since the route answers anybody else 403 and a
- * member is shown nothing. The whole set at once, as the server takes it.
- *
- * Confirming writes classifications, so it drops the catalogue: the book's own
- * record and the classification facets both move. Discarding writes nothing a
- * reader sees, so it drops this list alone.
- */
-export function useBookPendingHeadings(
-  bookId: number,
-  isAdmin: boolean,
-): UseBookPendingHeadingsResult {
-  const { t } = useTranslation();
-  const invalidate = useInvalidate();
-  const queryClient = useQueryClient();
-  const pending = useListPendingHeadings(bookId, {
-    query: { enabled: isAdmin },
-  });
-  // **Emptied before it is read again**, because the server's list is empty
-  // once either write lands. Invalidating alone leaves the settled set on screen
-  // for the refetch's round trip, with both buttons live again over headings
-  // already written or discarded.
-  const dropPending = () => {
-    const queryKey = getListPendingHeadingsQueryKey(bookId);
-    queryClient.setQueryData(queryKey, []);
-    void queryClient.invalidateQueries({ queryKey });
-  };
-  const accept = useConfirmPendingHeadings({
-    mutation: {
-      onSuccess: () => {
-        dropPending();
-        invalidate.catalogue();
-      },
-    },
-  });
-  const reject = useDiscardPendingHeadings({
-    mutation: { onSuccess: dropPending },
-  });
-
-  const headings = pending.data ?? [];
-
-  return {
-    headings,
-    confirm: () => accept.mutate({ bookId }),
-    discard: () => {
-      const question =
-        headings.length === 1
-          ? t("pendingHeadings.discardConfirmOne")
-          : t("pendingHeadings.discardConfirm");
-      if (window.confirm(question)) reject.mutate({ bookId });
-    },
-    isBusy: accept.isPending || reject.isPending,
-    error: pending.error ?? accept.error ?? reject.error,
-  };
-}
-
-/**
- * The fewest characters the heading field asks about: the server's
- * `vocabulary_copy.SUGGEST_MIN`, which answers 422 below it.
- */
-export const HEADING_QUERY_FLOOR = 2;
-
-/**
- * How long typing must pause before the heading field asks. Shorter than the
- * library search's `DEBOUNCE_MS`, because this reads a local copy rather than
- * the catalogue and a dropdown that lags a word behind is not offering anything.
- */
-export const HEADING_SUGGEST_DEBOUNCE_MS = 300;
-
-export interface UseBookHeadingFieldResult {
-  /** The vocabularies offered from. Empty draws no field: the setting is off,
-   * library mode is off, or no copy is loaded. */
-  vocabularies: SuggestingVocabularyOut[];
-  /** The vocabulary asked, the first offered until one is chosen. */
-  scheme: string;
-  chooseScheme: (scheme: string) => void;
-  typed: string;
-  type: (text: string) => void;
-  /** The headings offered for what was typed, after the pause. */
-  suggestions: ClassificationOut[];
-  /** Write the picked heading onto the book, and clear the field. */
-  pick: (heading: ClassificationOut) => void;
-  isPicking: boolean;
-  error: unknown;
-}
-
-/**
- * The heading field: headings offered from a local vocabulary copy as the
- * cataloguer types, and the one picked written onto the book.
- *
- * **Asks once typing pauses**, `HEADING_SUGGEST_DEBOUNCE_MS`, and not below
- * `HEADING_QUERY_FLOOR` characters, so a word typed is one request rather than
- * one per letter. Always for a subject, since that is what this field adds.
- */
-export function useBookHeadingField(bookId: number): UseBookHeadingFieldResult {
-  const invalidate = useInvalidate();
-  // A household never has the field, so it never asks: the server would
-  // answer an empty list anyway.
-  const libraryMode = useLibraryMode();
-  const vocabularies = useListSuggestingVocabularies(bookId, {
-    query: { enabled: libraryMode },
-  });
-  const offered = vocabularies.data ?? [];
-  const [chosen, chooseScheme] = useState<string | undefined>(undefined);
-  const scheme = schemeAsked(chosen, offered);
-  const [typed, type] = useState("");
-  const [asked, setAsked] = useDebouncedText(typed);
-  const suggestions = useHeadingSuggestions(bookId, scheme, asked);
-  const add = useAddHeading({
-    mutation: {
-      onSuccess: () => {
-        type("");
-        setAsked("");
-        invalidate.catalogue();
-      },
-    },
-  });
-
-  return {
-    vocabularies: offered,
-    scheme,
-    chooseScheme,
-    typed,
-    type,
-    suggestions: suggestions.headings,
-    // The suggestion is already the row an import writes, so it is posted
-    // back as it came: the server, not this hook, owns that form.
-    pick: (heading) =>
-      add.mutate({
-        bookId,
-        data: {
-          scheme: heading.scheme,
-          number: heading.number,
-          label: heading.label,
-        },
-      }),
-    isPicking: add.isPending,
-    error: firstError(vocabularies.error, suggestions.error, add.error),
-  };
-}
-
-/** The vocabulary asked: the one chosen, else the first offered. */
-function schemeAsked(
-  chosen: string | undefined,
-  offered: SuggestingVocabularyOut[],
-): string {
-  return chosen ?? offered[0]?.scheme ?? "";
-}
-
-/** `typed` once it has stood for `HEADING_SUGGEST_DEBOUNCE_MS`, trimmed. */
-function useDebouncedText(typed: string): [string, (text: string) => void] {
-  const [settled, setSettled] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(
-      () => setSettled(typed.trim()),
-      HEADING_SUGGEST_DEBOUNCE_MS,
-    );
-    return () => clearTimeout(timer);
-  }, [typed]);
-  return [settled, setSettled];
-}
-
-/** The headings offered for `asked`, and nothing below the floor. */
-function useHeadingSuggestions(
-  bookId: number,
-  scheme: string,
-  asked: string,
-): { headings: ClassificationOut[]; error: unknown } {
-  const ready = scheme !== "" && asked.length >= HEADING_QUERY_FLOOR;
-  const suggestions = useSuggestHeadings(
-    bookId,
-    { scheme, q: asked, use: HeadingUse.subject },
-    { query: { enabled: ready } },
-  );
-  return {
-    // Only for what is asked now: a stale answer under a cleared field would
-    // offer headings for a word nobody is typing.
-    headings: ready ? (suggestions.data ?? []) : [],
-    error: suggestions.error,
   };
 }
 
@@ -1054,72 +842,6 @@ export function useBookFiles(bookId: number): UseBookFilesResult {
     forgetting: forget.pendingRows,
     listError: references.error,
     error: forget.error,
-  };
-}
-
-export interface UseBookCoverImagesResult {
-  /** The further images kept of this book, oldest first. */
-  images: CoverImageOut[];
-  /** Keep one more image. */
-  upload: (file: File) => void;
-  isUploading: boolean;
-  /** Let one image go, after confirming. */
-  remove: (image: CoverImageOut) => void;
-  /** Make one image the shelf cover; the old cover takes its place. */
-  shelve: (image: CoverImageOut) => void;
-  /** The images being removed or shelved right now, by id. */
-  busy: ReadonlySet<number>;
-  /** Why the list could not be read, apart from why a write failed. */
-  listError: unknown;
-  error: unknown;
-}
-
-/**
- * A back cover, a spine, a dust jacket: images kept beside the shelf cover.
- *
- * **Read only through the per book route**, as the file references are, so an
- * image reaches this page exactly when its book does. Shelving one rewrites
- * the book's `cover_url`, so it drops the book as well as this list; the other
- * two writes touch nothing a listing shows.
- */
-export function useBookCoverImages(bookId: number): UseBookCoverImagesResult {
-  const queryClient = useQueryClient();
-  const invalidate = useInvalidate();
-  const { t } = useTranslation();
-  const images = useListCoverImages(bookId);
-  const dropList = () =>
-    void queryClient.invalidateQueries({
-      queryKey: getListCoverImagesQueryKey(bookId),
-    });
-
-  const upload = useUploadCoverImage({ mutation: { onSuccess: dropList } });
-  const remove = useRowWrite(
-    getDeleteCoverImageMutationOptions,
-    "imageId",
-    dropList,
-  );
-  const shelve = useRowWrite(
-    getShelveCoverImageMutationOptions,
-    "imageId",
-    () => {
-      dropList();
-      invalidate.book(bookId);
-    },
-  );
-
-  return {
-    images: images.data ?? [],
-    upload: (file) => upload.mutate({ bookId, data: { file } }),
-    isUploading: upload.isPending,
-    remove: (image) => {
-      // Asked, because nothing brings an uploaded image back.
-      if (confirm(t("coverImages.removeConfirm")))
-        remove.mutate({ bookId, imageId: image.id });
-    },
-    shelve: (image) => shelve.mutate({ bookId, imageId: image.id }),
-    busy: new Set([...remove.pendingRows, ...shelve.pendingRows]),
-    listError: images.error,
-    error: upload.error ?? remove.error ?? shelve.error,
   };
 }
 

@@ -38,8 +38,7 @@ import lending
 import reading
 from book_columns import FILLABLE_FROM_ANOTHER_ROW
 from database import Base, hold_book_ceilings
-from enums import BookIdentifierScheme
-from errors import MetAnotherChange
+from enums import BookIdentifierScheme, ClassificationScheme
 from logvalues import clipped
 from models import (
     MAX_ONLINE_LINKS_PER_BOOK,
@@ -47,14 +46,12 @@ from models import (
     Book,
     BookIdentifier,
     Classification,
-    CoverImage,
     DigitalReference,
     Highlight,
     KosyncDocument,
     Loan,
     Note,
     OnlineLink,
-    PendingHeading,
     Quote,
     ReadingProgress,
     ReadwiseBook,
@@ -309,18 +306,6 @@ def _carry_custom_field_values(fold: _Fold) -> None:
     custom_fields.resolve_merge(fold.db, fold.keeper.id, fold.loser_ids)
 
 
-def _left_to_the_cascade(_fold: _Fold) -> None:
-    """Nothing moves: a losing Book's rows go with it when it is deleted.
-
-    **For the pending headings, and a decision rather than an omission.** A
-    loser's suggestions were raised by its own harvested record, and the
-    keeper is not that record: the merge keeps the keeper's identifier, so no
-    later harvest of the loser's record finds the survivor to raise them again
-    or to remember they were settled. Carried over, they would offer an admin
-    another record's headings for a Book that record no longer names.
-    """
-
-
 # ── One policy per child of `books` ───────────────────────────────────────────
 
 #: What a merge does to every table that points at `books`.
@@ -342,7 +327,7 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
         _deduplicated(
             Classification,
             held=lambda book: book.classifications,
-            key=lambda row: (str(row.scheme), row.number),
+            key=lambda row: (ClassificationScheme(row.scheme).value, row.number),
             ceiling=MAX_CLASSIFICATIONS_PER_BOOK,
             absorb=_absorb_heading,
         ),
@@ -409,13 +394,6 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
             ceiling=MAX_ONLINE_LINKS_PER_BOOK,
         ),
     ),
-    # Further images move whole, and no file moves with them: each is named by
-    # its own row (`cover_store.IMAGE_SLOT_PREFIX`), so repointing the row is
-    # the whole carry. **No ceiling, deliberately**: the images are already on
-    # disk, so a merge adds no bytes, and dropping one would delete a picture a
-    # member took that nothing puts back. A survivor past
-    # `MAX_COVER_IMAGES_PER_BOOK` takes no upload until one goes.
-    _Transfer(_table(CoverImage.__tablename__), _moves_wholesale(CoverImage)),
     _Transfer(_table(Loan.__tablename__), _carry_loans),
     # Requests carry no uniqueness, so every row travels. Two open requests
     # from one member can result, which the holder answers like any other.
@@ -434,9 +412,6 @@ TRANSFERS: Final[tuple[_Transfer, ...]] = (
     # own book id, which a merge does not touch.
     _Transfer(_table(ReadwiseBook.__tablename__), _moves_wholesale(ReadwiseBook)),
     _Transfer(_table(custom_fields.VALUES_TABLE), _carry_custom_field_values),
-    # A harvest's suggestions stay with the Book its record is: see
-    # `_left_to_the_cascade`.
-    _Transfer(_table(PendingHeading.__tablename__), _left_to_the_cascade),
 )
 
 
@@ -480,8 +455,8 @@ if _UNDECLARED:
 # of column names relates to `Book` through nothing, so a column added to the
 # schema joins it only if somebody remembers. `book_columns` refuses to import
 # when a column is classified nowhere, and its cells carry why each exclusion is
-# an exclusion: `isbn` and `accession` because each is unique and `fold`
-# releases it in its own flush ahead of everything, `copy_group` because absorbing it would make the
+# an exclusion: `isbn` because it is unique and `fold` releases it in its own
+# flush ahead of everything, `copy_group` because absorbing it would make the
 # survivor a copy of the loser's siblings.
 
 
@@ -512,36 +487,7 @@ def _absorb_fields(keeper: Book, losers: Sequence[Book], isbn: str | None) -> No
     evidence.touched(keeper, filled)
 
 
-def _released(db: Session, keeper: Book, losers: Sequence[Book], column: str) -> str | None:
-    """The first losing row's value of a unique `column`, let go, for a survivor without one.
-
-    None, and nothing written, where the survivor has its own or no loser has
-    one. Otherwise every loser lets go and the release is flushed **before**
-    the caller hands the value to the survivor: both UPDATEs in one executemany
-    put the set before the clear and trip the index. `fold`'s docstring says
-    why that costs nothing.
-    """
-    value: str | None = next((getattr(loser, column) for loser in losers if getattr(loser, column)), None)
-    if getattr(keeper, column) is not None or value is None:
-        return None
-    for loser in losers:
-        setattr(loser, column, None)
-    db.flush()
-    return value
-
-
 # ── The door ──────────────────────────────────────────────────────────────────
-
-
-def _hold_every_book(db: Session, books: Sequence[Book]) -> None:
-    """Hold each Book in ascending id and expire it, or raise on one gone.
-
-    `fold`'s docstring says why every Book and why this order.
-    """
-    for book in sorted(books, key=lambda held: held.id):
-        if not hold_book_ceilings(db, book.id):
-            raise MetAnotherChange
-        db.expire(book)
 
 
 def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
@@ -553,9 +499,8 @@ def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
     first: their loaded collections still list the rows just moved, and the
     cascade walks those collections rather than the database.
 
-    **The ISBN and the accession number are released in their own flush,
-    before anything else** (`_released`). Each is unique, so the row it is
-    being taken from has to let go first. Both UPDATEs
+    **The ISBN is released in its own flush, before anything else.** It is
+    unique, so the row it is being taken from has to let go first. Both UPDATEs
     in one executemany puts the set before the clear and trips the index. These
     rows are about to cease to exist, so releasing it costs nothing.
 
@@ -563,35 +508,24 @@ def fold(db: Session, keeper: Book, losers: Sequence[Book]) -> None:
     every transfer is written to read the database as it stands rather than what
     a caller has already repointed.
 
-    **Every Book it touches is held before anything reads what it carries**,
-    keeper and losers alike, in ascending id as `database.hold_book_ceilings`
-    asks of a transaction holding several. A capped transfer counts the
-    keeper's rows and then moves the losers' in, so a writer adding to the
-    keeper between the two lands it past the ceiling: a file reference report,
-    an enrichment's headings or an import's links, each of which takes the
-    same lock. A writer holding a loser, a cover swap demoting the shelf cover
-    into a further image for one, otherwise commits a row after the transfer's
-    UPDATE read the loser's children and before the loser's DELETE, which
-    waits for it, so the cascade took a picture nobody had moved. Ascending
-    id rather than keeper first, because the keeper is whichever Book the
-    member chose: two merges with their keepers swapped each held one Book and
-    waited on the other's, and Postgres aborted one.
-
-    Each Book is expired after its lock, so every count is read under it
-    rather than from a collection a caller loaded before. That discards
-    nothing only while this is the transaction's first write to them, which
-    the one caller keeps. **A Book the lock finds gone raises
-    `MetAnotherChange`**: another merge deleted it while this one waited, and
-    nothing has been written yet.
+    **The keeper's ceilings are held first, before anything reads what it
+    already carries.** A capped transfer counts the keeper's rows and then
+    moves the losers' in, so a writer adding to the keeper between the two
+    lands it past the ceiling: a file reference report, an enrichment's
+    headings or an import's links, each of which takes the same lock. The keeper is expired after
+    it, so every count is read under the lock rather than from a collection a
+    caller loaded before. That discards nothing only while this is the
+    transaction's first write to the keeper, which the one caller keeps.
     """
-    _hold_every_book(db, [keeper, *losers])
+    hold_book_ceilings(db, keeper.id)
+    db.expire(keeper)
 
-    absorbed_isbn = _released(db, keeper, losers, "isbn")
-    # Fill only: a survivor with its own label keeps it, and the loser's goes
-    # with the loser (`book_columns.COPY_IDENTITY`). Not handed to
-    # `_absorb_fields`, because it is no work fact and `evidence.touched` must
-    # not count it as a change to the record.
-    keeper.accession = keeper.accession or _released(db, keeper, losers, "accession")
+    absorbed_isbn = next((loser.isbn for loser in losers if loser.isbn), None)
+    if keeper.isbn is None and absorbed_isbn is not None:
+        for loser in losers:
+            loser.isbn = None
+        db.flush()
+
     _absorb_fields(keeper, losers, absorbed_isbn)
     db.flush()
 

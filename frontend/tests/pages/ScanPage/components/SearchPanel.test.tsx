@@ -4,10 +4,9 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  Locale,
-  type BookMatch,
-  type CatalogueSource,
+import type {
+  BookMatch,
+  CatalogueSource,
 } from "../../../../src/api/generated/model";
 import SearchPanel from "../../../../src/pages/ScanPage/components/SearchPanel";
 import { renderLocalised } from "../../../utils";
@@ -25,10 +24,7 @@ function match(overrides: Partial<BookMatch> = {}): BookMatch {
 
 type PanelProps = Parameters<typeof SearchPanel>[0];
 
-function renderPanel(
-  overrides: Partial<PanelProps> = {},
-  locale: Locale = Locale.en,
-) {
+function renderPanel(overrides: Partial<PanelProps> = {}) {
   const props = {
     isConfigured: true,
     onOpenHelp: vi.fn<PanelProps["onOpenHelp"]>(),
@@ -45,10 +41,9 @@ function renderPanel(
     onSearchHarder: vi.fn<PanelProps["onSearchHarder"]>(),
     isSearchingHarder: false,
     hasSearchedHarder: false,
-    libraryMode: false,
     ...overrides,
   };
-  renderLocalised(<SearchPanel {...props} />, { locale });
+  renderLocalised(<SearchPanel {...props} />);
   return props;
 }
 
@@ -338,60 +333,5 @@ describe("the offer to search harder", () => {
     expect(
       screen.queryByText(/No matches\. Try fewer words/),
     ).not.toBeInTheDocument();
-  });
-});
-
-describe("the catalogue a candidate came from", () => {
-  it("is named in library mode by the name the settings show", () => {
-    renderPanel({ matches: [match({ source: "dnb" })], libraryMode: true });
-
-    expect(
-      screen.getByText("Source: German National Library"),
-    ).toBeInTheDocument();
-  });
-
-  it("names every catalogue a merged row came from, the leading one first", () => {
-    renderPanel({
-      matches: [match({ source: "dnb+open_library" })],
-      libraryMode: true,
-    });
-
-    expect(
-      screen.getByText("Source: German National Library and Open Library"),
-    ).toBeInTheDocument();
-  });
-
-  it("is not named with library mode off", () => {
-    renderPanel({ matches: [match({ source: "dnb" })], libraryMode: false });
-
-    expect(screen.queryByText(/^Source:/)).not.toBeInTheDocument();
-  });
-
-  it("shows a catalogue the roster does not know as sent rather than dropping it", () => {
-    renderPanel({
-      matches: [match({ source: "dnb+koha_local" })],
-      libraryMode: true,
-    });
-
-    expect(
-      screen.getByText("Source: German National Library and koha_local"),
-    ).toBeInTheDocument();
-  });
-
-  it("says nothing for a row that names no catalogue", () => {
-    renderPanel({ matches: [match({ source: "" })], libraryMode: true });
-
-    expect(screen.queryByText(/^Source:/)).not.toBeInTheDocument();
-  });
-
-  it("is named in German with the German catalogue names", () => {
-    renderPanel(
-      { matches: [match({ source: "dnb+open_library" })], libraryMode: true },
-      Locale.de,
-    );
-
-    expect(
-      screen.getByText("Quelle: Deutsche Nationalbibliothek und Open Library"),
-    ).toBeInTheDocument();
   });
 });

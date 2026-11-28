@@ -235,30 +235,6 @@ class TestWhichHeadingAFullBookKeeps:
         ]
 
 
-class TestAHeadingFromARecordUnderASchemeWithNoRow:
-    """MARC upload and a catalogue lookup write through `add_headings`, which
-    drops such a heading rather than failing the book at the foreign key. No
-    reader emits one today; a member's post is refused before it gets here."""
-
-    def test_it_is_dropped_and_the_rest_are_kept(self, db):
-        book = Book(title="Praxiswissen Docker")
-        db.add(book)
-        db.flush()
-
-        changed = add_headings(
-            book,
-            [
-                ClassificationIn(scheme="rvk", number="ST 250"),
-                ClassificationIn(scheme=ClassificationScheme.DDC, number="004"),
-            ],
-            db,
-        )
-        db.flush()
-
-        assert changed == ["004"]
-        assert [row.scheme for row in book.classifications] == ["ddc"]
-
-
 class TestCorrectingAHeadingWrittenBeforeTheKindExisted:
     """The only route by which anything already stored is ever put right.
 

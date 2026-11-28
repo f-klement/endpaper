@@ -46,7 +46,6 @@ and refuses past it. `docs/decisions.md` has the round this was settled in.
 
 import asyncio
 import logging
-import secrets
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -341,50 +340,6 @@ def stored_url(name: str) -> str:
 
 def local_url(book_id: int, extension: str) -> str:
     return stored_url(f"{book_id}.{extension}")
-
-
-def replaced_url(book_id: int, extension: str) -> str:
-    """`local_url` with a version, for a cover written over its own name.
-
-    The cover route lets a browser keep an image for a week
-    (`routers/covers._CACHE_CONTROL`), and a same format replace writes the
-    same `<id>.<ext>`. Without a new URL the shelf shows the old image until
-    that week runs out. Random rather than the file's change time, so it costs
-    no `stat`.
-
-    **Only the two routes that write a stored cover over its own name use
-    this**, an upload and a swap. Every other writer puts a file under a name
-    no browser has fetched with a 200, so its plain `local_url` cannot be held
-    stale. A URL built here is compared with a name only through `unversioned`.
-    """
-    return f"{local_url(book_id, extension)}?v={secrets.token_hex(4)}"
-
-
-def unversioned(url: str | None) -> str | None:
-    """A stored cover's URL without the version `replaced_url` gives it.
-
-    **Every comparison of a `cover_url` with a URL built from a file name goes
-    through this.** Compared whole, a versioned URL equals none of them, and
-    each comparison fails silently: `settle` would neither sweep the other
-    format on the commit nor discard the new file on a rollback, and a merge
-    would not adopt the loser's file the keeper's row names, sweeping it
-    instead.
-
-    **Only for that comparison**: a remote URL loses its query too, which no
-    caller can see, since a URL built from a name is never remote. Measured,
-    sparing a remote URL changed no test, so the branch is not kept.
-    """
-    return None if url is None else url.partition("?")[0]
-
-
-def image_slot_url(book_id: int, image_id: int, extension: str) -> str:
-    """The URL one further image of a book is served at.
-
-    Under the book's id, so the route resolves the book through the read rule
-    before it looks at the image; the file itself is named by the image alone
-    (`cover_store.IMAGE_SLOT_PREFIX`).
-    """
-    return stored_url(f"{book_id}/images/{image_id}.{extension}")
 
 
 def local_url_for(book_id: int) -> str | None:
@@ -1087,7 +1042,7 @@ def settle(db: Session, book_id: int, url: str | None, before: frozenset[Path]) 
     this app wrote for the book, so there is nothing to settle.
     """
     for extension in ALLOWED_IMAGE_EXTENSIONS:
-        if unversioned(url) == local_url(book_id, extension):
+        if url == local_url(book_id, extension):
             cover_store.settle(db, book_id, extension, before)
             return
 

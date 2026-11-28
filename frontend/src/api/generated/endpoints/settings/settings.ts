@@ -23,15 +23,10 @@ import type {
 
 import type {
   BodySetLoginImage,
-  CatalogueRegistryOut,
-  ClassificationSchemeCreate,
-  ClassificationSchemeOut,
-  ClassificationSchemeRename,
   CredentialKeyOut,
   FeatureFlagsOut,
   HTTPValidationError,
   LoginImageOut,
-  ProbeEvidenceOut,
   RecoveryPhraseIn,
   RecoveryPhraseOut,
   Refusal,
@@ -39,43 +34,11 @@ import type {
   SettingsOut,
   SettingsUpdate,
   SourceCredentialIn,
-  SourceTestIn,
-  VocabularyOut,
 } from "../../model";
 
 import { customFetch } from "../../../mutator.ts";
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
-
-const getHeaders = (
-  ...sources: (RequestInit["headers"] | Record<string, string | undefined>)[]
-) => {
-  const seen = new Set<string>();
-  const layers: [string, string | readonly string[]][][] = [];
-  for (const source of sources.reverse()) {
-    if (!source) continue;
-    const entries =
-      source instanceof Headers
-        ? source.entries()
-        : Symbol.iterator in source
-          ? Array.from(
-              source as Iterable<Iterable<string>>,
-              (entry) => Array.from(entry) as [string, string],
-            )
-          : Object.entries<string | readonly string[] | undefined>(source);
-    const layer: [string, string | readonly string[]][] = [];
-    for (const [name, value] of entries) {
-      if (value !== undefined && !seen.has(name.toLowerCase()))
-        layer.push([name, value]);
-    }
-    for (const [name] of layer) seen.add(name.toLowerCase());
-    layers.push(layer);
-  }
-  return Object.fromEntries(layers.reverse().flat()) as Extract<
-    RequestInit["headers"],
-    Record<string, unknown>
-  >;
-};
 
 const withQueryKey = <T extends object, K>(
   query: T,
@@ -246,13 +209,34 @@ export const updateSettings = async (
   settingsUpdate: SettingsUpdate,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<SettingsOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<SettingsOut>(getUpdateSettingsUrl(), {
     ...options,
     method: "PUT",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(settingsUpdate),
   });
 };
@@ -333,393 +317,6 @@ export const useUpdateSettings = <
   TContext
 > => {
   return useMutation(getUpdateSettingsMutationOptions(options), queryClient);
-};
-export const getGetCatalogueRegistryUrl = () => {
-  return `/api/settings/catalogue-registry`;
-};
-
-/**
- * The curated catalogues this build ships, each with the evidence it was
- * shipped on, and which of them this library picked. **Admin only**, beside
- * the pick it is read to make. `aged` says the snapshot's evidence is older
- * than it is trusted; nothing is fetched to find that out.
- * @summary Get Catalogue Registry
- */
-export const getCatalogueRegistry = async (
-  options?: Parameters<typeof customFetch>[1],
-): Promise<CatalogueRegistryOut> => {
-  return customFetch<CatalogueRegistryOut>(getGetCatalogueRegistryUrl(), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getGetCatalogueRegistryQueryKey = () => {
-  return [`/api/settings/catalogue-registry`] as const;
-};
-
-export const getGetCatalogueRegistryQueryOptions = <
-  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
-  TError = Refusal,
->(options?: {
-  query?: Partial<
-    UseQueryOptions<
-      Awaited<ReturnType<typeof getCatalogueRegistry>>,
-      TError,
-      TData
-    >
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getGetCatalogueRegistryQueryKey();
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof getCatalogueRegistry>>
-  > = ({ signal }) => getCatalogueRegistry({ signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof getCatalogueRegistry>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type GetCatalogueRegistryQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getCatalogueRegistry>>
->;
-export type GetCatalogueRegistryQueryError = Refusal;
-
-/**
- * The curated catalogues this build ships, each with the evidence it was
- * shipped on, and which of them this library picked. **Admin only**, beside
- * the pick it is read to make. `aged` says the snapshot's evidence is older
- * than it is trusted; nothing is fetched to find that out.
- * @summary Get Catalogue Registry
- */
-export function useGetCatalogueRegistry<
-  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
-  TError = Refusal,
->(
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getCatalogueRegistry>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getCatalogueRegistry>>,
-          TError,
-          Awaited<ReturnType<typeof getCatalogueRegistry>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The curated catalogues this build ships, each with the evidence it was
- * shipped on, and which of them this library picked. **Admin only**, beside
- * the pick it is read to make. `aged` says the snapshot's evidence is older
- * than it is trusted; nothing is fetched to find that out.
- * @summary Get Catalogue Registry
- */
-export function useGetCatalogueRegistry<
-  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getCatalogueRegistry>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof getCatalogueRegistry>>,
-          TError,
-          Awaited<ReturnType<typeof getCatalogueRegistry>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The curated catalogues this build ships, each with the evidence it was
- * shipped on, and which of them this library picked. **Admin only**, beside
- * the pick it is read to make. `aged` says the snapshot's evidence is older
- * than it is trusted; nothing is fetched to find that out.
- * @summary Get Catalogue Registry
- */
-export function useGetCatalogueRegistry<
-  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getCatalogueRegistry>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * The curated catalogues this build ships, each with the evidence it was
- * shipped on, and which of them this library picked. **Admin only**, beside
- * the pick it is read to make. `aged` says the snapshot's evidence is older
- * than it is trusted; nothing is fetched to find that out.
- * @summary Get Catalogue Registry
- */
-export function useGetCatalogueRegistry<
-  TData = Awaited<ReturnType<typeof getCatalogueRegistry>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof getCatalogueRegistry>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getGetCatalogueRegistryQueryOptions(options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-export const getDropRegistryCatalogueUrl = (source: string) => {
-  return `/api/settings/catalogue-registry/${source}`;
-};
-
-/**
- * Forget a pick. Dropping one never picked changes nothing.
- * @summary Drop Registry Catalogue
- */
-export const dropRegistryCatalogue = async (
-  source: string,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<CatalogueRegistryOut> => {
-  return customFetch<CatalogueRegistryOut>(
-    getDropRegistryCatalogueUrl(source),
-    {
-      ...options,
-      method: "DELETE",
-    },
-  );
-};
-
-export const getDropRegistryCatalogueMutationKey = () =>
-  ["dropRegistryCatalogue"] as const;
-
-export const getDropRegistryCatalogueMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof dropRegistryCatalogue>>,
-    TError,
-    DropRegistryCatalogueMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof dropRegistryCatalogue>>,
-  TError,
-  DropRegistryCatalogueMutationVariables,
-  TContext
-> => {
-  const mutationKey = getDropRegistryCatalogueMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof dropRegistryCatalogue>>,
-    DropRegistryCatalogueMutationVariables
-  > = (props) => {
-    const { source } = props ?? {};
-
-    return dropRegistryCatalogue(source, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DropRegistryCatalogueMutationResult = NonNullable<
-  Awaited<ReturnType<typeof dropRegistryCatalogue>>
->;
-
-export type DropRegistryCatalogueMutationError = Refusal | HTTPValidationError;
-export type DropRegistryCatalogueMutationVariables = { source: string };
-
-/**
- * Forget a pick. Dropping one never picked changes nothing.
- * @summary Drop Registry Catalogue
- */
-export const useDropRegistryCatalogue = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof dropRegistryCatalogue>>,
-      TError,
-      DropRegistryCatalogueMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof dropRegistryCatalogue>>,
-  TError,
-  DropRegistryCatalogueMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getDropRegistryCatalogueMutationOptions(options),
-    queryClient,
-  );
-};
-export const getPickRegistryCatalogueUrl = (source: string) => {
-  return `/api/settings/catalogue-registry/${source}`;
-};
-
-/**
- * Pick one registry catalogue. Picking it again changes nothing.
- *
- * A picked catalogue is asked when a book is added by its ISBN, after every
- * catalogue in the lookup order missed, and never in a title search;
- * `registry` says why.
- * @summary Pick Registry Catalogue
- */
-export const pickRegistryCatalogue = async (
-  source: string,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<CatalogueRegistryOut> => {
-  return customFetch<CatalogueRegistryOut>(
-    getPickRegistryCatalogueUrl(source),
-    {
-      ...options,
-      method: "PUT",
-    },
-  );
-};
-
-export const getPickRegistryCatalogueMutationKey = () =>
-  ["pickRegistryCatalogue"] as const;
-
-export const getPickRegistryCatalogueMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof pickRegistryCatalogue>>,
-    TError,
-    PickRegistryCatalogueMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof pickRegistryCatalogue>>,
-  TError,
-  PickRegistryCatalogueMutationVariables,
-  TContext
-> => {
-  const mutationKey = getPickRegistryCatalogueMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof pickRegistryCatalogue>>,
-    PickRegistryCatalogueMutationVariables
-  > = (props) => {
-    const { source } = props ?? {};
-
-    return pickRegistryCatalogue(source, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type PickRegistryCatalogueMutationResult = NonNullable<
-  Awaited<ReturnType<typeof pickRegistryCatalogue>>
->;
-
-export type PickRegistryCatalogueMutationError = Refusal | HTTPValidationError;
-export type PickRegistryCatalogueMutationVariables = { source: string };
-
-/**
- * Pick one registry catalogue. Picking it again changes nothing.
- *
- * A picked catalogue is asked when a book is added by its ISBN, after every
- * catalogue in the lookup order missed, and never in a title search;
- * `registry` says why.
- * @summary Pick Registry Catalogue
- */
-export const usePickRegistryCatalogue = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof pickRegistryCatalogue>>,
-      TError,
-      PickRegistryCatalogueMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof pickRegistryCatalogue>>,
-  TError,
-  PickRegistryCatalogueMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getPickRegistryCatalogueMutationOptions(options),
-    queryClient,
-  );
 };
 export const getForgetSourceCredentialUrl = (source: string) => {
   return `/api/settings/catalogue-sources/${source}/credential`;
@@ -879,11 +476,10 @@ export const getSetSourceCredentialUrl = (source: string) => {
 /**
  * Store a login for one catalogue, sealed.
  *
- * **Only a source whose credential is a login**, `targets.Target.credential_kind`.
- * `settings_store.catalogue_logins` resolves a login for those and no other, so
- * a login stored for a catalogue that answers anonymously, or for one whose
- * credential is this deployment's key, would be sealed and read by nothing.
- * 409 names that the source takes none.
+ * **Any roster source, not only one that declares it needs a credential.** A
+ * library may hold an account at a catalogue that also answers anonymously,
+ * and refusing it would be the storage deciding who may have an account
+ * somewhere else.
  *
  * 409 when the deployment pinned this source's credential, the same rule and
  * the same reason `_refuse_if_pinned` states for a settings row: a value the
@@ -896,13 +492,34 @@ export const setSourceCredential = async (
   sourceCredentialIn: SourceCredentialIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<SettingsOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<SettingsOut>(getSetSourceCredentialUrl(source), {
     ...options,
     method: "PUT",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(sourceCredentialIn),
   });
 };
@@ -961,11 +578,10 @@ export type SetSourceCredentialMutationVariables = {
 /**
  * Store a login for one catalogue, sealed.
  *
- * **Only a source whose credential is a login**, `targets.Target.credential_kind`.
- * `settings_store.catalogue_logins` resolves a login for those and no other, so
- * a login stored for a catalogue that answers anonymously, or for one whose
- * credential is this deployment's key, would be sealed and read by nothing.
- * 409 names that the source takes none.
+ * **Any roster source, not only one that declares it needs a credential.** A
+ * library may hold an account at a catalogue that also answers anonymously,
+ * and refusing it would be the storage deciding who may have an account
+ * somewhere else.
  *
  * 409 when the deployment pinned this source's credential, the same rule and
  * the same reason `_refuse_if_pinned` states for a settings row: a value the
@@ -995,647 +611,6 @@ export const useSetSourceCredential = <
 > => {
   return useMutation(
     getSetSourceCredentialMutationOptions(options),
-    queryClient,
-  );
-};
-export const getProbeCatalogueSourceUrl = (source: string) => {
-  return `/api/settings/catalogue-sources/${source}/test`;
-};
-
-/**
- * Ask one catalogue about one ISBN the way a scan would, and say how it answered.
- *
- * **A disposition and never what the catalogue returned**: answered,
- * answered nothing, refused or unreachable. **Admin only and rate limited for
- * the whole deployment**, a 429 past `ratelimit.SOURCE_TEST_LIMIT`, because
- * each test is a request to somebody else's server. A switched off source is
- * tested too. With no ISBN, a registry entry is asked the one its shipped
- * evidence names, so the result compares with that evidence directly.
- * @summary Probe Catalogue Source
- */
-export const probeCatalogueSource = async (
-  source: string,
-  sourceTestIn: SourceTestIn,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<ProbeEvidenceOut> => {
-  return customFetch<ProbeEvidenceOut>(getProbeCatalogueSourceUrl(source), {
-    ...options,
-    method: "POST",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
-    body: JSON.stringify(sourceTestIn),
-  });
-};
-
-export const getProbeCatalogueSourceMutationKey = () =>
-  ["probeCatalogueSource"] as const;
-
-export const getProbeCatalogueSourceMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof probeCatalogueSource>>,
-    TError,
-    ProbeCatalogueSourceMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof probeCatalogueSource>>,
-  TError,
-  ProbeCatalogueSourceMutationVariables,
-  TContext
-> => {
-  const mutationKey = getProbeCatalogueSourceMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof probeCatalogueSource>>,
-    ProbeCatalogueSourceMutationVariables
-  > = (props) => {
-    const { source, data } = props ?? {};
-
-    return probeCatalogueSource(source, data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type ProbeCatalogueSourceMutationResult = NonNullable<
-  Awaited<ReturnType<typeof probeCatalogueSource>>
->;
-export type ProbeCatalogueSourceMutationBody = SourceTestIn;
-export type ProbeCatalogueSourceMutationError = Refusal | HTTPValidationError;
-export type ProbeCatalogueSourceMutationVariables = {
-  source: string;
-  data: SourceTestIn;
-};
-
-/**
- * Ask one catalogue about one ISBN the way a scan would, and say how it answered.
- *
- * **A disposition and never what the catalogue returned**: answered,
- * answered nothing, refused or unreachable. **Admin only and rate limited for
- * the whole deployment**, a 429 past `ratelimit.SOURCE_TEST_LIMIT`, because
- * each test is a request to somebody else's server. A switched off source is
- * tested too. With no ISBN, a registry entry is asked the one its shipped
- * evidence names, so the result compares with that evidence directly.
- * @summary Probe Catalogue Source
- */
-export const useProbeCatalogueSource = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof probeCatalogueSource>>,
-      TError,
-      ProbeCatalogueSourceMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof probeCatalogueSource>>,
-  TError,
-  ProbeCatalogueSourceMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getProbeCatalogueSourceMutationOptions(options),
-    queryClient,
-  );
-};
-export const getListClassificationSchemesUrl = () => {
-  return `/api/settings/classification-schemes`;
-};
-
-/**
- * Every scheme a heading may quote: the built in four, then the library's own.
- *
- * **Any member**, because a book page names each heading's scheme from this
- * list. It says nothing about a book: no count, and no scheme is hidden for
- * being quoted only by somebody's private one.
- * @summary List Classification Schemes
- */
-export const listClassificationSchemes = async (
-  options?: Parameters<typeof customFetch>[1],
-): Promise<ClassificationSchemeOut[]> => {
-  return customFetch<ClassificationSchemeOut[]>(
-    getListClassificationSchemesUrl(),
-    {
-      ...options,
-      method: "GET",
-    },
-  );
-};
-
-export const getListClassificationSchemesQueryKey = () => {
-  return [`/api/settings/classification-schemes`] as const;
-};
-
-export const getListClassificationSchemesQueryOptions = <
-  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
-  TError = Refusal,
->(options?: {
-  query?: Partial<
-    UseQueryOptions<
-      Awaited<ReturnType<typeof listClassificationSchemes>>,
-      TError,
-      TData
-    >
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getListClassificationSchemesQueryKey();
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof listClassificationSchemes>>
-  > = ({ signal }) => listClassificationSchemes({ signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof listClassificationSchemes>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type ListClassificationSchemesQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listClassificationSchemes>>
->;
-export type ListClassificationSchemesQueryError = Refusal;
-
-/**
- * Every scheme a heading may quote: the built in four, then the library's own.
- *
- * **Any member**, because a book page names each heading's scheme from this
- * list. It says nothing about a book: no count, and no scheme is hidden for
- * being quoted only by somebody's private one.
- * @summary List Classification Schemes
- */
-export function useListClassificationSchemes<
-  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
-  TError = Refusal,
->(
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listClassificationSchemes>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listClassificationSchemes>>,
-          TError,
-          Awaited<ReturnType<typeof listClassificationSchemes>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * Every scheme a heading may quote: the built in four, then the library's own.
- *
- * **Any member**, because a book page names each heading's scheme from this
- * list. It says nothing about a book: no count, and no scheme is hidden for
- * being quoted only by somebody's private one.
- * @summary List Classification Schemes
- */
-export function useListClassificationSchemes<
-  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listClassificationSchemes>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listClassificationSchemes>>,
-          TError,
-          Awaited<ReturnType<typeof listClassificationSchemes>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * Every scheme a heading may quote: the built in four, then the library's own.
- *
- * **Any member**, because a book page names each heading's scheme from this
- * list. It says nothing about a book: no count, and no scheme is hidden for
- * being quoted only by somebody's private one.
- * @summary List Classification Schemes
- */
-export function useListClassificationSchemes<
-  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listClassificationSchemes>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * Every scheme a heading may quote: the built in four, then the library's own.
- *
- * **Any member**, because a book page names each heading's scheme from this
- * list. It says nothing about a book: no count, and no scheme is hidden for
- * being quoted only by somebody's private one.
- * @summary List Classification Schemes
- */
-export function useListClassificationSchemes<
-  TData = Awaited<ReturnType<typeof listClassificationSchemes>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listClassificationSchemes>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getListClassificationSchemesQueryOptions(options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-export const getDefineClassificationSchemeUrl = () => {
-  return `/api/settings/classification-schemes`;
-};
-
-/**
- * Add a scheme. A code already taken is a 409.
- *
- * **Admin only**, unlike defining a custom field: a scheme's filing rule is
- * fixed once defined, and what it files under orders a library's shelves.
- * @summary Define Classification Scheme
- */
-export const defineClassificationScheme = async (
-  classificationSchemeCreate: ClassificationSchemeCreate,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<ClassificationSchemeOut> => {
-  return customFetch<ClassificationSchemeOut>(
-    getDefineClassificationSchemeUrl(),
-    {
-      ...options,
-      method: "POST",
-      headers: getHeaders(
-        { "Content-Type": "application/json" },
-        options?.headers,
-      ),
-      body: JSON.stringify(classificationSchemeCreate),
-    },
-  );
-};
-
-export const getDefineClassificationSchemeMutationKey = () =>
-  ["defineClassificationScheme"] as const;
-
-export const getDefineClassificationSchemeMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof defineClassificationScheme>>,
-    TError,
-    DefineClassificationSchemeMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof defineClassificationScheme>>,
-  TError,
-  DefineClassificationSchemeMutationVariables,
-  TContext
-> => {
-  const mutationKey = getDefineClassificationSchemeMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof defineClassificationScheme>>,
-    DefineClassificationSchemeMutationVariables
-  > = (props) => {
-    const { data } = props ?? {};
-
-    return defineClassificationScheme(data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DefineClassificationSchemeMutationResult = NonNullable<
-  Awaited<ReturnType<typeof defineClassificationScheme>>
->;
-export type DefineClassificationSchemeMutationBody = ClassificationSchemeCreate;
-export type DefineClassificationSchemeMutationError =
-  | Refusal
-  | HTTPValidationError;
-export type DefineClassificationSchemeMutationVariables = {
-  data: ClassificationSchemeCreate;
-};
-
-/**
- * Add a scheme. A code already taken is a 409.
- *
- * **Admin only**, unlike defining a custom field: a scheme's filing rule is
- * fixed once defined, and what it files under orders a library's shelves.
- * @summary Define Classification Scheme
- */
-export const useDefineClassificationScheme = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof defineClassificationScheme>>,
-      TError,
-      DefineClassificationSchemeMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof defineClassificationScheme>>,
-  TError,
-  DefineClassificationSchemeMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getDefineClassificationSchemeMutationOptions(options),
-    queryClient,
-  );
-};
-export const getDeleteClassificationSchemeUrl = (scheme: string) => {
-  return `/api/settings/classification-schemes/${scheme}`;
-};
-
-/**
- * Delete a scheme no heading quotes.
- *
- * **A 409 naming how many books still quote it**, the owner's rule: no soft
- * delete and no reassignment. Its `detail` carries `code` `scheme_in_use` and
- * the `count` apart from the English sentence, for a client to word;
- * `classification_schemes.remove` says what the count covers. A built in
- * scheme is a 409 too, with a sentence only.
- * @summary Delete Classification Scheme
- */
-export const deleteClassificationScheme = async (
-  scheme: string,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<void> => {
-  return customFetch<void>(getDeleteClassificationSchemeUrl(scheme), {
-    ...options,
-    method: "DELETE",
-  });
-};
-
-export const getDeleteClassificationSchemeMutationKey = () =>
-  ["deleteClassificationScheme"] as const;
-
-export const getDeleteClassificationSchemeMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof deleteClassificationScheme>>,
-    TError,
-    DeleteClassificationSchemeMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof deleteClassificationScheme>>,
-  TError,
-  DeleteClassificationSchemeMutationVariables,
-  TContext
-> => {
-  const mutationKey = getDeleteClassificationSchemeMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof deleteClassificationScheme>>,
-    DeleteClassificationSchemeMutationVariables
-  > = (props) => {
-    const { scheme } = props ?? {};
-
-    return deleteClassificationScheme(scheme, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DeleteClassificationSchemeMutationResult = NonNullable<
-  Awaited<ReturnType<typeof deleteClassificationScheme>>
->;
-
-export type DeleteClassificationSchemeMutationError =
-  | Refusal
-  | HTTPValidationError;
-export type DeleteClassificationSchemeMutationVariables = { scheme: string };
-
-/**
- * Delete a scheme no heading quotes.
- *
- * **A 409 naming how many books still quote it**, the owner's rule: no soft
- * delete and no reassignment. Its `detail` carries `code` `scheme_in_use` and
- * the `count` apart from the English sentence, for a client to word;
- * `classification_schemes.remove` says what the count covers. A built in
- * scheme is a 409 too, with a sentence only.
- * @summary Delete Classification Scheme
- */
-export const useDeleteClassificationScheme = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof deleteClassificationScheme>>,
-      TError,
-      DeleteClassificationSchemeMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof deleteClassificationScheme>>,
-  TError,
-  DeleteClassificationSchemeMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getDeleteClassificationSchemeMutationOptions(options),
-    queryClient,
-  );
-};
-export const getRenameClassificationSchemeUrl = (scheme: string) => {
-  return `/api/settings/classification-schemes/${scheme}`;
-};
-
-/**
- * Rename a library's own scheme. A built in one is a 409.
- * @summary Rename Classification Scheme
- */
-export const renameClassificationScheme = async (
-  scheme: string,
-  classificationSchemeRename: ClassificationSchemeRename,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<ClassificationSchemeOut> => {
-  return customFetch<ClassificationSchemeOut>(
-    getRenameClassificationSchemeUrl(scheme),
-    {
-      ...options,
-      method: "PATCH",
-      headers: getHeaders(
-        { "Content-Type": "application/json" },
-        options?.headers,
-      ),
-      body: JSON.stringify(classificationSchemeRename),
-    },
-  );
-};
-
-export const getRenameClassificationSchemeMutationKey = () =>
-  ["renameClassificationScheme"] as const;
-
-export const getRenameClassificationSchemeMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof renameClassificationScheme>>,
-    TError,
-    RenameClassificationSchemeMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof renameClassificationScheme>>,
-  TError,
-  RenameClassificationSchemeMutationVariables,
-  TContext
-> => {
-  const mutationKey = getRenameClassificationSchemeMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof renameClassificationScheme>>,
-    RenameClassificationSchemeMutationVariables
-  > = (props) => {
-    const { scheme, data } = props ?? {};
-
-    return renameClassificationScheme(scheme, data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type RenameClassificationSchemeMutationResult = NonNullable<
-  Awaited<ReturnType<typeof renameClassificationScheme>>
->;
-export type RenameClassificationSchemeMutationBody = ClassificationSchemeRename;
-export type RenameClassificationSchemeMutationError =
-  | Refusal
-  | HTTPValidationError;
-export type RenameClassificationSchemeMutationVariables = {
-  scheme: string;
-  data: ClassificationSchemeRename;
-};
-
-/**
- * Rename a library's own scheme. A built in one is a 409.
- * @summary Rename Classification Scheme
- */
-export const useRenameClassificationScheme = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof renameClassificationScheme>>,
-      TError,
-      RenameClassificationSchemeMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof renameClassificationScheme>>,
-  TError,
-  RenameClassificationSchemeMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getRenameClassificationSchemeMutationOptions(options),
     queryClient,
   );
 };
@@ -2072,13 +1047,34 @@ export const restoreCredentialKey = async (
   recoveryPhraseIn: RecoveryPhraseIn,
   options?: Parameters<typeof customFetch>[1],
 ): Promise<CredentialKeyOut> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
   return customFetch<CredentialKeyOut>(getRestoreCredentialKeyUrl(), {
     ...options,
     method: "PUT",
-    headers: getHeaders(
-      { "Content-Type": "application/json" },
-      options?.headers,
-    ),
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
     body: JSON.stringify(recoveryPhraseIn),
   });
 };
@@ -2811,283 +1807,3 @@ export function useGetSenderHealth<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
-
-export const getListVocabulariesUrl = () => {
-  return `/api/settings/vocabularies`;
-};
-
-/**
- * Every declared subject vocabulary: its licence, what is loaded of it and
- * when, and any download under way. **Admin only**, beside the download it
- * is read to start.
- * @summary List Vocabularies
- */
-export const listVocabularies = async (
-  options?: Parameters<typeof customFetch>[1],
-): Promise<VocabularyOut[]> => {
-  return customFetch<VocabularyOut[]>(getListVocabulariesUrl(), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getListVocabulariesQueryKey = () => {
-  return [`/api/settings/vocabularies`] as const;
-};
-
-export const getListVocabulariesQueryOptions = <
-  TData = Awaited<ReturnType<typeof listVocabularies>>,
-  TError = Refusal,
->(options?: {
-  query?: Partial<
-    UseQueryOptions<Awaited<ReturnType<typeof listVocabularies>>, TError, TData>
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getListVocabulariesQueryKey();
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof listVocabularies>>
-  > = ({ signal }) => listVocabularies({ signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof listVocabularies>>,
-    TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-};
-
-export type ListVocabulariesQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listVocabularies>>
->;
-export type ListVocabulariesQueryError = Refusal;
-
-/**
- * Every declared subject vocabulary: its licence, what is loaded of it and
- * when, and any download under way. **Admin only**, beside the download it
- * is read to start.
- * @summary List Vocabularies
- */
-export function useListVocabularies<
-  TData = Awaited<ReturnType<typeof listVocabularies>>,
-  TError = Refusal,
->(
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listVocabularies>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listVocabularies>>,
-          TError,
-          Awaited<ReturnType<typeof listVocabularies>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * Every declared subject vocabulary: its licence, what is loaded of it and
- * when, and any download under way. **Admin only**, beside the download it
- * is read to start.
- * @summary List Vocabularies
- */
-export function useListVocabularies<
-  TData = Awaited<ReturnType<typeof listVocabularies>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listVocabularies>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listVocabularies>>,
-          TError,
-          Awaited<ReturnType<typeof listVocabularies>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * Every declared subject vocabulary: its licence, what is loaded of it and
- * when, and any download under way. **Admin only**, beside the download it
- * is read to start.
- * @summary List Vocabularies
- */
-export function useListVocabularies<
-  TData = Awaited<ReturnType<typeof listVocabularies>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listVocabularies>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/**
- * Every declared subject vocabulary: its licence, what is loaded of it and
- * when, and any download under way. **Admin only**, beside the download it
- * is read to start.
- * @summary List Vocabularies
- */
-export function useListVocabularies<
-  TData = Awaited<ReturnType<typeof listVocabularies>>,
-  TError = Refusal,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof listVocabularies>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getListVocabulariesQueryOptions(options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-export const getDownloadVocabularyUrl = (scheme: string) => {
-  return `/api/settings/vocabularies/${scheme}/download`;
-};
-
-/**
- * Fetch the vocabulary's release and load it in the background, replacing
- * the copy in use only once the new one is complete. The first download and
- * every refresh are this one request.
- *
- * A 404 for a vocabulary nobody declared. A 409 where its licence permits no
- * local copy, or a download of it is already under way.
- * @summary Download Vocabulary
- */
-export const downloadVocabulary = async (
-  scheme: string,
-  options?: Parameters<typeof customFetch>[1],
-): Promise<VocabularyOut> => {
-  return customFetch<VocabularyOut>(getDownloadVocabularyUrl(scheme), {
-    ...options,
-    method: "POST",
-  });
-};
-
-export const getDownloadVocabularyMutationKey = () =>
-  ["downloadVocabulary"] as const;
-
-export const getDownloadVocabularyMutationOptions = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof downloadVocabulary>>,
-    TError,
-    DownloadVocabularyMutationVariables,
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof downloadVocabulary>>,
-  TError,
-  DownloadVocabularyMutationVariables,
-  TContext
-> => {
-  const mutationKey = getDownloadVocabularyMutationKey();
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof downloadVocabulary>>,
-    DownloadVocabularyMutationVariables
-  > = (props) => {
-    const { scheme } = props ?? {};
-
-    return downloadVocabulary(scheme, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DownloadVocabularyMutationResult = NonNullable<
-  Awaited<ReturnType<typeof downloadVocabulary>>
->;
-
-export type DownloadVocabularyMutationError = Refusal | HTTPValidationError;
-export type DownloadVocabularyMutationVariables = { scheme: string };
-
-/**
- * Fetch the vocabulary's release and load it in the background, replacing
- * the copy in use only once the new one is complete. The first download and
- * every refresh are this one request.
- *
- * A 404 for a vocabulary nobody declared. A 409 where its licence permits no
- * local copy, or a download of it is already under way.
- * @summary Download Vocabulary
- */
-export const useDownloadVocabulary = <
-  TError = Refusal | HTTPValidationError,
-  TContext = unknown,
->(
-  options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof downloadVocabulary>>,
-      TError,
-      DownloadVocabularyMutationVariables,
-      TContext
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseMutationResult<
-  Awaited<ReturnType<typeof downloadVocabulary>>,
-  TError,
-  DownloadVocabularyMutationVariables,
-  TContext
-> => {
-  return useMutation(
-    getDownloadVocabularyMutationOptions(options),
-    queryClient,
-  );
-};

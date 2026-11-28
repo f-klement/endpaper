@@ -19,10 +19,10 @@ import {
  * A login at a catalogue that will not answer without one.
  *
  * **Only the logins that exist are listed, plus a way to add one to any
- * source that takes one.** A form per catalogue would be ten password boxes on
- * a screen where nine households need none, and "this source needs a login and
- * has not got one" is already said in the provider list above, as a source
- * that is switched on and not ready. One fact, one place.
+ * source.** A form per catalogue would be ten password boxes on a screen where
+ * nine households need none, and "this source needs a login and has not got
+ * one" is already said in the provider list above, as a source that is switched
+ * on and not ready. One fact, one place.
  *
  * **A login is write only, like the Google Books key beside it.** The server
  * never sends one back, so the fields cannot mirror `settings`: an empty box
@@ -52,11 +52,6 @@ export default function CatalogueLoginsSection({
 
   const rows = settings.catalogue_sources ?? [];
   const held = rows.filter((row) => provenanceOf(row) !== "none");
-  // A source whose credential is not a login is left out because the server
-  // refuses one for it with a 409: nothing would read it.
-  const addable = rows.filter(
-    (row) => row.credential === "login" && provenanceOf(row) === "none",
-  );
   const editing = rows.find((row) => row.source === adding);
   // A login cannot be stored without a key, and the control that makes one is
   // in the section below this. Saying so here is cheaper than a 409 the reader
@@ -95,26 +90,12 @@ export default function CatalogueLoginsSection({
         ))}
       </ul>
 
-      {/* **Only with something to offer.** Every source that takes a login
-          ships one in a stock build, so the list is empty there and a picker
-          drawn anyway would be a control offering "Choose a catalogue" and
-          nothing else. A shipped login is replaced from its own row. */}
-      {addable.length > 0 && (
-        <SourcePicker
-          rows={addable}
-          adding={adding}
-          needsKeyFirst={needsKeyFirst}
-          onPick={setAdding}
-        />
-      )}
-
-      {/* Outside the picker, which is often absent: the held rows' buttons
-          are disabled by the same flag and need the same reason. */}
-      {needsKeyFirst && (
-        <p className="text-xs text-amber-800 dark:text-amber-200">
-          {t("settings.credentialNeedsKeyFirst")}
-        </p>
-      )}
+      <SourcePicker
+        rows={rows}
+        adding={adding}
+        needsKeyFirst={needsKeyFirst}
+        onPick={setAdding}
+      />
 
       <LoginForm
         editing={editing}
@@ -253,7 +234,7 @@ function HeldLoginStatus({ row }: { row: CatalogueSourceOut }) {
   );
 }
 
-/** The picker offering the sources it is handed: those that can take a login now. */
+/** The picker offering every source that has no login yet. */
 function SourcePicker({
   rows,
   adding,
@@ -282,12 +263,19 @@ function SourcePicker({
         className="w-full px-3 py-2 rounded-xl border border-paper-200 text-sm disabled:bg-paper-50 disabled:text-paper-400 disabled:cursor-not-allowed dark:border-paper-700 dark:disabled:bg-paper-800"
       >
         <option value="">{t("settings.credentialAddChoose")}</option>
-        {rows.map((row) => (
-          <option key={row.source} value={row.source}>
-            {t(catalogueName(row.source))}
-          </option>
-        ))}
+        {rows
+          .filter((row) => provenanceOf(row) === "none")
+          .map((row) => (
+            <option key={row.source} value={row.source}>
+              {t(catalogueName(row.source))}
+            </option>
+          ))}
       </select>
+      {needsKeyFirst && (
+        <p className="text-xs text-amber-800 dark:text-amber-200">
+          {t("settings.credentialNeedsKeyFirst")}
+        </p>
+      )}
     </div>
   );
 }

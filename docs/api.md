@@ -1,9 +1,8 @@
 # API reference
 
-Base URL is the app's own origin. The OpenAPI schema is at `/openapi.json`, generated from
-the code so it cannot drift from it, and it is the input to the frontend's generated client.
-It is at the `user` level below: the schema carries every route's description, and that is
-for members.
+Base URL is the app's own origin. Interactive docs (Swagger) at `/docs`, the OpenAPI schema
+at `/openapi.json`. Both are generated from the code, so they cannot drift from it, and
+that schema is the input to the frontend's generated client.
 
 This page covers what the schema does not express: who may call what, and why a given
 status code comes back.
@@ -679,7 +678,7 @@ Books created by an import get `ownership=unknown`, never `owned`. See
 
 ### Metadata lookup
 
-`GET /api/books/lookup` asks nineteen catalogues in two phases, then any picked registry catalogue, and merges what comes back.
+`GET /api/books/lookup` asks eighteen catalogues in two phases and merges what comes back.
 
 **Phase one, asked together:** the **Deutsche Nationalbibliothek** and **K10plus**, the
 union catalogue of the German library networks. Both are free, need no key, and are the
@@ -692,8 +691,7 @@ the same book.
 **Phase two, asked in turn, only if neither knew the book:** the **National Library of
 Greece**, then the **Polish National Library**, then the **Royal Danish Library**, then
 the **SBN**, Italy's union catalogue, then **PORBASE**, Portugal's, then the **National
-Széchényi Library**, Hungary's, then the **Slovak National Library**, then **Open
-Library**, then the **Austrian
+Széchényi Library**, Hungary's, then **Open Library**, then the **Austrian
 National Library**, then the **Czech National Library**, then the **Spanish National
 Library**, then **LIBRIS**, the Swedish union catalogue, then **Melinda**, the
 Finnish one, then **BIBSYS**, the Norwegian one, then the **Biblioteca Nacional
@@ -707,19 +705,15 @@ no other `978` book in a named group: on its Greek books the NLG answers 34 to O
 ones the Polish library 30 to Open Library's 4, on its Danish ones the Royal Danish Library
 29 to Open Library's 1, on its Italian ones the SBN 26 to Open Library's 13, on its
 Portuguese ones PORBASE 25 to Open Library's 11, on its Hungarian ones the National
-Széchényi Library 17 to Open Library's 3, on its `978-80` ones the Slovak National Library
-4 to Open Library's 1, and on its `978-3` ones the ÖNB 1 to Open Library's 3 and the NKP's
-0. The Czech National Library answers 40 of those `978-80` books and carries no remit, so it
-is asked about them too, after Open Library. The Polish, Danish and Hungarian frames are there because the
+Széchényi Library 17 to Open Library's 3, and on its `978-3` ones the ÖNB 1 to Open
+Library's 3 and the NKP's 0. The Polish, Danish and Hungarian frames are there because the
 500 hold no Polish, Danish or Hungarian ISBN. A `979` ISBN, or one whose group cannot be
-named, reaches every such catalogue, so that lookup asks all seven before Open Library: their
-measured p90s sum to about 3.4 seconds, and each Z39.50 catalogue that cannot be reached adds
+named, reaches every such catalogue, so that lookup asks all six before Open Library: their
+measured p90s sum to about 3.3 seconds, and each Z39.50 catalogue that cannot be reached adds
 up to its ten second timeout, since a lookup has no overall deadline. Open Library is the broadest source and much the slowest, which is why it is here
-rather than in phase one. **After phase two come the catalogues an admin picked from the
-registry**, in the registry's order and on any ISBN, so a pick costs a request only on a book
-every other catalogue missed.
+rather than in phase one.
 
-**Three of the nineteen need a credential and only one of them costs money**, which is why the
+**Three of the eighteen need a credential and only one of them costs money**, which is why the
 last three are where they are. Google Books has a key, a quota and a bill attached, so it is
 last and an ordinary lookup spends no quota at all. The Argentine and Uruguayan national
 libraries each need a login and charge nothing: each library publishes a username and
@@ -747,12 +741,11 @@ phase one judges a candidate by the books it would add rather than by everything
 **And in phase two it is asked only about the ISBNs it could hold.** An ISBN names its own
 registration group, `978-3` for German language publishing, `978-960` and `978-618` for
 Greek, `978-83` for Polish, `978-87` for Danish, `978-9974` for Uruguayan, `978-88` for
-Italian, `978-972` and `978-989` for Portuguese, `978-963` and `978-615` for Hungarian,
-`978-80` for Czech and Slovak, and a
+Italian, `978-972` and `978-989` for Portuguese, `978-963` and `978-615` for Hungarian, and a
 catalogue whose collecting remit is one of those is skipped for a book from another. So a
 German library stops paying a round trip to Athens on every scan the German pair misses.
-Measured over the same 500 ISBNs, for the chain that needs no credential: **2.376s per
-lookup becoming 1.263s**, and **2,325 phase two requests becoming 781**, for the same 429
+Measured over the same 500 ISBNs, for the chain that needs no credential: **2.366s per
+lookup becoming 1.268s**, and **2,151 phase two requests becoming 748**, for the same 429
 books.
 
 **The Spanish National Library declares no remit**, unlike the two above it, and that is a
@@ -775,11 +768,10 @@ The Danish catalogue is the same case again, with a twist: one Brazilian book of
 held by it and by BIBSYS, the Norwegian union catalogue, and nothing else, so one of the two
 may carry a remit and not both. The Danish national library carries `978-87` and BIBSYS,
 a union catalogue, carries none. Nor does Melinda, the
-Finnish union catalogue: it alone holds one Greek book of the 500. The SBN, PORBASE, the
-National Széchényi Library and the Slovak National Library were put to all 500 and to the
-Polish, Danish and Hungarian frames, and every book each answers outside its own groups
-another catalogue still asked holds, so each is asked only about its own country's books;
-for the Slovak library that is `978-80`, which Czech publishers share.
+Finnish union catalogue: it alone holds one Greek book of the 500. The SBN, PORBASE and the
+National Széchényi Library were put to all 500 and to the Polish, Danish and Hungarian
+frames, and every book each answers outside its own groups another catalogue still asked
+holds, so each is asked only about its own country's books.
 
 **No book is lost to it, and that is a measured bound rather than an intention.** A
 catalogue may carry a remit only if there is no book it alone answers outside that remit,
@@ -804,7 +796,7 @@ asymmetry in this table and is the server's rather than a preference: it returns
 filled in record per reply whatever page size is asked for, so ten search results would be
 ten requests. A lookup wants one record and gets one.
 
-**No order of the nineteen finds more books than another.** Every enabled source is asked
+**No order of the eighteen finds more books than another.** Every enabled source is asked
 until one answers, so the order decides latency and which records are merged, never
 coverage. Reordering is not the fix for a book the chain misses.
 
@@ -814,13 +806,13 @@ the registration groups it collects and no others. The bound on that is zero boo
 sentence above holds in practice as well as in principle.
 
 **What the chain covers on a stock install, which is one that has typed nothing.**
-Sixteen of the nineteen need no credential at all, two ship the one their library publishes,
+Fifteen of the eighteen need no credential at all, two ship the one their library publishes,
 and only Google Books takes a key you supply. Measured over 500
-domestic ISBNs across ten countries, the eighteen sources a stock install asks answer **441 and
+domestic ISBNs across ten countries, the seventeen sources a stock install asks answer **441 and
 miss 59**,
 and outside German language publishing they miss **55 of 400**.
 
-Twelve of those books are the two credentialled catalogues': the sixteen sources that need
+Twelve of those books are the two credentialled catalogues': the fifteen sources that need
 nothing answer **429 and miss 71**, the Argentine catalogue uniquely adds four and the
 Uruguayan one eight, each in its own country's frame. Of the 429, the SBN adds 15 to the
 twelve older free sources, all Italian, and PORBASE 16, all Portuguese: on the sample's fifty
@@ -833,10 +825,8 @@ sources holds; on fifty Swedish ones LIBRIS answers 45, 22 of them books none of
 holds; on fifty Danish ones the Royal Danish Library answers 38, 27 of them books none of
 the nine older free sources holds; on fifty Norwegian ones BIBSYS answers 48, 16 of them
 books none of those nine holds; on fifty Finnish ones Melinda answers all 50, 9 of them
-books none of those nine holds; on fifty Hungarian ones the National Széchényi Library
-answers 40, 12 of them books none of the twelve older free sources holds; and on fifty Slovak
-ones the Slovak National Library answers 27, 16 of them books none of the fifteen older free
-sources holds. Neither adds a book of the 500.
+books none of those nine holds; and on fifty Hungarian ones the National Széchényi Library
+answers 40, 12 of them books none of the twelve older free sources holds.
 
 The same books under an
 earlier release answered 300: the three national catalogues added since, the NLG, the NKP
@@ -873,7 +863,7 @@ authorised heading string itself, subdivisions included
 identifier for it in this record, so the string is the access point.
 
 **`lcsh` reaches only the search response**, not this one. The Library of Congress is not
-one of the nineteen sources a lookup asks, so a scan never sees an LCSH heading; a picked search
+one of the eighteen sources a lookup asks, so a scan never sees an LCSH heading; a picked search
 result carries it into `POST /{id}/enrich/apply`, which is how it reaches a book.
 
 **The suggestion has two routes and they fail on opposite records.** One compares the
@@ -1180,12 +1170,10 @@ in three places from a lookup's:
   sends: they are the Library of Congress call number and subject heading, and
   both have columns here.
 
-**Matching is ISBN, then author and title together.** A record crediting
-somebody never matches on its title alone; a record crediting nobody matches a
-Book crediting nobody by its title. It uses `identity.work_key`, which is also
-what the duplicate finder computes. The worst case for a catalogue transfer is
-two different books folded into one record, and every library holds more than
-one *Selected poems*.
+**Matching is ISBN, then author and title together, never title alone.** It uses
+`identity.work_key`, which is also what the duplicate finder computes. The worst
+case for a catalogue transfer is two different books folded into one record, and
+every library holds more than one *Selected poems*.
 
 The CSV importer uses `identity.reading_history_title`, and it differs in two
 ways rather than one: no credit in the key, **and** the title is matched as
@@ -1266,11 +1254,9 @@ other people's private books would restore to a library missing rows, which is
 the one thing a backup must never do.
 
 `confirm=true` is a query parameter rather than a body field so the destructive
-call cannot be made by anything replaying a plain upload. The manifest's shape
-is checked before the first row is deleted, and the rows are read as they are
-inserted; nothing commits until every table is in, because a restore that
-failed halfway would leave a library that is neither the backup nor what was
-there before.
+call cannot be made by anything replaying a plain upload. The archive is
+validated in full before the first row is deleted, because a restore that fails
+halfway leaves a library that is neither the backup nor what was there before.
 Cover entries are taken by filename only: a zip entry may name any path it
 likes, including one outside the covers directory.
 
@@ -1363,10 +1349,10 @@ The loans list is not affected: a list of the household's loans is not the remin
 channel.
 
 `reason` is `disabled`, `no_url`, `nothing_due`, `unreachable`, `misconfigured`,
-`in_app_only`, `unexpected` or `no_address`, and is **null exactly when `sent` is true**. It is a closed
+`in_app_only` or `unexpected`, and is **null exactly when `sent` is true**. It is a closed
 set because a client has to render the difference and cannot branch on prose; `detail` is the
 same outcome as a sentence, for a log or a caller with no message catalogue. A 200 with
-`sent: false` is the ordinary answer for all eight: none of them is an error in the request.
+`sent: false` is the ordinary answer for all seven: none of them is an error in the request.
 `in_app_only` is the run where the in app notice is the only channel on, so nothing was sent
 anywhere and nothing was meant to be. `unexpected` is a sender that failed in a way the code
 does not anticipate, neither refused nor unreachable: it is that channel's failure, the
@@ -1374,7 +1360,7 @@ others still run, and the server log names the exception's type and where it was
 Its `detail` is a fixed sentence, never the exception's message.
 
 `senders` holds one `{sender, sent, loans, skipped_private, reason, detail}` per channel this
-run had something to report, in the order in app, webhook, email, Telegram, patron email. A pushing sender
+run had something to report, in the order in app, webhook, email, Telegram. A pushing sender
 is reported when it was **tried**, and a run with nothing overdue tries none, so the list is
 empty in two cases: every channel off, and nothing overdue while the in app notice is off.
 The in app row appears even on a run that pushed nothing, including one with nothing overdue,
@@ -1393,22 +1379,6 @@ same private books, because each goes to a channel rather than to a person, so t
 numbers agree. The in app row reports **0**: its audience is a member, so nothing is
 withheld from it.
 
-**The patron email** (`overdue_patron_mail_enabled`) sends each patron one message about
-the overdue loans that patron holds, to the address on their record, over the mail server
-the email channel uses. It has its own selection: a private book a patron borrowed is
-named to that patron, since a reminder about a book in your own hands discloses nothing,
-and never to anybody else, so its row reports a withheld count of **0**. A patron with no
-usable address is not skipped silently: the row reports `no_address`, and those loans are
-not stamped by it. **Each audience keeps its own stamp**: the patron email stamps
-`patron_notified_at` on the loans it delivered and the channels stamp `notified_at`, so each
-chases a loan at most once per reminder interval, and a failure on one never holds the other
-back. The patron email stops at its first failure that is not about one address, since any
-other failure would repeat for every patron: a refused recipient, and a non ASCII address on
-a server without `SMTPUTF8`, go on to the next patron. The message greets the patron by name
-and lists each loan with its due date. **Switching library mode on turns this and the
-email channel on, once**, leaving alone either one an admin has already set; a later switch
-on does not turn them on again, and switching the mode off changes neither.
-
 **A channel's standing record** is `GET /api/settings/sender-health`, admin only, one
 `{sender, last_run_at, sent, reason, detail, failing_since, failures, broken}` per channel
 that is switched on. Every run writes it, the manual one included, so a failure survives the
@@ -1416,7 +1386,7 @@ run that produced it rather than living only in the container log. `sent` is nul
 channel has run at all, because "not yet" and "fine" are different answers.
 
 `broken` is a judgement rather than a fact, and it is three rules. A refusal the app made
-itself (`no_url`, `misconfigured`, `no_address`) counts at once, since all of those are raised before a
+itself (`no_url`, `misconfigured`) counts at once, since all of those are raised before a
 socket is opened and nothing will work until a setting changes. An `unexpected` failure
 counts at once too: it is a case the code does not anticipate, and nothing says it will pass.
 A destination that could not be reached counts only after **24 hours** and at least **two**
@@ -1455,9 +1425,8 @@ warrants.
 ```
 
 Three properties of the request are load bearing. **Private books are excluded, on every
-channel that pushes to a channel**, in the query rather than afterwards: none of the three
-has a member identity behind it, and each lands where the whole household reads. The patron
-email is addressed to one person about their own loans, which is why it may name one. The in app notice is
+channel that pushes**, in the query rather than afterwards: none of the three has a member
+identity behind it, and each lands where the whole household reads. The in app notice is
 the exception and it is the rule rather than a hole in it: that query is rooted at the
 Shelf, so each reader gets what `visible_to()` already says they may see, their own private
 books included. `skipped_private` counts what
@@ -1884,18 +1853,12 @@ nothing about the others, and completing it from the defaults would read a reque
 disable one catalogue as an instruction to switch six on. A name this build does not know
 is refused with 422, and the list is bounded at the size of the roster.
 
-`PUT /api/settings` accepts `library_mode`, `public_catalogue_enabled`,
-`public_catalogue_indexing_enabled`, `sru_server_enabled` and `oai_provider_enabled`, and **refuses no combination
-of them**: an admin may
+`PUT /api/settings` accepts `library_mode`, `public_catalogue_enabled` and
+`public_catalogue_indexing_enabled`, and **refuses no combination of them**: an admin may
 store a publish row while library mode is off, and the catalogue stays unpublished because
 the routes ask `public_catalogue_is_published` rather than reading a row. Refusing the
 write instead would make the order two toggles are saved in matter, and would lose an
 admin's stated intent the moment they turned library mode off to look at something.
-
-**One pair is refused**: `oai_provider_enabled` true with `oai_admin_email`, the repository
-contact address OAI-PMH's `Identify` serves, empty. A write naming either field that would
-leave the switch on with no address is 409 and writes nothing, whichever of the two it
-changes. `oai_admin_email` is one address or an empty string, 422 otherwise.
 
 `GET /api/settings` never returns the Google Books API key, only a masked preview plus
 `has_google_books_api_key`. A masked string is not a truth value, so the UI keys off the
@@ -1976,12 +1939,6 @@ An unknown source is **404** on the write. The delete reaches a stored row whose
 no longer in the roster, because `catalogue_credentials` carries no foreign key on purpose
 and an orphan nothing can remove would need a database edit; deleting sends nothing anywhere,
 so the roster check buys nothing there.
-
-A source whose credential is not a login is **409** on the write, naming that it takes none:
-one that answers without a credential, and Google Books, whose key is a setting. A login is
-resolved for a request only where the source's credential is one, so a login stored for any
-other would be sealed and read by nothing. The delete still reaches such a row, which an
-archive written before this refusal can carry.
 
 A source whose login the deployment pinned through `CATALOGUE_CREDENTIAL_<SOURCE>` is **409**
 on the write, naming the variable, the same rule every other pinned setting follows. **On the
@@ -2089,9 +2046,7 @@ evaluated on the server, so a publish row left on while library mode is off serv
 |---|---|---|---|
 | GET | `/api/public/books` | **public** | Search the published catalogue. **404** when nothing is published |
 | GET | `/api/public/books/{book_id}` | **public** | One record. **404** for a book that is private, trashed or absent |
-| GET | `/api/public/books/{book_id}/availability` | **public** | `on_shelf` or `on_loan` for the title, any public copy in counting as on the shelf. **404** while its own switch is off, and for every reason the record route gives one |
-| GET | `/sru` | **public** | The SRU base URL. Same switches plus its own, same rate limit. Not in the OpenAPI schema |
-| GET | `/oai` | **public** | The OAI-PMH base URL. Same switches plus its own, same rate limit. Not in the OpenAPI schema |
+| GET | `/sru` | **public** | The SRU base URL. Same switches, same rate limit. Not in the OpenAPI schema |
 | GET | `/robots.txt` | **public** | Generated from the switches. Not in the OpenAPI schema |
 
 **`HEAD` answers 404 where `GET` answers 200**, on these routes and on every other GET
@@ -2147,10 +2102,7 @@ nofollow` and `/robots.txt` disallows everything.
 `/sru` is the same catalogue over the protocol other library systems speak: CQL in a query
 string, MARCXML out. It runs the **same** gate as the JSON catalogue above, which means the
 same two switches, the same 404 rather than 403, and the same 120 a minute counter shared
-with it rather than a second budget of its own. Then it needs its own switch,
-`sru_server_enabled`, which is off by default; off, `/sru` answers the same 404 as an
-unpublished catalogue. The revision adding it writes it on where the catalogue was already
-published, so an upgraded deployment keeps answering.
+with it rather than a second budget of its own.
 
 It is **not** in the OpenAPI schema, for the reason `/robots.txt` is not: it is a document
 another institution's software fetches, not an operation this application's own client
@@ -2201,10 +2153,8 @@ Masking (`*` and `?`) is supported and anchoring (`^`) is not.
 There is a sixth bound on what the query costs to **run**, which is a different question:
 comparing a term against an index is charged against a budget of **64 units** and a query
 that would spend more is refused. One comparison costs **1 unit** through most indexes and
-**8** through `dc.description`, which measured an order of magnitude dearer than the rest.
-`dc.subject` costs 8 plus one unit for each tag per book above one, averaged over the public
-catalogue, because it compares every tag of every book: 17 where books carry ten tags on
-average. `cql.serverChoice` and `bib.anywhere` compare three columns, so one
+**8** through `dc.description` and `dc.subject`, which measured an order of magnitude
+dearer than the rest. `cql.serverChoice` and `bib.anywhere` compare three columns, so one
 comparison through either costs **3**.
 
 **`=` compares a term once; `any` and `all` compare once per word.** So
@@ -2224,34 +2174,6 @@ rule: `a or b and c` is `(a or b) and c`. Parentheses are how a client says othe
 
 The records are `marc.py`'s, so they carry exactly the fields the MARC export does, which
 is a subset of what `PublicBookOut` publishes. See [security.md](security.md).
-
-### OAI-PMH
-
-`/oai` is the same catalogue for harvesting: OAI-PMH 2.0, GET only. It runs the **same** gate
-as `/sru` and then its own switch, `oai_provider_enabled`, off by default everywhere; off, it
-answers the same 404 as an unpublished catalogue. Not in the OpenAPI schema, for `/sru`'s reason.
-
-| Verb | Arguments | Answers |
-|---|---|---|
-| `Identify` | none | `deletedRecord` is `persistent`, granularity `YYYY-MM-DD`, `adminEmail` the stored contact address |
-| `ListMetadataFormats` | `identifier` optional | `oai_dc` and `marc21` |
-| `ListSets` | `resumptionToken` optional | always `noSetHierarchy` |
-| `GetRecord` | `identifier`, `metadataPrefix` | one record, or a deleted header |
-| `ListIdentifiers`, `ListRecords` | `metadataPrefix`, then `from`, `until`, `set` optional; or `resumptionToken` alone | 50 records a page, in id order |
-
-**Identifiers** are `oai:<host>:<book id>`, the host being the one the request named
-(`/sru`'s rule). **Datestamps are days**, and move on every write that changes the published
-record, a tag, a classification or a link included, and on nothing else. **`from` and `until`
-are both inclusive** and are days; a value with a time is `badArgument`, as the protocol says
-of a granularity finer than the repository's. A record leaving the catalogue answers as a
-deleted header from then on, once the provider has answered its first request.
-
-**A resumption token is opaque and carries nothing a fresh request could not ask for**: the
-format, the window in whole days and the last id served. Anything else, an old token after an upgrade
-included, is `badResumptionToken`; start the harvest again.
-
-Every refusal is an HTTP 200 carrying an OAI-PMH `<error>`. `badVerb` and `badArgument` echo
-no argument back. See [security.md](security.md#oai-pmh).
 
 ### KOReader progress sync
 

@@ -1,38 +1,28 @@
 import { useNavigate } from "react-router-dom";
 
-import type { SettingsOut, SettingsUpdate } from "../../../api/generated/model";
-
 import { useLibraryMode } from "../../../app/hooks";
 import { useTranslation } from "../../../i18n";
 import { FolderSweepNotice, SettingsSection } from "../../components";
 import { useFolderSweep } from "../../hooks";
 import SettingsSubPage from "../components/SettingsSubPage";
-import ToggleField from "../components/ToggleField";
 import { useSettings } from "../hooks";
 import CalibreImport from "./components/CalibreImport";
-import ClassificationSchemesSection from "./components/ClassificationSchemesSection";
 import CoversSection from "./components/CoversSection";
 import CustomFieldsSection from "./components/CustomFieldsSection";
-import HarvestImport from "./components/HarvestImport";
-import HarvestSection from "./components/HarvestSection";
 import KoreaderHighlightImport from "./components/KoreaderHighlightImport";
 import LibraryImport from "./components/LibraryImport";
 import MarcImport from "./components/MarcImport";
 import StoreIdentifiersSection from "./components/StoreIdentifiersSection";
 import StoreImport from "./components/StoreImport";
-import VocabulariesSection from "./components/VocabulariesSection";
 import {
   useCalibreImport,
-  useClassificationSchemes,
   useCoverBackfill,
   useCustomFields,
-  useHarvestImport,
   useKoreaderHighlightImport,
   useLibraryImport,
   useMarcImport,
   useStoreIdentifierBackfill,
   useStoreImport,
-  useVocabularies,
 } from "./hooks";
 
 /**
@@ -45,10 +35,9 @@ import {
  * member's own shelf they are repairing; and defining a custom field is
  * additive and changes no book, exactly as inventing a tag is.
  *
- * Only the field **delete**, the classification schemes card and the subject
- * vocabularies card are admin only, which is why the settings record is asked
- * for at all here: it decides whether those are drawn, so they appear where
- * they would work rather than answering 403 when pressed.
+ * Only the field **delete** is admin only, which is why the settings record is
+ * asked for at all here: `isAdmin` decides whether that one control is drawn,
+ * so it appears where it would work rather than answering 403 when pressed.
  *
  * The covers card reads next to the import because it is what an import leaves
  * undone: a CSV carries no cover, so a library that arrived that way has none.
@@ -92,13 +81,7 @@ export default function LibrarySettingsPage() {
   // endpoint is admin only and a 403 is reported as `isForbidden`. Nothing on
   // this page is refused to a member, so the record is read for that one fact
   // and the page renders the same either way.
-  const settingsState = useSettings();
-  const { settings } = settingsState;
-  const schemes = useClassificationSchemes(settings !== undefined);
-  const vocabularies = useVocabularies(settings !== undefined);
-  const harvestImport = useHarvestImport(
-    harvestRepositoryOf(libraryMode, settings),
-  );
+  const { settings } = useSettings();
 
   return (
     <SettingsSubPage icon="book" title={t("settings.library.title")}>
@@ -185,38 +168,6 @@ export default function LibrarySettingsPage() {
         </SettingsSection>
       )}
 
-      {/* Library mode and admin only, like the MARC card above it: the
-          harvester runs only in library mode, and the switch is a settings
-          write. */}
-      {libraryMode && settings !== undefined && (
-        <HarvestSection
-          settings={settings}
-          isSaving={settingsState.isSaving}
-          saveError={settingsState.saveError}
-          onSave={settingsState.save}
-        />
-      )}
-
-      {/* Only once the switch is on: the routes answer 404 until then, so a
-          card offered before it could do nothing but be refused. */}
-      {harvestIsOn(libraryMode, settings) && (
-        <SettingsSection title={t("harvestRun.title")} icon="library">
-          <HarvestImport
-            isPreviewing={harvestImport.isPreviewing}
-            isImporting={harvestImport.isImporting}
-            preview={harvestImport.preview}
-            result={harvestImport.result}
-            resumable={harvestImport.resumable}
-            readError={harvestImport.readError}
-            harvestError={harvestImport.harvestError}
-            onRead={harvestImport.read}
-            onCarryOn={harvestImport.carryOn}
-            onConfirm={harvestImport.confirm}
-            onCancel={harvestImport.reset}
-          />
-        </SettingsSection>
-      )}
-
       <StoreIdentifiersSection
         result={storeIdentifiers.result}
         isRunning={storeIdentifiers.isRunning}
@@ -240,90 +191,6 @@ export default function LibrarySettingsPage() {
         onRename={customFields.rename}
         onRemove={customFields.remove}
       />
-
-      {/* Admin only, unlike the fields above: every write to a scheme is, and
-          a scheme's rule orders the whole library's shelves. */}
-      {settings !== undefined && (
-        <ClassificationSchemesSection
-          schemes={schemes.schemes}
-          isBusy={schemes.isBusy}
-          error={schemes.error}
-          onDefine={schemes.define}
-          onRename={schemes.rename}
-          onRemove={schemes.remove}
-        />
-      )}
-
-      {/* Admin only too: a download replaces the copy every member's subject
-          lookup reads. Beside the schemes, as the other half of what a
-          heading may quote. */}
-      {settings !== undefined && (
-        <VocabulariesSection
-          vocabularies={vocabularies.vocabularies}
-          isStarting={vocabularies.isStarting}
-          error={vocabularies.error}
-          onDownload={vocabularies.download}
-        />
-      )}
-
-      {/* Under the copies it reads from. */}
-      <HeadingFieldSetting
-        libraryMode={libraryMode}
-        settings={settings}
-        isSaving={settingsState.isSaving}
-        onSave={settingsState.save}
-      />
     </SettingsSubPage>
   );
-}
-
-/**
- * The switch for the book page's heading field. Library mode and admin only:
- * the server offers a household no heading field whatever this says, and the
- * switch is a settings write.
- */
-function HeadingFieldSetting({
-  libraryMode,
-  settings,
-  isSaving,
-  onSave,
-}: {
-  libraryMode: boolean;
-  settings: SettingsOut | undefined;
-  isSaving: boolean;
-  onSave: (update: SettingsUpdate) => void;
-}) {
-  const { t } = useTranslation();
-  if (!libraryMode || settings === undefined) return null;
-  return (
-    <SettingsSection title={t("headingField.settingTitle")} icon="book">
-      <ToggleField
-        label={t("headingField.setting")}
-        hint={t("headingField.settingHint")}
-        checked={settings.headings_from_vocabulary ?? true}
-        disabled={isSaving}
-        onChange={(checked) => onSave({ headings_from_vocabulary: checked })}
-      />
-    </SettingsSection>
-  );
-}
-
-/** Whether a harvest can run: library mode, and the switch an admin reads on. */
-function harvestIsOn(
-  libraryMode: boolean,
-  settings: SettingsOut | undefined,
-): boolean {
-  return libraryMode && settings?.oai_harvest_enabled === true;
-}
-
-/**
- * The repository a harvest would read, or null while none can be: what the
- * hook keys its preview on, so a corrected address discards it.
- */
-function harvestRepositoryOf(
-  libraryMode: boolean,
-  settings: SettingsOut | undefined,
-): string | null {
-  if (!harvestIsOn(libraryMode, settings)) return null;
-  return settings?.oai_harvest_base_url ?? null;
 }

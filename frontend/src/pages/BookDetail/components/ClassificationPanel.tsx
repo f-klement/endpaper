@@ -4,9 +4,9 @@ import type { ClassificationOut } from "../../../api/generated/model";
 import { useTranslation } from "../../../i18n";
 import {
   KIND_LABEL,
+  SCHEME_LABEL,
   headingKind,
   headingText,
-  schemeLabel,
 } from "../../../lib/classificationLabels";
 
 interface ClassificationPanelProps {
@@ -85,7 +85,7 @@ export default function ClassificationPanel({
                 {/* The scheme, in the muted tier, because it qualifies the
                     heading rather than competing with it. */}
                 <span className="text-paper-600 dark:text-paper-400">
-                  {schemeLabel(classification.scheme, t)}
+                  {t(SCHEME_LABEL[classification.scheme])}
                 </span>
                 {/* The words lead. A GND heading's `number` is an authority id
                     and its caption is the thing a person reads, so a chip built

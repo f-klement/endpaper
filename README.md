@@ -69,7 +69,7 @@ other people can reach it are in [the configuration reference](docs/configuratio
 ## Features
 
 - **Barcode scanning** with a phone camera, or type the ISBN.
-- **Records from nineteen catalogues**, asked in an order you choose, with the cover stored here
+- **Records from eighteen catalogues**, asked in an order you choose, with the cover stored here
   rather than linked from somebody else's server.
 - **Bringing a library in** from Goodreads, LibraryThing, StoryGraph, Libib, Openreads,
   Calibre or MARC records, or from a folder of ebook files that are read in your browser and
@@ -119,8 +119,7 @@ DATA_DIR=./data uv run uvicorn main:app --reload
 ```
 `DATA_DIR` decides where the SQLite file and uploaded covers live. It defaults to
 `/app/data` (the path inside the container), so set it when running outside one.
-The OpenAPI schema is then at `http://localhost:8000/openapi.json`, for a signed in member
-only: send the token as `Authorization: Bearer <token>`.
+Interactive API docs are then at `http://localhost:8000/docs`.
 
 **Frontend**, with [Bun](https://bun.com) 1.3:
 ```bash

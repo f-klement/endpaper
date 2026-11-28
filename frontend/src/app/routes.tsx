@@ -11,7 +11,6 @@ import Home from "../pages/Home";
 import LoansPage from "../pages/LoansPage";
 import LoginPage from "../pages/LoginPage";
 import OverduePage from "../pages/OverduePage";
-import PatronsPage from "../pages/PatronsPage";
 import PublicCataloguePage, {
   PublicBookPage,
 } from "../pages/PublicCataloguePage";
@@ -70,11 +69,6 @@ export default function AppRoutes({ user, mode, onSignIn }: AppRoutesProps) {
       <Route path="/quotes" element={<QuotesPage />} />
       <Route path="/duplicates" element={<DuplicatesPage />} />
       <Route path="/stats" element={<StatsPage />} />
-      {/* Mounted for an admin only, so a member who types the address meets
-          the 404 page rather than a screen of refusals. The API refuses a
-          member every patron route on its own; this keeps the page, and the
-          fact of a register, out of a member's sight as well. */}
-      {user.is_admin && <Route path="/patrons" element={<PatronsPage />} />}
       {/* Settings is an index of six routes rather than one long page. The
           order here is the order `SETTINGS_ROUTES` draws them in, and that
           table is what the index page reads: a route added in one place and

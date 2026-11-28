@@ -7,10 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import {
-  CatalogueSource,
-  RegisteredCatalogue,
-} from "../../src/api/generated/model";
+import { CatalogueSource } from "../../src/api/generated/model";
 import { en } from "../../src/i18n/en";
 import { catalogueName } from "../../src/lib/catalogueName";
 
@@ -26,14 +23,9 @@ import { catalogueName } from "../../src/lib/catalogueName";
  *
  * `CatalogueSource` is a runtime const in the generated client, regenerated
  * from the backend enum, so this list moves when the roster does and the day a
- * source joins with no name the test goes red rather than quiet. The registry's
- * `RegisteredCatalogue` is read the same way, so a refresh adding an entry
- * does too: a picked entry's records name it as their origin.
+ * source joins with no name the test goes red rather than quiet.
  */
-const ON_THE_ROSTER = [
-  ...Object.values(CatalogueSource),
-  ...Object.values(RegisteredCatalogue),
-];
+const ON_THE_ROSTER = Object.values(CatalogueSource);
 
 describe("a catalogue's name", () => {
   it("resolves to a real message for every source the API can send", () => {

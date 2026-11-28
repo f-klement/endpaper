@@ -52,11 +52,6 @@ beforeEach(() => {
   localStorage.clear();
   api = mockApi();
   api.on(/\/api\/public\/books\/12/, { body: RECORD });
-  // The default answer: the library has not switched availability on.
-  api.on(/\/api\/public\/books\/12\/availability/, {
-    status: 404,
-    body: { detail: "Not found" },
-  });
 });
 
 function render() {
@@ -92,24 +87,6 @@ describe("PublicBookPage", () => {
     expect(screen.getByText("by Frank Herbert")).toBeInTheDocument();
     expect(screen.getByText("Space opera")).toBeInTheDocument();
     expect(screen.getByText("A desert planet.")).toBeInTheDocument();
-  });
-
-  it("says a book is on loan where the library shows it", async () => {
-    api.on(/\/api\/public\/books\/12\/availability/, {
-      body: { status: "on_loan" },
-    });
-    render();
-    expect(await screen.findByText("On loan")).toBeInTheDocument();
-  });
-
-  it("draws the record and no availability while the library hides it", async () => {
-    render();
-    await screen.findByRole("heading", { name: "Dune" });
-    expect(api.calls.some((call) => call.url.endsWith("/availability"))).toBe(
-      true,
-    );
-    expect(screen.queryByText("On the shelf")).not.toBeInTheDocument();
-    expect(screen.queryByText("On loan")).not.toBeInTheDocument();
   });
 
   it("reads the bibliographic facts as pairs", async () => {

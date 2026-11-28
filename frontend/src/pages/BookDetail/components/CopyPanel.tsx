@@ -147,18 +147,6 @@ export default function CopyPanel({ book, isSaving, onSave }: CopyPanelProps) {
       <p className="text-xs text-paper-600 mt-1 mb-3 dark:text-paper-400">
         {t("copy.hint")}
       </p>
-      {/* Read only: the server mints it from the row, and only the bulk
-          action on the library assigns it. Absent until a member asks. */}
-      {book.accession && (
-        <dl className="mb-3 flex gap-2 text-sm">
-          <dt className="font-medium text-paper-700 dark:text-paper-200">
-            {t("accession.label")}
-          </dt>
-          <dd className="font-mono tabular-nums text-paper-800 dark:text-paper-100">
-            {book.accession}
-          </dd>
-        </dl>
-      )}
 
       <form onSubmit={submit} className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">

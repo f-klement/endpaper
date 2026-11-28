@@ -79,7 +79,6 @@ from main import app, iter_api_routes
 ROUTES_TAKING_A_FILE = {
     ("POST", "/api/backup/restore"): "this instance's own backup archive",
     ("POST", "/api/books/{book_id}/cover"): "a cover image",
-    ("POST", "/api/books/{book_id}/cover-images"): "a further image of a book, beside its cover",
     ("POST", "/api/imports/csv"): "another app's CSV export",
     ("POST", "/api/imports/marc"): "a MARCXML record set",
     ("POST", "/api/imports/marc/preview"): "a MARCXML record set",

@@ -10,18 +10,15 @@ nothing to `books`, and that undoing one really does restore what was there.
 from typing import Any
 
 import httpx
-import pytest
 import respx
 from sqlalchemy import event
 
-import settings_store
 from authors import author_key
 from database import engine
-from enums import SettingKey
 from models import AuthorAlias, AuthorIdentifier, Book
 from schemas.author import MAX_BATCH_KEYS
 from tests.helpers import DNB, silence_catalogues, sru_response
-from tests.test_authority import NAF, NAF_EMPTY, NAF_RECORD, ORCID, ORCID_RECORD, ORCID_SEARCH
+from tests.test_authority import NAF, NAF_RECORD
 
 AUTHORS = "/api/books/authors"
 
@@ -1260,69 +1257,6 @@ class TestALibraryOfCongressRecordOnceConfirmed:
         ]
 
 
-class TestOrcidIsAskedByNameOnlyInLibraryMode:
-    """ORCID's top hit was the book's own author for 30 of 385 authors on the
-    catalogue sample, so a household is not offered its namesakes. A stored iD
-    is a key rather than a name, and resolves in either mode."""
-
-    @staticmethod
-    def _looked_up(
-        client, headers, author: str, orcid: dict[str, Any], q: str | None = None
-    ) -> tuple[list[dict], list[str]]:
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=LOBID).mock(return_value=httpx.Response(200, json={"member": []}))
-            mock.get(url__startswith=NAF).mock(
-                return_value=httpx.Response(200, text=NAF_EMPTY, headers={"content-type": "text/xml"})
-            )
-            mock.get(url__startswith=ORCID).mock(return_value=httpx.Response(200, json=orcid))
-            mock.get(url__startswith=WIKIDATA).mock(return_value=httpx.Response(200, json=WIKIDATA_NO_ITEM))
-            params = {"author": author} if q is None else {"author": author, "q": q}
-            res = client.get(f"{AUTHORS}/authority", params=params, headers=headers)
-            asked = [str(call.request.url) for call in mock.calls if str(call.request.url).startswith(ORCID)]
-        assert res.status_code == 200, res.text
-        return res.json(), asked
-
-    # The shelf spelling and a retyped name reach `authority.search` from two
-    # call sites, and each passes the library mode flag on its own.
-    NAME_SEARCHES = pytest.mark.parametrize("q", [None, "Josiah S. Carberry"], ids=["shelf", "retyped"])
-
-    @NAME_SEARCHES
-    def test_a_household_name_search_does_not_ask_it(self, client, admin, make_book, q):
-        make_book(admin["headers"], title="Ghosts of Providence", author="Josiah Carberry")
-
-        rows, asked = self._looked_up(client, admin["headers"], "Josiah Carberry", ORCID_SEARCH, q)
-
-        assert (rows, asked) == ([], [])
-
-    @NAME_SEARCHES
-    def test_a_library_name_search_asks_it_where_both_files_find_nobody(
-        self, client, admin, make_book, db, q
-    ):
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        make_book(admin["headers"], title="Ghosts of Providence", author="Josiah Carberry")
-
-        rows, asked = self._looked_up(client, admin["headers"], "Josiah Carberry", ORCID_SEARCH, q)
-
-        assert [(row["scheme"], row["certain"]) for row in rows] == [("orcid", False), ("orcid", False)]
-        assert len(asked) == 1
-
-    def test_a_household_still_resolves_a_stored_orcid_id(self, client, admin, make_book):
-        make_book(admin["headers"], title="Ghosts of Providence", author="Josiah Carberry")
-        assert (
-            confirm(
-                client, admin["headers"], "Josiah Carberry", "0000-0002-1825-0097", scheme="orcid"
-            ).status_code
-            == 201
-        )
-
-        rows, asked = self._looked_up(client, admin["headers"], "Josiah Carberry", ORCID_RECORD)
-
-        assert [(row["scheme"], row["identifier"], row["certain"]) for row in rows] == [
-            ("orcid", "0000-0002-1825-0097", True)
-        ]
-        assert len(asked) == 1
-
-
 class TestSteeringTheAuthoritySearch:
     def test_a_retyped_name_is_what_gets_searched(self, client, admin, make_book):
         """The shelf spells somebody in a form the GND does not use, so the
@@ -1520,88 +1454,6 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
             "bnchl": "10000000000000000007303",
         }
 
-    def test_each_row_says_which_file_supplied_it(self, client, admin, make_book):
-        """The confirmed number is the member's word, checked by lobid whose
-        record names the author; the four from `sameAs` are lobid's and the six
-        from the cluster VIAF's."""
-        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
-
-        with respx.mock(assert_all_called=False) as mock:
-            _authority_mock(mock, lobid=LOBID_RECORD)
-            res = confirm(client, admin["headers"], "Robert Louis Stevenson", "118753711")
-
-        body = res.json()
-        assert (body["identifier"]["asserted_by"], body["identifier"]["checked_by"]) == ("member", "lobid")
-        assert {row["scheme"]: row["asserted_by"] for row in body["cross_references"]} == {
-            "isni": "lobid",
-            "lcnaf": "lobid",
-            "viaf": "lobid",
-            "wikidata": "lobid",
-            "blbnb": "viaf",
-            "arbabn": "viaf",
-            "bne": "viaf",
-            "ptbnp": "viaf",
-            "iccu": "viaf",
-            "bnchl": "viaf",
-        }
-
-    def test_an_existing_number_whose_record_names_somebody_else_stays_unchecked(
-        self, client, admin, make_book
-    ):
-        """lobid holds the number, but its record is Stevenson's, so it has not
-        named the author the member filed it under."""
-        make_book(admin["headers"], title="Tom Sawyer", author="Mark Twain")
-
-        with respx.mock(assert_all_called=False) as mock:
-            _authority_mock(mock, lobid=LOBID_RECORD)
-            res = confirm(client, admin["headers"], "Mark Twain", "118753711")
-
-        assert res.status_code == 201, res.text
-        assert (res.json()["identifier"]["asserted_by"], res.json()["identifier"]["checked_by"]) == (
-            "member",
-            None,
-        )
-
-    def test_the_cross_references_of_a_record_naming_somebody_else_stay_unchecked(
-        self, client, admin, make_book
-    ):
-        """Wikidata and the BNP corroborate Stevenson's record, not Mark Twain,
-        so a check they gave there is no check here."""
-        make_book(admin["headers"], title="Tom Sawyer", author="Mark Twain")
-
-        with respx.mock(assert_all_called=False) as mock:
-            _authority_mock(mock, lobid=LOBID_RECORD)
-            res = confirm(client, admin["headers"], "Mark Twain", "118753711")
-
-        checks = {row["scheme"]: row["checked_by"] for row in res.json()["cross_references"]}
-        assert checks
-        assert set(checks.values()) == {None}
-
-    def test_a_variant_name_on_the_record_is_the_author_named(self, client, admin, make_book):
-        make_book(admin["headers"], title="Kidnapped", author="R. L. Stevenson")
-        record = {**LOBID_RECORD, "variantName": ["Stevenson, R. L."]}
-
-        with respx.mock(assert_all_called=False) as mock:
-            _authority_mock(mock, lobid=record)
-            res = confirm(client, admin["headers"], "R. L. Stevenson", "118753711")
-
-        assert res.status_code == 201, res.text
-        assert res.json()["identifier"]["checked_by"] == "lobid"
-
-    def test_a_number_lobid_answers_with_its_successor_stays_unchecked(self, client, admin, make_book):
-        """A retired number resolving to another record is not lobid naming
-        the value the member confirmed, even where that record names the
-        author."""
-        make_book(admin["headers"], title="Kidnapped", author="Robert Louis Stevenson")
-        successor = {**LOBID_RECORD, "gndIdentifier": "131572873"}
-
-        with respx.mock(assert_all_called=False) as mock:
-            _authority_mock(mock, lobid=successor)
-            res = confirm(client, admin["headers"], "Robert Louis Stevenson", "118753711")
-
-        assert res.status_code == 201, res.text
-        assert res.json()["identifier"]["checked_by"] is None
-
     async def test_one_deadline_covers_all_three_hosts_a_confirmation_reaches(self):
         """**Two places can drop it and neither is observable through a result.**
         `_cross_references_for` builds one absolute deadline and hands it to
@@ -1639,7 +1491,7 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
         original_once, original_get = fetch.get_once, fetch.get
         fetch.get_once, fetch.get = once, get
         try:
-            await books_router._cross_references_for("118753711", "robert louis stevenson")
+            await books_router._cross_references_for("118753711")
         finally:
             fetch.get_once, fetch.get = original_once, original_get
 
@@ -1660,7 +1512,6 @@ class TestConfirmingStoresTheCrossReferencesThatCameWithTheRecord:
 
         assert res.status_code == 201, res.text
         assert res.json()["identifier"]["identifier"] == "118753711"
-        assert res.json()["identifier"]["checked_by"] is None
         assert res.json()["cross_references"] == []
 
     def test_viaf_being_down_costs_the_national_ones_and_nothing_else(self, client, admin, make_book):

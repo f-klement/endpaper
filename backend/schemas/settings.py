@@ -2,18 +2,13 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator
 
-import mailer
 from enums import (
     CatalogueSource,
-    ClassificationScheme,
-    CredentialKind,
     CredentialProvenance,
     Locale,
     OverdueNotifyReason,
     OverdueSender,
-    Transport,
 )
-from models import HARVEST_BASE_URL_MAX
 from schemas.common import UtcDateTime
 
 #: How far apart two reminders for the same loan may be, in days. The floor is
@@ -207,24 +202,6 @@ class CatalogueSourceOut(BaseModel):
     #: is then asked about every ISBN. `asked_first` is the field that answers
     #: "is this filtered", and it has to be read first.
     serves_groups: list[str]
-    #: How the catalogue is asked: SRU, Z39.50, or a JSON API of its own
-    #: (`bespoke`). With the three fields below it, what a policy about which
-    #: catalogues may receive readers' queries is written against; the address
-    #: is not served, because it changes without the policy changing.
-    protocol: Transport
-    #: The SRU version, and empty on every other protocol.
-    protocol_version: str
-    #: The record schema or Z39.50 record syntax asked for, empty where none is
-    #: named.
-    record_schema: str
-    #: Whether queries travel encrypted. False for plain HTTP and for Z39.50.
-    encrypted: bool
-    #: What the catalogue wants before it answers: nothing, this deployment's
-    #: API key at a commercial service, or the institution's login.
-    credential: CredentialKind
-    #: The classification schemes this catalogue can supply. The screen warns
-    #: before switching off the last enabled supplier of one.
-    classification_schemes: list[ClassificationScheme]
 
 
 class LoginImageOut(BaseModel):
@@ -417,13 +394,6 @@ class SettingsOut(BaseModel):
     #: catalogue content somewhere outside this app.
     overdue_in_app_enabled: bool = True
 
-    # ── The patron's own notice ──────────────────────────────────────────
-    #: One mail per patron about their own overdue loans, private Books
-    #: included, to the address on their record, over the mail server above.
-    #: Off by default, and turned on once by the first switch of library mode
-    #: on, with `overdue_mail_enabled` beside it.
-    overdue_patron_mail_enabled: bool = False
-
     #: The secrets sealed under a key this deployment cannot open, by setting
     #: name: `google_books_api_key`, `overdue_webhook_secret`, `mail_password`
     #: or `telegram_bot_token`. Each has to be entered again; until then its
@@ -445,24 +415,6 @@ class SettingsOut(BaseModel):
     #: `library_mode and public_catalogue_enabled`, computed on the server so
     #: the browser cannot get the rule wrong. See `FeatureFlagsOut`.
     public_catalogue_published: bool = False
-    #: Whether the SRU server may answer, as stored. Like the two above it, the
-    #: route also needs the catalogue published, so with
-    #: `public_catalogue_published` false this is intent and nothing is served.
-    sru_server_enabled: bool = False
-    #: Whether the OAI-PMH provider may answer, as stored. Intent like the SRU
-    #: switch above: nothing is served while `public_catalogue_published` is false.
-    oai_provider_enabled: bool = False
-    #: The repository contact address OAI-PMH's `Identify` serves, as stored. The
-    #: switch above cannot be stored on while it is empty.
-    oai_admin_email: str = ""
-    #: The OAI-PMH harvester's switch and its repository address, as stored. The
-    #: switch cannot be stored on while the address is empty, and the harvester
-    #: runs only in library mode: `settings_store.harvest_repository`.
-    oai_harvest_enabled: bool = False
-    oai_harvest_base_url: str = ""
-    #: Whether a public record says if its book is on the shelf or on loan, as
-    #: stored. Like the SRU switch, it also needs the catalogue published.
-    public_availability_enabled: bool = False
 
     #: Whether accounts here belong to people outside the household.
     #:
@@ -477,17 +429,6 @@ class SettingsOut(BaseModel):
     #: `/auth/config` publishes the same fact to the login page, which needs it
     #: before anybody holds a token.
     accounts_open_to_outsiders: bool = False
-
-    #: Whether an admin has put away the library page's offer of a local
-    #: vocabulary copy, for the whole installation. The offer also ends once
-    #: any copy is loaded, which the vocabularies list says, not this.
-    vocabulary_offer_dismissed: bool = False
-
-    #: Whether a book's heading field offers headings from the local vocabulary
-    #: copies. **The stored row, not the one in force**, as `library_mode` is:
-    #: it is read with library mode (`settings_store.headings_from_vocabulary`),
-    #: and an admin has to see what they set.
-    headings_from_vocabulary: bool = True
 
 
 class SourceCredentialIn(BaseModel):
@@ -656,9 +597,6 @@ class SettingsUpdate(BaseModel):
 
     overdue_in_app_enabled: bool | None = None
 
-    #: The patron's own overdue notice. See `SettingsOut`.
-    overdue_patron_mail_enabled: bool | None = None
-
     #: Library mode, the publish switch and whether a crawler is invited.
     #:
     #: Three separate fields, and none of them refuses the other: an admin may
@@ -671,63 +609,12 @@ class SettingsUpdate(BaseModel):
     library_mode: bool | None = None
     public_catalogue_enabled: bool | None = None
     public_catalogue_indexing_enabled: bool | None = None
-    #: The SRU server's own switch. Stored whatever the publish state, for the
-    #: reason the three above are: the route reads it with the publish state.
-    sru_server_enabled: bool | None = None
-    #: The OAI-PMH provider's own switch, stored whatever the publish state for
-    #: the reason the SRU switch is.
-    oai_provider_enabled: bool | None = None
-    #: The repository contact address `Identify` serves. Published to anyone who
-    #: can reach the provider, so a role address rather than a person's. An
-    #: empty string clears it, which is refused while the switch is on.
-    oai_admin_email: str | None = Field(default=None, max_length=MAX_MAIL_ADDRESS)
-    #: The OAI-PMH harvester's switch. Refused on while no repository address is
-    #: stored or sent beside it.
-    oai_harvest_enabled: bool | None = None
-    #: The repository the harvester reads: the one setting that makes this
-    #: server connect where a person typed. A household address is admitted,
-    #: over http or https. An empty string clears it, which is refused while the
-    #: switch is on.
-    oai_harvest_base_url: str | None = Field(default=None, max_length=HARVEST_BASE_URL_MAX)
-    #: Whether a public record shows on the shelf or on loan. Stored whatever
-    #: the publish state, for the SRU switch's reason.
-    public_availability_enabled: bool | None = None
 
     #: Whether accounts here belong to people outside the household. Turning it
     #: on gates accounts created afterwards and never strands a member already
     #: in the library: verification is stamped when an account is made. See
     #: `models.User.email_verified_at`.
     accounts_open_to_outsiders: bool | None = None
-
-    #: Puts the library page's vocabulary offer away for the installation, or
-    #: brings it back with false.
-    vocabulary_offer_dismissed: bool | None = None
-
-    #: Turns the vocabulary suggestions on a book's heading field on or off.
-    headings_from_vocabulary: bool | None = None
-
-    @field_validator("oai_admin_email")
-    @classmethod
-    def an_address_or_a_clear(cls, value: str | None) -> str | None:
-        """One address by `mailer.looks_like_address`, the rule every address in
-        this app passes, or "" to clear it."""
-        if value is None:
-            return None
-        trimmed = value.strip()
-        if trimmed and not mailer.looks_like_address(trimmed):
-            raise ValueError("The repository contact address is not an address.")
-        return trimmed
-
-    @field_validator("oai_harvest_base_url")
-    @classmethod
-    def a_repository_or_a_clear(cls, value: str | None) -> str | None:
-        """The address trimmed, or "" to clear it.
-
-        **Not validated here**: `routers/settings.py` refuses one
-        `harvester.is_harvestable` does not admit, since that rule reaches
-        `fetch` and a schema sits below it.
-        """
-        return None if value is None else value.strip()
 
     @field_validator("overdue_webhook_url")
     @classmethod

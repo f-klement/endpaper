@@ -15,10 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { type BookOut, ReadStatus } from "../../../src/api/generated/model";
 import {
-  HEADING_SUGGEST_DEBOUNCE_MS,
   hasAbout,
   sectionDefaults,
-  useBookHeadingField,
   useBookActions,
   useBookNotes,
   useBookSections,
@@ -363,91 +361,5 @@ describe("useBookActions", () => {
 
     expect(window.confirm).toHaveBeenCalledOnce();
     expect(api.calls).toHaveLength(0);
-  });
-});
-
-describe("useBookHeadingField", () => {
-  const KATZE = { scheme: "gnd", number: "4029849-4", label: "Katze" };
-  const SUGGEST = "/api/books/7/headings/suggest";
-
-  function inLibraryMode(api: ReturnType<typeof mockApi>) {
-    api.on("/api/settings/features", {
-      body: {
-        google_books_ready: false,
-        goodreads_lookup_enabled: false,
-        default_locale: "en",
-        library_mode: true,
-      },
-    });
-    api.on("/api/books/7/headings/vocabularies", {
-      body: [{ scheme: "gnd", name: "GND" }],
-    });
-    api.on(SUGGEST, { body: [KATZE] });
-  }
-
-  async function renderField() {
-    const api = mockApi();
-    inLibraryMode(api);
-    const rendered = renderHookWithProviders(() => useBookHeadingField(7));
-    await waitFor(() => expect(rendered.result.current.scheme).toBe("gnd"));
-    return { api, rendered };
-  }
-
-  /** Type each text in turn on a clock of the step's own, then pause. */
-  function typeAndPause(
-    rendered: Awaited<ReturnType<typeof renderField>>["rendered"],
-    ...texts: string[]
-  ) {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    try {
-      for (const text of texts) {
-        act(() => rendered.result.current.type(text));
-      }
-      act(() => {
-        vi.advanceTimersByTime(HEADING_SUGGEST_DEBOUNCE_MS);
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  }
-
-  const asks = (api: ReturnType<typeof mockApi>) =>
-    api.calls.filter((call) => call.url.includes(SUGGEST));
-
-  it("asks once for a word typed, after the pause", async () => {
-    const { api, rendered } = await renderField();
-
-    typeAndPause(rendered, "K", "Ka", "Kat");
-
-    await waitFor(() =>
-      expect(rendered.result.current.suggestions).toEqual([KATZE]),
-    );
-    expect(asks(api)).toHaveLength(1);
-    expect(asks(api)[0]?.url).toContain("q=Kat");
-  });
-
-  it("asks nothing below two characters", async () => {
-    const { api, rendered } = await renderField();
-
-    typeAndPause(rendered, "K");
-    await settled();
-
-    expect(asks(api)).toEqual([]);
-    expect(rendered.result.current.suggestions).toEqual([]);
-  });
-
-  it("posts the pick back unchanged and clears the field", async () => {
-    const { api, rendered } = await renderField();
-    api.on("/api/books/7/headings", { status: 201, body: KATZE }, "POST");
-    typeAndPause(rendered, "Kat");
-
-    act(() => rendered.result.current.pick(KATZE));
-
-    await waitFor(() => expect(rendered.result.current.typed).toBe(""));
-    expect(api.lastCall("/api/books/7/headings", "POST")?.body).toEqual({
-      scheme: "gnd",
-      number: "4029849-4",
-      label: "Katze",
-    });
   });
 });

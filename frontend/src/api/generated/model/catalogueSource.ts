@@ -19,7 +19,7 @@
  * **Not every source answers every question**, and the split is real rather
  * than incidental. BNF and LOC are title search only, because neither was
  * worth an ISBN request. NKP, BNE, BNA, BNU, BN_PL, LIBRIS, KB_DK, BIBSYS,
- * MELINDA, SBN, PORBASE, OSZK and SNK are the other way round, **lookup only**, and
+ * MELINDA, SBN, PORBASE and OSZK are the other way round, **lookup only**, and
  * for two different reasons. The NKP's,
  * the BNA's and the BNU's is the server's: each renders one populated record
  * per response whatever page size is asked for, so a search for ten
@@ -55,5 +55,4 @@ export const CatalogueSource = {
   sbn: "sbn",
   porbase: "porbase",
   oszk: "oszk",
-  snk: "snk",
 } as const;

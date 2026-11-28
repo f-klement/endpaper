@@ -161,8 +161,7 @@ export default function SelectionBar({
 }
 
 /**
- * The verbs behind the disclosure: status, tag, collection, location, delete
- * and accession numbers.
+ * The verbs behind the disclosure: status, tag, collection, location, delete.
  *
  * Mounted only while the disclosure is open, so the tag order below is worked
  * out only then.
@@ -268,18 +267,6 @@ function MoreActions({
           {t("bulk.delete")}
         </button>
       </div>
-
-      {/* No confirm: assigning is idempotent, the number being the row's own,
-          and the server numbers only owned copies, counting the rest
-          unchanged. */}
-      <button
-        type="button"
-        disabled={cannotAct}
-        onClick={() => onRun(BulkAction.assign_accession)}
-        className="w-full py-1.5 rounded-lg border border-paper-200 text-xs font-medium text-paper-600 hover:bg-paper-50 disabled:opacity-40 dark:border-paper-700 dark:text-paper-300 dark:hover:bg-paper-800"
-      >
-        {t("accession.assign")}
-      </button>
     </div>
   );
 }

@@ -149,68 +149,6 @@ describe("a barcode", () => {
   });
 });
 
-/** The queue a list of ISBNs leaves of `start`. */
-function listed(isbns: string[], start: ScannedEntry[] = []): ScannedEntry[] {
-  return queueAfter(start, { kind: "listed", isbns });
-}
-
-describe("a listed ISBN", () => {
-  it("is queued waiting for the paced lookup, keyed as a barcode is", () => {
-    const [only] = listed([DUNE.isbn]);
-    expect(only).toEqual(
-      row({
-        state: "listed",
-        key: `isbn:${DUNE.isbn}`,
-        label: DUNE.isbn,
-        isbn: DUNE.isbn,
-      }),
-    );
-    expect([needsALookup(only!), isReady(only!)]).toEqual([true, false]);
-  });
-
-  it("already scanned is not queued again", () => {
-    const scanned = queueAfter([], { kind: "captured", isbn: DUNE.isbn });
-    expect(listed([DUNE.isbn], scanned)).toBe(scanned);
-  });
-
-  it("is counted among the rows waiting for a lookup", () => {
-    expect(figuresOf(listed([DUNE.isbn, "9780306406157"])).waiting).toBe(2);
-  });
-
-  it("nobody knows becomes not found, a row the batch does not take", () => {
-    const missed = rowAfter(row({ state: "listed", isbn: DUNE.isbn }), {
-      kind: "not-answered",
-      key: "k",
-      asked: "listed",
-      unknown: true,
-    });
-    expect([missed.state, missed.draft, isReady(missed)]).toEqual([
-      "not-found",
-      blankDraft(DUNE.isbn),
-      false,
-    ]);
-  });
-
-  it("whose catalogues were not reached is offered to the lookup again", () => {
-    const missed = rowAfter(row({ state: "listed", isbn: DUNE.isbn }), {
-      kind: "not-answered",
-      key: "k",
-      asked: "listed",
-      unknown: false,
-    });
-    expect([missed.state, needsALookup(missed)]).toEqual(["not-reached", true]);
-  });
-
-  it("is found with the record a catalogue had", () => {
-    const answered = rowAfter(row({ state: "searching", isbn: DUNE.isbn }), {
-      kind: "isbn-answered",
-      key: "k",
-      lookup: DUNE,
-    });
-    expect([answered.state, answered.draft?.title]).toEqual(["found", "Dune"]);
-  });
-});
-
 describe("an ISBN a file or a name carried", () => {
   it("from a name takes the record whole", () => {
     const named = row({

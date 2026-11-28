@@ -74,8 +74,6 @@ export const BarcodeFormat = {
   EAN_8: "EAN_8",
   UPC_A: "UPC_A",
   UPC_E: "UPC_E",
-  CODE_128: "CODE_128",
-  CODE_39: "CODE_39",
   QR_CODE: "QR_CODE",
 };
 

@@ -665,16 +665,9 @@ HEADING_WRITES: Final[dict[str, dict[str, dict[str, int]]]] = {
         # The owner's ruling on the MARC importer: choosing the file is the
         # confirmation.
         "confirm_file_headings": {"classifications.add_headings": 1},
-        # A harvested Book's pending set, which an admin confirmed.
-        "confirm_harvested_headings": {"classifications.add_headings": 1},
-        # A heading a Member picked on the Book's heading field.
-        "confirm_picked_heading": {"classifications.add_headings": 1},
     },
-    # A MARC file a Member chose to import, through its door. A harvest's
-    # headings take the other branch, to `pending_headings.raise_on`.
-    "importing.py": {"MarcImport._keep_headings": {"evidence.confirm_file_headings": 1}},
-    # `POST /{book_id}/pending-headings/confirm`, through its door.
-    "pending_headings.py": {"confirm": {"evidence.confirm_harvested_headings": 1}},
+    # A MARC file a Member chose to import, through its door.
+    "importing.py": {"MarcImport._apply_one": {"evidence.confirm_file_headings": 1}},
     "routers/books.py": {
         # For `_create_book` alone, the one function here that calls it.
         "<module>": {"classifications.add_headings": 1},
@@ -685,8 +678,6 @@ HEADING_WRITES: Final[dict[str, dict[str, dict[str, int]]]] = {
         "_create_book": {"classifications.add_headings": 1},
         # `POST /{book_id}/enrich/apply`: the record row a Member selected.
         "apply_enrichment": {"evidence.confirm": 1},
-        # `POST /{book_id}/headings`: the heading a Member picked.
-        "add_heading": {"evidence.confirm_picked_heading": 1},
     },
 }
 
@@ -697,8 +688,6 @@ _NAMED: Final[tuple[tuple[object, str], ...]] = (
     (classifications.add_headings, "classifications.add_headings"),
     (evidence.confirm, "evidence.confirm"),
     (evidence.confirm_file_headings, "evidence.confirm_file_headings"),
-    (evidence.confirm_harvested_headings, "evidence.confirm_harvested_headings"),
-    (evidence.confirm_picked_heading, "evidence.confirm_picked_heading"),
 )
 #: Called, because most names of the model are reads: a query's entity, a
 #: column, the restore's table list.

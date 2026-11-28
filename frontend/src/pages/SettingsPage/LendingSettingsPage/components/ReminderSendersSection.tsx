@@ -146,13 +146,6 @@ export default function ReminderSendersSection({
         health={health[OverdueSender.email]}
       />
 
-      <PatronMailBlock
-        settings={settings}
-        isSaving={isSaving}
-        onSave={onSave}
-        health={health[OverdueSender.patron_mail]}
-      />
-
       <div className="space-y-3 pt-4 border-t border-paper-200 dark:border-paper-700">
         <h3 className="text-sm font-medium text-paper-700 dark:text-paper-200">
           {t("settings.telegram")}
@@ -257,40 +250,6 @@ function TelegramChatField({ settings, isSaving, onSave }: ChannelProps) {
 
 interface MailBlockProps extends ChannelProps {
   health: SenderHealth | undefined;
-}
-
-/**
- * The patron's own overdue notice (#24): one switch over the mail server the
- * block above configures, so it has no fields of its own.
- */
-function PatronMailBlock({
-  settings,
-  isSaving,
-  onSave,
-  health,
-}: MailBlockProps) {
-  const { t } = useTranslation();
-
-  return (
-    <div className="space-y-3 pt-4 border-t border-paper-200 dark:border-paper-700">
-      <h3 className="text-sm font-medium text-paper-700 dark:text-paper-200">
-        {t("settings.patronMail")}
-      </h3>
-      <ToggleField
-        label={t("settings.patronMailEnable")}
-        hint={t("settings.patronMailHint")}
-        checked={settings.overdue_patron_mail_enabled ?? false}
-        disabled={isSaving}
-        onChange={(checked) => onSave({ overdue_patron_mail_enabled: checked })}
-      />
-      <SenderHealthLine health={health} />
-      {/* The privacy note at the top of this section does not apply here:
-          this mail has one reader, the patron holding the book. */}
-      <p className={`${HINT_CLASS} leading-relaxed`}>
-        {t("settings.patronMailPrivacyNote")}
-      </p>
-    </div>
-  );
 }
 
 /** The mail fields a deployment may pin from its environment. */

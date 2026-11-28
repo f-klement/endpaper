@@ -51,14 +51,13 @@ from fastapi import Path as PathParam
 from fastapi.responses import FileResponse
 
 import cover_store
-from dependencies import BookForCover, RowId
+from dependencies import BookForCover
 from refusals import refuses
 
 router = APIRouter(prefix="/covers", tags=["covers"])
 
-# Long, because the content at a given URL never changes: a cover written over
-# its own name is recorded under a new `?v=` (`covers.replaced_url`), and a
-# further image's name is its row's id, which is never issued twice.
+# Long, because the content at a given URL never changes: a re-upload writes a
+# new extension or the same bytes, and the cache buster is the filename itself.
 # `private` and not `public`: a shared cache in front of this must not serve one
 # member's cover to another, which is the whole point of the route existing.
 #
@@ -179,13 +178,13 @@ def _not_found() -> HTTPException:
     `dependencies._not_found` records: a shared exception object accumulates a
     frame on its `__traceback__` at every raise and never releases it.
 
-    **This route is the worst place in the app to get that wrong.** Every route
-    here raises it, and a cover 404 is ordinary rather than exceptional: every
+    **This route is the worst place in the app to get that wrong.** It has five
+    raise sites, and a cover 404 is ordinary rather than exceptional: every
     `<img>` on every page hits it, and a book with no stored cover answers 404
     by design.
 
-    The raises on a book's routes pinned a `Session` and the `User` the cover
-    cookie resolved to. The ones in `get_login_background` are public:
+    Three of the five pinned a `Session` and the `User` the cover cookie
+    resolved to. The other two are in `get_login_background`, which is public:
     measured, `GET /covers/login_bg.png` answers 404 with no `Authorization`
     header and no cookie. Those pinned no identity and needed no session at all,
     which is the sharper half: an unauthenticated caller could grow that object
@@ -287,45 +286,6 @@ def get_cover(
     # `TestTheMediaTypesAreNotDocuments` is what makes the lookup total: its keys
     # are exactly the extensions `cover_store` will hand back.
     path = cover_store.cover_to_serve(book.id, extension)
-    if path is None:
-        raise _not_found()
-
-    return FileResponse(
-        path,
-        media_type=_MEDIA_TYPES[path.suffix.lstrip(".")],
-        headers={"Cache-Control": _CACHE_CONTROL},
-    )
-
-
-# A different shape from the route above (a further segment), so neither can
-# match the other's path whatever the declaration order.
-@router.get(
-    "/{book_id}/images/{image_id}.{extension}",
-    response_class=Response,
-    responses={
-        200: {"content": _DECLARED_CONTENT},
-        206: {"content": _DECLARED_PARTIAL_CONTENT},
-    },
-)
-@refuses(404)
-def get_cover_image(
-    book: BookForCover,
-    image_id: RowId,
-    extension: Annotated[str, PathParam(pattern=r"^[A-Za-z]{3,4}$")],
-) -> FileResponse:
-    """A further image of a book the caller may see: a back cover, a spine.
-
-    The same read rule as the cover, through the same dependency, and then the
-    image has to be one of **this** book's: an image id is a counter too, and
-    naming a visible book beside another book's image id answers 404 as an
-    invisible book does.
-    """
-    # Through the relationship rather than a query of its own: the rows carry
-    # no member, so the book is their whole privacy (`models.CoverImage`).
-    image = next((held for held in book.cover_images if held.id == image_id), None)
-    if image is None or image.extension != extension.lower():
-        raise _not_found()
-    path = cover_store.image_slot_to_serve(image.id, image.extension)
     if path is None:
         raise _not_found()
 

@@ -50,20 +50,6 @@ class TestReadAndWrite:
         settings_store.set_value(db, SettingKey.MAIL_SERVER, "second")
         assert settings_store.get_raw(db, SettingKey.MAIL_SERVER) == "second"
 
-    def test_a_value_equal_to_the_default_is_still_a_choice(self, db):
-        settings_store.set_value(db, SettingKey.OVERDUE_MAIL_ENABLED, "false")
-        keys = (SettingKey.OVERDUE_MAIL_ENABLED, SettingKey.OVERDUE_PATRON_MAIL_ENABLED)
-        assert settings_store.unchosen(db, keys) == (SettingKey.OVERDUE_PATRON_MAIL_ENABLED,)
-
-    def test_a_cleared_key_is_unchosen_again(self, db):
-        settings_store.set_value(db, SettingKey.MAIL_SERVER, "smtp.example.org")
-        settings_store.set_value(db, SettingKey.MAIL_SERVER, None)
-        assert settings_store.unchosen(db, (SettingKey.MAIL_SERVER,)) == (SettingKey.MAIL_SERVER,)
-
-    def test_a_key_the_environment_pins_is_chosen(self, db, monkeypatch):
-        monkeypatch.setenv("MAIL_SERVER", "smtp.example.org")
-        assert settings_store.unchosen(db, (SettingKey.MAIL_SERVER,)) == ()
-
     @pytest.mark.parametrize("value", ["true", "TRUE", "1", "yes", "on"])
     def test_truthy_spellings(self, db, value):
         settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_ENABLED, value)
@@ -167,78 +153,6 @@ class TestLibraryModeAndThePublicCatalogue:
         different decisions, and the default answer to the second is no."""
         assert settings_store.DEFAULTS[SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED] == "false"
 
-    def test_the_sru_server_starts_off(self):
-        """Every export protocol starts off: a catalogue published to people is
-        not also served to software until an admin says so."""
-        assert settings_store.DEFAULTS[SettingKey.SRU_SERVER_ENABLED] == "false"
-
-    def test_availability_starts_off(self):
-        """Owner's decision on issue #29: a public record says nothing about
-        loans until an admin turns it on."""
-        assert settings_store.DEFAULTS[SettingKey.PUBLIC_AVAILABILITY_ENABLED] == "false"
-
-    def test_availability_needs_a_published_catalogue_as_well(self, db):
-        """The switch on its own shows nothing to anybody."""
-        settings_store.set_value(db, SettingKey.PUBLIC_AVAILABILITY_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        assert settings_store.availability_is_shown(db) is False
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.availability_is_shown(db) is True
-
-    def test_sru_needs_a_published_catalogue_as_well(self, db):
-        """The switch on its own cannot publish a catalogue."""
-        settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        assert settings_store.sru_is_served(db) is False
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.sru_is_served(db) is True
-
-    def test_a_published_catalogue_is_not_served_over_sru_by_default(self, db):
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.sru_is_served(db) is False
-
-    def test_headings_from_a_vocabulary_are_offered_by_default_in_library_mode_alone(self, db):
-        """On by default in a library, never in a household (owner, 2026-11-22)."""
-        assert settings_store.headings_from_vocabulary(db) is False
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        assert settings_store.headings_from_vocabulary(db) is True
-        settings_store.set_value(db, SettingKey.HEADINGS_FROM_VOCABULARY, "false")
-        assert settings_store.headings_from_vocabulary(db) is False
-
-    def test_the_oai_provider_starts_off(self):
-        """Owner's decision: off on a fresh install and on an upgrade alike."""
-        assert settings_store.DEFAULTS[SettingKey.OAI_PROVIDER_ENABLED] == "false"
-
-    def test_oai_needs_a_published_catalogue_as_well(self, db):
-        settings_store.set_value(db, SettingKey.OAI_PROVIDER_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.OAI_ADMIN_EMAIL, "catalogue@library.example")
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        assert settings_store.oai_is_served(db) is False
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        assert settings_store.oai_is_served(db) is True
-
-    def test_oai_needs_a_contact_address_as_well(self, db):
-        """A restore can store the switch on without the write that refuses it."""
-        for key in (
-            SettingKey.OAI_PROVIDER_ENABLED,
-            SettingKey.LIBRARY_MODE,
-            SettingKey.PUBLIC_CATALOGUE_ENABLED,
-        ):
-            settings_store.set_value(db, key, "true")
-        assert settings_store.oai_is_served(db) is False
-
-    def test_the_first_service_is_recorded_once(self, db):
-        settings_store.set_value(db, SettingKey.OAI_FIRST_SERVED, "2026-01-02T03:04:05")
-        settings_store.record_oai_service(db)
-        assert settings_store.get_raw(db, SettingKey.OAI_FIRST_SERVED) == "2026-01-02T03:04:05"
-
-    def test_the_sru_switch_does_not_serve_oai(self, db):
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.SRU_SERVER_ENABLED, "true")
-        assert settings_store.oai_is_served(db) is False
-
     def test_a_fresh_database_publishes_nothing(self, db):
         """The default read through the accessor, not off the table: a default
         that is never consulted is not a default."""
@@ -281,7 +195,7 @@ class TestLibraryModeAndThePublicCatalogue:
         settings_store.set_value(db, SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED, "true")
         assert settings_store.public_catalogue_may_be_indexed(db) is True
 
-    def test_the_publishing_switches_are_not_pinnable_from_the_environment(self):
+    def test_the_three_switches_are_not_pinnable_from_the_environment(self):
         """Settings rather than environment variables, and pinned as a decision
         rather than left as an accident of an unedited table.
 
@@ -298,8 +212,6 @@ class TestLibraryModeAndThePublicCatalogue:
                 SettingKey.LIBRARY_MODE,
                 SettingKey.PUBLIC_CATALOGUE_ENABLED,
                 SettingKey.PUBLIC_CATALOGUE_INDEXING_ENABLED,
-                SettingKey.SRU_SERVER_ENABLED,
-                SettingKey.PUBLIC_AVAILABILITY_ENABLED,
             )
             if config.env_variable_name(key)
         ]
@@ -308,42 +220,6 @@ class TestLibraryModeAndThePublicCatalogue:
             "a catalogue has to stay a runtime decision an admin can undo without "
             "a redeploy."
         )
-
-
-class TestTheHarvesterReadsOneRepository:
-    """`harvest_repository`: library mode, the switch, and an address that is
-    not blank, or None. `harvester.configured_repository` validates the address."""
-
-    _REPOSITORY: Final = "http://10.0.0.10/oai"
-
-    def _switch_on(self, db, address: str = _REPOSITORY) -> None:
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "true")
-        settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "true")
-        settings_store.set_value(db, SettingKey.OAI_HARVEST_BASE_URL, address)
-
-    def test_the_harvester_starts_off_with_no_repository(self, db):
-        assert settings_store.DEFAULTS[SettingKey.OAI_HARVEST_ENABLED] == "false"
-        assert settings_store.DEFAULTS[SettingKey.OAI_HARVEST_BASE_URL] == ""
-        assert settings_store.harvest_repository(db) is None
-
-    def test_the_repository_is_named_once_everything_is_on(self, db):
-        self._switch_on(db)
-        assert settings_store.harvest_repository(db) == self._REPOSITORY
-
-    def test_outside_library_mode_there_is_no_repository(self, db):
-        self._switch_on(db)
-        settings_store.set_value(db, SettingKey.LIBRARY_MODE, "false")
-        assert settings_store.harvest_repository(db) is None
-
-    def test_with_the_switch_off_there_is_no_repository(self, db):
-        self._switch_on(db)
-        settings_store.set_value(db, SettingKey.OAI_HARVEST_ENABLED, "false")
-        assert settings_store.harvest_repository(db) is None
-
-    def test_a_blank_stored_address_names_no_repository(self, db):
-        """A restore stores the rows without passing the settings route."""
-        self._switch_on(db, "   ")
-        assert settings_store.harvest_repository(db) is None
 
 
 class TestACredentialMakesASourceReady:
@@ -358,9 +234,9 @@ class TestACredentialMakesASourceReady:
 
     @pytest.fixture
     def needs_a_credential(self, monkeypatch):
-        """Pretend the BNE declares that it needs a login."""
-        monkeypatch.setattr(sources, "NEEDS_A_KEY", sources.NEEDS_A_KEY | {CatalogueSource.BNE})
-        monkeypatch.setattr(sources, "NEEDS_A_LOGIN", sources.NEEDS_A_LOGIN | {CatalogueSource.BNE})
+        """Pretend the BNE declares that it needs a credential."""
+        widened = sources.NEEDS_A_KEY | {CatalogueSource.BNE}
+        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset(widened))
         return CatalogueSource.BNE
 
     def test_it_is_neither_held_nor_ready_without_one(self, db, needs_a_credential):
@@ -486,7 +362,7 @@ class TestTheKeyIsResolvedOncePerRequest:
     def test_two_sealed_logins_cost_what_one_costs(self, db, key_phrase, monkeypatch):
         """The count is flat in the number of sources, which is the whole fix."""
         self._seal(db, key_phrase, monkeypatch, "dnb")
-        monkeypatch.setattr(sources, "NEEDS_A_LOGIN", frozenset({CatalogueSource.DNB}))
+        monkeypatch.setattr(sources, "NEEDS_A_KEY", frozenset({CatalogueSource.DNB}))
         tally = self._counted(monkeypatch)
         assert len(settings_store.catalogue_logins(db)) == 1
         one = tally[0]
@@ -500,7 +376,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         )
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_LOGIN",
+            "NEEDS_A_KEY",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         tally[0] = 0
@@ -526,7 +402,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_LOGIN",
+            "NEEDS_A_KEY",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY")
@@ -547,7 +423,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         """
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_LOGIN",
+            "NEEDS_A_KEY",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         monkeypatch.setenv(credentials.env_variable_name("dnb"), "alice:hunter2")
@@ -568,7 +444,7 @@ class TestTheKeyIsResolvedOncePerRequest:
         self._seal(db, key_phrase, monkeypatch, "dnb", "k10plus")
         monkeypatch.setattr(
             sources,
-            "NEEDS_A_LOGIN",
+            "NEEDS_A_KEY",
             frozenset({CatalogueSource.DNB, CatalogueSource.K10PLUS}),
         )
         reads: list[str] = []
@@ -1976,67 +1852,83 @@ class TestAnOverriddenSettingIsReadWhereItIsPinned:
 
 
 class TestThePlanAndTheLoginsAgreeOnWhoNeedsOne:
-    """A source admitted to the plan on a held login has a login resolved for it, or goes out bare.
+    """A source admitted to the plan has a login resolved for it, or goes out bare.
 
-    **One subject, read by both loops.** `ready_sources` admits a login source
-    through `_sources_with_a_credential`, and `catalogue_logins` resolves over
-    `sources_whose_door_carries_a_login`; both range over `sources.NEEDS_A_LOGIN`.
-    A source in the first and not the second sits in the plan with no entry in the
-    mapping, and `metadata` asks it with no credential.
+    **Two predicates decide this and nothing made them agree.** `ready_sources`
+    admits a credentialled source through `_sources_with_a_credential`, which asks
+    `credentials.is_held` over `sources.NEEDS_A_KEY - _SECRET_IS_A_SETTINGS_ROW`.
+    `catalogue_logins` resolves a login over `sources.NEEDS_A_KEY` filtered by
+    `metadata.carries_a_credential`. Different subjects, different readers. A source
+    in the first and not the second sits in the plan with no entry in the mapping,
+    and `metadata` asks it with no credential.
 
-    **Asked of the two functions that loop rather than of the set**, with every
-    login held and every request handed one, so a loop that stops reading it, or
-    filters inside itself, is what goes red. That every member's door carries a
-    login is `metadata.resolve`'s refusal, planted in `tests/test_metadata.py` on
-    rows the roster has not got; the runtime half, a key rotated between the two
-    keychain reads, is `catalogue_access`'s warning.
+    **They agree on today's roster, on a set of size one, by coincidence.**
+    `carries_a_credential` answers False for every transport but SRU, so the first
+    catalogue that needs a key, keeps its secret sealed rather than in a settings
+    row, and speaks anything else opens the gap. This is the arm that fails on the
+    row that opens it, rather than a member's search going out bare and nothing
+    saying so.
+
+    **Why this is a test and not a refusal at the site.** A raise in
+    `catalogue_logins` would turn a silent unauthenticated request into a 500, on a
+    case that cannot happen today, for a cause the caller cannot fix: `is_held` and
+    `for_request` are two reads of the keychain, so a key rotated between them is a
+    legitimate disagreement. The runtime half is a `logger.warning`, which makes the
+    silent case audible without inventing a new failure.
     """
 
-    @staticmethod
-    def _gap(db, monkeypatch) -> set[CatalogueSource]:
-        """Admitted on a login and not resolved for, with every login held and handed over."""
-        login = credentials.Credential("https://catalogue.invalid", "alice", "hunter2")
-        monkeypatch.setattr(credentials, "is_held", lambda *_: True)
-        monkeypatch.setattr(credentials, "for_request", lambda *_: login)
-        admitted = settings_store._sources_with_a_credential(db)
-        assert admitted, "nothing is admitted on a login, so this proves nothing"
-        return admitted - set(settings_store.catalogue_logins(db))
+    def _needs_a_login(self) -> set[CatalogueSource]:
+        """What `catalogue_logins` will try to resolve, asked rather than restated."""
+        return set(settings_store.sources_whose_door_carries_a_login())
 
-    def test_every_source_admitted_on_a_login_has_one_resolved_for_it(self, db, monkeypatch):
-        gap = sorted(source.value for source in self._gap(db, monkeypatch))
+    def _admitted_by_a_credential(self) -> set[CatalogueSource]:
+        """What `ready_sources` will admit on a held credential, read off its rule."""
+        return set(sources.NEEDS_A_KEY) - settings_store._SECRET_IS_A_SETTINGS_ROW
+
+    def test_every_source_admitted_on_a_credential_has_one_resolved_for_it(self):
+        gap = sorted(source.value for source in self._admitted_by_a_credential() - self._needs_a_login())
 
         assert not gap, (
-            f"{gap} reach the plan on a held login and have no login resolved, "
+            f"{gap} reach the plan on a held credential and have no login resolved, "
             "so their requests go out unauthenticated"
         )
 
-    def test_a_resolver_that_drops_a_login_source_is_reported(self, db, monkeypatch):
-        """The diagonal: the resolver's subject narrowed by one, as a filter of its own would."""
-        stranded, *kept = settings_store.sources_whose_door_carries_a_login()
-        monkeypatch.setattr(settings_store, "sources_whose_door_carries_a_login", lambda: kept)
+    def test_the_two_subjects_are_not_empty(self):
+        """Both sets empty would make the arm above pass on nothing at all."""
+        assert self._needs_a_login()
+        assert self._admitted_by_a_credential()
 
-        assert stranded in self._gap(db, monkeypatch), (
-            "the rule no longer notices a source admitted on a login whose request "
-            "has none resolved, which is the whole of what it is for"
+    def test_a_sealed_non_sru_source_is_reported(self, monkeypatch):
+        """The diagonal, and it plants the defect in the predicate rather than the sets.
+
+        **The first version of this asserted that two literal sets subtract**, which
+        passes with the warning deleted, both helpers deleted and the whole production
+        rule gone. Its docstring claimed the rule fires and the rule was never invoked:
+        the covered case, chosen by the person who believed the guard.
+
+        This makes one real change, to the capability predicate `catalogue_logins` reads,
+        and then asks the first arm's own expression what it sees. A source that needs a
+        key and whose door stops carrying a credential is admitted by `ready_sources` and
+        skipped by the login resolver, which is the gap.
+        """
+        import metadata
+
+        admitted = self._admitted_by_a_credential()
+        assert admitted, "nothing is admitted on a credential, so this proves nothing"
+        stranded = min(admitted)
+
+        monkeypatch.setattr(
+            metadata,
+            "carries_a_credential",
+            lambda target: target is not targets.SEEDED[stranded],
         )
 
+        gap = self._admitted_by_a_credential() - self._needs_a_login()
 
-class TestASourceWhoseCredentialIsAKeyReadsTheRowsItsSecretNames:
-    """`ready_sources` reads a key source's rows off its `Secret`, so a row naming none is refused."""
-
-    def test_a_secret_naming_no_settings_row_is_refused(self, db):
-        with pytest.raises(ValueError, match="names the secret"):
-            settings_store._key_in_force(db, targets.Secret.NONE, None, switched_on=False)
-
-    def test_a_key_under_a_switched_off_section_is_not_ready(self, db, encryption_key):
-        """The switch is read before the key: a stored key alone sends no ISBN to Google."""
-        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "a-real-key")
-        assert CatalogueSource.GOOGLE_BOOKS not in settings_store.ready_sources(db)
-
-    def test_but_is_still_reported_as_held(self, db, encryption_key):
-        """`source_credentials` asks whether a key exists, which the switch does not change."""
-        settings_store.set_value(db, SettingKey.GOOGLE_BOOKS_API_KEY, "a-real-key")
-        assert CatalogueSource.GOOGLE_BOOKS in settings_store.source_credentials(db)
+        assert stranded in gap, (
+            "the rule no longer notices a source admitted on a credential whose door "
+            "carries none, which is the whole of what it is for"
+        )
 
 
 class TestTheAppsOwnSecretsAreSealedAtRest:

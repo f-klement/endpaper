@@ -13,24 +13,17 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import {
-  getGetCatalogueRegistryQueryKey,
   getGetCredentialKeyQueryKey,
   getGetSettingsQueryKey,
   useCreateCredentialKey,
-  useDropRegistryCatalogue,
   useForgetCredentialKey,
   useForgetSourceCredential,
-  useGetCatalogueRegistry,
   useGetCredentialKey,
-  usePickRegistryCatalogue,
-  useProbeCatalogueSource,
   useRestoreCredentialKey,
   useSetSourceCredential,
 } from "../../../api/generated/endpoints/settings/settings";
 import type {
-  CatalogueRegistryOut,
   CredentialKeyOut,
-  ProbeEvidenceOut,
   SettingsOut,
 } from "../../../api/generated/model";
 
@@ -160,56 +153,5 @@ export function useSourceCredentials(): UseSourceCredentialsResult {
     remove: (source) => remove.mutate({ source }),
     isWorking: save.isPending || remove.isPending,
     error: save.error ?? remove.error,
-  };
-}
-
-export interface UseCatalogueRegistryResult {
-  registry: CatalogueRegistryOut | undefined;
-  setPicked: (source: string, picked: boolean) => void;
-  isWorking: boolean;
-  error: unknown;
-}
-
-/** The curated registry this build ships, and picking from it. */
-export function useCatalogueRegistry(): UseCatalogueRegistryResult {
-  const queryClient = useQueryClient();
-  const query = useGetCatalogueRegistry({ query: { retry: false } });
-
-  // Both answer with the whole registry, so it goes straight into the cache.
-  const onSuccess = (updated: CatalogueRegistryOut) => {
-    queryClient.setQueryData(getGetCatalogueRegistryQueryKey(), updated);
-  };
-  const pick = usePickRegistryCatalogue({ mutation: { onSuccess } });
-  const drop = useDropRegistryCatalogue({ mutation: { onSuccess } });
-
-  return {
-    registry: query.data,
-    setPicked: (source, picked) => (picked ? pick : drop).mutate({ source }),
-    isWorking: pick.isPending || drop.isPending,
-    error: query.error ?? pick.error ?? drop.error,
-  };
-}
-
-export interface UseSourceTestResult {
-  /** The last answer, a disposition and never what the catalogue sent. */
-  result: ProbeEvidenceOut | undefined;
-  run: () => void;
-  isRunning: boolean;
-  error: unknown;
-}
-
-/**
- * Testing one catalogue, seeded or from the registry.
- *
- * No ISBN is sent, so the server asks its default: a registry entry's own
- * evidence ISBN, which makes the result comparable with what the list shows.
- */
-export function useSourceTest(source: string): UseSourceTestResult {
-  const test = useProbeCatalogueSource();
-  return {
-    result: test.data,
-    run: () => test.mutate({ source, data: {} }),
-    isRunning: test.isPending,
-    error: test.error,
   };
 }

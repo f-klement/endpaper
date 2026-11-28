@@ -3,13 +3,13 @@ import { useState } from "react";
 import type {
   ImportResultOut,
   MarcPreviewOut,
+  MarcPreviewRow,
 } from "../../../../api/generated/model";
 import { type MessageKey, useTranslation } from "../../../../i18n";
 import {
   ConfirmRow,
   FilePicker,
   ImportError,
-  RecordRows,
   ResultPanel,
   ReviewAdded,
   TitleList,
@@ -103,17 +103,8 @@ export default function MarcImport({
  * for it, and one two books answer is left alone. Counting only the first
  * promised records the import then refused, by exactly the number another
  * member holds privately.
- *
- * Exported for the harvest card, whose preview carries the same counts over
- * harvested records: one formula, so the two cards cannot promise different
- * numbers for the same records.
  */
-export function wouldBeAddedBy(
-  preview: Pick<
-    MarcPreviewOut,
-    "readable" | "already_held" | "blocked" | "in_trash" | "ambiguous"
-  >,
-): number {
+function wouldBeAddedBy(preview: MarcPreviewOut): number {
   return (
     preview.readable -
     preview.already_held -
@@ -194,6 +185,7 @@ function PreviewCounts({ preview }: { preview: MarcPreviewOut }) {
     ["marc.ambiguous", preview.ambiguous ?? 0],
     ["marc.skipped", preview.skipped],
   ];
+  const rows = preview.rows ?? [];
 
   return (
     <div className="text-sm text-paper-700 bg-paper-50 border border-paper-200 rounded-xl p-3 space-y-1 dark:text-paper-200 dark:bg-paper-900 dark:border-paper-700">
@@ -210,8 +202,24 @@ function PreviewCounts({ preview }: { preview: MarcPreviewOut }) {
             {t(key, { count })}
           </p>
         ))}
-      <RecordRows rows={preview.rows ?? []} />
+      {rows.length > 0 && (
+        <ul className="text-xs text-paper-600 mt-1 space-y-0.5 dark:text-paper-400">
+          {rows.map((row, index) => (
+            <li key={`${row.title}-${index}`}>{describeRow(row)}</li>
+          ))}
+        </ul>
+      )}
     </div>
+  );
+}
+
+/** What a record was read as, so a bad field is visible before the write. */
+function describeRow(row: MarcPreviewRow): string {
+  const classifications = row.classifications ?? [];
+  return (
+    row.title +
+    (row.author ? ` · ${row.author}` : "") +
+    (classifications.length > 0 ? ` · ${classifications.join(", ")}` : "")
   );
 }
 

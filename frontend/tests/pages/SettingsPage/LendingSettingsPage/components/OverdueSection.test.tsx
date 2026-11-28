@@ -233,7 +233,6 @@ describe("OverdueSection", () => {
     [OverdueNotifyReason.nothing_due, "nothing is overdue"],
     [OverdueNotifyReason.unreachable, "could not be reached"],
     [OverdueNotifyReason.unexpected, "in a way the app did not expect"],
-    [OverdueNotifyReason.no_address, "has no usable email address"],
   ])("renders its own sentence for %s", (reason, fragment) => {
     renderSection(
       {},

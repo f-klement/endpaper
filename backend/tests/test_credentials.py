@@ -24,7 +24,7 @@ import config
 import credentials
 import targets
 from database import Base
-from enums import CatalogueSource, CredentialKind, CredentialProvenance, SettingKey
+from enums import CatalogueSource, CredentialProvenance, SettingKey
 from models import CatalogueCredential
 from tests.conftest import forget_any_encryption_key
 from tests.corpus import application_modules
@@ -1698,16 +1698,14 @@ class TestThisBuildShipsExactlyTheDefaultsItSaysItDoes:
     def test_exactly_two_rows_ship_a_login_today(self):
         assert SHIPPING == [CatalogueSource.BNA, CatalogueSource.BNU]
 
-    def test_a_row_that_ships_one_is_a_row_whose_credential_is_a_login(self):
+    def test_a_row_that_ships_one_is_a_row_that_needs_one(self):
         for source in SHIPPING:
-            assert targets.SEEDED[source].credential_kind is CredentialKind.LOGIN
+            assert targets.SEEDED[source].needs_key is True
 
-    @pytest.mark.parametrize("source", [CatalogueSource.BNE, CatalogueSource.GOOGLE_BOOKS])
-    def test_and_the_construction_refuses_it_on_any_other_kind(self, source):
-        """Enforced at construction, not only true of the roster: a row needing no
-        credential, and a row whose secret is a settings row, which no ladder reads."""
-        row = targets.SEEDED[source]
-        with pytest.raises(ValueError, match="credential is not a login"):
+    def test_and_the_construction_refuses_the_other_way_round(self):
+        """The rule is enforced at construction, not only true of the roster."""
+        row = targets.SEEDED[CatalogueSource.BNE]
+        with pytest.raises(ValueError, match="needs no credential"):
             dataclasses.replace(row, shipped_credential=targets.ShippedCredential("u", "p"))
 
     @pytest.mark.parametrize(
@@ -2283,13 +2281,14 @@ class TestASealedLoginNeedsATransportThatCarriesIt:
     `test_metadata.py::TestACatalogueLoginReachesTheRequestItWasStoredFor` is the
     send that proves it. What is left is the door a login does **not** go
     through: a row declaring `Capability.NEEDS_A_CREDENTIAL` whose secret is a
-    sealed login and whose transport is bespoke would have its login resolved
-    and then dropped by its door, silently, were it not refused below.
+    sealed login and whose transport is bespoke would be resolved by the router
+    and dropped by `metadata._lookup_one`, silently, exactly as before.
 
-    **Refused at boot by `metadata.resolve`**, which reads which store a row's
-    secret lives in off `targets.Target.credential_kind`. This is the same
-    question asked of the roster, so a seeded row that opens the gap is red here
-    as well as at boot.
+    **It cannot be refused in `metadata.resolve`**, which is where a row naming a
+    capability nothing can serve is turned away at boot. Which store a source's
+    secret lives in is `settings_store._SECRET_IS_A_SETTINGS_ROW`, and #210 is
+    open to make it a capability on the row. Until it is, `resolve` cannot tell a
+    sealed login from an API key and this is the tripwire instead.
 
     **The weakness the earlier version carried is gone.** It asserted a
     signature, which a door accepting the argument and dropping it satisfied,
@@ -2302,8 +2301,8 @@ class TestASealedLoginNeedsATransportThatCarriesIt:
         """The arm that runs today, and the reason the rule is not inline.
 
         Google Books is the roster's bespoke credentialled row. It is fine
-        because its secret is a settings row rather than a sealed login, so it
-        is not in `sources.NEEDS_A_LOGIN`.
+        because its secret is a settings row rather than a sealed login, which
+        is precisely the distinction this file cannot see and #210 exists for.
         """
         assert not _carries_a_sealed_login(CatalogueSource.GOOGLE_BOOKS)
 
@@ -2312,13 +2311,14 @@ class TestASealedLoginNeedsATransportThatCarriesIt:
         assert _carries_a_sealed_login(CatalogueSource.DNB)
 
     def test_every_source_needing_a_sealed_login_is_on_such_a_transport(self):
+        import settings_store
         import sources
 
-        assert sources.NEEDS_A_LOGIN, "no roster source needs a login, so this proves nothing"
-        stranded = sorted(
-            source.value for source in sources.NEEDS_A_LOGIN if not _carries_a_sealed_login(source)
-        )
-        assert not stranded, f"{stranded} need a sealed login on a transport that sends none"
+        sealed = sources.NEEDS_A_KEY - settings_store._SECRET_IS_A_SETTINGS_ROW
+        if not sealed:
+            pytest.skip("no roster source needs a sealed login yet")
+        stranded = sorted(source.value for source in sealed if not _carries_a_sealed_login(source))
+        assert not stranded, f"{stranded} need a sealed login on a transport that sends none. See #210."
 
 
 class TestWhatCannotBeOpenedIsCountedOffTheTableAndNotTheRoster:
@@ -2718,26 +2718,3 @@ class TestASealedSettingIsCountedWhenItIsStranded:
         with pytest.raises(credentials.KeyConfigurationError) as refusal:
             credentials.generate_key(db)
         assert "unset MAIL_PASSWORD and TELEGRAM_BOT_TOKEN where" in str(refusal.value)
-
-
-class TestAnAddressAnAdminTypedHasOneForm:
-    """`typed_address_host` is the form both typed doors share, and
-    `household_admits` the literal check the harvester adds to it."""
-
-    def test_the_host_of_an_admitted_address_is_returned(self):
-        assert credentials.typed_address_host("http://10.0.0.10:8083/opds") == "10.0.0.10"
-
-    @pytest.mark.parametrize(
-        "url",
-        ["ftp://10.0.0.10/", "http://user@10.0.0.10/", "http://", "http://10.0.0.10:99999/", "http://[::1/"],
-    )
-    def test_a_refused_form_has_no_host(self, url):
-        assert credentials.typed_address_host(url) is None
-
-    @pytest.mark.parametrize("host", ["repository.example", "10.0.0.10", "127.0.0.1"])
-    def test_a_name_or_a_household_literal_is_admitted(self, host):
-        assert credentials.household_admits(host)
-
-    @pytest.mark.parametrize("host", ["169.254.169.254", "224.0.0.1", "0.0.0.0"])
-    def test_a_literal_the_household_policy_refuses_is_refused(self, host):
-        assert not credentials.household_admits(host)

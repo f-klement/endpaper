@@ -43,7 +43,6 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Final, Literal, cast
-from xml.sax.saxutils import escape
 
 import httpx
 import pytest
@@ -56,7 +55,7 @@ import fetch
 import marc_fields
 import xml_parse
 from authority import AuthorityUnavailable, resolve, resolve_stored, search
-from enums import AuthorityScheme, AuthoritySupplier
+from enums import AuthorityScheme
 from tests.strategies import (
     Node,
     answer_of,
@@ -1043,9 +1042,7 @@ class TestTheRefusalsAreStructural:
         for the doctype refusal every XML door shares, and `bibliographic` for
         ISBD punctuation. None opens a session. **Direct imports only**:
         `metadata` and `bibliographic` import `models` for a page count
-        constant, and this rule does not follow them there. **The BNP check
-        widened it by one**: `authors`, for the name key a confirmation
-        compares on, which imports nothing of this app.
+        constant, and this rule does not follow them there.
         """
         imported: set[str] = set()
         for node in ast.walk(ast.parse(self._source())):
@@ -1068,7 +1065,6 @@ class TestTheRefusalsAreStructural:
             "marc_fields",
             "metadata",
             "bibliographic",
-            "authors",
         }, sorted(imported)
 
 
@@ -1263,14 +1259,6 @@ VIAF_AUTOSUGGEST: dict[str, Any] = {
 #: Built from `LOBID_RECORD` through the module's own parser rather than typed
 #: out, so a change to `_candidate` cannot leave these tests asserting against a
 #: candidate the module no longer produces.
-def _supplied(
-    identifier: str, asserted_by: AuthoritySupplier, checked_by: AuthoritySupplier | None
-) -> authority.SuppliedIdentifier:
-    """One expected value with both suppliers named, so no assertion here can
-    leave out which file gave it or which checked it."""
-    return authority.SuppliedIdentifier(identifier, asserted_by=asserted_by, checked_by=checked_by)
-
-
 def _certain_candidate(**overrides):
     candidate = authority._candidate(LOBID_RECORD, certain=True)
     assert candidate is not None
@@ -1347,12 +1335,12 @@ class TestTheNationalIdentifiersAGndRecordDoesNotCarry:
             found = await authority.national_identifiers(_certain_candidate())
 
         assert found == {
-            AuthorityScheme.BLBNB: _supplied("000560463", AuthoritySupplier.VIAF, None),
-            AuthorityScheme.ARBABN: _supplied("000035867", AuthoritySupplier.VIAF, None),
-            AuthorityScheme.BNE: _supplied("981060880923108606", AuthoritySupplier.VIAF, None),
-            AuthorityScheme.PTBNP: _supplied("27012", AuthoritySupplier.VIAF, None),
-            AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.VIAF, None),
-            AuthorityScheme.BNCHL: _supplied("10000000000000000007303", AuthoritySupplier.VIAF, None),
+            AuthorityScheme.BLBNB: "000560463",
+            AuthorityScheme.ARBABN: "000035867",
+            AuthorityScheme.BNE: "981060880923108606",
+            AuthorityScheme.PTBNP: "27012",
+            AuthorityScheme.ICCU: "CFIV000439",
+            AuthorityScheme.BNCHL: "10000000000000000007303",
         }
 
     @pytest.mark.asyncio
@@ -1365,8 +1353,8 @@ class TestTheNationalIdentifiersAGndRecordDoesNotCarry:
             _viaf_router(mock)
             found = await authority.national_identifiers(_certain_candidate())
 
-        assert "n  78088964" not in {supplied.identifier for supplied in found.values()}
-        assert "027149102" not in {supplied.identifier for supplied in found.values()}
+        assert "n  78088964" not in found.values()
+        assert "027149102" not in found.values()
 
     @pytest.mark.asyncio
     async def test_the_viaf_cluster_id_is_never_returned_as_an_identity(self):
@@ -1379,7 +1367,7 @@ class TestTheNationalIdentifiersAGndRecordDoesNotCarry:
             found = await authority.national_identifiers(_certain_candidate())
 
         assert AuthorityScheme.VIAF not in found
-        assert "95207986" not in {supplied.identifier for supplied in found.values()}
+        assert "95207986" not in found.values()
 
     @pytest.mark.asyncio
     async def test_nothing_is_asked_of_viaf_when_the_record_already_names_a_cluster(self):
@@ -1715,7 +1703,7 @@ class TestTheSruSerialiserFailsOnSomeRecordsAndRetryingIsUseless:
             found = await authority.national_identifiers(confirmed)
             paths = [call.request.url.path for call in mock.calls]
 
-        assert found[AuthorityScheme.BLBNB] == _supplied("000612368", AuthoritySupplier.VIAF, None)
+        assert found[AuthorityScheme.BLBNB] == "000612368"
         assert len(found) == 6
         assert paths[-1] == "/viaf/95207986"
 
@@ -1912,10 +1900,8 @@ class TestWikidataIsAFallbackAndNotAComparator:
             asked = _national_asks(mock)
 
         assert asked == []
-        assert found[AuthorityScheme.BNE] == _supplied("981060880923108606", AuthoritySupplier.VIAF, None)
-        assert found[AuthorityScheme.BNCHL] == _supplied(
-            "10000000000000000007303", AuthoritySupplier.VIAF, None
-        )
+        assert found[AuthorityScheme.BNE] == "981060880923108606"
+        assert found[AuthorityScheme.BNCHL] == "10000000000000000007303"
         assert len(found) == 6
 
     @pytest.mark.asyncio
@@ -1930,12 +1916,12 @@ class TestWikidataIsAFallbackAndNotAComparator:
 
         assert sorted(asked) == sorted(WIKIDATA_NATIONAL_VALUES)
         assert found == {
-            AuthorityScheme.BLBNB: _supplied("000560463", AuthoritySupplier.WIKIDATA, None),
-            AuthorityScheme.ARBABN: _supplied("000035867", AuthoritySupplier.WIKIDATA, None),
-            AuthorityScheme.BNE: _supplied("XX900250", AuthoritySupplier.WIKIDATA, None),
-            AuthorityScheme.PTBNP: _supplied("27012", AuthoritySupplier.WIKIDATA, None),
-            AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.WIKIDATA, None),
-            AuthorityScheme.BNCHL: _supplied("000034753", AuthoritySupplier.WIKIDATA, None),
+            AuthorityScheme.BLBNB: "000560463",
+            AuthorityScheme.ARBABN: "000035867",
+            AuthorityScheme.BNE: "XX900250",
+            AuthorityScheme.PTBNP: "27012",
+            AuthorityScheme.ICCU: "CFIV000439",
+            AuthorityScheme.BNCHL: "000034753",
         }
 
     @pytest.mark.asyncio
@@ -1948,7 +1934,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             _wikidata_router(mock, national=WIKIDATA_NATIONAL)
             found = await authority.national_identifiers(self._confirmable())
 
-        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
+        assert found[AuthorityScheme.BNE] == "XX900250"
 
     @pytest.mark.asyncio
     async def test_a_body_that_parses_and_holds_no_cluster_buys_it_too(self):
@@ -1974,7 +1960,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             asked = _national_asks(mock)
 
         assert sorted(asked) == sorted(WIKIDATA_NATIONAL_VALUES)
-        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
+        assert found[AuthorityScheme.BNE] == "XX900250"
 
     @pytest.mark.asyncio
     async def test_an_item_id_that_is_not_one_never_reaches_a_request(self):
@@ -2071,7 +2057,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             asked = _national_asks(mock)
 
         assert sorted(asked) == sorted(WIKIDATA_NATIONAL_VALUES)
-        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
+        assert found[AuthorityScheme.BNE] == "XX900250"
 
     @pytest.mark.asyncio
     async def test_a_cluster_id_lobid_supplied_that_viaf_would_refuse_is_an_outage(self):
@@ -2111,7 +2097,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             viaf_calls = [call for call in mock.calls if str(call.request.url).startswith(VIAF)]
 
         assert viaf_calls == []
-        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
+        assert found[AuthorityScheme.BNE] == "XX900250"
 
     @pytest.mark.asyncio
     async def test_a_candidate_with_no_wikidata_item_has_no_second_supplier(self):
@@ -2186,7 +2172,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             _wikidata_router(mock, national=repeated)
             found = await authority.national_identifiers(self._confirmable())
 
-        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
+        assert found[AuthorityScheme.BNE] == "XX900250"
 
     @pytest.mark.asyncio
     async def test_a_deprecated_statement_is_not_stored(self):
@@ -2234,7 +2220,7 @@ class TestWikidataIsAFallbackAndNotAComparator:
             _wikidata_router(mock, national=preferred)
             found = await authority.national_identifiers(self._confirmable())
 
-        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
+        assert found[AuthorityScheme.BNE] == "XX900250"
 
     @pytest.mark.asyncio
     async def test_the_six_are_asked_one_at_a_time(self):
@@ -3407,19 +3393,6 @@ class TestACrossReferenceIsOnlyEverAWebLink:
         )
 
 
-class TestAnUncheckedIdentifierKeepsWhatItsSupplierSaid:
-    """`SuppliedIdentifier.unchecked`, which the router calls where the record
-    the identifier came from names somebody else."""
-
-    def test_only_the_second_file_is_dropped(self):
-        checked = authority.SuppliedIdentifier(
-            "Q1", asserted_by=AuthoritySupplier.WIKIDATA, checked_by=AuthoritySupplier.LOBID
-        )
-        assert checked.unchecked() == authority.SuppliedIdentifier(
-            "Q1", asserted_by=AuthoritySupplier.WIKIDATA, checked_by=None
-        )
-
-
 class TestTheCrossReferencesThatArriveWithTheRecord:
     """`cross_references`, which reads four identifiers off a record already in
     hand.
@@ -3443,23 +3416,11 @@ class TestTheCrossReferencesThatArriveWithTheRecord:
         candidate = await self._resolved(LOBID_RECORD)
 
         assert authority.cross_references(candidate) == {
-            AuthorityScheme.ISNI: _supplied(
-                "0000000122831567", AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA
-            ),
-            AuthorityScheme.LCNAF: _supplied("n78088964", AuthoritySupplier.LOBID, None),
-            AuthorityScheme.VIAF: _supplied("95207986", AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA),
-            AuthorityScheme.WIKIDATA: _supplied("Q1512", AuthoritySupplier.LOBID, AuthoritySupplier.WIKIDATA),
+            AuthorityScheme.ISNI: "0000000122831567",
+            AuthorityScheme.LCNAF: "n78088964",
+            AuthorityScheme.VIAF: "95207986",
+            AuthorityScheme.WIKIDATA: "Q1512",
         }
-
-    @pytest.mark.asyncio
-    async def test_a_value_wikidata_is_silent_about_is_lobids_alone_and_unchecked(self):
-        """Silence is not agreement: the VIAF cluster is stored, as before,
-        and says no second file named it."""
-        candidate = await self._resolved(LOBID_RECORD, viaf={"claims": {}})
-
-        assert authority.cross_references(candidate)[AuthorityScheme.VIAF] == _supplied(
-            "95207986", AuthoritySupplier.LOBID, None
-        )
 
     @pytest.mark.asyncio
     async def test_the_records_own_scheme_is_never_among_them(self):
@@ -3510,9 +3471,7 @@ class TestTheCrossReferencesThatArriveWithTheRecord:
         candidate = await self._resolved(without_item)
 
         assert candidate.wikidata_id == "Q1512"
-        assert authority.cross_references(candidate)[AuthorityScheme.WIKIDATA] == _supplied(
-            "Q1512", AuthoritySupplier.WIKIDATA, None
-        )
+        assert authority.cross_references(candidate)[AuthorityScheme.WIKIDATA] == "Q1512"
 
     def test_a_subject_heading_is_not_read_as_a_person(self):
         """`id.loc.gov` serves several files under one host and the two shapes
@@ -4129,19 +4088,17 @@ def _orcid_read(body: object, status: int = 200) -> list[authority.AuthorityCand
 
 class TestOrcidIsTheLastFile:
     """ORCID asked only for a name the GND and the NAF hold nobody under, the
-    rank the owner set on 2026-09-05, and only where the caller asks for it."""
+    rank the owner set on 2026-09-05."""
 
     @staticmethod
-    async def _searched(
-        name: str, *, lobid: object = None, orcid: object = ORCID_SEARCH, naf=(), ask_orcid: bool = True
-    ):
+    async def _searched(name: str, *, lobid: object = None, orcid: object = ORCID_SEARCH, naf=()):
         with respx.mock(assert_all_called=False) as mock:
             mock.get(url__startswith=LOBID).mock(
                 return_value=lobid if isinstance(lobid, httpx.Response) else _json(lobid or {"member": []})
             )
             _naf_router(mock, *naf, orcid=orcid)
             _wikidata_router(mock)
-            found = await search(name, ask_orcid=ask_orcid)
+            found = await search(name)
             # Copied inside the block: respx clears its calls on leaving it.
             calls = list(mock.calls)
         return found, calls
@@ -4155,28 +4112,6 @@ class TestOrcidIsTheLastFile:
             (AuthorityScheme.ORCID, "0000-0002-1825-0097"),
         ]
         assert not any(row.certain for row in found)
-
-    @pytest.mark.asyncio
-    async def test_a_search_not_asking_it_answers_nobody_where_neither_file_holds_the_name(self):
-        """The household case: ORCID holds two people under the name, and a
-        search that was not told to ask it neither asks nor offers them."""
-        found, calls = await self._searched("Josiah Carberry", ask_orcid=False)
-
-        assert found == []
-        assert not [call for call in calls if str(call.request.url).startswith(ORCID)]
-
-    @pytest.mark.asyncio
-    async def test_a_search_is_not_asked_of_it_unless_the_caller_says_so(self):
-        """The default is off, so a caller that forgets the flag cannot offer a
-        household ORCID's namesakes."""
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=LOBID).mock(return_value=_json({"member": []}))
-            _naf_router(mock, orcid=ORCID_SEARCH)
-            _wikidata_router(mock)
-            found = await search("Josiah Carberry")
-            orcid_calls = [call for call in mock.calls if str(call.request.url).startswith(ORCID)]
-
-        assert (found, orcid_calls) == ([], [])
 
     @pytest.mark.asyncio
     async def test_it_is_not_asked_where_a_file_found_somebody(self):
@@ -4251,7 +4186,7 @@ class TestOrcidIsTheLastFile:
             _naf_router(mock, *naf, orcid=ORCID_SEARCH)
             _wikidata_router(mock)
             with pytest.raises(AuthorityUnavailable):
-                await search("Josiah Carberry", ask_orcid=True)
+                await search("Josiah Carberry")
             orcid_calls = [call for call in mock.calls if str(call.request.url).startswith(ORCID)]
 
         assert orcid_calls == []
@@ -4398,408 +4333,6 @@ class TestAStoredOrcidIsResolvedByTheFile:
             assert await resolve_stored([(AuthorityScheme.ORCID, "0000-0002-1825-0097")]) == []
 
 
-#: The Biblioteca Nacional de Portugal's URN service. **Captured live on
-#: 2026-11-18**, verbatim: `id=24816`, Umberto Eco, and `id=99999999`, a number
-#: it does not hold.
-BNP = "https://urn.bnportugal.gov.pt/"
-
-BNP_ECO = (
-    '<?xml version="1.0" encoding="UTF-8"?><collection xmlns="info:lc/xmlns/marcxchange-v2"><re'
-    'cord format="Unimarc" type="authority"><leader>00291cx  a2200121   45  </leader><controlfi'
-    'eld tag="001">24816</controlfield><controlfield tag="003">http://id.bnportugal.gov.pt/aut/'
-    'catbnp/24816</controlfield><datafield ind1=" " ind2=" " tag="100"><subfield code="a">19910'
-    '708apory0103    ba0 </subfield></datafield><datafield ind1=" " ind2=" " tag="102"><subfiel'
-    'd code="a">IT</subfield></datafield><datafield ind1=" " ind2=" " tag="152"><subfield code='
-    '"a">RPC</subfield></datafield><datafield ind1=" " ind2="1" tag="200"><subfield code="a">Ec'
-    'o,</subfield><subfield code="b">Umberto,</subfield><subfield code="f">1932-2016</subfield>'
-    '</datafield><datafield ind1=" " ind2="1" tag="400"><subfield code="a">Ecco,</subfield><sub'
-    'field code="b">Umberto</subfield><subfield code="3">1963720</subfield></datafield><datafie'
-    'ld ind1=" " ind2="0" tag="400"><subfield code="a">Eco</subfield><subfield code="3">1900214'
-    '</subfield></datafield><datafield ind1=" " ind2="0" tag="801"><subfield code="a">PT</subfi'
-    'eld><subfield code="b">BN</subfield></datafield><datafield ind1=" " ind2=" " tag="810"><su'
-    'bfield code="a">Enc. Luso-Bras. de Cultura</subfield></datafield><datafield ind1=" " ind2='
-    '" " tag="830"><subfield code="a">Escritor, filósofo, semiólogo, linguísta e bibliófilo. Ti'
-    "tular da cadeira de Semiótica e diretor da Escola Sup. de Ciências Humanas na Univ. de Bol"
-    'onha. </subfield></datafield><datafield ind1="4" ind2=" " tag="856"><subfield code="u">htt'
-    'ps://www.wikidata.org/wiki/Q12807</subfield></datafield><datafield ind1="4" ind2=" " tag="'
-    '856"><subfield code="u">https://pt.wikipedia.org/wiki/Umberto_Eco</subfield></datafield><d'
-    'atafield ind1="4" ind2=" " tag="856"><subfield code="u">https://viaf.org/en/viaf/108299403'
-    "</subfield></datafield></record></collection>"
-)
-
-BNP_MISS = '<?xml version="1.0"?>\n<urn-response><error>Registo inexistente</error></urn-response>'
-
-BNP_EMPTY = (
-    '<?xml version="1.0" encoding="UTF-8"?><collection xmlns="info:lc/xmlns/marcxchange-v2"></collection>'
-)
-
-
-def _bnp_resolved(body: str | httpx.Response, number: str = "24816"):
-    """`resolve_stored` on one PTBNP number, the BNP answering `body`, and the
-    calls it made."""
-
-    async def run():
-        with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=BNP).mock(
-                return_value=body if isinstance(body, httpx.Response) else _xml(body)
-            )
-            _wikidata_router(mock)
-            found = await resolve_stored([(AuthorityScheme.PTBNP, number)])
-            # Read inside the block: leaving it resets the router's call list.
-            calls = list(mock.calls)
-        return found, route, calls
-
-    return run()
-
-
-class TestAStoredPtbnpNumberIsResolvedByTheFile:
-    """The one national number a file answers by number: 20 of 20 sampled
-    numbers found, measured 2026-11-18."""
-
-    @pytest.mark.asyncio
-    async def test_a_lone_ptbnp_number_resolves_to_its_person(self):
-        (found,), route, _ = await _bnp_resolved(BNP_ECO)
-
-        assert route.calls[0].request.url.params["id"] == "24816"
-        assert (found.scheme, found.identifier, found.certain) == (AuthorityScheme.PTBNP, "24816", True)
-        assert (found.name, found.born, found.died) == ("Eco, Umberto", "1932", "2016")
-        assert found.variants == ("Ecco, Umberto", "Eco")
-
-    @pytest.mark.asyncio
-    async def test_wikidata_is_asked_by_the_ptbnp_property(self):
-        """`P1005`; with no property the item would never be asked for, and
-        with the wrong one it would answer nobody."""
-        _, _, calls = await _bnp_resolved(BNP_ECO)
-
-        asked = [
-            call.request.url.params["srsearch"]
-            for call in calls
-            if str(call.request.url).startswith(WIKIDATA) and "srsearch" in call.request.url.params
-        ]
-        assert asked == ["haswbstatement:P1005=24816"]
-
-    @pytest.mark.asyncio
-    async def test_nothing_but_the_name_and_its_dates_is_read(self):
-        """`830` is a biographical note, which `docs/featurelist.md` refuses."""
-        (found,), _, _ = await _bnp_resolved(BNP_ECO)
-
-        assert "Escritor" not in repr(found)
-
-    @pytest.mark.asyncio
-    async def test_a_gnd_number_beside_it_is_asked_and_the_bnp_is_not(self):
-        with respx.mock(assert_all_called=False) as mock:
-            mock.get(url__startswith=LOBID).mock(return_value=_json(LOBID_RECORD))
-            route = mock.get(url__startswith=BNP).mock(return_value=_xml(BNP_ECO))
-            _wikidata_router(mock)
-            found = await resolve_stored(
-                [(AuthorityScheme.PTBNP, "24816"), (AuthorityScheme.GND, "118753711")]
-            )
-
-        assert [row.identifier for row in found] == ["118753711"]
-        assert route.call_count == 0
-
-    @pytest.mark.asyncio
-    async def test_a_number_the_bnp_does_not_hold_answers_nothing(self):
-        """The service answers a miss with HTTP 200, so it is read from the body."""
-        found, route, _ = await _bnp_resolved(BNP_MISS, "99999999")
-
-        assert found == []
-        # Asked and read, rather than never asked, which also answers nothing.
-        assert route.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_a_record_for_another_number_answers_nothing(self):
-        found, route, _ = await _bnp_resolved(BNP_ECO, "24817")
-
-        assert found == []
-        # Asked and read, rather than never asked, which also answers nothing.
-        assert route.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_a_reference_record_is_not_a_person(self):
-        found, route, _ = await _bnp_resolved(BNP_ECO.replace("00291cx  a", "00291cy  a"))
-
-        assert found == []
-        # Asked and read, rather than never asked, which also answers nothing.
-        assert route.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_a_record_with_no_personal_heading_is_not_a_person(self):
-        found, route, _ = await _bnp_resolved(BNP_ECO.replace('ind2="1" tag="200"', 'ind2="1" tag="210"'))
-
-        assert found == []
-        # Asked and read, rather than never asked, which also answers nothing.
-        assert route.call_count == 1
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "body",
-        [
-            '<?xml version="1.0"?>\n<urn-response><error>Erro interno</error></urn-response>',
-            "<html><body>Service unavailable</body></html>",
-            "not xml",
-            httpx.Response(500, text=BNP_ECO),
-            BNP_EMPTY,
-        ],
-        ids=["another urn error", "an html page", "not xml", "a 500", "an empty collection"],
-    )
-    async def test_an_answer_it_cannot_read_is_a_refusal_and_not_nobody(self, body):
-        with pytest.raises(AuthorityUnavailable):
-            await _bnp_resolved(body)
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize("stored", ["024816", "24816 OR x", "12345678901", "PT24816", "24816/../x"])
-    async def test_anything_that_is_not_a_ptbnp_number_is_not_put_to_it(self, stored):
-        found, route, _ = await _bnp_resolved(BNP_ECO, stored)
-
-        assert found == []
-        assert route.call_count == 0
-
-    @pytest.mark.parametrize(
-        ("dates", "expected"),
-        [
-            ("1932-2016", ("1932", "2016")),
-            ("1946-", ("1946", None)),
-            ("ca 50-120", ("ca 50", "120")),
-            ("fl. 1990", (None, None)),
-        ],
-    )
-    def test_the_dates_are_split_at_the_hyphen_and_kept_as_written(self, dates, expected):
-        assert authority._bnp_dates([("a", "Eco,"), ("f", dates)]) == expected
-
-
-@st.composite
-def bnp_answers(draw) -> str:
-    """A BNP answer as text: a MarcXchange record whose number, leader, heading
-    tag, subfields and variants are drawn, or the service's own `urn-response`
-    with a drawn error."""
-    if draw(st.booleans()):
-        error = draw(st.sampled_from(["Registo inexistente", ""]) | st.text(xml_characters(), max_size=20))
-        return f"<urn-response><error>{escape(error)}</error></urn-response>"
-    # Each choice near even, so the person asked for is drawn often enough for
-    # the witness below to find it under any seed.
-    number = draw(st.just("24816") | st.sampled_from(["024816", ""]) | st.text(xml_characters(), max_size=12))
-    kind = draw(st.sampled_from(["x", "y"]))
-    tag = draw(st.sampled_from(["200", "210"]))
-    texts = st.text(xml_characters(), max_size=24)
-    parts = st.lists(st.tuples(st.sampled_from(["a", "b", "f", "c"]), texts), max_size=4)
-    heading = [("a", draw(texts)), *draw(parts)]
-    variants = draw(st.lists(texts, max_size=3))
-    subfields = "".join(f'<subfield code="{code}">{escape(text)}</subfield>' for code, text in heading)
-    others = "".join(
-        f'<datafield tag="400"><subfield code="a">{escape(text)}</subfield></datafield>' for text in variants
-    )
-    return (
-        f'<collection xmlns="info:lc/xmlns/marcxchange-v2"><record><leader>00291c{kind}  a</leader>'
-        f'<controlfield tag="001">{escape(number)}</controlfield>'
-        f'<datafield tag="{tag}">{subfields}</datafield>{others}</record></collection>'
-    )
-
-
-def _bnp_answer(text: str) -> fetch.Fetched:
-    return fetch.Fetched(200, text.encode(), "utf-8")
-
-
-def _bnp_person_read(text: str) -> bool:
-    """Whether the door reads this answer as the person asked for, a refusal
-    counting as not."""
-    try:
-        return authority._bnp_read(_bnp_answer(text), "24816") is not None
-    except AuthorityUnavailable:
-        return False
-
-
-class TestABnpAnswerIsReadOrRefusedByName:
-    """The BNP response path, which reaches the same parse as the NAF's
-    through `_tree`. Anything out of `_bnp_read` but a record, None or
-    `AuthorityUnavailable` is a 500 on the author's lookup."""
-
-    @pytest.mark.property
-    @given(text=bnp_answers())
-    def test_it_answers_the_person_asked_for_or_refuses_inside_the_allocation_bound(self, text):
-        """The factor is the NAF's, borrowed because MarcXchange is the same
-        element shape, and not measured on the suite pod for this door: the 20
-        real records, 870 to 2,901 bytes, sit inside `ALLOCATION_FLOOR`. A
-        local read on 2026-11-18, CPython 3.15, at the 64 KiB cap peaked at
-        11.7 to 14.7 a byte."""
-        response = _bnp_answer(text)
-        got = answer_of(
-            authority._bnp_read,
-            response,
-            "24816",
-            answers=(authority._BnpRecord, type(None)),
-            refuses=AuthorityUnavailable,
-        )
-        if got.value is not None:
-            person = got.value.person
-            assert (person.scheme, person.identifier) == (AuthorityScheme.PTBNP, "24816")
-            assert person.name
-        assert (
-            got.peak <= authority.ALLOCATION_FACTOR * len(response.text.encode()) + xml_parse.ALLOCATION_FLOOR
-        )
-
-    def test_the_generator_still_reaches_a_person(self):
-        witness(
-            bnp_answers(),
-            _bnp_person_read,
-            reaches="a record the door reads as the person asked for",
-        )
-
-
-def _bnp_naming(surname: str, forename: str, number: str = "27012") -> str:
-    """`BNP_ECO` under another number, its heading another person's."""
-    heading = '<subfield code="a">Eco,</subfield><subfield code="b">Umberto,</subfield>'
-    assert heading in BNP_ECO
-    return BNP_ECO.replace("24816", number).replace(
-        heading, f'<subfield code="a">{surname},</subfield><subfield code="b">{forename},</subfield>'
-    )
-
-
-async def _confirmed_beside_the_bnp(answer, *, brief_status: int = 200, candidate=None):
-    """`national_identifiers` for Stevenson, whose cluster names PTBNP `27012`,
-    the BNP answering `answer`, and the numbers it was asked for."""
-    with respx.mock(assert_all_called=False) as mock:
-        _viaf_router(mock, brief_status=brief_status)
-        _wikidata_router(mock, national=WIKIDATA_NATIONAL)
-        route = mock.get(url__startswith=BNP)
-        if isinstance(answer, Exception):
-            route.mock(side_effect=answer)
-        else:
-            route.mock(return_value=answer if isinstance(answer, httpx.Response) else _xml(answer))
-        found = await authority.national_identifiers(candidate or _certain_candidate())
-        asked = [call.request.url.params["id"] for call in route.calls]
-    return found, asked
-
-
-class TestAConfirmedPortugueseNumberIsPutBackToTheBnp:
-    """The cluster's PTBNP number is kept only where the BNP's record by it
-    names the person confirmed; a BNP that cannot answer keeps it unchecked."""
-
-    @pytest.mark.asyncio
-    async def test_a_record_naming_the_person_keeps_the_number(self):
-        found, asked = await _confirmed_beside_the_bnp(_bnp_naming("Stevenson", "Robert Louis"))
-
-        assert asked == ["27012"]
-        assert found[AuthorityScheme.PTBNP] == _supplied(
-            "27012", AuthoritySupplier.VIAF, AuthoritySupplier.BNP
-        )
-        assert len(found) == 6
-
-    @pytest.mark.asyncio
-    async def test_a_record_naming_somebody_else_drops_that_number_and_no_other(self):
-        found, asked = await _confirmed_beside_the_bnp(BNP_ECO.replace("24816", "27012"))
-
-        assert asked == ["27012"]
-        assert AuthorityScheme.PTBNP not in found
-        assert len(found) == 5
-
-    @pytest.mark.asyncio
-    async def test_a_number_the_bnp_does_not_hold_is_dropped(self):
-        found, asked = await _confirmed_beside_the_bnp(BNP_MISS)
-
-        assert asked == ["27012"]
-        assert AuthorityScheme.PTBNP not in found
-
-    @pytest.mark.asyncio
-    async def test_any_name_either_file_gives_matches_in_any_word_order(self):
-        """`Stivenson, Robert Luis` is one of the GND record's variants, and
-        the BNP heading here gives its words in another order."""
-        found, _ = await _confirmed_beside_the_bnp(_bnp_naming("Luis Stivenson", "Robert"))
-
-        assert found[AuthorityScheme.PTBNP] == _supplied(
-            "27012", AuthoritySupplier.VIAF, AuthoritySupplier.BNP
-        )
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        "answer",
-        [httpx.Response(503), httpx.ConnectError("down"), "<html><body>Service unavailable</body></html>"],
-        ids=["a 503", "no connection", "an html page"],
-    )
-    async def test_a_bnp_that_cannot_answer_keeps_the_number_unchecked(self, answer):
-        found, _ = await _confirmed_beside_the_bnp(answer)
-
-        assert found[AuthorityScheme.PTBNP] == _supplied("27012", AuthoritySupplier.VIAF, None)
-        assert len(found) == 6
-
-    @pytest.mark.asyncio
-    async def test_the_number_wikidata_supplies_is_checked_too(self):
-        found, asked = await _confirmed_beside_the_bnp(
-            BNP_ECO.replace("24816", "27012"),
-            brief_status=403,
-            candidate=TestWikidataIsAFallbackAndNotAComparator._confirmable(),
-        )
-
-        assert asked == ["27012"]
-        assert AuthorityScheme.PTBNP not in found
-        assert found[AuthorityScheme.BNE] == _supplied("XX900250", AuthoritySupplier.WIKIDATA, None)
-
-    @pytest.mark.asyncio
-    async def test_an_empty_collection_keeps_the_number_unchecked(self):
-        """Never seen as the BNP's miss, so it is read as an answer it cannot
-        read rather than as nobody."""
-        found, asked = await _confirmed_beside_the_bnp(BNP_EMPTY)
-
-        assert asked == ["27012"]
-        assert found[AuthorityScheme.PTBNP] == _supplied("27012", AuthoritySupplier.VIAF, None)
-
-    @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("old", "new"),
-        [
-            ("https://viaf.org/en/viaf/108299403", "https://viaf.org/en/viaf/95207986"),
-            ("https://viaf.org/en/viaf/108299403", "https://viaf.org/viaf/95207986/"),
-            ("Enc. Luso-Bras. de Cultura", "VIAF http://viaf.org/viaf/95207986/"),
-        ],
-        ids=["856 with a language", "856", "810"],
-    )
-    async def test_a_record_under_another_name_linking_the_cluster_keeps_the_number(self, old, new):
-        """Fogazzaro's case: the BNP misspells him and links his cluster. The
-        cluster here is Stevenson's, `95207986`; Eco's own link to
-        `108299403` is what the drop test above refuses."""
-        record = _bnp_naming("Fogazarro", "Antonio")
-        assert old in record
-
-        found, asked = await _confirmed_beside_the_bnp(record.replace(old, new))
-
-        assert asked == ["27012"]
-        assert found[AuthorityScheme.PTBNP] == _supplied(
-            "27012", AuthoritySupplier.VIAF, AuthoritySupplier.BNP
-        )
-
-    @pytest.mark.asyncio
-    async def test_on_the_wikidata_route_a_link_to_lobids_cluster_rescues_nothing(self):
-        """No cluster named the GND number back, so lobid's is not one to
-        match."""
-        record = _bnp_naming("Fogazarro", "Antonio").replace(
-            "https://viaf.org/en/viaf/108299403", "https://viaf.org/viaf/95207986/"
-        )
-        candidate = TestWikidataIsAFallbackAndNotAComparator._confirmable()
-        assert "http://viaf.org/viaf/95207986" in candidate.same_as
-
-        found, asked = await _confirmed_beside_the_bnp(record, brief_status=403, candidate=candidate)
-
-        assert asked == ["27012"]
-        assert AuthorityScheme.PTBNP not in found
-
-    @pytest.mark.asyncio
-    async def test_a_number_the_bnp_would_not_be_asked_by_is_dropped_unasked(self):
-        with respx.mock(assert_all_called=False) as mock:
-            route = mock.get(url__startswith=BNP).mock(return_value=_xml(BNP_ECO))
-            found = await authority._ptbnp_checked(
-                _certain_candidate(),
-                {
-                    AuthorityScheme.PTBNP: _supplied("027012", AuthoritySupplier.VIAF, None),
-                    AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.VIAF, None),
-                },
-                None,
-                cluster="95207986",
-            )
-
-        assert found == {AuthorityScheme.ICCU: _supplied("CFIV000439", AuthoritySupplier.VIAF, None)}
-        assert route.call_count == 0
-
-
 class TestAnOrcidArrivesFreeWithAGndRecord:
     """A GND record links an ORCID in `sameAs`: 392,941 differentiated persons
     did on lobid, measured 2026-11-16."""
@@ -4813,9 +4346,7 @@ class TestAnOrcidArrivesFreeWithAGndRecord:
     def test_one_orcid_is_a_cross_reference(self):
         references = authority.cross_references(self._linking("0000-0002-1825-0097"))
 
-        assert references[AuthorityScheme.ORCID] == _supplied(
-            "0000-0002-1825-0097", AuthoritySupplier.LOBID, None
-        )
+        assert references[AuthorityScheme.ORCID] == "0000-0002-1825-0097"
 
     def test_two_orcids_are_neither_stored(self):
         """GND `1344514472` links two, measured; taking the first would be
@@ -4827,9 +4358,7 @@ class TestAnOrcidArrivesFreeWithAGndRecord:
     def test_one_orcid_linked_twice_is_one(self):
         references = authority.cross_references(self._linking("0000-0002-1825-0097", "0000-0002-1825-0097"))
 
-        assert references[AuthorityScheme.ORCID] == _supplied(
-            "0000-0002-1825-0097", AuthoritySupplier.LOBID, None
-        )
+        assert references[AuthorityScheme.ORCID] == "0000-0002-1825-0097"
 
     @pytest.mark.parametrize(
         ("scheme", "second"),
@@ -4854,6 +4383,4 @@ class TestAnOrcidArrivesFreeWithAGndRecord:
         nothing compares them: see `authority._ORCID_URI`."""
         references = authority.cross_references(self._linking("0000-0002-1825-0097"))
 
-        assert references[AuthorityScheme.ISNI] == _supplied(
-            "0000000122831567", AuthoritySupplier.LOBID, None
-        )
+        assert references[AuthorityScheme.ISNI] == "0000000122831567"

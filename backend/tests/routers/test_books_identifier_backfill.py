@@ -340,9 +340,9 @@ class TestWhatABatchCostsTheDatabase:
         four = self._measure(client, admin["headers"], make_book, LIBRARY_VOLUME_IDS[2:4])
 
         # Eleven of the thirteen are fixed. Among them is a credential read for
-        # each login source in `settings_store.ready_sources`, so a source that
-        # joins `NEEDS_A_LOGIN` moves this figure by one, as the Uruguayan
-        # national library did.
+        # each sealed source in `settings_store.ready_sources`, so a source that
+        # joins `NEEDS_A_KEY` with a secret outside the settings row moves this
+        # figure by one, as the Uruguayan national library did.
         assert (two, four) == (13, 13), (
             f"a batch of two costs {two} SELECTs and the next two cost {four}. "
             "Both are the same batch size, so the two figures must agree; they "

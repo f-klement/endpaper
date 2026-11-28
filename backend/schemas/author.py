@@ -14,7 +14,7 @@ from authors import (
     SuggestionReason,
     author_key,
 )
-from enums import AuthorityProvenance, AuthorityScheme, AuthoritySupplier
+from enums import AuthorityProvenance, AuthorityScheme
 from models import AUTHOR_KEY_MAX, AUTHORITY_IDENTIFIER_MAX
 from schemas.common import one_line_without_invisible_characters
 
@@ -184,12 +184,6 @@ class AuthorIdentifierOut(BaseModel):
     list has to be able to tell an assertion a catalogue made from one somebody
     chose, and inferring it from an absent user id would make a deleted account
     look like a machine. See `enums.AuthorityProvenance`.
-
-    `asserted_by` is the file the value came from and `checked_by` a second
-    file that tied the same value to the same person, or null where none did,
-    so a number two files agree on reads differently from one a single file
-    carried. A row stored before either was recorded reads `unrecorded`. See
-    `enums.AuthoritySupplier`.
     """
 
     id: int
@@ -197,8 +191,6 @@ class AuthorIdentifierOut(BaseModel):
     scheme: AuthorityScheme
     identifier: str
     provenance: AuthorityProvenance
-    asserted_by: AuthoritySupplier
-    checked_by: AuthoritySupplier | None
 
 
 class ConfirmedIdentifierOut(BaseModel):

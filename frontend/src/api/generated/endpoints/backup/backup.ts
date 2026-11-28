@@ -338,13 +338,9 @@ export const getRestoreBackupUrl = (params?: RestoreBackupParams) => {
  * is the only endpoint in the app that destroys data it was not given the id
  * of, and it destroys all of it.
  *
- * The manifest's shape is checked before the first row is deleted; its rows,
- * and each line of a table the archive carries as lines, are read as they are
- * inserted, after the deletes. Nothing commits until every table is in, so a
- * refusal at either point leaves what was there before. A restore that
- * failed halfway would leave a library that is neither the backup nor what
- * was there, which is worse than either, so a commit between tables would
- * break this.
+ * The archive is validated in full before the first row is deleted. A restore
+ * that fails halfway leaves a library that is neither the backup nor what was
+ * there before, which is worse than either.
  * @summary Restore Backup
  */
 export const restoreBackup = async (
@@ -420,13 +416,9 @@ export type RestoreBackupMutationVariables = {
  * is the only endpoint in the app that destroys data it was not given the id
  * of, and it destroys all of it.
  *
- * The manifest's shape is checked before the first row is deleted; its rows,
- * and each line of a table the archive carries as lines, are read as they are
- * inserted, after the deletes. Nothing commits until every table is in, so a
- * refusal at either point leaves what was there before. A restore that
- * failed halfway would leave a library that is neither the backup nor what
- * was there, which is worse than either, so a commit between tables would
- * break this.
+ * The archive is validated in full before the first row is deleted. A restore
+ * that fails halfway leaves a library that is neither the backup nor what was
+ * there before, which is worse than either.
  * @summary Restore Backup
  */
 export const useRestoreBackup = <

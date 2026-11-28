@@ -1,6 +1,6 @@
 """One door for the catalogue requests this app makes, and every bound on them.
 
-`metadata.py` and `google_books.py` ask twenty one third party catalogues for records,
+`metadata.py` and `google_books.py` ask twenty third party catalogues for records,
 seventeen of them over HTTP. Every one of those HTTP requests used to be built by
 hand: nine `httpx.AsyncClient(...)` constructions in `metadata.py` and one in
 `google_books.py`, each repeating the
@@ -58,8 +58,7 @@ import socket
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
-from typing import Any, BinaryIO, Final, Protocol
+from typing import Any, Final, Protocol
 from urllib.parse import urljoin, urlsplit
 
 import httpx
@@ -1182,115 +1181,3 @@ async def get_once(
             deadline=deadline,
             credential=credential,
         )
-
-
-# ── A published file, to disk ────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class Downloaded:
-    """What `download` wrote: its length, and the `Last-Modified` it was sent with."""
-
-    length: int
-    last_modified: str | None
-
-
-def _https_hop(response: httpx.Response) -> str:
-    """The URL of the next hop of a download, if it stays on https. Raises if it does not.
-
-    **Any host, unlike `_same_host_hop`**, because the one release this was
-    written for leaves its host: measured 2026-11-20, `id.loc.gov` answers its
-    LCSH release with a 303 to `lds-downloads.s3.amazonaws.com`. A download's
-    first URL is shipped configuration rather than anybody's input, so a hop is
-    chosen by the publisher, and what it may not do is move the bytes onto a
-    channel somebody on the path can rewrite: nothing else checks them but the
-    gzip CRC, which whoever writes the stream also writes.
-
-    **Nor is a hop held to a public address**: `download` uses `_client`, not
-    `pinned_client`, so a compromised publisher could aim one at an https
-    service inside the cluster. Accepted because the first URL is shipped
-    configuration; what comes back must still survive gzip and conversion,
-    and only `_shown` of the URL reaches an error.
-    """
-    location = response.headers.get("location")
-    if not location:
-        raise RedirectedOffHost("A redirect carried no Location header")
-    there = httpx.URL(urljoin(str(response.request.url), location))
-    if there.scheme != "https":
-        raise RedirectedOffHost(f"{response.request.url.host} tried to redirect to {_shown(str(there))}")
-    return str(there)
-
-
-def _declared_length(response: httpx.Response) -> int | None:
-    raw = response.headers.get("content-length", "")
-    return int(raw) if raw.isascii() and raw.isdigit() else None
-
-
-async def _write_capped(
-    response: httpx.Response, out: BinaryIO, cap: int, progress: Callable[[int, int | None], None]
-) -> int:
-    """`_read_capped` to a file: raw bytes, refused the moment they pass `cap`."""
-    encoding = response.headers.get("content-encoding", "").strip().lower()
-    if encoding not in ("", "identity"):
-        raise UnrequestedEncoding(f"{_shown(str(response.request.url))} answered with {encoding!r}")
-    declared = _declared_length(response)
-    total = 0
-    async for chunk in response.aiter_raw():
-        total += len(chunk)
-        if total > cap:
-            raise ResponseTooLarge(f"{_shown(str(response.request.url))} answered with more than {cap} bytes")
-        out.write(chunk)
-        progress(total, declared)
-    return total
-
-
-async def _download_hops(
-    client: httpx.AsyncClient, url: str, out: BinaryIO, cap: int, progress: Callable[[int, int | None], None]
-) -> Downloaded:
-    """`_walk_hops` for a download: the hop rule is `_https_hop`, and only a 200 is written."""
-    target = url
-    for _ in range(MAX_REDIRECTS + 1):
-        try:
-            async with client.stream("GET", target) as response:
-                if response.is_redirect:
-                    target = _https_hop(response)
-                    continue
-                if response.status_code != httpx.codes.OK:
-                    raise FetchRefused(f"{_shown(target)} answered {response.status_code}")
-                length = await _write_capped(response, out, cap, progress)
-                return Downloaded(length, response.headers.get("last-modified"))
-        except UnicodeError as error:
-            # A `Location` naming an unusable host raises inside `stream`, for
-            # the reason at the same arm in `_walk_hops`.
-            raise RedirectedOffHost(f"{_shown(target)} sent a Location naming an unusable host") from error
-    raise TooManyRedirects(f"{_shown(url)} redirected more than {MAX_REDIRECTS} times")
-
-
-async def download(
-    url: str,
-    path: Path,
-    *,
-    limit: int,
-    seconds: float,
-    progress: Callable[[int, int | None], None] = lambda _done, _total: None,
-) -> Downloaded:
-    """GET a published file over https into `path`, bounded the way `get` is.
-
-    At most `limit` bytes counted raw, at most `MAX_REDIRECTS` hops, every one
-    of them https (`_https_hop`), and all of it inside `seconds`. `progress` is
-    told the bytes so far and the length the answer declared, or None.
-
-    **To a file and not into memory**, which is the whole difference from `get`:
-    a subject vocabulary's release is tens of megabytes compressed, past
-    `MAX_RESPONSE_BYTES` by an order of magnitude and past what a pod limited to
-    512Mi should hold as one `bytes`. **The deadline is the whole download's**,
-    by the `asyncio.timeout` `get` measured, so a source that trickles a byte
-    just inside each read's timeout is still stopped. What `path` holds after a
-    refusal is the caller's to remove.
-    """
-    try:
-        async with asyncio.timeout(seconds), _client() as client:
-            with path.open("wb") as out:
-                return await _download_hops(client, url, out, limit, progress)
-    except TimeoutError:
-        raise DeadlineExceeded(f"{_shown(url)} was still sending after {seconds} seconds") from None

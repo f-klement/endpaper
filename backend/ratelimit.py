@@ -100,30 +100,21 @@ RECOVERY_CODE_LIMIT = RateLimit(max_attempts=10, window_seconds=3600)
 IMPORT_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
 
 # A metadata search asks eight public catalogues at once, and a lookup can reach
-# any of nineteen catalogues, the first two at once and the rest in turn until one
-# answers. Nine of them are asked only about ISBNs in their own registration
+# any of eighteen catalogues, the first two at once and the rest in turn until one
+# answers. Eight of them are asked only about ISBNs in their own registration
 # groups, all `978` groups and no group in two remits. So in the default order a
 # `978` ISBN whose group this build can name reaches eleven at most, while a `979`
-# ISBN, or one whose group it cannot name, can reach all nineteen. Either then
-# reaches every catalogue an admin picked from the registry, which a lookup asks
-# last on any ISBN the rest missed, and whose own limits nobody has measured, so
-# this limit is what bounds them. Each of the
-# four Z39.50 catalogues a lookup reaches puts a search again at most twice
-# when the catalogue refuses it as a temporary error, and three of them search a
-# second time, with the ten digit form, when the first search misses, so one of
-# them takes at most six searches on one connection. These count catalogues, not
+# ISBN, or one whose group it cannot name, can reach all eighteen. Each of the
+# three Z39.50 catalogues a lookup reaches searches a second time, with the ten
+# digit form, when the first search misses, and puts a search again at most
+# twice when the catalogue refuses it as a temporary error, so one of them takes
+# at most six searches on one connection. These count catalogues, not
 # requests: a catalogue may take more than one request to answer. The library
 # runs or pays for none of them. One member holding the scan page open with a
 # script behind it would spend somebody else's quota and put this deployment's
 # address in front of their rate limiter, which is a way to lose metadata for
 # everyone. Sixty a minute is far above scanning a shelf by hand and far below
-# what would be noticed upstream, with one exception: the Slovak National
-# Library closes a connection once about eight have arrived from one address
-# within a minute. That is per address, not per member, so every member and
-# every lookup, refresh and enrichment counts towards it together: it is met by
-# `978-80` books, and by `979` ones or any whose group cannot be named, that the
-# leading pair misses, and past it the SNK is reported unavailable for some of
-# them. `metadata`'s block for it measures it.
+# what would be noticed upstream.
 METADATA_LIMIT = RateLimit(max_attempts=60, window_seconds=60)
 
 # The authority files are not the catalogues and their published budget is much
@@ -295,23 +286,6 @@ EXPORT_LIMIT = RateLimit(max_attempts=5, window_seconds=60)
 # read on the way out. Said again at `routers/backup.download_backup`, because
 # that is where somebody reads the limit and concludes the download is capped.
 BACKUP_LIMIT = RateLimit(max_attempts=3, window_seconds=60)
-
-# The admin's **test this source** action, and the unit is one lookup sent to a
-# third party's catalogue on demand. Unbounded, that button is a request
-# generator with a friendly label (owner, ticket 148), so it is bounded even
-# though every caller is an admin.
-#
-# **Keyed on the deployment, not on the admin**: the cost lands on the
-# catalogues, and two admins pressing in turn are still one server asking. Ten
-# a minute tests every source this build ships inside a few minutes and keeps
-# a held key from becoming a stream at one host.
-SOURCE_TEST_LIMIT = RateLimit(max_attempts=10, window_seconds=60)
-
-# The heading field asks once per pause in typing, and each ask reads the local
-# vocabulary copy and nothing outside it, so the cost is this server's own. Two a
-# second per member covers a cataloguer typing against the client's debounce;
-# what it stops is a script holding the one SQLite connection with prefix scans.
-HEADING_SUGGEST_LIMIT = RateLimit(max_attempts=120, window_seconds=60)
 
 
 #: How many distinct keys one limiter remembers at once.
@@ -491,8 +465,6 @@ identifier_backfill_limiter = SlidingWindowLimiter(IDENTIFIER_BACKFILL_LIMIT)
 public_catalogue_limiter = SlidingWindowLimiter(PUBLIC_CATALOGUE_LIMIT)
 export_limiter = SlidingWindowLimiter(EXPORT_LIMIT)
 backup_limiter = SlidingWindowLimiter(BACKUP_LIMIT)
-source_test_limiter = SlidingWindowLimiter(SOURCE_TEST_LIMIT)
-heading_suggest_limiter = SlidingWindowLimiter(HEADING_SUGGEST_LIMIT)
 recovery_request_address_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_request_account_limiter = SlidingWindowLimiter(RECOVERY_REQUEST_LIMIT)
 recovery_code_limiter = SlidingWindowLimiter(RECOVERY_CODE_LIMIT)

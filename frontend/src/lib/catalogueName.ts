@@ -1,7 +1,4 @@
-import type {
-  CatalogueSource,
-  RegisteredCatalogue,
-} from "../api/generated/model";
+import type { CatalogueSource } from "../api/generated/model";
 import type { MessageKey } from "../i18n/en";
 
 /**
@@ -14,13 +11,8 @@ import type { MessageKey } from "../i18n/en";
  * key prefix changes, and `tests/lib/catalogueName.test.ts` pins every source on
  * the roster against the catalogue rather than trusting the template.
  *
- * **A registry entry is named here too**, under the same prefix, since a picked
- * one supplies records a book then names as its origin. Its name is in the
- * message catalogue rather than read off the registry's English one, so the
- * German screen names it in German.
+ * The name itself is a proper noun and is not translated.
  */
-export function catalogueName(
-  source: CatalogueSource | RegisteredCatalogue,
-): MessageKey {
+export function catalogueName(source: CatalogueSource): MessageKey {
   return `providers.name.${source}` as MessageKey;
 }

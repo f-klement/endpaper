@@ -38,10 +38,6 @@ const BASE = {
   public_catalogue_enabled: false,
   public_catalogue_indexing_enabled: false,
   public_catalogue_published: false,
-  sru_server_enabled: false,
-  oai_provider_enabled: false,
-  oai_admin_email: "",
-  public_availability_enabled: false,
 };
 
 function settings(overrides: Record<string, unknown> = {}) {
@@ -128,31 +124,6 @@ describe("PublicCatalogueSettingsPage", () => {
     expect(
       screen.getByText(/Search engines are told to stay away/),
     ).toBeInTheDocument();
-  });
-
-  it("names availability in the confirmation only while it is stored on", async () => {
-    settings({ library_mode: true, public_availability_enabled: true });
-    render();
-    await userEvent.click(
-      await screen.findByRole("checkbox", {
-        name: "Let anyone search this catalogue",
-      }),
-    );
-
-    expect(await screen.findByText(/^Shown as well:/)).toBeInTheDocument();
-  });
-
-  it("leaves availability out of the confirmation while it is off", async () => {
-    settings({ library_mode: true });
-    render();
-    await userEvent.click(
-      await screen.findByRole("checkbox", {
-        name: "Let anyone search this catalogue",
-      }),
-    );
-
-    await screen.findByText(/Publish this catalogue\?/);
-    expect(screen.queryByText(/^Shown as well:/)).not.toBeInTheDocument();
   });
 
   it("writes nothing until the confirmation is accepted", async () => {
@@ -276,28 +247,6 @@ describe("PublicCatalogueSettingsPage", () => {
     expect(await screen.findByText(/It publishes nothing/)).toBeInTheDocument();
   });
 
-  it("says before library mode goes on that it turns the overdue emails on", async () => {
-    // #24: the first switch on also turns on mail to patrons and the
-    // household, and the admin flipping it is told at that moment.
-    settings({ library_mode: false });
-    render();
-
-    expect(
-      await screen.findByText(/also turns on the overdue emails/i),
-    ).toBeInTheDocument();
-  });
-
-  it("stops saying so once library mode is on", async () => {
-    // The diagonal: a mode already on turns nothing on by being shown.
-    settings({ library_mode: true });
-    render();
-
-    await screen.findByText(/It publishes nothing/);
-    expect(
-      screen.queryByText(/also turns on the overdue emails/i),
-    ).not.toBeInTheDocument();
-  });
-
   it("turns library mode off without a confirmation", async () => {
     // Only publishing is confirmed. Making something less public never is.
     settings({ library_mode: true, public_catalogue_enabled: true });
@@ -333,126 +282,6 @@ describe("PublicCatalogueSettingsPage", () => {
     expect(
       await screen.findByRole("link", { name: "See what a visitor sees" }),
     ).toHaveAttribute("href", "/catalogue");
-  });
-
-  it("cannot serve SRU from a catalogue that is not published", async () => {
-    settings({ library_mode: true, sru_server_enabled: true });
-    render();
-    expect(
-      await screen.findByRole("checkbox", {
-        name: "Serve this catalogue over SRU",
-      }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText(
-        "Publish the catalogue first. SRU serves only a published catalogue.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("switches SRU on for a published catalogue without a confirmation", async () => {
-    settings({
-      library_mode: true,
-      public_catalogue_enabled: true,
-      public_catalogue_published: true,
-    });
-    render();
-    await userEvent.click(
-      await screen.findByRole("checkbox", {
-        name: "Serve this catalogue over SRU",
-      }),
-    );
-
-    const write = api.calls.find((call) => call.method === "PUT");
-    expect(write?.body).toEqual({ sru_server_enabled: true });
-  });
-
-  it("cannot serve OAI-PMH from a catalogue that is not published", async () => {
-    settings({ library_mode: true, oai_provider_enabled: true });
-    render();
-    expect(
-      await screen.findByRole("checkbox", {
-        name: "Let aggregators harvest this catalogue over OAI-PMH",
-      }),
-    ).toBeDisabled();
-  });
-
-  it("cannot turn OAI-PMH on without a contact address, and says why", async () => {
-    settings({
-      library_mode: true,
-      public_catalogue_enabled: true,
-      public_catalogue_published: true,
-    });
-    render();
-    expect(
-      await screen.findByRole("checkbox", {
-        name: "Let aggregators harvest this catalogue over OAI-PMH",
-      }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText(
-        "Enter a repository contact address below first. OAI-PMH shows it to every aggregator.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("saves the contact address on its own", async () => {
-    render();
-    await userEvent.type(
-      await screen.findByLabelText("Repository contact address"),
-      "catalogue@library.example",
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Save address" }));
-
-    const write = api.calls.find((call) => call.method === "PUT");
-    expect(write?.body).toEqual({
-      oai_admin_email: "catalogue@library.example",
-    });
-  });
-
-  it("switches OAI-PMH on without writing the SRU switch", async () => {
-    settings({
-      library_mode: true,
-      public_catalogue_enabled: true,
-      public_catalogue_published: true,
-      oai_admin_email: "catalogue@library.example",
-    });
-    render();
-    await userEvent.click(
-      await screen.findByRole("checkbox", {
-        name: "Let aggregators harvest this catalogue over OAI-PMH",
-      }),
-    );
-
-    const write = api.calls.find((call) => call.method === "PUT");
-    expect(write?.body).toEqual({ oai_provider_enabled: true });
-  });
-
-  it("cannot show availability from a catalogue that is not published", async () => {
-    settings({ library_mode: true });
-    render();
-    expect(
-      await screen.findByRole("checkbox", {
-        name: "Show whether a book is on the shelf or on loan",
-      }),
-    ).toBeDisabled();
-  });
-
-  it("switches availability on for a published catalogue", async () => {
-    settings({
-      library_mode: true,
-      public_catalogue_enabled: true,
-      public_catalogue_published: true,
-    });
-    render();
-    await userEvent.click(
-      await screen.findByRole("checkbox", {
-        name: "Show whether a book is on the shelf or on loan",
-      }),
-    );
-
-    const write = api.calls.find((call) => call.method === "PUT");
-    expect(write?.body).toEqual({ public_availability_enabled: true });
   });
 
   it("reads the stored rows, not the conjunction, for the switches", async () => {
